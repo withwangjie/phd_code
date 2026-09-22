@@ -1612,6 +1612,7 @@ def fit_energy_calibration_csv(input_csv: Path, output_json: Path, ridge_alpha: 
         "train_r2":(None if ss_tot<=0 else float(1.0-np.sum(residual**2)/ss_tot)),
         "cv_scheme":"deterministic PDB-grouped SHA256-order round-robin 5-fold",
         "cv_folds":cv_rows,
+        "cv_fold_count":int(len(cv_rows)),
         "cv_rmse_kcal":(
             None if not cv_mask.any()
             else float(np.sqrt(np.mean((y[cv_mask]-cv_predictions[cv_mask])**2)))
