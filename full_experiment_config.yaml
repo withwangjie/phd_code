@@ -269,6 +269,11 @@ qc_benchmark:
     training_csv: "calibration/coarse_to_amber_train.csv"
     require_calibrated: true
     ridge_alpha: 1.0
+    acceptance:
+      max_cv_rmse_kcal: 10.0
+      max_cv_mae_kcal: 7.5
+      min_cv_r2: 0.20
+      min_cv_spearman: 0.40
     max_complexes: 0        # 0 = every eligible training complex
     assignments_per_complex: 64
     active_sites: 6
@@ -299,13 +304,19 @@ qc_benchmark:
   sa_passes: 100
   greedy_passes: 50
   energy_window: 2.0
+  sensitivity:
+    depths: [1, 2, 3]
+    max_evals: [90, 180, 300]
+    eval_shots: [200, 500, 1000]
+    cvar_alpha: [0.05, 0.10, 0.25, 0.50, 1.0]
+    note: "development/ablation only; primary validation remains frozen at p=2, max_evals=90, shots=500, alpha=0.1"
   # Number of independent repeat/perturb identities per (pruning, radius,
   # depth, max_evals) case -- passed as --seeds to _ablation_main, which now
   # derives each case's independent --master-seed-based optimize/sample
   # sub-seeds itself (requirement #2; never two flat values guessed at by
   # this orchestrator and stuffed into --seeds as if they were ordinary
   # repeats).
-  repeats: 3
+  repeats: 10
 
 # ---------------------------------------------------------------------------
 # Stage 5: real-atom structural experiment (run_real_complex_pilot.py, run
@@ -321,7 +332,7 @@ structure_experiment:
   # --sample-seeds from streams["optimize"]/streams["sample"] keyed by
   # (target pdb, each seed here) -- see requirement #2 -- so these values
   # are never reused directly as the QAOA search or final-sampling seed.
-  seeds: [42, 43, 44]
+  seeds: [42, 43, 44, 45, 46]
   outputs: 1000
   max_evals: 90
   relax_iterations: 200
