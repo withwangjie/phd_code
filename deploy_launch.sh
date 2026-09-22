@@ -33,7 +33,7 @@ fail() { echo "[deploy_launch] ERROR: $*" >&2; exit 1; }
 # letting run_full_experiment.sh silently fall back to a bare `python3`
 # that is very likely missing this project's dependencies.
 # ---------------------------------------------------------------------------
-SHARED_VENV="/data/quantum-protein/.venv"
+SHARED_VENV="${QP_VENV:-/data/quantum-protein/.venv}"
 if [ "${1:-}" = "--venv" ]; then
     SHARED_VENV="$2"
     shift 2
@@ -45,7 +45,7 @@ elif [ -f "${SHARED_VENV}/bin/activate" ] || [ -f "${SHARED_VENV}/Scripts/activa
     ln -s "$SHARED_VENV" "${SCRIPT_DIR}/.venv"
     log "Linked this deployment to the existing shared environment: ${SHARED_VENV}"
 else
-    fail "No virtual environment found at ${SHARED_VENV} (checked bin/activate and Scripts/activate). This deployment does not install dependencies automatically -- create/restore that environment first (or re-run with: ./deploy_launch.sh --venv /path/to/existing/.venv), then re-run this script."
+    fail "No virtual environment found at ${SHARED_VENV}. Set QP_VENV, use --venv /path/to/existing/.venv, or create/restore that environment first."
 fi
 
 log "Handing off to run_full_experiment.sh (formal pipeline: data_audit -> queue_freeze -> egnn_train -> qc_benchmark -> structure_experiment -> statistics -> final_report; smoke_check is disabled in full_experiment_config.yaml for this deployment)."
