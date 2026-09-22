@@ -1957,6 +1957,45 @@ class AllAtomInterfaceQUBOBuilder:
         if not math.isfinite(value): raise FloatingPointError("Nonfinite all-atom energy")
         return value
 
+    def positions_for_chi1_assignment(self, assignment: Mapping[str, float]) -> np.ndarray:
+        """Apply explicit chi1 angles to Active residues without candidate-set projection.
+
+        This is used by the TRAIN-ONLY coarse-to-Amber calibration stage so the
+        exact same chi1 assignment evaluated by the coarse model is evaluated by
+        Amber14, rather than snapping to the all-atom builder's retained states.
+        """
+        positions=self.base_positions.copy()
+        residue_lookup={}
+        for residue in self.topology.residues():
+            rid=f"{residue.chain.id}:{residue.id}{residue.insertionCode.strip()}"
+            residue_lookup[rid]=residue
+        for rid,angle in assignment.items():
+            if rid not in self.active_residues:
+                raise ValueError(f"Calibration assignment contains non-active residue: {rid}")
+            residue=residue_lookup[rid]
+            atoms={a.name:a.index for a in residue.atoms()}
+            ca,cb=atoms["CA"],atoms["CB"]
+            site=self.active_residues.index(rid)
+            indices=self.candidates[self.site_to_variables[site][0]]["indices"]
+            original=_chi1_angle({n:positions[i] for n,i in atoms.items()},residue.name)
+            delta=np.deg2rad((float(angle)-original+180)%360-180)
+            center=positions[ca]
+            axis=positions[cb]-center
+            axis/=np.linalg.norm(axis)
+            relative=positions[indices]-center
+            rotated=(relative*np.cos(delta)+np.cross(axis,relative)*np.sin(delta)
+                     +np.outer(relative@axis,axis)*(1-np.cos(delta)))
+            positions[indices]=center+rotated
+            checked={n:positions[i] for n,i in atoms.items()}
+            observed=_chi1_angle(checked,residue.name)
+            if abs((observed-float(angle)+180)%360-180)>1e-5:
+                raise AssertionError("Explicit chi1 calibration rotation mismatch")
+        return positions
+
+    def energy_for_chi1_assignment(self, assignment: Mapping[str, float]) -> float:
+        """Amber14 potential for an exact residue->chi1 assignment."""
+        return self.energy(self.positions_for_chi1_assignment(assignment))
+
     def build(self) -> QUBOResult:
         """Inclusion-exclusion physical terms; validate full-assignment energy equivalence."""
         # Use a complete candidate assignment as decomposition origin. A heavily
