@@ -24,31 +24,53 @@ from subgraph_to_qubo import read_atomistic_structure, _SIDECHAIN_NAMES, AllAtom
 from seed_streams import derive_streams, derive_child_seed, save_stream_map, DEFAULT_MASTER_SEED
 
 
-def _load_frozen_target_ids(path: Path) -> list[str]:
-    """Load an immutable frozen-target allowlist with strict validation.
+def _load_frozen_targets(path: Path) -> list[dict]:
+    """Load immutable frozen targets, including graph-instance identity.
 
-    The file may be a JSON list of PDB-id strings or the earlier
-    selected_targets.json list of dictionaries carrying target/pdb_id.
-    IDs are normalized to lowercase, but duplicates, empty IDs and malformed
-    entries fail closed rather than silently shrinking the formal denominator.
+    Current formal selected_targets.json entries must freeze the exact graph
+    via target + source_id + graph_path + graph_sha256. Plain string entries
+    are accepted only as legacy PDB-only allowlists for backward-compatible
+    development utilities; a new formal freeze always writes full identity.
     """
     raw = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(raw, list) or not raw:
         raise ValueError("Frozen target file must contain a nonempty JSON list")
-    target_ids: list[str] = []
+    records: list[dict] = []
     for index, entry in enumerate(raw):
         if isinstance(entry, str):
             value = entry
+            record = dict(target=value.strip().lower(), legacy_pdb_only=True)
         elif isinstance(entry, dict):
             value = entry.get("target") or entry.get("pdb_id")
+            record = dict(
+                target=value.strip().lower() if isinstance(value, str) else value,
+                source_id=entry.get("source_id"),
+                graph_path=entry.get("graph_path"),
+                graph_sha256=entry.get("graph_sha256"),
+                legacy_pdb_only=False,
+            )
+            missing = [k for k in ("source_id", "graph_path", "graph_sha256")
+                       if not isinstance(record.get(k), str) or not record[k].strip()]
+            if missing:
+                raise ValueError(
+                    f"Frozen target entry {index} lacks graph identity field(s): {missing}")
+            record["source_id"] = record["source_id"].strip()
+            record["graph_path"] = record["graph_path"].replace("\\", "/").strip()
+            record["graph_sha256"] = record["graph_sha256"].strip().lower()
         else:
             raise ValueError(f"Frozen target entry {index} must be a string or object")
         if not isinstance(value, str) or not value.strip():
             raise ValueError(f"Frozen target entry {index} has no target/pdb_id")
-        target_ids.append(value.strip().lower())
+        records.append(record)
+    target_ids = [r["target"] for r in records]
     if len(target_ids) != len(set(target_ids)):
         raise ValueError("Frozen target file contains duplicate PDB IDs")
-    return target_ids
+    return records
+
+
+def _load_frozen_target_ids(path: Path) -> list[str]:
+    """Backward-compatible ID view of :func:`_load_frozen_targets`."""
+    return [r["target"] for r in _load_frozen_targets(path)]
 
 
 def _reconcile_frozen_targets(
@@ -302,13 +324,30 @@ def main(argv=None) -> int:
     candidates = sorted([r for r in rows if r["split"] == "test_snac_hard"], key=lambda r: (int(r["nodes"]),r["pdb_id"],r["path"]))
     frozen_target_ids = None
     frozen_target_set = None
+    frozen_target_records = None
     missing_frozen_from_manifest: list[str] = []
     if args.pdb_allowlist_file:
-        frozen_target_ids = _load_frozen_target_ids(args.pdb_allowlist_file)
+        frozen_target_records = _load_frozen_targets(args.pdb_allowlist_file)
+        frozen_target_ids = [r["target"] for r in frozen_target_records]
         frozen_target_set = set(frozen_target_ids)
-        manifest_candidate_ids = {r["pdb_id"].lower() for r in candidates}
-        missing_frozen_from_manifest = sorted(frozen_target_set - manifest_candidate_ids)
-        candidates = [r for r in candidates if r["pdb_id"].lower() in frozen_target_set]
+        frozen_by_id = {r["target"]: r for r in frozen_target_records}
+        matched_candidates = []
+        matched_ids = set()
+        for row in candidates:
+            pdb = row["pdb_id"].lower()
+            frozen = frozen_by_id.get(pdb)
+            if frozen is None:
+                continue
+            if frozen.get("legacy_pdb_only"):
+                matched_candidates.append(row); matched_ids.add(pdb); continue
+            row_path = row["path"].replace("\\", "/")
+            if (row.get("source_id") == frozen["source_id"]
+                    and row_path == frozen["graph_path"]
+                    and row.get("sha256", "").lower() == frozen["graph_sha256"]):
+                matched_candidates.append(row)
+                matched_ids.add(pdb)
+        missing_frozen_from_manifest = sorted(frozen_target_set - matched_ids)
+        candidates = matched_candidates
     excluded_pdb = {x.lower() for x in args.exclude_pdb}
     if args.exclude_pdb_file:
         excluded_pdb |= {line.strip().lower() for line in args.exclude_pdb_file.read_text(encoding="utf-8").splitlines() if line.strip()}
@@ -432,7 +471,8 @@ def main(argv=None) -> int:
                 del check
                 config.update(target=pdb,native_structure=str(work/"native.cif"),
                     candidate_relax_iterations=args.candidate_relax_iterations,
-                    protocol="validation_control",graph_sha256=row["sha256"],source_id=graph.source_id,
+                    protocol="validation_control",graph_sha256=row["sha256"],
+                    graph_path=row["path"].replace("\\", "/"),source_id=graph.source_id,
                     raw_sha256=_ablation_digest(raw),native_sha256=_ablation_digest(work/"native.cif"),
                     development_exposed=development_exposed,chain_identity_audit=chain_identity_audit,
                     cdr3_identity=cdr3_identity,independence_status=independence_status,
@@ -519,6 +559,12 @@ def main(argv=None) -> int:
             examined_candidates=len(decisions), qualifying_pool_size=len(candidates),
             target_cap=args.targets or None, selected_targets=len(selected),
             frozen_target_ids=sorted(frozen_target_set) if frozen_target_set is not None else None,
+            frozen_graph_identities=(
+                sorted([
+                    {k: r.get(k) for k in ("target", "source_id", "graph_path", "graph_sha256")}
+                    for r in frozen_target_records
+                ], key=lambda r: r["target"])
+                if frozen_target_records is not None else None),
             frozen_target_count=len(frozen_target_set) if frozen_target_set is not None else None,
             execution_selected_target_ids=sorted(execution_selected_ids),
             structure_experiment_completed_targets=completed_targets,
