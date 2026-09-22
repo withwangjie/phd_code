@@ -264,7 +264,7 @@ def main(argv=None) -> int:
         help="PDB IDs (case-insensitive) known to have been used/inspected during development "
              "(e.g. the historical dev queue). Recorded on every candidate's independence audit as "
              "development_exposed, DISTINCT from --exclude-pdb: exposure is tracked even for "
-             f"candidates that are not excluded -- exposure and {args.identity_threshold*100:.0f}% identity screening are different, "
+             "candidates that are not excluded -- exposure and the configured identity-threshold screening are different, "
              "both-necessary checks, and neither implies the other.")
     parser.add_argument("--dev-exposed-pdb-file",type=Path,default=None,
         help="Optional file with one PDB ID per line, merged with --dev-exposed-pdb.")
