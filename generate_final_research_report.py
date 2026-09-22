@@ -70,6 +70,20 @@ def _read_text(path: Path) -> Optional[str]:
     return path.read_text(encoding="utf-8") if path.is_file() else None
 
 
+def _filter_qc_rows(rows: List[Dict[str, str]], budget_mode: str) -> List[Dict[str, str]]:
+    selected=[]
+    for row in rows:
+        mode=row.get("budget_mode") or "matched_outputs"
+        if mode==budget_mode:
+            selected.append(row)
+    return selected
+
+
+def _formal_statistics_payload(ctx: "ReportContext", mode: str) -> Optional[Dict[str, Any]]:
+    payload=_read_json(ctx.run_dir / "qc_benchmark" / f"statistics_{mode}.json")
+    return payload if isinstance(payload,dict) else None
+
+
 def _fmt(value: Any, digits: int = 4) -> str:
     if value is None:
         return "n/a"
@@ -306,9 +320,10 @@ def section_pruning_contribution(ctx: ReportContext) -> List[str]:
     if not stage_ok(ctx, "qc_benchmark"):
         lines += ["qc_benchmark stage did not complete; no pruning-ablation numbers are reported.", ""]
         return lines
-    rows = _read_csv_rows(ctx.run_dir / "qc_benchmark" / "metrics.csv")
+    all_rows = _read_csv_rows(ctx.run_dir / "qc_benchmark" / "metrics.csv")
+    rows = _filter_qc_rows(all_rows, "matched_outputs")
     if not rows:
-        lines += ["`qc_benchmark/metrics.csv` is empty or missing.", ""]
+        lines += ["No matched-output rows were found in `qc_benchmark/metrics.csv`.", ""]
         return lines
     prunings = sorted({r.get("pruning", "") for r in rows if r.get("pruning")})
     lines.append("Five-way pruning-strategy comparison, sharing the same perturbed input, site count, and "
@@ -418,6 +433,47 @@ def section_search_performance(ctx: ReportContext) -> List[str]:
     lines.append("A run whose termination reason is `max_evaluations_reached` (budget exhausted) is never "
                   "reported above as `converged`; the raw `termination_reason` distribution is shown as-is.")
     lines.append("")
+
+    lines.append("### 3.3 Frozen primary paired inference")
+    lines.append("")
+    if not stage_ok(ctx, "statistics"):
+        lines.append("Statistics stage did not complete; no formal paired inference is reported.")
+        lines.append("")
+        return lines
+    for mode in ("outputs","time"):
+        payload=_formal_statistics_payload(ctx,mode)
+        label="Matched outputs" if mode=="outputs" else "Matched time"
+        lines.append(f"#### {label}")
+        lines.append("")
+        if not payload:
+            lines.append(f"`statistics_{mode}.json` is missing or unreadable.")
+            lines.append("")
+            continue
+        lines.append(
+            f"Frozen primary contrast: outputs={payload.get('primary_outputs')}, "
+            f"objective={payload.get('primary_objective')}, restarts={payload.get('primary_restarts')}; "
+            f"cluster unit: {payload.get('cluster_unit','n/a')}.")
+        lines.append("")
+        lines.append("| Baseline | Metric | Clusters | Mean QAOA-classical difference | 95% CI | p | Holm p |")
+        lines.append("|---|---|---:|---:|---|---:|---:|")
+        effects=payload.get("effects") or []
+        if effects:
+            for effect in effects:
+                lines.append(
+                    f"| {effect.get('baseline')} | {effect.get('metric')} | {effect.get('n_clusters',0)} | "
+                    f"{_fmt(effect.get('mean_difference'))} | "
+                    f"{_fmt(effect.get('ci_low'))}, {_fmt(effect.get('ci_high'))} | "
+                    f"{_fmt(effect.get('p_value'))} | {_fmt(effect.get('p_holm'))} |")
+        else:
+            lines.append("| — | — | 0 | n/a | n/a | n/a | n/a |")
+        lines.append("")
+        lines.append(f"Paired-case counts: `{json.dumps(payload.get('paired_cases',{}),sort_keys=True)}`.")
+        lines.append(f"Exclusions: `{json.dumps(payload.get('exclusions',{}),sort_keys=True)}`.")
+        if mode=="time":
+            lines.append(
+                "Time-mode inference is reported separately from matched-output inference and uses "
+                "only the explicitly recorded time-budget controls passing the frozen overrun rule.")
+        lines.append("")
     return lines
 
 
@@ -666,23 +722,24 @@ def section_external_and_robustness(ctx: ReportContext) -> List[str]:
 def section_cost(ctx: ReportContext) -> List[str]:
     lines = ["## 6. Cost", ""]
     if stage_ok(ctx, "qc_benchmark"):
-        rows = _read_csv_rows(ctx.run_dir / "qc_benchmark" / "metrics.csv")
+        all_rows = _read_csv_rows(ctx.run_dir / "qc_benchmark" / "metrics.csv")
+        rows = _filter_qc_rows(all_rows, "matched_outputs")
         if rows:
             by_solver: Dict[str, List[float]] = {}
             for r in rows:
                 solver = r.get("solver", "")
                 if r.get("solver_seconds") not in (None, "", "None"):
                     by_solver.setdefault(solver, []).append(float(r["solver_seconds"]))
-            lines.append("### 5.1 Coarse-grained ablation solver wall time (seconds, mean per case)")
+            lines.append("### 5.1 Coarse-grained matched-output solver cost (seconds, mean per row)")
             lines.append("")
             lines.append("| Solver | Cases | Mean solver_seconds |")
             lines.append("|---|---:|---:|")
             for solver, values in sorted(by_solver.items()):
                 lines.append(f"| {solver} | {len(values)} | {_fmt(sum(values)/len(values))} |")
             lines.append("")
-            lines.append("Oracle/exact-landscape preprocessing time is recorded separately "
-                          "(`oracle_seconds`/`build_seconds` in the raw CSV) and excluded from the solver "
-                          "timings above, per this project's existing convention.")
+            lines.append("Only matched-output rows are summarized here; matched-time controls are kept separate. "
+                          "Oracle/exact-landscape preprocessing time is recorded separately "
+                          "(`oracle_seconds`/`build_seconds` in the raw CSV) and excluded from these solver costs.")
             lines.append("")
     for label, directory in (("dev queue", ctx.run_dir / "dev_queue"), ("validation queue", ctx.run_dir / "validation_queue")):
         rows = _load_recovery_rows(directory)
