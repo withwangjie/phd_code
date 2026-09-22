@@ -122,7 +122,7 @@ def rq5_energy_structure(rows: list[dict], cluster_map: dict[str,str], resamples
 
     e=np.asarray([x[3] for x in centered],float)
     r=np.asarray([x[4] for x in centered],float)
-    rho,p=spearmanr(e,r)
+    rho=float(spearmanr(e,r).statistic)
     clusters=sorted({x[1] for x in centered})
     rng=np.random.default_rng(seed)
     boots=[]
@@ -138,10 +138,35 @@ def rq5_energy_structure(rows: list[dict], cluster_map: dict[str,str], resamples
             value=spearmanr(se,sr).statistic
             if math.isfinite(float(value)):
                 boots.append(float(value))
+
+    # Cluster-aware null: preserve target/method blocks and permute only the
+    # centered RMSD residuals within each block. This avoids treating repeated
+    # seeds or different proteins as exchangeable independent observations.
+    blocks=defaultdict(list)
+    for item in centered:
+        blocks[(item[0],item[2])].append(item)
+    trials=max(1000,min(int(resamples),20000))
+    extreme=0;valid_trials=0
+    if math.isfinite(rho):
+        for _ in range(trials):
+            pe=[];pr=[]
+            for block in blocks.values():
+                be=np.asarray([x[3] for x in block],float)
+                br=np.asarray([x[4] for x in block],float)
+                shuffled=rng.permutation(br)
+                pe.extend(be.tolist());pr.extend(shuffled.tolist())
+            value=spearmanr(np.asarray(pe,float),np.asarray(pr,float)).statistic
+            if math.isfinite(float(value)):
+                valid_trials+=1
+                if abs(float(value))>=abs(rho)-1e-15:
+                    extreme+=1
+    permutation_p=None if valid_trials==0 else (extreme+1)/(valid_trials+1)
     return dict(
         definition="within-target/method centered discrete energy vs post-relaxation side-chain RMSD",
         n_rows=len(centered),n_clusters=len(clusters),
-        spearman_rho=float(rho),p_value=float(p),
+        spearman_rho=rho,p_value=permutation_p,
+        p_value_method="within-target/method centered-RMSD permutation",
+        permutation_trials=valid_trials,
         ci_low=(None if not boots else float(np.percentile(boots,2.5))),
         ci_high=(None if not boots else float(np.percentile(boots,97.5))),
         interpretation="positive rho means higher discrete energy is associated with worse final RMSD",
@@ -184,7 +209,8 @@ def main() -> int:
         f"95% cluster-bootstrap CI: [{primary['ci_low']}, {primary['ci_high']}]; p={primary['p_value']}.","",
         "## Energy-to-structure transfer","",
         f"Spearman rho={rq5.get('spearman_rho')} with 95% cluster-bootstrap CI "
-        f"[{rq5.get('ci_low')}, {rq5.get('ci_high')}], p={rq5.get('p_value')}.",
+        f"[{rq5.get('ci_low')}, {rq5.get('ci_high')}], "
+        f"cluster-aware permutation p={rq5.get('p_value')}.",
         rq5.get("interpretation",""),"",
         "Repeated seeds are centered/averaged within target before family-cluster inference; "
         "PDB rows are not treated as independent proteins.",
