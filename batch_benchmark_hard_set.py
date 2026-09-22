@@ -2311,7 +2311,7 @@ def _recovery_comparison(initial: float, relax_only: float, final: float) -> dic
 
 
 def _recovery_benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
-    """Retrospective multi-seed chi1 perturbation/recovery, with relax-only control."""
+    """Retrospective multi-seed side-chain perturbation/recovery, with relax-only control."""
     from subgraph_to_qubo import AllAtomInterfaceQUBOBuilder
     import openmm
     parser=argparse.ArgumentParser(description="Fixed-backbone perturbation-recovery control")
@@ -2331,6 +2331,7 @@ def _recovery_benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
         help="Per-seed independent in-search measurement sub-seeds, positionally matched to --seeds "
              "(defaults elementwise to --seeds when omitted). Drives optimize_robust's finite-shot "
              "CVaR/mean draws WHILE searching -- distinct from --optimize-seeds and --sample-seeds.")
+    parser.add_argument("--perturbation-mode",choices=("multi_chi","chi1"),default="multi_chi")
     parser.add_argument("--min-perturb-degrees",type=float,default=40.)
     parser.add_argument("--max-perturb-degrees",type=float,default=120.)
     parser.add_argument("--outputs",type=int,default=1000)
@@ -2392,10 +2393,18 @@ def _recovery_benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
                         if not perturbed.exists() or _ablation_digest(perturbed)!=saved["structure_sha256"]:
                             raise ValueError("Perturbed input changed or missing")
                     else:
-                        positions,angles=generator.perturb_chi1(seed,args.min_perturb_degrees,args.max_perturb_degrees)
+                        if args.perturbation_mode=="multi_chi":
+                            positions,angles=generator.perturb_sidechain_chis(
+                                seed,args.min_perturb_degrees,args.max_perturb_degrees)
+                            perturb_protocol="retrospective multi-chi recovery; all defined side-chain chis perturbed; no clash/energy/reference-based rejection"
+                        else:
+                            positions,angles=generator.perturb_chi1(
+                                seed,args.min_perturb_degrees,args.max_perturb_degrees)
+                            perturb_protocol="retrospective chi1-only recovery ablation; no clash/energy/reference-based rejection"
                         generator.write_structure(positions,perturbed)
-                        _ablation_atomic_json(metadata,dict(seed=seed,angles=angles,structure_sha256=_ablation_digest(perturbed),
-                            protocol="retrospective chi1-only recovery; no clash/energy/reference-based rejection"))
+                        _ablation_atomic_json(metadata,dict(
+                            seed=seed,angles=angles,structure_sha256=_ablation_digest(perturbed),
+                            perturbation_mode=args.perturbation_mode,protocol=perturb_protocol))
                     child_case=dict(input_structure=str(perturbed),reference_structure=str(native),
                         cdr3_residues=case.get('cdr3_residues',[]),pruning=case.get('pruning'),
                         candidate_relax_iterations=int(case.get("candidate_relax_iterations",0)),
@@ -2444,10 +2453,12 @@ def _recovery_benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
                     failures+=1
                     with (out/"failed_cases.log").open("a",encoding="utf-8") as f:
                         f.write(f"seed={seed}\n"+traceback.format_exc()+"\n");f.flush()
-        lines=["# Retrospective chi1 perturbation-recovery", "",
+        lines=["# Retrospective side-chain perturbation-recovery", "",
+            f"Perturbation mode: {args.perturbation_mode}.",
             f"One target; requested seeds={len(args.seeds)}, failed seeds={failures}. Repeated seeds are not independent proteins; no inferential p values.",
             "Positive RMSD gains mean improvement. All methods share the perturbed input and relaxation protocol. Relax-only isolates local minimization without discrete search.",
-            "Native backbone and distal chi remain fixed/inherited; this is neither de novo prediction nor an independent structural benchmark.",
+            ("Native backbone remains fixed; formal multi_chi mode perturbs all defined Active side-chain chis before recovery. "
+             "The chi1 mode is a controlled ablation. This is neither de novo prediction nor blind docking."),
             "Perturbations are not rejected based on energy or reference similarity. Failures must be included in the denominator; energy decrease alone is not accuracy.",
             "", "| Method | Successful seeds | Mean gain vs input (A) | Mean gain vs relax-only (A) | Energy-down/RMSD-up cases |", "|---|---:|---:|---:|---:|"]
         for method in ("qaoa","sa","uniform","greedy"):
