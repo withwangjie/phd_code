@@ -553,11 +553,15 @@ class Orchestrator:
                 manifest=resolve_path(self.config,ext.get("independence_manifest",""))
                 graph_ok=graph_dir.is_dir() and any(graph_dir.glob("*.pt"))
                 checks["external_vhh_graphs"]=graph_ok
-                checks["external_vhh_independence_manifest"]=manifest.is_file()
+                # The independence manifest is deliberately generated later,
+                # after this run has frozen its own training dataset/cluster
+                # map. A pre-existing manifest is accepted but not required
+                # during preflight because it cannot be validly generated
+                # before queue_freeze.
+                checks["external_vhh_independence_manifest_preexisting"]=manifest.is_file()
+                checks["external_vhh_independence_manifest_generated_later"]=not manifest.is_file()
                 if not graph_ok:
                     missing_resources.append(str(graph_dir))
-                if not manifest.is_file():
-                    missing_resources.append(str(manifest))
             structural=external.get("structural_baselines", {}) or {}
             if structural.get("required",False):
                 faspr=Path(structural.get("faspr_executable",""))
