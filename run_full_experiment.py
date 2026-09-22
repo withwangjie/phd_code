@@ -381,6 +381,15 @@ class Orchestrator:
                                       f"Prerequisite stage '{prereq}' has not completed; refusing to start.")
                 self._save_stage_status(result)
                 return result
+            if not optional_skip:
+                prereq_ok, prereq_detail = self._validate_completed_stage_artifacts(prereq)
+                if not prereq_ok:
+                    result = StageResult(
+                        stage, "failed", utc_timestamp(), utc_timestamp(), 1,
+                        f"Prerequisite stage '{prereq}' has a completed marker but failed artifact "
+                        f"verification: {prereq_detail}")
+                    self._save_stage_status(result)
+                    return result
         existing = self._load_stage_status(stage)
         if existing and stage not in self.force_restage:
             if existing["status"] in ("completed", "completed_with_failures"):
