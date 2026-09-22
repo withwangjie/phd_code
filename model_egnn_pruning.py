@@ -410,7 +410,7 @@ def extract_top_interface_subgraph(
         + antigen_guidance_weight * antigen_proximity
     )
     threshold_local = torch.nonzero(
-        vhh_probabilities >= probability_threshold, as_tuple=False
+        vhh_scores >= probability_threshold, as_tuple=False
     ).flatten()
     threshold_count = int(threshold_local.numel())
     if threshold_count < required_minimum:
