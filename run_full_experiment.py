@@ -1094,6 +1094,12 @@ class Orchestrator:
                 failures.append(f"{name} exited {returncode} (see {log_path})")
         status = "completed" if not failures else "failed"
         detail = "All smoke checks passed." if not failures else "; ".join(failures)
+        atomic_write_json(smoke_dir/"smoke_summary.json",{
+            "status":status,
+            "checks":[{"name":name,"argv":argv} for name,argv in checks],
+            "failures":failures,
+            "closed":True,
+        })
         return StageResult("smoke_check", status, started, utc_timestamp(), 0 if not failures else 1, detail)
 
     # ================================================================
@@ -1575,6 +1581,29 @@ class Orchestrator:
             if failed_checks:
                 ok=False
                 acceptance_detail="; ".join(failed_checks)
+        calibration_report=self.run_dir/"calibration"/"calibration_report.md"
+        calibration_report.parent.mkdir(parents=True,exist_ok=True)
+        payload_for_report={}
+        if calibration_file.is_file():
+            try: payload_for_report=json.loads(calibration_file.read_text(encoding="utf-8"))
+            except Exception: payload_for_report={}
+        calibration_report.write_text("\n".join([
+            "# Energy calibration result",
+            "",
+            f"Status: {'accepted' if ok else 'failed'}",
+            f"Training CSV: {training_csv}",
+            f"Calibration JSON: {calibration_file}",
+            f"Training complexes: {payload_for_report.get('n_train_complexes','n/a')}",
+            f"Training family groups: {payload_for_report.get('n_train_groups','n/a')}",
+            f"CV folds: {payload_for_report.get('cv_fold_count','n/a')}",
+            f"CV RMSE (kcal/mol): {payload_for_report.get('cv_rmse_kcal','n/a')}",
+            f"CV MAE (kcal/mol): {payload_for_report.get('cv_mae_kcal','n/a')}",
+            f"CV R2: {payload_for_report.get('cv_r2','n/a')}",
+            f"CV Spearman: {payload_for_report.get('cv_spearman','n/a')}",
+            f"RMSE improvement (kcal/mol): {payload_for_report.get('calibration_rmse_improvement_kcal','n/a')}",
+            "",
+            f"Acceptance detail: {acceptance_detail or 'all configured acceptance gates passed'}",
+        ])+"\n",encoding="utf-8")
         return StageResult(
             "energy_calibration", "completed" if ok else "failed", started, utc_timestamp(),
             fit_returncode,
@@ -1674,6 +1703,46 @@ class Orchestrator:
                     failures.append(
                         f"shots={shots}, alpha={alpha}, failures_total="
                         f"{summary.get('failures_total')}")
+        aggregate_rows=[]
+        for shots in cfg.get("eval_shots",[200,500,1000]):
+            for alpha in cfg.get("cvar_alpha",[0.05,0.1,0.25,0.5,1.0]):
+                sub=out/f"shots_{shots}_alpha_{str(alpha).replace('.','p')}"
+                metrics=sub/"metrics.csv"
+                if not metrics.is_file():
+                    continue
+                with metrics.open(newline="",encoding="utf-8") as handle:
+                    rows=list(csv.DictReader(handle))
+                qrows=[r for r in rows if r.get("solver")=="qaoa"]
+                def mean_field(field):
+                    vals=[float(r[field]) for r in qrows if r.get(field) not in (None,"","None")]
+                    return (sum(vals)/len(vals)) if vals else None
+                aggregate_rows.append({
+                    "eval_shots":shots,"cvar_alpha":alpha,"rows":len(qrows),
+                    "mean_hit":mean_field("hit"),"mean_gap":mean_field("gap"),
+                    "mean_ground_probability":mean_field("ground_probability"),
+                    "mean_low_energy_mass":mean_field("low_energy_mass"),
+                    "mean_solver_seconds":mean_field("solver_seconds"),
+                })
+        out.mkdir(parents=True,exist_ok=True)
+        summary_csv=out/"sensitivity_summary.csv"
+        fields=["eval_shots","cvar_alpha","rows","mean_hit","mean_gap",
+                "mean_ground_probability","mean_low_energy_mass","mean_solver_seconds"]
+        with summary_csv.open("w",newline="",encoding="utf-8") as handle:
+            writer=csv.DictWriter(handle,fieldnames=fields);writer.writeheader();writer.writerows(aggregate_rows)
+        atomic_write_json(out/"sensitivity_summary.json",{
+            "scope":"development-only",
+            "primary_protocol_unchanged":True,
+            "subruns_planned":len(cfg.get("eval_shots",[200,500,1000]))*len(cfg.get("cvar_alpha",[0.05,0.1,0.25,0.5,1.0])),
+            "subruns_summarized":len(aggregate_rows),
+            "failures":failures,
+            "rows":aggregate_rows,
+        })
+        md=["# Development-only QAOA sensitivity","","Validation/test data were not used to select hyperparameters.","",
+            "| eval shots | CVaR alpha | QAOA rows | mean hit | mean gap | mean ground probability | mean low-energy mass | mean solver seconds |",
+            "|---:|---:|---:|---:|---:|---:|---:|---:|"]
+        for row in aggregate_rows:
+            md.append("| {eval_shots} | {cvar_alpha} | {rows} | {mean_hit} | {mean_gap} | {mean_ground_probability} | {mean_low_energy_mass} | {mean_solver_seconds} |".format(**row))
+        (out/"sensitivity_summary.md").write_text("\n".join(md)+"\n",encoding="utf-8")
         return StageResult(
             "method_sensitivity","completed" if not failures else "failed",
             started,utc_timestamp(),0 if not failures else 1,
@@ -2137,6 +2206,10 @@ class Orchestrator:
                 ext_failures.append(f"Required external independence manifest missing: {independence}")
             else:
                 manifest=json.loads(independence.read_text(encoding="utf-8"))
+                run_external_root=self.run_dir/"external_validation"
+                run_external_root.mkdir(parents=True,exist_ok=True)
+                local_independence=run_external_root/"external_vhh_independence_manifest.json"
+                shutil.copy2(independence,local_independence)
                 current_cluster_setting=(
                     (self.config["queue_freeze"].get("independence_clustering", {}) or {}).get("cluster_map")
                 )
@@ -2343,6 +2416,25 @@ class Orchestrator:
                     failures.append(f"External structural baselines failed (exit={rc}; see {log})")
                 else:
                     summary=json.loads(baseline_summary.read_text(encoding="utf-8"))
+                    report_path=out/"external_baseline_report.md"
+                    metrics_path=out/"external_baseline_metrics.csv"
+                    row_count=0; methods=set(); targets=set()
+                    if metrics_path.is_file():
+                        with metrics_path.open(newline="",encoding="utf-8") as handle:
+                            baseline_rows=list(csv.DictReader(handle))
+                        row_count=len(baseline_rows)
+                        methods={r.get("method","") for r in baseline_rows if r.get("method")}
+                        targets={r.get("target","") for r in baseline_rows if r.get("target")}
+                    report_path.write_text("\n".join([
+                        "# External structural baseline result",
+                        "",
+                        f"Rows: {row_count}",
+                        f"Targets: {len(targets)}",
+                        f"Methods: {', '.join(sorted(methods)) if methods else 'n/a'}",
+                        f"Failures: {len(summary.get('failures',[]) or [])}",
+                        "",
+                        "FASPR is a mature biological packing baseline; Phenix clashscore/common structural evaluation is applied consistently to external and internal structures.",
+                    ])+"\n",encoding="utf-8")
                     if summary.get("failures"):
                         failures.append(
                             f"External structural baselines contain {len(summary['failures'])} failures"
