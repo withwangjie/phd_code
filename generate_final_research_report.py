@@ -373,7 +373,7 @@ def section_search_performance(ctx: ReportContext) -> List[str]:
         return lines
     primary_sites=_primary_active_sites(ctx)
     rows=[
-        r for r in all_rows
+        r for r in _filter_qc_rows(all_rows,"matched_outputs")
         if int(float(r.get("active_sites",primary_sites)))==primary_sites
     ]
 
