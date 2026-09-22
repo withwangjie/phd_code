@@ -1487,28 +1487,86 @@ def _ablation_dispatch(tasks: Iterable[tuple], workers: int) -> Iterable[tuple]:
 
 
 def fit_energy_calibration_csv(input_csv: Path, output_json: Path, ridge_alpha: float) -> dict:
-    """Fit coarse component weights to Amber delta-E using TRAIN rows only."""
+    """Fit nonnegative coarse-component weights to Amber delta-E using TRAIN complexes only.
+
+    Rows from the same PDB are kept together in deterministic 5-fold
+    cross-validation so conformers from one complex never appear in both a
+    calibration fold's fit and evaluation subsets.
+    """
     if ridge_alpha < 0 or not math.isfinite(ridge_alpha):
         raise ValueError("ridge_alpha must be finite and nonnegative")
     with Path(input_csv).open(newline="",encoding="utf-8-sig") as handle:
         rows=list(csv.DictReader(handle))
     if not rows:
         raise ValueError("Calibration CSV is empty")
-    required=("prior_energy","vhh_environment_energy","antigen_energy","pair_energy","amber_delta_kcal")
+    required=(
+        "pdb_id","split","prior_energy","vhh_environment_energy",
+        "antigen_energy","pair_energy","amber_delta_kcal",
+    )
     missing=[key for key in required if key not in rows[0]]
-    if missing: raise ValueError(f"Calibration CSV missing columns: {missing}")
-    if "split" in rows[0] and any(str(row["split"]).lower()!="train" for row in rows):
+    if missing:
+        raise ValueError(f"Calibration CSV missing columns: {missing}")
+    if any(str(row["split"]).lower()!="train" for row in rows):
         raise ValueError("Energy calibration may use training rows only")
-    X=np.asarray([[float(row[k]) for k in required[:-1]] for row in rows],dtype=float)
-    y=np.asarray([float(row[required[-1]]) for row in rows],dtype=float)
+    pdb_ids=[str(row["pdb_id"]).strip().lower() for row in rows]
+    if any(not pdb for pdb in pdb_ids):
+        raise ValueError("Calibration rows require nonempty pdb_id values")
+
+    feature_names=("prior_energy","vhh_environment_energy","antigen_energy","pair_energy")
+    X=np.asarray([[float(row[k]) for k in feature_names] for row in rows],dtype=float)
+    y=np.asarray([float(row["amber_delta_kcal"]) for row in rows],dtype=float)
     if not np.isfinite(X).all() or not np.isfinite(y).all():
         raise ValueError("Calibration data contain non-finite values")
+    if len(set(pdb_ids)) < 2:
+        raise ValueError("Calibration requires at least two distinct training complexes")
+
+    def fit_coefficients(x: np.ndarray, target: np.ndarray) -> np.ndarray:
+        design=np.column_stack([np.ones(len(x)),x])
+        if ridge_alpha:
+            ridge=np.zeros((x.shape[1],1+x.shape[1]),dtype=float)
+            ridge[:,1:]=math.sqrt(float(ridge_alpha))*np.eye(x.shape[1])
+            design_aug=np.vstack([design,ridge])
+            target_aug=np.concatenate([target,np.zeros(x.shape[1],dtype=float)])
+        else:
+            design_aug,target_aug=design,target
+        lower=np.asarray([-np.inf,0.0,0.0,0.0,0.0],dtype=float)
+        upper=np.full(5,np.inf,dtype=float)
+        result=lsq_linear(design_aug,target_aug,bounds=(lower,upper),method="trf")
+        if not result.success or not np.isfinite(result.x).all():
+            raise RuntimeError(f"Nonnegative ridge calibration failed: {result.message}")
+        return result.x
+
+    unique_pdbs=sorted(set(pdb_ids))
+    fold_of={
+        pdb:int.from_bytes(hashlib.sha256(pdb.encode("utf-8")).digest()[:8],"big")%5
+        for pdb in unique_pdbs
+    }
+    cv_rows=[]
+    cv_predictions=np.full(len(y),np.nan,dtype=float)
+    for fold in sorted(set(fold_of.values())):
+        test_mask=np.asarray([fold_of[pdb]==fold for pdb in pdb_ids],dtype=bool)
+        train_mask=~test_mask
+        if not test_mask.any() or not train_mask.any():
+            continue
+        beta=fit_coefficients(X[train_mask],y[train_mask])
+        pred=np.column_stack([np.ones(test_mask.sum()),X[test_mask]])@beta
+        cv_predictions[test_mask]=pred
+        residual=y[test_mask]-pred
+        cv_rows.append(dict(
+            fold=int(fold),
+            train_complexes=int(len({p for p,m in zip(pdb_ids,train_mask) if m})),
+            test_complexes=int(len({p for p,m in zip(pdb_ids,test_mask) if m})),
+            test_rows=int(test_mask.sum()),
+            rmse_kcal=float(np.sqrt(np.mean(residual**2))),
+            mae_kcal=float(np.mean(np.abs(residual))),
+        ))
+
+    beta=fit_coefficients(X,y)
     design=np.column_stack([np.ones(len(X)),X])
-    penalty=np.diag([0.0]+[float(ridge_alpha)]*X.shape[1])
-    beta=np.linalg.solve(design.T@design+penalty,design.T@y)
     pred=design@beta
     residual=y-pred
     ss_tot=float(np.sum((y-y.mean())**2))
+    cv_mask=np.isfinite(cv_predictions)
     payload={
         "intercept":float(beta[0]),
         "prior_weight":float(beta[1]),
@@ -1516,11 +1574,24 @@ def fit_energy_calibration_csv(input_csv: Path, output_json: Path, ridge_alpha: 
         "antigen_weight":float(beta[3]),
         "pair_weight":float(beta[4]),
         "ridge_alpha":float(ridge_alpha),
+        "coefficient_constraint":"nonnegative component weights; unconstrained intercept",
         "n_train_samples":int(len(y)),
-        "rmse_kcal":float(np.sqrt(np.mean(residual**2))),
-        "r2":(None if ss_tot<=0 else float(1.0-np.sum(residual**2)/ss_tot)),
+        "n_train_complexes":int(len(unique_pdbs)),
+        "train_rmse_kcal":float(np.sqrt(np.mean(residual**2))),
+        "train_mae_kcal":float(np.mean(np.abs(residual))),
+        "train_r2":(None if ss_tot<=0 else float(1.0-np.sum(residual**2)/ss_tot)),
+        "cv_scheme":"deterministic PDB-grouped SHA256 5-fold",
+        "cv_folds":cv_rows,
+        "cv_rmse_kcal":(
+            None if not cv_mask.any()
+            else float(np.sqrt(np.mean((y[cv_mask]-cv_predictions[cv_mask])**2)))
+        ),
+        "cv_mae_kcal":(
+            None if not cv_mask.any()
+            else float(np.mean(np.abs(y[cv_mask]-cv_predictions[cv_mask])))
+        ),
         "input_sha256":_ablation_digest(Path(input_csv)),
-        "scope":"fit on training complexes only; freeze before validation/test",
+        "scope":"fit on training complexes only; freeze coefficients before validation/test",
     }
     _ablation_atomic_json(Path(output_json),payload)
     return payload
