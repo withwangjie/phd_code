@@ -56,6 +56,25 @@ _SIDECHAIN_NAMES = {
     "PHE": "CB CG CD1 CD2 CE1 CE2 CZ", "TYR": "CB CG CD1 CD2 CE1 CE2 CZ OH",
     "TRP": "CB CG CD1 CD2 NE1 CE2 CE3 CZ2 CZ3 CH2",
 }
+_CHI_ATOMS = {
+    "SER": (("N","CA","CB","OG"),),
+    "THR": (("N","CA","CB","OG1"),),
+    "CYS": (("N","CA","CB","SG"),),
+    "VAL": (("N","CA","CB","CG1"),),
+    "ILE": (("N","CA","CB","CG1"),("CA","CB","CG1","CD1")),
+    "LEU": (("N","CA","CB","CG"),("CA","CB","CG","CD1")),
+    "ASP": (("N","CA","CB","CG"),("CA","CB","CG","OD1")),
+    "ASN": (("N","CA","CB","CG"),("CA","CB","CG","OD1")),
+    "GLU": (("N","CA","CB","CG"),("CA","CB","CG","CD"),("CB","CG","CD","OE1")),
+    "GLN": (("N","CA","CB","CG"),("CA","CB","CG","CD"),("CB","CG","CD","OE1")),
+    "LYS": (("N","CA","CB","CG"),("CA","CB","CG","CD"),("CB","CG","CD","CE"),("CG","CD","CE","NZ")),
+    "ARG": (("N","CA","CB","CG"),("CA","CB","CG","CD"),("CB","CG","CD","NE"),("CG","CD","NE","CZ")),
+    "MET": (("N","CA","CB","CG"),("CA","CB","CG","SD"),("CB","CG","SD","CE")),
+    "HIS": (("N","CA","CB","CG"),("CA","CB","CG","ND1")),
+    "PHE": (("N","CA","CB","CG"),("CA","CB","CG","CD1")),
+    "TYR": (("N","CA","CB","CG"),("CA","CB","CG","CD1")),
+    "TRP": (("N","CA","CB","CG"),("CA","CB","CG","CD1")),
+}
 _SYMMETRIC_SWAPS = {
     "ASP": [("OD1", "OD2")], "GLU": [("OE1", "OE2")],
     "ARG": [("NH1", "NH2")], "VAL": [("CG1", "CG2")],
@@ -205,6 +224,63 @@ def _chi1_angle(atoms: Mapping[str, np.ndarray], residue_name: str) -> Optional[
     if min(np.linalg.norm(v), np.linalg.norm(w)) < 1e-8:
         raise ValueError("Undefined chi1 torsion")
     return float(np.degrees(np.arctan2(np.dot(np.cross(axis, v), w), np.dot(v, w))))
+
+
+
+def _rotate_about_axis(points: np.ndarray, origin: np.ndarray, axis: np.ndarray, angle_degrees: float) -> np.ndarray:
+    axis=np.asarray(axis,dtype=float)
+    norm=np.linalg.norm(axis)
+    if norm<1e-10:
+        raise ValueError("Degenerate rotation axis")
+    axis=axis/norm
+    relative=np.asarray(points,dtype=float)-origin
+    theta=np.deg2rad(float(angle_degrees))
+    return (origin + relative*np.cos(theta)
+            + np.cross(axis,relative)*np.sin(theta)
+            + np.outer(relative@axis,axis)*(1-np.cos(theta)))
+
+
+def _downstream_atoms(
+    bond_graph: Mapping[int,set[int]], start: int, blocked: int, allowed: set[int]
+) -> set[int]:
+    """Atoms on the distal side of one rotatable bond, restricted to one residue."""
+    seen={blocked}; stack=[start]; result=set()
+    while stack:
+        atom=stack.pop()
+        if atom in seen or atom not in allowed:
+            continue
+        seen.add(atom);result.add(atom)
+        stack.extend(neighbor for neighbor in bond_graph[atom] if neighbor not in seen)
+    return result
+
+
+def _apply_sidechain_chis(
+    positions: np.ndarray,
+    atoms: Mapping[str,int],
+    bond_graph: Mapping[int,set[int]],
+    residue_name: str,
+    targets: Sequence[float],
+) -> np.ndarray:
+    """Set χ1..χn sequentially for one acyclic canonical side chain."""
+    definitions=_CHI_ATOMS.get(residue_name,())
+    if len(targets)>len(definitions):
+        raise ValueError(f"Too many chi targets for {residue_name}: {len(targets)}>{len(definitions)}")
+    result=np.asarray(positions,dtype=float).copy()
+    allowed=set(atoms.values())
+    for definition,target in zip(definitions,targets):
+        if not all(name in atoms for name in definition):
+            raise ValueError(f"Missing chi atoms for {residue_name}: {definition}")
+        a,b,c,d=(atoms[name] for name in definition)
+        current=_torsion_angle_degrees(result[a],result[b],result[c],result[d])
+        delta=((float(target)-current+180.0)%360.0)-180.0
+        moving=sorted(_downstream_atoms(bond_graph,c,b,allowed))
+        if d not in moving:
+            raise ValueError(f"Chi downstream graph is inconsistent for {residue_name}: {definition}")
+        result[moving]=_rotate_about_axis(result[moving],result[b],result[c]-result[b],delta)
+        observed=_torsion_angle_degrees(result[a],result[b],result[c],result[d])
+        if abs(((observed-float(target)+180.0)%360.0)-180.0)>1e-5:
+            raise AssertionError(f"Failed to set torsion {definition}: target={target}, observed={observed}")
+    return result
 
 
 def evaluate_atomistic_prediction(
@@ -670,7 +746,12 @@ def _dunbrack_templates_for_site(library_bins, amino_acid: str, phi: float, psi:
         for z in sigma_offsets:
             angle=((row.chi1_degrees+float(z)*sigma1+180.0)%360.0)-180.0
             weight=row.prior_probability*math.exp(-0.5*float(z)**2)
-            expanded.append(RotamerTemplate(angle,weight,row.chi_degrees,row.chi_sigmas,"dunbrack2010"))
+            chis=list(row.chi_degrees)
+            if chis:
+                chis[0]=angle
+            else:
+                chis=[angle]
+            expanded.append(RotamerTemplate(angle,weight,tuple(chis),row.chi_sigmas,"dunbrack2010"))
     if not expanded: raise ValueError(f"No Dunbrack candidates survived probability floor for {key}")
     expanded.sort(key=lambda r:(-r.prior_probability,r.chi1_degrees))
     total=sum(r.prior_probability for r in expanded)
@@ -1854,9 +1935,6 @@ class AllAtomInterfaceQUBOBuilder:
             if ca in moving or not moving.issubset(set(atoms.values())):
                 raise ValueError(f"Cyclic/crosslinked Active side chain unsupported: {rid}")
             indices=np.array(sorted(moving),dtype=int)
-            axis=self.base_positions[cb]-self.base_positions[ca]; axis/=np.linalg.norm(axis)
-            atom_coordinates={name:self.base_positions[index] for name,index in atoms.items()}
-            original=_chi1_angle(atom_coordinates,residue.name)
             if self.chi1_angles_override is None:
                 if self.rotamer_mode=="dunbrack2010" and one_letter not in "AG":
                     phi,psi=allatom_backbone_angles[rid]
@@ -1865,25 +1943,24 @@ class AllAtomInterfaceQUBOBuilder:
                         probability_floor=self.rotamer_probability_floor,
                         sigma_offsets=self.rotamer_sigma_offsets,
                     )
-                    angles=tuple(t.chi1_degrees for t in templates)
                 else:
-                    angles=tuple(t.chi1_degrees for t in _expanded_rotamer_templates(one_letter))
+                    templates=_expanded_rotamer_templates(one_letter)
             else:
-                angles=tuple(self.chi1_angles_override)
-            raw_pool_sizes[site]=len(angles)
+                templates=tuple(RotamerTemplate(float(angle),1.0/len(self.chi1_angles_override),(float(angle),),(),"legacy_override")
+                                for angle in self.chi1_angles_override)
+            raw_pool_sizes[site]=len(templates)
             variables=[]
-            for angle in angles:
-                delta=np.deg2rad((float(angle)-original+180)%360-180)
-                relative=self.base_positions[indices]-self.base_positions[ca]
-                rotated=relative*np.cos(delta)+np.cross(axis,relative)*np.sin(delta)+np.outer(relative@axis,axis)*(1-np.cos(delta))
-                coordinates=rotated+self.base_positions[ca]
-                checked=dict(atom_coordinates)
-                checked.update({name:coordinates[list(indices).index(index)] for name,index in atoms.items() if index in moving})
-                if abs((_chi1_angle(checked,residue.name)-angle+180)%360-180)>1e-6:
-                    raise AssertionError("Chi1 rotation convention mismatch")
+            for template in templates:
+                targets=(template.chi_degrees if (self.rotamer_mode=="dunbrack2010" and self.chi1_angles_override is None)
+                         else (template.chi1_degrees,))
+                full=_apply_sidechain_chis(self.base_positions,atoms,bonds,residue.name,targets)
+                coordinates=full[indices].copy()
                 variables.append(len(self.candidates))
-                self.candidates.append(dict(site=site,residue_id=rid,residue_name=residue.name,
-                    angle=float(angle),indices=indices,positions=coordinates))
+                self.candidates.append(dict(
+                    site=site,residue_id=rid,residue_name=residue.name,
+                    angle=float(template.chi1_degrees),chi_degrees=tuple(float(v) for v in targets),
+                    prior_probability=float(template.prior_probability),
+                    indices=indices,positions=coordinates))
             raw_candidates_by_site[site]=variables
             self.movable.update(moving)
         if candidate_relax_iterations:
@@ -2058,9 +2135,12 @@ class AllAtomInterfaceQUBOBuilder:
                 solvent="vacuum; NoCutoff",raw_rotamer_pool_sizes=self.raw_rotamer_pool_sizes,
                 rotamers_per_site=self.retained_rotamers_per_site,
                 site_scores=self.site_scores.tolist(),
-                rotamer_state_policy=(f"{self.rotamer_mode} chi1 candidates -> 3--6 retained under <=30 variables" if self.chi1_angles_override is None else "explicit legacy chi1 angle override"),
+                candidate_chi_degrees=[list(candidate.get("chi_degrees",(candidate["angle"],))) for candidate in self.candidates],
+                rotamer_state_policy=(f"{self.rotamer_mode} full side-chain rotamer states (chi1..chiN) -> 3--6 retained under <=30 variables" if self.rotamer_mode=="dunbrack2010" and self.chi1_angles_override is None else "explicit legacy chi1 angle override"),
                 rotamer_library_path=(None if self.rotamer_library_path is None else str(self.rotamer_library_path)),
-                candidate_scope="input-conditioned distal chi; Amber14 single-candidate prescreen, no affinity claim"))
+                candidate_scope=("Dunbrack full side-chain chi state; Amber14 single-candidate prescreen, no affinity claim"
+                    if self.rotamer_mode=="dunbrack2010" and self.chi1_angles_override is None
+                    else "legacy chi1-only candidate; no affinity claim")))
 
     def write_structure(self, positions: np.ndarray, destination: Path) -> None:
         """Write author-ID CIF, with occupancy=1 for generated computational atoms."""
