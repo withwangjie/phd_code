@@ -92,7 +92,8 @@ def prepare(graph, source: Path, destination: Path, sites: int, *, pruning: str 
             antigen_guidance_weight: float = 0.25,
             antigen_proximity_scale: float = 6.0,
             contact_ca_cutoff: float = 8.0,
-            homology_isolation: dict[str, float] | None = None) -> dict:
+            homology_isolation: dict[str, float] | None = None,
+            eligibility_only: bool = False) -> dict:
     """Resolve structure and select Active sites under the shared main protocol."""
     if not 0.0 <= antigen_guidance_weight <= 1.0:
         raise ValueError("antigen_guidance_weight must be in [0,1]")
@@ -165,6 +166,30 @@ def prepare(graph, source: Path, destination: Path, sites: int, *, pruning: str 
         scored.append((dist, rid, contact_count, i))
     if len(scored) < sites:
         raise ValueError(f"Only {len(scored)} chemically movable VHH sites")
+
+    # Queue-freeze eligibility must not depend on a temporary pruning/ranking
+    # strategy before the EGNN checkpoint exists. In eligibility-only mode we
+    # preserve the cleaned structure and expose the full chemically movable
+    # residue pool; main() then verifies that at least K of these residues are
+    # independently Dunbrack/Amber-compatible, without choosing the formal
+    # Active set.
+    if eligibility_only:
+        st.make_mmcif_document().write_file(str(destination))
+        return dict(
+            active_residues=[], active_site_scores=[],
+            eligible_residues=[item[1] for item in scored],
+            alignment_residues=partners, partner_residues=partners,
+            preparation_changes=changes, cdr3_residues=cdr_ids,
+            pruning="eligibility_only", pruning_candidate_count=len(scored),
+            pruning_seed=None, model_status=None,
+            antigen_guidance_weight=float(antigen_guidance_weight),
+            antigen_proximity_scale=float(antigen_proximity_scale),
+            contact_ca_cutoff_angstrom=float(contact_ca_cutoff),
+            selection_origin=(
+                "eligibility-only queue freeze: no contact/distance/CDR/EGNN ranking; "
+                "formal Active residues are selected only after EGNN training"
+            ),
+        )
     model_status=None
     if pruning=='contact':
         ordered=sorted(scored,key=lambda x:(-x[2],x[0],x[1]))
@@ -244,6 +269,9 @@ def main(argv=None) -> int:
     parser.add_argument("--relax-iterations", type=int, default=200)
     parser.add_argument("--candidate-relax-iterations", type=int, default=100)
     parser.add_argument("--prepare-only", action="store_true")
+    parser.add_argument("--eligibility-only", action="store_true",
+        help="With --prepare-only, freeze target membership without selecting Active residues. "
+             "Requires only that at least --sites VHH residues are independently Dunbrack/Amber-compatible.")
     parser.add_argument("--eval-shots",type=int,choices=(200,500,1000))
     parser.add_argument("--loop-relax-iterations",type=int,default=100)
     parser.add_argument("--pruning",choices=('egnn','contact','distance','cdr','random'),default='egnn')
@@ -301,6 +329,8 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     if not 1 <= args.sites <= 10 or args.targets < 0:
         parser.error("Require 1..10 sites and a nonnegative target count (0 = unlimited)")
+    if args.eligibility_only and not args.prepare_only:
+        parser.error("--eligibility-only is valid only together with --prepare-only")
     if not 0.0 < args.min_perturb_degrees <= args.max_perturb_degrees <= 180.0:
         parser.error("Require 0 < min-perturb-degrees <= max-perturb-degrees <= 180")
     homology = {
@@ -421,7 +451,8 @@ def main(argv=None) -> int:
                     antigen_guidance_weight=args.antigen_guidance_weight,
                     antigen_proximity_scale=args.antigen_proximity_scale,
                     contact_ca_cutoff=args.contact_ca_cutoff,
-                    homology_isolation=homology)
+                    homology_isolation=homology,
+                    eligibility_only=args.eligibility_only)
                 chain_identity_audit=[]
                 max_vhh_identity=0.0
                 max_antigen_identity=0.0
@@ -470,17 +501,50 @@ def main(argv=None) -> int:
                         f"with minimum length coverage {args.antigen_min_length_coverage:.2f}"
                     )
                 config["preparation_changes"].extend(complete_terminal_oxygen(work/"native.cif"))
-                # Confirm full Amber template compatibility before freezing membership.
-                check=AllAtomInterfaceQUBOBuilder(
-                    work/"native.cif",config["active_residues"],
-                    site_scores=config.get("active_site_scores"),
-                    rotamer_mode=args.rotamer_mode,
-                    rotamer_library_path=args.rotamer_library,
-                    rotamer_probability_floor=args.rotamer_probability_floor,
-                    rotamer_sigma_offsets=args.rotamer_sigma_offsets,
-                    solvent_model=args.solvent_model,
-                )
-                del check
+                if args.eligibility_only:
+                    # Prove existence of K compatible sites without ranking them.
+                    compatible=[]
+                    compatibility_failures=[]
+                    for rid in config.get("eligible_residues",[]):
+                        try:
+                            check=AllAtomInterfaceQUBOBuilder(
+                                work/"native.cif",[rid],site_scores=[0.0],
+                                rotamer_mode=args.rotamer_mode,
+                                rotamer_library_path=args.rotamer_library,
+                                rotamer_probability_floor=args.rotamer_probability_floor,
+                                rotamer_sigma_offsets=args.rotamer_sigma_offsets,
+                                solvent_model=args.solvent_model,
+                            )
+                            del check
+                            compatible.append(rid)
+                            if len(compatible) >= args.sites:
+                                break
+                        except Exception as site_exc:
+                            compatibility_failures.append(dict(
+                                residue_id=rid,
+                                error=f"{type(site_exc).__name__}: {site_exc}",
+                            ))
+                    if len(compatible) < args.sites:
+                        raise ValueError(
+                            f"Only {len(compatible)} independently Dunbrack/Amber-compatible VHH sites; "
+                            f"need {args.sites}"
+                        )
+                    config["eligibility_compatible_residues"]=compatible
+                    config["eligibility_site_failures"]=compatibility_failures
+                    config["active_residues"]=[]
+                    config["active_site_scores"]=[]
+                else:
+                    # Formal run: verify the actually selected Active set.
+                    check=AllAtomInterfaceQUBOBuilder(
+                        work/"native.cif",config["active_residues"],
+                        site_scores=config.get("active_site_scores"),
+                        rotamer_mode=args.rotamer_mode,
+                        rotamer_library_path=args.rotamer_library,
+                        rotamer_probability_floor=args.rotamer_probability_floor,
+                        rotamer_sigma_offsets=args.rotamer_sigma_offsets,
+                        solvent_model=args.solvent_model,
+                    )
+                    del check
                 config.update(target=pdb,native_structure=str(work/"native.cif"),
                     candidate_relax_iterations=args.candidate_relax_iterations,
                     protocol="validation_control",graph_sha256=row["sha256"],source_id=graph.source_id,
