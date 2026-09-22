@@ -1084,6 +1084,18 @@ class Orchestrator:
                     lambda value,limit:value>=limit),
             ]
             failed_checks=[]
+            min_train_complexes=int(limits.get("min_train_complexes",0))
+            min_cv_folds=int(limits.get("min_cv_folds",0))
+            observed_complexes=int(payload.get("n_train_complexes",0) or 0)
+            observed_folds=int(payload.get("cv_fold_count",len(payload.get("cv_folds",[]) or [])) or 0)
+            if observed_complexes < min_train_complexes:
+                failed_checks.append(
+                    f"n_train_complexes={observed_complexes} violates min_train_complexes={min_train_complexes}"
+                )
+            if observed_folds < min_cv_folds:
+                failed_checks.append(
+                    f"cv_fold_count={observed_folds} violates min_cv_folds={min_cv_folds}"
+                )
             for metric,key,predicate in checks:
                 if key not in limits:
                     continue
