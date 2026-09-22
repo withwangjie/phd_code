@@ -726,7 +726,7 @@ class Orchestrator:
             return True,"qc_benchmark closure verified"
         if stage=="structure_experiment":
             dev=self.run_dir/"dev_queue"/"run_summary.json"
-            validation=self.run_dir/"validation_queue"/"execution"/"run_summary.json"
+            validation=self.run_dir/"validation_queue"/"run_summary.json"
             ok,detail=require([dev,validation])
             if not ok:return ok,detail
             dev_summary,error=read_json(dev)
@@ -2365,8 +2365,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--smoke-only", action="store_true",
                          help="Run only env_check + smoke_check, then stop (for a fast preflight pass).")
     args = parser.parse_args(list(argv) if argv is not None else None)
+    if args.smoke_only and args.resume:
+        parser.error("--smoke-only creates a separate disposable preflight run and cannot be combined with --resume")
 
-    config = load_config(args.config)
+    config = apply_runtime_mode_overrides(load_config(args.config), smoke_only=args.smoke_only)
     repo_root = Path(config["paths"]["repo_root"]).resolve()
     lock_root = resolve_path(config, config["paths"]["run_root"])
     lock_root.mkdir(parents=True, exist_ok=True)
@@ -2405,7 +2407,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             manifest = build_run_manifest(config, repo_root)
             atomic_write_json(run_dir / "run_manifest.json", manifest)
             frozen_config_path = run_dir / "frozen_config.yaml"
-            shutil.copy2(args.config, frozen_config_path)
+            frozen_config_path.write_text(
+                yaml.safe_dump(config,sort_keys=False,allow_unicode=True),
+                encoding="utf-8",
+            )
             streams = derive_streams(config["master_seed"])
             save_stream_map(run_dir / "seed_streams.json", config["master_seed"], streams)
             print(f"New run: {run_dir}")
