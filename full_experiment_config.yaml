@@ -352,6 +352,7 @@ structure_experiment:
   seeds: [42, 43, 44, 45, 46]
   outputs: 1000
   max_evals: 90
+  qaoa_depth: 2
   relax_iterations: 200
   candidate_relax_iterations: 100
   antigen_guidance_weight: 0.25
