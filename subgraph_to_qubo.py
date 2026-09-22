@@ -1442,7 +1442,7 @@ class InterfaceQUBOBuilder:
                 rotamer_index=state.rotamer_index,
                 chi1_degrees=state.chi1_degrees,
                 prior_probability=state.prior_probability,
-                self_energy=state.self_energy,
+                self_energy=float(physical_self[index]),
             )
             for index, state in enumerate(rotamers)
         )
