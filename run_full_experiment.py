@@ -1739,6 +1739,13 @@ class Orchestrator:
             failures.extend(ext_failures)
             if not ext_failures:
                 out=self.run_dir/"external_validation"/"vhh_coarse"
+                external_repeats=[
+                    derive_child_seed(
+                        derive_streams(self.config["master_seed"])["perturb"],
+                        "external_vhh_repeat",str(i)
+                    )
+                    for i in range(int(ext.get("repeats",10)))
+                ]
                 argv=[
                     self.venv_python,"batch_benchmark_hard_set.py","--research-ablation",
                     "--input-dir",str(graph_dir),"--checkpoint",str(checkpoint),"--out-dir",str(out),
@@ -1778,6 +1785,7 @@ class Orchestrator:
                     "--max-targets",str(ext.get("max_targets",0)),
                     "--workers",str(qc.get("workers",1)),
                     "--omp-threads",str(self.config.get("hardware",{}).get("cpu_threads_per_process",2)),
+                    "--seeds",*[str(v) for v in external_repeats],
                     "--master-seed",str(self.config["master_seed"]),
                 ]
                 rc,log=self._run_subprocess("external_vhh_benchmark",argv)
