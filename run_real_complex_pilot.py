@@ -145,16 +145,17 @@ def prepare(graph, source: Path, destination: Path, sites: int, *, pruning: str 
     for i in chain_nodes:
         rid=graph.residue_ids[i]
         entry = residues[rid]
-        # Exclude cysteine from movable sites to avoid breaking disulfides.
+        # Formal main protocol ranks every chemically movable VHH residue.
+        # Native interface distance is retained only as a baseline feature,
+        # never as an oracle eligibility gate.
         if entry["name"] in ("ALA", "GLY", "PRO", "CYS"):
             continue
         xyz = np.array(list(entry["atoms"].values()))
         dist = np.sqrt(np.min(np.sum((xyz[:, None]-partner_atoms)**2, axis=-1)))
-        if dist < 8.:
-            contact_count=int(np.sum(np.sum((xyz[:,None]-partner_atoms)**2,axis=-1)<25.))
-            scored.append((float(dist), rid, contact_count, i))
+        contact_count=int(np.sum(np.sum((xyz[:,None]-partner_atoms)**2,axis=-1)<25.))
+        scored.append((float(dist), rid, contact_count, i))
     if len(scored) < sites:
-        raise ValueError(f"Only {len(scored)} eligible VHH interface-neighborhood sites")
+        raise ValueError(f"Only {len(scored)} chemically movable VHH sites")
     model_status=None
     if pruning=='contact':
         ordered=sorted(scored,key=lambda x:(-x[2],x[0],x[1]))
@@ -180,13 +181,25 @@ def prepare(graph, source: Path, destination: Path, sites: int, *, pruning: str 
         composite_map={int(idx):float(score) for idx,score in zip(candidate_indices,composite)}
         ordered=sorted(scored,key=lambda x:(-composite_map[x[3]],x[1]))
     else: raise ValueError('Unknown pruning strategy')
-    active = [item[1] for item in ordered[:sites]]
+    chosen = ordered[:sites]
+    active = [item[1] for item in chosen]
+    if pruning == 'egnn':
+        active_site_scores = [composite_map[item[3]] for item in chosen]
+    elif pruning == 'contact':
+        values = np.asarray([item[2] for item in scored], dtype=float)
+        denom = max(float(values.max()), 1.0)
+        active_site_scores = [float(item[2]) / denom for item in chosen]
+    elif pruning == 'cdr':
+        active_site_scores = [1.0 if item[1] in cdr_ids else 0.0 for item in chosen]
+    else:
+        active_site_scores = [0.0 for _ in chosen]
     st.make_mmcif_document().write_file(str(destination))
-    return dict(active_residues=active, alignment_residues=partners, partner_residues=partners,
+    return dict(active_residues=active, active_site_scores=active_site_scores,
+                alignment_residues=partners, partner_residues=partners,
                 preparation_changes=changes, cdr3_residues=cdr_ids,pruning=pruning,
                 pruning_candidate_count=len(scored),pruning_seed=seed,model_status=model_status,
                 antigen_guidance_weight=float(antigen_guidance_weight),
-                selection_origin=(f"{pruning} selection from native-pose VHH heavy-atom <8A interface neighborhood; "
+                selection_origin=(f"{pruning} selection across all chemically movable VHH residues; native distance/contact used only as explicit baselines; "
                     f"EGNN path uses shared composite score=(1-w)*EGNN+w*exp(-dAg/6A), w={antigen_guidance_weight:.3f}; "
                     "fixed before perturbation; retrospective control"))
 
@@ -377,7 +390,8 @@ def main(argv=None) -> int:
                     raise ValueError("Training annotated CDR-H3 overlap")
                 config["preparation_changes"].extend(complete_terminal_oxygen(work/"native.cif"))
                 # Confirm full Amber template compatibility before freezing membership.
-                check=AllAtomInterfaceQUBOBuilder(work/"native.cif",config["active_residues"])
+                check=AllAtomInterfaceQUBOBuilder(work/"native.cif",config["active_residues"],
+                    site_scores=config.get("active_site_scores"))
                 del check
                 config.update(target=pdb,native_structure=str(work/"native.cif"),
                     candidate_relax_iterations=args.candidate_relax_iterations,
@@ -461,7 +475,7 @@ def main(argv=None) -> int:
             f"Target cap: {args.targets or 'unlimited (all qualifying targets)'}; qualifying candidate pool: {len(candidates)}; "
             f"examined {len(decisions)}; selected {len(selected)} (coverage of examined pool: {coverage_pct:.1f}%); "
             f"structural experiment completed {completed_targets}, failed {sorted(failed)}.",
-            "Input is native backbone/pose plus perturbed Active chi1. Formal EGNN Active-site selection uses the shared antigen-guided composite score (EGNN probability plus nearest-antigen proximity); contact/CDR/random remain explicit ablation baselines. This is a retrospective native-backbone-conditioned recovery task, not blind docking or CDR-H3 backbone prediction.",
+            "Input is native backbone/pose plus perturbed Active chi1. Formal EGNN Active-site selection ranks all chemically movable VHH residues with the shared antigen-guided composite score (EGNN probability plus nearest-antigen proximity); native heavy-atom <8A is no longer an oracle eligibility gate. Contact/CDR/random remain explicit ablation baselines. This is a retrospective native-backbone-conditioned recovery task, not blind docking or CDR-H3 backbone prediction.",
             "Adaptive 6/9/12 raw chi1 sub-rotamer pools are generated by residue flexibility, Amber14 single-candidate energies pre-screen them to 3-6 retained states/site under <=30 variables, and discrete optimization selects among those prepared candidates. Candidate-local and final relaxation may move all atoms downstream of CA-CB; backbone and background remain frozen.",
             "All methods share input/candidates, read budget and relaxation. CPU cost is not equal. Reference structure evaluates accuracy but never selects solver output.",
             "Independence is limited to PDB plus 40% full-chain/annotated-CDR3 global identity screening (per-chain identity/coverage recorded in eligibility.json). Family/local-domain relatedness is NOT checked (no cluster map exists in this project): every non-excluded target's status is independence_not_confirmed, never confirmed-independent. Development exposure (--dev-exposed-pdb) is recorded per target, separately from the identity screen. This is an exploratory pilot, not a fresh confirmatory test.",
