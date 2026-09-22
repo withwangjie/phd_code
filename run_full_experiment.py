@@ -1342,6 +1342,38 @@ class Orchestrator:
                 ids.update(external_ids)
             universe_path.write_text("\n".join(sorted(ids))+"\n",encoding="utf-8")
 
+        if clustering_cfg.get("required",False) and pair_path is not None and pair_path.is_file():
+            universe_ids={
+                line.strip().lower() for line in universe_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            }
+            query_col=int(clustering_cfg.get("query_column",0))
+            target_col=int(clustering_cfg.get("target_column",1))
+            covered_ids=set()
+            for raw_line in pair_path.read_text(encoding="utf-8-sig").splitlines():
+                line=raw_line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                fields=line.split("\t")
+                if len(fields)<=max(query_col,target_col):
+                    continue
+                for idx in (query_col,target_col):
+                    token=Path(fields[idx].strip()).name
+                    lower=token.lower()
+                    for suffix in (".cif.gz",".pdb.gz",".cif",".pdb",".mmcif"):
+                        if lower.endswith(suffix):
+                            token=token[:-len(suffix)]
+                            break
+                    if token:
+                        covered_ids.add(token[:4].lower() if len(token)>=4 else token.lower())
+            missing_pair_coverage=sorted(universe_ids-covered_ids)
+            if missing_pair_coverage:
+                return StageResult(
+                    "queue_freeze","failed",started,utc_timestamp(),None,
+                    "Frozen structure-similarity pair table does not demonstrate query/target coverage "
+                    f"for the complete internal+external universe: {missing_pair_coverage[:20]}"
+                )
+
         if not cluster_map_path.is_file():
             if pair_path is not None and pair_path.is_file():
                 cluster_argv=[
