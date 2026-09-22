@@ -210,7 +210,7 @@ class XYMixerQAOASampler:
         physical_self: Binary linear coefficients with shape ``[M]``.
         physical_pair: Strictly upper-triangular binary pair coefficients with
             shape ``[M, M]``.
-        site_to_variables: Mapping from residue-site index to its 3--6 global
+        site_to_variables: Mapping from residue-site index to its 2--6 global
             binary-variable indices.
         p: QAOA depth. Supported values are 1, 2, and 3.
         shots: Default number of measurement shots.
@@ -321,9 +321,9 @@ class XYMixerQAOASampler:
 
         variables: List[int] = []
         for site, group in self.site_to_variables.items():
-            if not 3 <= len(group) <= 6:
+            if not 2 <= len(group) <= 6:
                 raise ValueError(
-                    f"Site {site} must contain 3 to 6 candidate variables, got {len(group)}"
+                    f"Site {site} must contain 2 to 6 candidate variables, got {len(group)}"
                 )
             if len(set(group)) != len(group):
                 raise ValueError(f"Site {site} contains duplicate variable indices")
@@ -1118,7 +1118,7 @@ class XYMixerQAOASampler:
     def enumerate_ground_states(self, tolerance: float = 1e-9) -> GroundStateResult:
         """Exactly enumerate the feasible rotamer assignments.
 
-        The builder's 30-bit budget and 3--6 candidates per residue keep the
+        The current builder emits 3--6 candidates per residue under a 30-bit budget; legacy 2-state registers remain supported for regression tests. The
         legal product space small enough for an exact benchmark oracle.
         """
 
