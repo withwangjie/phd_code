@@ -373,12 +373,21 @@ class Orchestrator:
         existing = self._load_stage_status(stage)
         if existing and stage not in self.force_restage:
             if existing["status"] in ("completed", "completed_with_failures"):
-                print(f"[{stage}] Already {existing['status']}; skipping (use --force-restage {stage} to redo).")
+                resume_ok, resume_detail = self._validate_completed_stage_artifacts(stage)
+                if not resume_ok:
+                    result = StageResult(
+                        stage, "failed", existing["started_utc"], utc_timestamp(), 1,
+                        "Resume integrity check failed: " + resume_detail +
+                        f" Use --force-restage {stage} after investigating.",
+                        existing.get("argv", []), existing.get("log_path"), False)
+                    self._save_stage_status(result)
+                    return result
+                print(f"[{stage}] Already {existing['status']}; verified artifacts and skipping "
+                      f"(use --force-restage {stage} to redo).")
                 return StageResult(stage, existing["status"], existing["started_utc"],
                                     existing["finished_utc"], existing["returncode"],
-                                    "Resumed: previously " + existing["status"] + ".",
-                                    existing.get("argv", []), existing.get("log_path"),
-                                    existing.get("artifacts_ok", True))
+                                    "Resumed with artifact verification: " + resume_detail,
+                                    existing.get("argv", []), existing.get("log_path"), True)
             if existing["status"] == "failed":
                 print(f"[{stage}] Previously FAILED systemically: {existing['detail']}")
                 print(f"[{stage}] Not auto-retrying. Pass --force-restage {stage} to retry after investigating.")
@@ -401,6 +410,99 @@ class Orchestrator:
         if missing:
             return False, "Missing or empty expected artifact(s): " + ", ".join(missing)
         return True, "All expected artifacts present and non-empty."
+
+    def _validate_completed_stage_artifacts(self, stage: str) -> tuple[bool, str]:
+        """Revalidate key artifacts before trusting a historical completed marker."""
+        def require(paths: Sequence[Path]) -> tuple[bool, str]:
+            return self._artifacts_present(paths)
+
+        def read_json(path: Path) -> tuple[Optional[dict], Optional[str]]:
+            try:
+                value = json.loads(path.read_text(encoding="utf-8"))
+            except Exception as exc:
+                return None, f"Unreadable JSON {path}: {type(exc).__name__}: {exc}"
+            if not isinstance(value, dict):
+                return None, f"Expected JSON object at {path}"
+            return value, None
+
+        if stage == "smoke_check":
+            # Smoke is optional and its detailed outputs are disposable by
+            # design; the persisted stage marker itself is sufficient.
+            return True, "optional smoke marker accepted"
+        if stage == "env_check":
+            return require([self.run_dir / "env_check.json"])
+        if stage == "data_audit":
+            return require([self.run_dir / "audit" / name for name in (
+                "data_audit_report.md", "data_audit_details.csv",
+                "data_audit_details.jsonl", "data_audit_inventory.json",
+                "data_audit_db55_pairs.json")])
+        if stage == "queue_freeze":
+            dataset = self.dataset_dir()
+            freeze = self.run_dir / "validation_queue" / "freeze"
+            ok, detail = require([
+                dataset / "graph_manifest.csv", dataset / "graph_manifest.json",
+                dataset / "run_summary.json", dataset / "graph_dataset_delivery_report.md",
+                freeze / "selected_targets.json", freeze / "eligibility.json",
+                freeze / "run_manifest.json",
+            ])
+            if not ok:
+                return ok, detail
+            summary, error = read_json(dataset / "run_summary.json")
+            if error:
+                return False, error
+            if not summary.get("complete"):
+                return False, "dataset run_summary.json is not complete"
+            try:
+                frozen = json.loads((freeze / "selected_targets.json").read_text(encoding="utf-8"))
+            except Exception as exc:
+                return False, f"Unreadable frozen selected_targets.json: {exc}"
+            if not isinstance(frozen, list) or not frozen:
+                return False, "Frozen validation selected_targets.json is empty or invalid"
+            return True, "queue-freeze dataset and frozen validation artifacts verified"
+        if stage == "egnn_train":
+            return require([
+                self.checkpoint_dir() / "best_egnn_pruning.pt",
+                self.checkpoint_dir() / "training_summary.json",
+            ])
+        if stage == "qc_benchmark":
+            root = self.run_dir / "qc_benchmark"
+            ok, detail = require([root / "run_manifest.json", root / "run_summary.json"])
+            if not ok:
+                return ok, detail
+            summary, error = read_json(root / "run_summary.json")
+            if error:
+                return False, error
+            if not summary.get("closed") or summary.get("cases_completed_total", 0) <= 0:
+                return False, "qc_benchmark run_summary.json is not closed with completed cases"
+            return True, "qc_benchmark closure verified"
+        if stage == "structure_experiment":
+            dev = self.run_dir / "dev_queue" / "run_summary.json"
+            validation = self.run_dir / "validation_queue" / "execution" / "run_summary.json"
+            ok, detail = require([dev, validation])
+            if not ok:
+                return ok, detail
+            dev_summary, error = read_json(dev)
+            if error:
+                return False, error
+            validation_summary, error = read_json(validation)
+            if error:
+                return False, error
+            if not dev_summary.get("closed"):
+                return False, "dev_queue run_summary.json is not closed"
+            if not validation_summary.get("closed") or not validation_summary.get("frozen_set_accounting_ok"):
+                return False, "validation execution is not closed against the frozen denominator"
+            return True, "dev and validation structural closure verified"
+        if stage == "statistics":
+            root = self.run_dir / "qc_benchmark"
+            modes = self.config.get("statistics", {}).get("budget_modes", ["outputs", "time"])
+            return require([
+                root / f"statistics_{mode}.{suffix}"
+                for mode in modes for suffix in ("json", "md")
+            ])
+        if stage == "final_report":
+            filename = self.config.get("final_report", {}).get("filename", "FINAL_RESEARCH_REPORT.md")
+            return require([self.run_dir / filename])
+        return False, f"No resume artifact policy defined for stage {stage!r}"
 
     # ================================================================
     # Stage 0: environment check
