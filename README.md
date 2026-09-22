@@ -209,3 +209,26 @@ the validation queue never chooses its solvent model after inspecting results.
 ## Literature basis
 
 The authoritative design-to-literature mapping is maintained in `METHODS_EVIDENCE.md`. Reference labels [R1]–[R21] in this README refer to that file. The register explicitly separates direct literature support from literature-informed preregistration and study-specific preregistration so that exact numerical choices are never misrepresented as published standards.
+
+
+## Portable server runtime configuration
+
+Scientific protocol and server infrastructure are intentionally separated.
+
+- `full_experiment_config.yaml` contains the frozen scientific protocol.
+- `server_config.yaml` contains server paths, resource policy, external-tool locations, and operational resource gates.
+- `resolve_server_config.py` detects CPU/GPU/RAM and resolves paths/tools before formal preflight, then writes `.runtime/resolved_runtime_config.yaml` and `.runtime/server_resolution.json`.
+- `run_full_experiment.sh` uses the same resolved runtime config for both preflight and the formal run.
+
+Portable overrides can be supplied without editing the scientific protocol:
+
+```bash
+export QP_VENV=/path/to/.venv
+export QP_DATA_ROOT=/path/to/data
+export QP_RUN_ROOT=/path/to/runs
+export QP_FASPR=/path/to/FASPR
+export QP_PHENIX_CLASHSCORE=/path/to/phenix.clashscore
+./deploy_launch.sh
+```
+
+In auto mode the resolver chooses DDP ranks from available GPUs while preserving the configured target global batch size, derives CPU worker counts from available physical cores, selects the OpenMM platform from available hardware, and records every resolved value in the run configuration/provenance. Scientific thresholds, QAOA protocol values, data-split rules, endpoints, and statistical choices are never hardware-auto-tuned.
