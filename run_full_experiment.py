@@ -746,9 +746,24 @@ class Orchestrator:
         if stage=="env_check":
             return require([self.run_dir/"env_check.json"])
         if stage=="data_audit":
-            return require([self.run_dir/"audit"/name for name in (
+            audit_root=self.run_dir/"audit"
+            required=[audit_root/name for name in (
                 "data_audit_report.md","data_audit_details.csv","data_audit_details.jsonl",
-                "data_audit_inventory.json","data_audit_db55_pairs.json")])
+                "data_audit_inventory.json","data_audit_db55_pairs.json")]
+            ok,detail=require(required)
+            if not ok:return ok,detail
+            inventory,error=read_json(audit_root/"data_audit_inventory.json")
+            if error:return False,error
+            if inventory.get("partial_run"):
+                return False,"Formal data audit is marked partial_run=true"
+            expected=int(inventory.get("tasks",-1))
+            observed=sum(
+                1 for line in (audit_root/"data_audit_details.jsonl").read_text(
+                    encoding="utf-8").splitlines() if line.strip()
+            )
+            if expected<0 or observed!=expected:
+                return False,f"Data-audit denominator mismatch: discovered={expected}, audited_rows={observed}"
+            return True,f"data audit closed exactly over {observed} discovered structures"
         if stage=="queue_freeze":
             dataset=self.dataset_dir()
             freeze=self.run_dir/"validation_queue"/"freeze"
