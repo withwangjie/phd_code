@@ -2,9 +2,13 @@
 """Pre-registered structural endpoint and energy-to-structure statistics.
 
 Primary endpoint: post-relaxation symmetry-corrected Active side-chain
-heavy-atom RMSD. Primary contrast: QAOA - SA. Repeats are averaged within PDB
-before cluster-level inference. RQ5 uses Spearman association between discrete
-energy and post-relaxation RMSD, with cluster bootstrap confidence intervals.
+heavy-atom RMSD. Primary contrast: QAOA - SA. Solver values are strictly paired
+within the same target and perturbation seed, then averaged within target and
+family/structure cluster. RQ5 tests whether paired solver differences in
+discrete energy propagate to paired differences in post-relaxation RMSD using
+cluster-level Spearman inference, bootstrap confidence intervals and
+permutation tests. The primary structural contrast and RQ5 form one
+two-hypothesis Holm-adjusted confirmatory family.
 """
 from __future__ import annotations
 
