@@ -101,6 +101,12 @@ smoke_check:
 data_audit:
   workers: 16
   limit: 0  # 0 = no limit; audits every discovered structure
+  # High-confidence structure benchmark gates.
+  max_resolution_angstrom: 3.0
+  min_interface_occupancy: 0.90
+  allow_interface_altloc: false
+  allow_unknown_resolution: false
+  allow_incomplete_interface_sidechains: false
 
 # ---------------------------------------------------------------------------
 # Stage 2: queue freeze + isolation (no cap) + graph construction.
@@ -132,7 +138,7 @@ queue_freeze:
   graph_build:
     workers: 8
     # Scientific graph protocol. Changing any value requires a fresh dataset;
-    # graph v1.4 records these values in every .pt and run_summary.json.
+    # graph v1.5 records these values in every .pt and run_summary.json.
     interface_label_cutoff_angstrom: 5.0
     intra_chain_ca_cutoff_angstrom: 8.0
     cross_partner_knn_k: 3
