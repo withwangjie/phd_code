@@ -70,6 +70,60 @@ python "${SCRIPT_DIR}/resolve_server_config.py" \
 log "Resolved runtime config: $RESOLVED_CONFIG"
 
 # ---------------------------------------------------------------------------
+# 1c. Resolve ONE run directory for all artifacts, including preflight and
+# launch logs. Fresh runs are created here before preflight; resumed runs
+# reuse their original directory.
+# ---------------------------------------------------------------------------
+RUN_ROOT="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["run_root"])' "$SERVER_REPORT")"
+RUN_PREFIX="$(python -c 'import yaml,sys; print((yaml.safe_load(open(sys.argv[1]))["paths"]).get("run_prefix","experiments_full_run_"))' "$RESOLVED_CONFIG")"
+mkdir -p "$RUN_ROOT"
+
+RESUME_TARGET=""
+PREV_ARG=""
+for ARG in "$@"; do
+    if [ "$PREV_ARG" = "--resume" ]; then
+        RESUME_TARGET="$ARG"
+        break
+    fi
+    case "$ARG" in
+        --resume=*) RESUME_TARGET="${ARG#--resume=}"; break ;;
+    esac
+    PREV_ARG="$ARG"
+done
+
+if [ -n "$RESUME_TARGET" ]; then
+    if [[ "$RESUME_TARGET" = /* ]]; then
+        RUN_DIR="$RESUME_TARGET"
+    else
+        RUN_DIR="${RUN_ROOT}/${RESUME_TARGET}"
+    fi
+    [ -d "$RUN_DIR" ] || fail "Resume run directory not found: $RUN_DIR"
+    FRESH_RUN=0
+else
+    RUN_STAMP="$(date -u +%Y%m%d_%H%M%S)"
+    RUN_DIR="${RUN_ROOT}/${RUN_PREFIX}${RUN_STAMP}"
+    SUFFIX=0
+    while [ -e "$RUN_DIR" ]; do
+        SUFFIX=$((SUFFIX+1))
+        RUN_DIR="${RUN_ROOT}/${RUN_PREFIX}${RUN_STAMP}_${SUFFIX}"
+    done
+    mkdir -p "$RUN_DIR"
+    FRESH_RUN=1
+fi
+
+mkdir -p "$RUN_DIR/logs" "$RUN_DIR/provenance"
+if [ "$FRESH_RUN" -eq 1 ]; then
+    cp "$SCIENTIFIC_CONFIG" "$RUN_DIR/provenance/scientific_config.source.yaml"
+    cp "$SERVER_CONFIG" "$RUN_DIR/provenance/server_config.source.yaml"
+    cp "$RESOLVED_CONFIG" "$RUN_DIR/provenance/resolved_runtime_config.yaml"
+    cp "$SERVER_REPORT" "$RUN_DIR/provenance/server_resolution.json"
+    [ -f "${SCRIPT_DIR}/METHODS_EVIDENCE.md" ] && cp "${SCRIPT_DIR}/METHODS_EVIDENCE.md" "$RUN_DIR/provenance/METHODS_EVIDENCE.md"
+    git rev-parse HEAD > "$RUN_DIR/provenance/git_head.txt" 2>/dev/null || true
+    python -m pip freeze > "$RUN_DIR/provenance/pip_freeze.txt" 2>/dev/null || true
+    env | sort > "$RUN_DIR/provenance/environment.txt"
+fi
+
+# ---------------------------------------------------------------------------
 # 2. Fast fail on a second concurrent launch, BEFORE even importing Python --
 #    run_full_experiment.py holds its own filelock for the run_root for the
 #    full duration too; this is a cheap early check so a duplicate launch
@@ -96,8 +150,14 @@ fi
 # CUDA/DDP/NCCL/OpenMM/resource failure aborts the formal launch.
 PREFLIGHT_SCRIPT="${SCRIPT_DIR}/formal_preflight.sh"
 [ -f "$PREFLIGHT_SCRIPT" ] || fail "Formal preflight script missing: $PREFLIGHT_SCRIPT"
+PREFLIGHT_LOG="$RUN_DIR/logs/formal_preflight.log"
 log "Running formal preflight gate..."
-QP_RESOLVED_CONFIG="$RESOLVED_CONFIG" QP_SERVER_REPORT="$SERVER_REPORT" bash "$PREFLIGHT_SCRIPT"
+if ! QP_RESOLVED_CONFIG="$RESOLVED_CONFIG" QP_SERVER_REPORT="$SERVER_REPORT" \
+    bash "$PREFLIGHT_SCRIPT" 2>&1 | tee "$PREFLIGHT_LOG"; then
+    echo "failed" > "$RUN_DIR/PREFLIGHT_STATUS"
+    fail "Formal preflight failed. Full log: $PREFLIGHT_LOG"
+fi
+echo "passed" > "$RUN_DIR/PREFLIGHT_STATUS"
 log "Formal preflight gate passed."
 
 # ---------------------------------------------------------------------------
@@ -111,12 +171,16 @@ log "Formal preflight gate passed."
 #    it can be reported below regardless of which/how many run directories
 #    the Python orchestrator itself creates or resumes.
 # ---------------------------------------------------------------------------
-LAUNCH_TIMESTAMP="$(date -u +%Y%m%d_%H%M%S)"
-LAUNCH_LOG="${SCRIPT_DIR}/run_full_experiment_launch_${LAUNCH_TIMESTAMP}.log"
+LAUNCH_LOG="$RUN_DIR/logs/launch.log"
 
-echo $$ > "$LOCK_FILE"
-nohup python -u "${SCRIPT_DIR}/run_full_experiment.py" --config "$RESOLVED_CONFIG" "$@" \
-    > "$LAUNCH_LOG" 2>&1 &
+echo $ > "$LOCK_FILE"
+if [ "$FRESH_RUN" -eq 1 ]; then
+    nohup python -u "${SCRIPT_DIR}/run_full_experiment.py" --config "$RESOLVED_CONFIG" \
+        --run-dir "$RUN_DIR" "$@" > "$LAUNCH_LOG" 2>&1 &
+else
+    nohup python -u "${SCRIPT_DIR}/run_full_experiment.py" --config "$RESOLVED_CONFIG" \
+        "$@" > "$LAUNCH_LOG" 2>&1 &
+fi
 PIPELINE_PID=$!
 disown "$PIPELINE_PID" 2>/dev/null || true
 # Reassign the lock to the actual background process (not this shell), and
@@ -131,18 +195,18 @@ disown $! 2>/dev/null || true
 log ""
 log "=== Full experiment pipeline launched ==="
 log "PID:              ${PIPELINE_PID}"
+log "Run directory:     ${RUN_DIR}"
 log "Lock file:         ${LOCK_FILE}"
+log "Preflight log:     ${PREFLIGHT_LOG}"
 log "Launch log:        ${LAUNCH_LOG}"
 log "Scientific config: ${SCRIPT_DIR}/${SCIENTIFIC_CONFIG}"
 log "Server config:     ${SCRIPT_DIR}/${SERVER_CONFIG}"
 log "Resolved config:   ${RESOLVED_CONFIG}"
 log "Server report:     ${SERVER_REPORT}"
 log ""
-log "run_full_experiment.py creates its own uniquely timestamped run"
-log "directory (experiments_full_run_<UTC timestamp>/) and prints it near"
-log "the top of the launch log; each stage's own stdout/stderr additionally"
-log "goes to <run_dir>/logs/<stage>.log, and <run_dir>/progress.json is"
-log "updated after every stage."
+log "This run directory is the complete experiment archive: provenance,"
+log "preflight, launch/stage logs, dataset, checkpoints, benchmark outputs,"
+log "structural results, statistics and final report all live under it."
 log ""
 log "Tail overall progress with:   tail -f '${LAUNCH_LOG}'"
 log "Check process status with:    kill -0 ${PIPELINE_PID} 2>/dev/null && echo running || echo finished"
