@@ -319,12 +319,51 @@ def main() -> int:
         choices=("qaoa_vs_sa","qaoa_vs_greedy","qaoa_vs_uniform"))
     parser.add_argument("--resamples",type=int,default=10000)
     parser.add_argument("--seed",type=int,default=20260917)
+    parser.add_argument("--expected-targets-file",type=Path,
+        help="Frozen selected_targets.json; when supplied, structural rows must close exactly against it.")
+    parser.add_argument("--expected-seeds",type=int,nargs="+",
+        help="Frozen perturbation seeds; used with --expected-targets-file to prevent silent denominator shrinkage.")
     args=parser.parse_args()
     if args.resamples<1000:
         parser.error("--resamples must be >=1000")
     rows=list(csv.DictReader(args.metrics.open(encoding="utf-8-sig",newline="")))
     if not rows:
         raise ValueError("Structural metrics CSV is empty")
+    expected_targets=None
+    denominator_sha256=None
+    if args.expected_targets_file is not None:
+        if not args.expected_targets_file.is_file():
+            raise ValueError(f"Expected-target file missing: {args.expected_targets_file}")
+        raw_targets=json.loads(args.expected_targets_file.read_text(encoding="utf-8"))
+        if not isinstance(raw_targets,list) or not raw_targets:
+            raise ValueError("Expected-target file must contain a nonempty list")
+        expected_targets={
+            str((entry.get("target") or entry.get("pdb_id")) if isinstance(entry,dict) else entry).strip().lower()
+            for entry in raw_targets
+        }
+        if "" in expected_targets or not expected_targets:
+            raise ValueError("Expected-target file contains an invalid target identity")
+        if not args.expected_seeds:
+            raise ValueError("--expected-seeds is required with --expected-targets-file")
+        expected_seeds={str(int(v)) for v in args.expected_seeds}
+        expected_methods={"qaoa","sa","uniform","greedy"}
+        observed=[(
+            str(row.get("target","")).strip().lower(),
+            str(row.get("seed","")).strip(),
+            str(row.get("method","")).strip(),
+        ) for row in rows]
+        if len(observed)!=len(set(observed)):
+            raise ValueError("Duplicate target/seed/method rows in formal structural metrics")
+        expected={
+            (target,seed,method)
+            for target in expected_targets for seed in expected_seeds for method in expected_methods
+        }
+        if set(observed)!=expected:
+            missing=sorted(expected-set(observed))
+            extra=sorted(set(observed)-expected)
+            raise ValueError(
+                f"Formal structural denominator mismatch: missing={missing[:20]}, extra={extra[:20]}")
+        denominator_sha256=sha256(args.expected_targets_file)
     raw=json.loads(args.cluster_map.read_text(encoding="utf-8"))
     cluster_map={str(k).lower():str(v) for k,v in raw.items()}
     primary=grouped_primary(rows,cluster_map,args.primary_endpoint,args.primary_contrast,args.resamples,args.seed)
@@ -340,6 +379,10 @@ def main() -> int:
     payload=dict(
         primary=primary,rq5=rq5,resamples=args.resamples,seed=args.seed,
         metrics_sha256=sha256(args.metrics),cluster_map_sha256=sha256(args.cluster_map),
+        expected_targets_sha256=denominator_sha256,
+        expected_target_count=(None if expected_targets is None else len(expected_targets)),
+        expected_seeds=(None if args.expected_seeds is None else [int(v) for v in args.expected_seeds]),
+        denominator_closed=(expected_targets is not None),
         multiplicity_policy="Primary structural contrast and RQ5 form one two-hypothesis confirmatory family with Holm FWER adjustment; all other structural metrics are descriptive unless separately adjusted.",
         confirmatory_family=dict(
             hypotheses=["primary_structural_contrast","rq5_energy_structure"],
