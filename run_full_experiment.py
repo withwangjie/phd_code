@@ -91,6 +91,7 @@ ORCHESTRATED_SCRIPTS: List[str] = [
     "seed_streams.py",
     "audit_all_datasets.py",
     "build_final_pyg_dataset.py",
+    "build_independence_cluster_map.py",
     "train_egnn_pruning.py",
     "generate_energy_calibration_dataset.py",
     "batch_benchmark_hard_set.py",
@@ -640,13 +641,43 @@ class Orchestrator:
             "--min-interface-residues", str(qf_cfg["graph_build"].get("min_interface_residues", 15)),
         ]
         clustering_cfg = qf_cfg.get("independence_clustering", {}) or {}
-        cluster_map_path = resolve_path(self.config, clustering_cfg.get("cluster_map", "")) if clustering_cfg.get("cluster_map") else None
-        if clustering_cfg.get("required", False):
-            if cluster_map_path is None or not cluster_map_path.is_file():
+        cluster_map_path = (
+            resolve_path(self.config, clustering_cfg.get("cluster_map", ""))
+            if clustering_cfg.get("cluster_map") else None
+        )
+        if cluster_map_path is not None and not cluster_map_path.is_file():
+            pair_setting=clustering_cfg.get("pair_tsv")
+            pair_path=resolve_path(self.config,pair_setting) if pair_setting else None
+            if pair_path is not None and pair_path.is_file():
+                cluster_map_path.parent.mkdir(parents=True,exist_ok=True)
+                cluster_argv=[
+                    self.venv_python,"build_independence_cluster_map.py",
+                    "--pairs",str(pair_path),"--out-json",str(cluster_map_path),
+                    "--min-score",str(clustering_cfg.get("min_score",0.50)),
+                    "--query-column",str(clustering_cfg.get("query_column",0)),
+                    "--target-column",str(clustering_cfg.get("target_column",1)),
+                    "--score-column",str(clustering_cfg.get("score_column",2)),
+                ]
+                cluster_rc,cluster_log=self._run_subprocess("build_independence_cluster_map",cluster_argv)
+                if cluster_rc!=0 or not cluster_map_path.is_file():
+                    return StageResult(
+                        "queue_freeze","failed",started,utc_timestamp(),cluster_rc,
+                        f"Family/structure cluster-map generation failed; see {cluster_log}",
+                        cluster_argv,str(cluster_log),False,
+                    )
+            elif clustering_cfg.get("required",False):
                 return StageResult(
                     "queue_freeze", "failed", started, utc_timestamp(), None,
-                    f"Required family/domain/structure cluster map missing: {cluster_map_path}",
+                    f"Required cluster map missing and no usable frozen pair TSV is available: "
+                    f"map={cluster_map_path}, pairs={pair_path}",
                 )
+        if clustering_cfg.get("required", False) and (
+            cluster_map_path is None or not cluster_map_path.is_file()
+        ):
+            return StageResult(
+                "queue_freeze","failed",started,utc_timestamp(),None,
+                f"Required family/domain/structure cluster map missing: {cluster_map_path}",
+            )
         if cluster_map_path is not None and cluster_map_path.is_file():
             graph_argv += ["--cluster-map", str(cluster_map_path)]
         if qf_cfg["graph_build"].get("no_cap", True):
