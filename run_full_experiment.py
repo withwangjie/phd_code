@@ -680,6 +680,8 @@ class Orchestrator:
             if summary.get("status")!="complete":
                 return False,"training_summary.json status is not complete"
             checkpoint_info=summary.get("checkpoint") or {}
+            if checkpoint_info.get("strict_reload_verified") is not True:
+                return False,"training_summary.json does not record strict_reload_verified=true"
             expected_sha=checkpoint_info.get("sha256")
             if not expected_sha:
                 return False,"training_summary.json has no checkpoint sha256"
