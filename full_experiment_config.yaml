@@ -106,7 +106,7 @@ data_audit:
 # Stage 2: queue freeze + isolation (no cap) + graph construction.
 # 2a. build_final_pyg_dataset.py --no-cap: hard-set dedup remains CDR-H3 based,
 #     while EGNN train/validation later uses bilateral full-chain VHH+antigen
-#     40% connected components; applies the existing
+#     layered VHH/CDR-H3/antigen connected components; applies the existing
 #     PDB-overlap / CDR3-overlap isolation rules, and DOES NOT cap the
 #     resulting test_snac_hard split at any fixed count -- every qualifying,
 #     independent cluster is kept (requirement #1: cancel the 500 cap).
