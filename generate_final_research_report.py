@@ -172,8 +172,11 @@ def section_data_reliability(ctx: ReportContext) -> List[str]:
 
     dataset_dir = ctx.resolve_run((ctx.frozen_config.get("paths", {}) or {}).get("dataset_dir", "dataset"))
     run_summary = _read_json(dataset_dir / "run_summary.json") or {}
-    identity_threshold = float(run_summary.get("identity_threshold", 0.40))
-    identity_pct = 100.0 * identity_threshold
+    cdr_h3_threshold = float(run_summary.get("cdr_h3_identity_threshold", 0.50))
+    homology = ((ctx.frozen_config.get("queue_freeze", {}) or {}).get("homology_isolation", {}) or {})
+    vhh_threshold = float(homology.get("vhh_full_chain_identity", 0.80))
+    antigen_threshold = float(homology.get("antigen_identity", 0.30))
+    antigen_coverage = float(homology.get("antigen_min_length_coverage", 0.70))
     lines.append("### 1.2 Deduplication, isolation, and split (build_final_pyg_dataset.py --no-cap)")
     lines.append("")
     lines.append(f"- Cap removed (requirement #1): `no_cap` semantics used; "
@@ -181,7 +184,7 @@ def section_data_reliability(ctx: ReportContext) -> List[str]:
     lines.append(f"- Admission by source: {json.dumps(run_summary.get('admission', {}))}")
     lines.append(f"- CDR-H3 >=16aa eligible pool: {run_summary.get('long_eligible', 'n/a')}; "
                   f"unique CDR sequences: {run_summary.get('unique_long_cdr', 'n/a')}; "
-                  f"{identity_pct:.0f}%-identity clusters: {run_summary.get('clusters', 'n/a')}.")
+                  f"{cdr_h3_threshold*100:.0f}%-CDR-H3-identity clusters: {run_summary.get('clusters', 'n/a')}.")
     graphs = run_summary.get("graphs", "n/a")
     complete = run_summary.get("complete", None)
     lines.append(f"- Total graphs written this run: {graphs}. Pipeline-level `complete` flag: {complete}.")
@@ -235,15 +238,17 @@ def section_data_reliability(ctx: ReportContext) -> List[str]:
                   "map, so family- or domain-level relatedness is never checked and a candidate is never "
                   "reported as confirmed-independent. Only `excluded_*` statuses are asserted with confidence.")
     if selected:
-        max_identities = [float(d.get("max_chain_identity", 0.0)) for d in selected if "max_chain_identity" in d]
-        cdr_identities = [float(d.get("cdr3_identity", 0.0)) for d in selected if "cdr3_identity" in d]
-        if max_identities:
-            lines.append(f"- Among selected targets: max full-chain identity vs. training/selected pool "
-                          f"ranges {min(max_identities):.3f}-{max(max_identities):.3f} "
-                          f"(mean {sum(max_identities)/len(max_identities):.3f}); CDR-H3 identity ranges "
-                          f"{min(cdr_identities):.3f}-{max(cdr_identities):.3f} "
-                          f"(mean {sum(cdr_identities)/len(cdr_identities):.3f}) -- both below the {identity_threshold:.2f} "
-                          f"exclusion threshold by construction, recorded here rather than only in the boolean gate.")
+        vhh_ids = [float(d.get("max_vhh_identity", 0.0)) for d in selected]
+        antigen_ids = [float(d.get("max_antigen_identity", 0.0)) for d in selected]
+        cdr_ids = [float(d.get("cdr3_identity", 0.0)) for d in selected]
+        if vhh_ids:
+            lines.append(
+                f"- Layered homology isolation: VHH < {vhh_threshold:.2f}, "
+                f"CDR-H3 < {cdr_h3_threshold:.2f}, antigen < {antigen_threshold:.2f} "
+                f"with minimum length coverage {antigen_coverage:.2f}. "
+                f"Selected-target maxima: VHH {max(vhh_ids):.3f}, "
+                f"CDR-H3 {max(cdr_ids):.3f}, antigen {max(antigen_ids):.3f}."
+            )
     lines.append("")
     return lines
 
@@ -545,9 +550,12 @@ def section_applicability_boundary(ctx: ReportContext) -> List[str]:
         "confirmatory claim, and only to the extent its own target count and per-target variance support one "
         "-- a small queue (see section 1.3 for its actual selected count) supports stability/sanity checking, "
         "not a general statistical-power guarantee.",
-        f"- Independence checking is PDB-disjoint plus {100.0 * float(((ctx.frozen_config.get('queue_freeze', {}) or {}).get('identity_threshold', 0.40))):.0f}% global chain identity and annotated CDR-H3 identity "
-        "against training; this does NOT establish remote-homology or antigen-family independence beyond that "
-        "threshold.",
+        f"- Independence checking is PDB-disjoint plus layered sequence isolation: "
+        f"VHH < {100.0 * float((((ctx.frozen_config.get('queue_freeze', {}) or {}).get('homology_isolation', {}) or {}).get('vhh_full_chain_identity', 0.80))):.0f}%, "
+        f"CDR-H3 < {100.0 * float((((ctx.frozen_config.get('queue_freeze', {}) or {}).get('homology_isolation', {}) or {}).get('cdr_h3_identity', 0.50))):.0f}%, "
+        f"antigen < {100.0 * float((((ctx.frozen_config.get('queue_freeze', {}) or {}).get('homology_isolation', {}) or {}).get('antigen_identity', 0.30))):.0f}% "
+        f"with minimum length coverage {100.0 * float((((ctx.frozen_config.get('queue_freeze', {}) or {}).get('homology_isolation', {}) or {}).get('antigen_min_length_coverage', 0.70))):.0f}%; "
+        "this still does NOT establish family/domain-level independence.",
         "- Classical simulation of the discrete QAOA circuit in the feasible subspace is exact-subspace "
         "classical simulation, not a quantum-hardware run; nothing in this report should be read as a "
         "hardware or NISQ-noise result.",
