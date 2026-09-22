@@ -1210,6 +1210,10 @@ class Orchestrator:
         repeats=[derive_child_seed(
             derive_streams(self.config["master_seed"])["perturb"],"sensitivity_repeat",str(i))
             for i in range(int(cfg.get("repeats",3)))]
+        target_selection_seed=derive_child_seed(
+            derive_streams(self.config["master_seed"])["partition"],
+            "method_sensitivity_target_subset"
+        )
         # eval_shots and CVaR alpha are separate axes; batch driver accepts one
         # of each per invocation, so run a frozen Cartesian set of sub-runs.
         failures=[];logs=[];argvs=[]
@@ -1253,7 +1257,9 @@ class Orchestrator:
                     "--sa-passes",str(qc.get("sa_passes",100)),
                     "--greedy-passes",str(qc.get("greedy_passes",50)),
                     "--energy-window",str(qc.get("energy_window",2.0)),
-                    "--max-targets",str(cfg.get("max_targets",20)),"--workers",str(qc.get("workers",1)),
+                    "--max-targets",str(cfg.get("max_targets",20)),
+                    "--target-selection-seed",str(target_selection_seed),
+                    "--workers",str(qc.get("workers",1)),
                     "--omp-threads",str(self.config.get("hardware",{}).get("cpu_threads_per_process",2)),
                     "--seeds",*[str(v) for v in repeats],"--master-seed",str(self.config["master_seed"]),
                 ]
