@@ -1991,6 +1991,7 @@ def _paired_statistics_main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--seed",type=int,default=20260917)
     parser.add_argument("--cluster-map",type=Path,help="JSON mapping every PDB ID to antigen/sequence-family cluster")
     parser.add_argument("--budget-mode",choices=["outputs","time"],default="outputs")
+    parser.add_argument("--primary-pruning", type=str, default="egnn")
     parser.add_argument("--primary-outputs", type=int, default=1000)
     parser.add_argument("--primary-objective", choices=("mean", "cvar"), default="cvar")
     parser.add_argument("--primary-restarts", type=int, default=4)
@@ -2009,6 +2010,9 @@ def _paired_statistics_main(argv: Optional[Sequence[str]] = None) -> int:
         case=json.loads(path.read_text())
         # Explicit primary output-budget contrast; never silently overwrite
         # all objective/restart/budget variants in a solver-keyed dictionary.
+        if str(case.get("config",{}).get("pruning","")) != args.primary_pruning:
+            skipped["nonprimary_pruning"] += 1
+            continue
         if int(case.get("config",{}).get("active_sites",args.primary_active_sites)) != args.primary_active_sites:
             skipped["nonprimary_active_sites"] += 1
             continue
@@ -2069,6 +2073,7 @@ def _paired_statistics_main(argv: Optional[Sequence[str]] = None) -> int:
     for effect,pvalue in zip(tested,_holm_adjust([e["p_value"] for e in tested])):
         effect["p_holm"] = pvalue
     payload=dict(budget_mode=args.budget_mode,seed=args.seed,resamples=args.resamples,
+        primary_pruning=args.primary_pruning,
         primary_outputs=args.primary_outputs, primary_objective=args.primary_objective,
         primary_restarts=args.primary_restarts, primary_active_sites=args.primary_active_sites,
         cluster_unit="provided family clusters" if cluster_map is not None else "PDB (homology dependence unresolved)",
@@ -2078,7 +2083,7 @@ def _paired_statistics_main(argv: Optional[Sequence[str]] = None) -> int:
         max_time_overrun_fraction=args.max_time_overrun_fraction,
         analysis_code_sha256=_ablation_digest(Path(__file__)))
     lines=["# Exploratory paired statistics", "", "Differences = QAOA - classical; negative gap favours QAOA, positive hit favours QAOA.",
-        f"Primary contrast: active_sites={args.primary_active_sites}, outputs={args.primary_outputs}, objective={args.primary_objective}, restarts={args.primary_restarts}. Time-mode uses the explicitly recorded budget donor at the same output budget; other sizes/curves remain scaling or raw records.",
+        f"Primary contrast: pruning={args.primary_pruning}, active_sites={args.primary_active_sites}, outputs={args.primary_outputs}, objective={args.primary_objective}, restarts={args.primary_restarts}. Time-mode uses the explicitly recorded budget donor at the same output budget; other pruning strategies/sizes/curves remain ablation/scaling/raw records.",
         "Repeats averaged within PDB, then PDBs within supplied families. Equal cluster weighting.",
         "95% percentile bootstrap intervals are marginal, not simultaneous. Two-sided sign-flip p values assume exchangeability/symmetry; Holm correction covers every tested contrast in this report.",
         "PDB clusters do not remove homologous-family dependence. Small cluster counts give unreliable intervals. One cluster: no CI or p value.",
