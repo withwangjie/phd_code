@@ -11,14 +11,14 @@ prediction.
 ## Formal research pipeline
 
 1. **Leakage-controlled data construction**
-   - Interface labels: cross-partner heavy-atom contact < 5 A.
-   - Graph edges: intra-chain CA radius < 8 A plus fixed cross-partner KNN.
+   - Interface labels: cross-partner heavy-atom contact < 5 A, following antibody-antigen/CAPRI-style contact definitions [R3,R4].
+   - Graph edges: intra-chain CA radius < 8 A plus fixed cross-partner KNN. The 8 A radius and KNN k are study-specific graph-construction choices used to avoid deterministic label leakage; they are not claimed as literature-optimal values.
    - EGNN train/validation split: layered connected components. Complexes are
      joined if VHH full-chain identity >=80%, CDR-H3 identity >=50%, or
      antigen identity >=30% with >=70% minimum length coverage; no random 90/10 split.
 
 2. **Antigen-conditioned Active-site selection**
-   - SE(3)-equivariant EGNN provides residue-level interface probabilities.
+   - E(n)-equivariant EGNN [R1] provides residue-level interface probabilities.
    - Formal EGNN ranking uses
      `(1-w) * EGNN + w * exp(-d_Ag/6A)`, with `w=0.25` by default.
    - Contact, nearest-distance, CDR and random strategies are explicit ablation baselines.
@@ -26,7 +26,7 @@ prediction.
 3. **Adaptive side-chain state construction**
    - Formal coarse modeling uses a chi1-oriented pseudo-atom approximation,
      while formal all-atom validation uses complete backbone-dependent Dunbrack
-     2010 rotamer states (chi1..chiN) queried from residue phi/psi context.
+     2010 rotamer states [R2] (chi1..chiN) queried from residue phi/psi context.
      Legacy hand-written chi1 priors are debug/compatibility only.
    - Candidate pre-screening uses local environment / antigen-conditioned
      interaction scoring (coarse model) or Amber14 single-candidate energy
@@ -34,20 +34,19 @@ prediction.
      calibrated to Amber delta-E using training complexes only, with frozen
      coefficients for validation/test.
    - 3--6 states per Active residue are retained under a global <=30-variable
-     budget.
-   - Formal benchmark default: 6 Active residues; supported range 5--8.
+     budget. The rotamer representation is literature grounded [R2,R10-R12], while the 3--6 retention rule and <=30-bit cap are study-specific preregistered resource constraints.
+   - Formal quantum-classical scaling axis: 4, 6, 8, and 10 Active residues. Six sites remains the preregistered primary confirmatory/all-atom size; the other sizes are scaling conditions, not literature-defined standards.
 
 4. **Constrained discrete optimization**
-   - One-hot residue registers are encoded as QUBO/Ising variables.
+   - Fixed-backbone rotamer selection is treated as a combinatorial side-chain positioning problem [R10-R12] and encoded with one-hot QUBO/Ising variables.
+   - QAOA follows the hybrid variational framework of Farhi et al. [R7]; protein/peptide quantum-optimization precedent is provided by [R16-R18].
    - XY-mixer QAOA preserves local Hamming weight and therefore feasibility.
-   - Classical baselines include exact feasible-state enumeration and
-     simulated annealing.
-   - Mean-energy and finite-shot CVaR QAOA objectives are compared.
+   - Classical baselines include exact feasible-state enumeration and simulated annealing [R13].
+   - Mean-energy and finite-shot CVaR objectives are compared; CVaR is supported by [R8]. The primary alpha=0.1 remains a study-specific preregistered value checked by development-only sensitivity analysis.
 
 5. **Structure-level validation**
    - Solver assignments are reconstructed as side-chain conformations.
-   - OpenMM constrained relaxation evaluates whether discrete energy gains
-     persist after continuous structural refinement.
+   - OpenMM [R19] constrained relaxation with the ff14SB protein force field [R15] evaluates whether discrete energy gains persist after continuous structural refinement.
    - Structural metrics include Active side-chain RMSD, Fnat, interface RMSD,
      ligand RMSD, clash measures, and related trajectory metrics.
 
@@ -72,7 +71,7 @@ prediction.
   recovery now perturbs and reconstructs every defined Active side-chain chi.
   The coarse energy surrogate remains chi1-oriented and is explicitly
   calibrated against Amber14 on training complexes only.
-- No quantum advantage claim should be made without matched-budget evidence.
+- No hardware quantum advantage or quantum speedup claim is made from simulator data. Matched-output/matched-time and scaling results are interpreted only as quantum-classical algorithmic relative-performance evidence, consistent with modern quantum-optimization benchmarking guidance [R20].
 - Smoke checks and legacy explicit `chi1_angles` overrides are engineering or
   ablation paths and are not the formal main protocol.
 
@@ -205,3 +204,8 @@ the validation queue never chooses its solvent model after inspecting results.
 - `evaluate_complex_metrics.py`: structure-level evaluation.
 - `analyze_structure_recovery.py`: pre-registered structural endpoint and RQ5 inference.
 - `run_external_structure_baselines.py`: FASPR and Phenix clashscore baselines.
+
+
+## Literature basis
+
+The authoritative design-to-literature mapping is maintained in `METHODS_EVIDENCE.md`. Reference labels [R1]–[R21] in this README refer to that file. The register explicitly separates direct literature support from literature-informed preregistration and study-specific preregistration so that exact numerical choices are never misrepresented as published standards.
