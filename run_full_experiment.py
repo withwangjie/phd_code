@@ -927,7 +927,8 @@ class Orchestrator:
         # deferred until stage_structure_experiment, after training.
         bootstrap_pruning = vq_cfg.get("eligibility_bootstrap_pruning", "contact")
         validation_seed = save_derived_child(streams, "perturb", "validation_queue_selection_order")
-        validation_dir = self.run_dir / "validation_queue"
+        validation_root = self.run_dir / "validation_queue"
+        validation_dir = validation_root / "freeze"
         vq_argv = [
             self.venv_python, "run_real_complex_pilot.py",
             "--dataset", str(dataset_dir),
@@ -1515,7 +1516,7 @@ class Orchestrator:
             # A target can still fail re-verification here (recorded, not
             # silently dropped), but no target outside the frozen set can
             # ever be added.
-            frozen_targets = validation_dir / "selected_targets.json"
+            frozen_targets = validation_dir / "freeze" / "selected_targets.json"
             argv += ["--targets", str(queue_cfg.get("target_count", 0))]
             if frozen_targets.is_file():
                 argv += ["--pdb-allowlist-file", str(frozen_targets)]
