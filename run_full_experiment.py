@@ -487,6 +487,10 @@ class Orchestrator:
         see dataset_dir() -- same run-isolation guarantee."""
         return self.run_dir / self.config["paths"].get("checkpoint_dir", "checkpoints")
 
+    def frozen_cluster_map_path(self) -> Path:
+        """Run-local family/structure cluster map used by every downstream stage."""
+        return self.run_dir/"independence"/"pdb_family_clusters.json"
+
     # -- status persistence ------------------------------------------------
     def _stage_status_path(self, stage: str) -> Path:
         return self.status_dir / f"{stage}.json"
@@ -1248,10 +1252,12 @@ class Orchestrator:
             "--min-interface-residues", str(qf_cfg["graph_build"].get("min_interface_residues", 15)),
         ]
         clustering_cfg = qf_cfg.get("independence_clustering", {}) or {}
-        cluster_map_path = (
+        source_cluster_map_path = (
             resolve_path(self.config, clustering_cfg.get("cluster_map", ""))
             if clustering_cfg.get("cluster_map") else None
         )
+        cluster_map_path=self.frozen_cluster_map_path()
+        cluster_map_path.parent.mkdir(parents=True,exist_ok=True)
         pair_setting=clustering_cfg.get("pair_tsv")
         pair_path=resolve_path(self.config,pair_setting) if pair_setting else None
         # Preserve singleton structures even when the external pair table omits
@@ -1297,9 +1303,8 @@ class Orchestrator:
                 ids.update(external_ids)
             universe_path.write_text("\n".join(sorted(ids))+"\n",encoding="utf-8")
 
-        if cluster_map_path is not None and not cluster_map_path.is_file():
+        if not cluster_map_path.is_file():
             if pair_path is not None and pair_path.is_file():
-                cluster_map_path.parent.mkdir(parents=True,exist_ok=True)
                 cluster_argv=[
                     self.venv_python,"build_independence_cluster_map.py",
                     "--pairs",str(pair_path),"--out-json",str(cluster_map_path),
@@ -1318,11 +1323,16 @@ class Orchestrator:
                         f"Family/structure cluster-map generation failed; see {cluster_log}",
                         cluster_argv,str(cluster_log),False,
                     )
+            elif source_cluster_map_path is not None and source_cluster_map_path.is_file():
+                shutil.copy2(source_cluster_map_path,cluster_map_path)
+                source_prov=source_cluster_map_path.with_suffix(".provenance.json")
+                if source_prov.is_file():
+                    shutil.copy2(source_prov,cluster_map_path.with_suffix(".provenance.json"))
             elif clustering_cfg.get("required",False):
                 return StageResult(
                     "queue_freeze", "failed", started, utc_timestamp(), None,
-                    f"Required cluster map missing and no usable frozen pair TSV is available: "
-                    f"map={cluster_map_path}, pairs={pair_path}",
+                    f"Required cluster map missing and no usable frozen pair TSV/source map is available: "
+                    f"source_map={source_cluster_map_path}, pairs={pair_path}",
                 )
 
         # A pre-existing map is accepted only if its provenance binds it to
@@ -1611,10 +1621,7 @@ class Orchestrator:
             "--rotamer-sigma-offsets", *[str(v) for v in rot_cfg.get("sigma_offsets", [-1.0,0.0,1.0])],
             "--solvent-model", str((self.config.get("structure_experiment",{}) or {}).get("solvent_model","vacuum")),
         ]
-        cluster_setting=(
-            (self.config["queue_freeze"].get("independence_clustering", {}) or {}).get("cluster_map")
-        )
-        cluster_path=resolve_path(self.config,cluster_setting) if cluster_setting else None
+        cluster_path=self.frozen_cluster_map_path()
         if cluster_path is not None:
             if not cluster_path.is_file():
                 return StageResult(
@@ -2064,12 +2071,10 @@ class Orchestrator:
                 # optimize/sample streams -- never passed as flat --seeds values.
                 "--master-seed", str(self.config["master_seed"]),
             ]
-            cluster_setting=(qf_cfg.get("independence_clustering", {}) or {}).get("cluster_map")
-            if cluster_setting:
-                cluster_path=resolve_path(self.config, cluster_setting)
-                if not cluster_path.is_file():
-                    raise FileNotFoundError(f"Required family/structure cluster map missing: {cluster_path}")
-                flags += ["--cluster-map", str(cluster_path)]
+            cluster_path=self.frozen_cluster_map_path()
+            if not cluster_path.is_file():
+                raise FileNotFoundError(f"Required run-local family/structure cluster map missing: {cluster_path}")
+            flags += ["--cluster-map", str(cluster_path)]
             if cfg.get("robust_qaoa", True):
                 flags += ["--robust-qaoa", "--qaoa-restarts", str(cfg.get("qaoa_restarts", 4)),
                           "--qaoa-objective", cfg.get("qaoa_objective", "cvar"),
@@ -2395,10 +2400,7 @@ class Orchestrator:
             if not graph_dir.is_dir() or not any(graph_dir.glob("*.pt")):
                 ext_failures.append(f"Required external VHH graph set missing/empty: {graph_dir}")
             if not independence.is_file() and graph_dir.is_dir() and any(graph_dir.glob("*.pt")):
-                cluster_setting=(
-                    (self.config["queue_freeze"].get("independence_clustering", {}) or {}).get("cluster_map")
-                )
-                cluster_path=resolve_path(self.config,cluster_setting) if cluster_setting else None
+                cluster_path=self.frozen_cluster_map_path()
                 if cluster_path is None or not cluster_path.is_file():
                     ext_failures.append(
                         "Cannot generate external independence manifest without frozen cluster map"
@@ -2431,10 +2433,7 @@ class Orchestrator:
                 run_external_root.mkdir(parents=True,exist_ok=True)
                 local_independence=run_external_root/"external_vhh_independence_manifest.json"
                 shutil.copy2(independence,local_independence)
-                current_cluster_setting=(
-                    (self.config["queue_freeze"].get("independence_clustering", {}) or {}).get("cluster_map")
-                )
-                current_cluster_path=resolve_path(self.config,current_cluster_setting) if current_cluster_setting else None
+                current_cluster_path=self.frozen_cluster_map_path()
                 current_cluster_sha=(
                     sha256_of(current_cluster_path)
                     if current_cluster_path is not None and current_cluster_path.is_file()
@@ -2570,10 +2569,7 @@ class Orchestrator:
                             f"External VHH benchmark has {external_summary.get('failures_total')} failed cases"
                         )
                     if not failures:
-                        cluster_setting=(
-                            (self.config["queue_freeze"].get("independence_clustering", {}) or {}).get("cluster_map")
-                        )
-                        cluster_path=resolve_path(self.config,cluster_setting) if cluster_setting else None
+                        cluster_path=self.frozen_cluster_map_path()
                         if cluster_path is None or not cluster_path.is_file():
                             failures.append("External paired statistics require frozen family/structure cluster map")
                         else:
@@ -2733,15 +2729,11 @@ class Orchestrator:
                     "--primary-active-sites", str(primary_active_sites),
                     "--max-time-overrun-fraction", str(cfg.get("max_time_overrun_fraction", 0.10)),
                 ]
-                cluster_setting = cfg.get("cluster_map") or (
-                    (self.config["queue_freeze"].get("independence_clustering", {}) or {}).get("cluster_map")
-                )
-                if cluster_setting:
-                    cluster_path = resolve_path(self.config, cluster_setting)
-                    if not cluster_path.is_file():
-                        failures.append(f"Missing required cluster map for statistics: {cluster_path}")
-                        continue
-                    argv += ["--cluster-map", str(cluster_path)]
+                cluster_path=self.frozen_cluster_map_path()
+                if not cluster_path.is_file():
+                    failures.append(f"Missing required run-local cluster map for statistics: {cluster_path}")
+                    continue
+                argv += ["--cluster-map", str(cluster_path)]
                 returncode, log_path = self._run_subprocess(
                     f"statistics_{results_dir.name}_{budget_mode}", argv)
                 logs.append(str(log_path)); argvs.append(argv)
@@ -2792,11 +2784,8 @@ class Orchestrator:
                             f"{cfg.get('primary_qc_baseline','sa')}/{cfg.get('primary_qc_metric','gap')} "
                             f"has {observed_clusters} independent clusters; requires >= {min_qc_clusters}")
         validation_metrics = self.run_dir / "validation_queue" / "real_complex_metrics.csv"
-        cluster_setting = cfg.get("cluster_map") or (
-            (self.config["queue_freeze"].get("independence_clustering", {}) or {}).get("cluster_map")
-        )
-        if validation_metrics.is_file() and cluster_setting:
-            cluster_path = resolve_path(self.config, cluster_setting)
+        cluster_path=self.frozen_cluster_map_path()
+        if validation_metrics.is_file() and cluster_path.is_file():
             structure_json = self.run_dir / "statistics" / "structure_statistics.json"
             structure_md = self.run_dir / "statistics" / "structure_statistics.md"
             structure_json.parent.mkdir(parents=True, exist_ok=True)
@@ -2839,7 +2828,7 @@ class Orchestrator:
         elif not validation_metrics.is_file():
             failures.append(f"Missing validation structural metrics: {validation_metrics}")
         else:
-            failures.append("Primary structural statistics require a frozen family/structure cluster map")
+            failures.append(f"Primary structural statistics require run-local frozen cluster map: {cluster_path}")
 
         status = "failed" if failures else "completed"
         detail = "; ".join(failures) if failures else (
