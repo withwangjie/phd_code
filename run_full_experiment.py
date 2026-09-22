@@ -50,6 +50,7 @@ import json
 import os
 import platform
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -310,16 +311,32 @@ class Orchestrator:
         with log_path.open("a", encoding="utf-8") as log_handle:
             log_handle.write(f"\n=== {started} :: {' '.join(argv)} ===\n")
             log_handle.flush()
+            use_process_group = os.name == "posix"
+            process = subprocess.Popen(
+                argv, cwd=str(cwd or self.repo_root), env=full_env,
+                stdout=log_handle, stderr=subprocess.STDOUT,
+                start_new_session=use_process_group,
+            )
             try:
-                process = subprocess.run(
-                    argv, cwd=str(cwd or self.repo_root), env=full_env,
-                    stdout=log_handle, stderr=subprocess.STDOUT,
-                    timeout=timeout,
-                )
-                return process.returncode, log_path
+                return process.wait(timeout=timeout), log_path
             except subprocess.TimeoutExpired:
+                if use_process_group:
+                    os.killpg(process.pid, signal.SIGTERM)
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        os.killpg(process.pid, signal.SIGKILL)
+                        process.wait()
+                else:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait()
                 log_handle.write(
-                    f"\n[orchestrator] stage timeout after {timeout_seconds:.3f} seconds; subprocess terminated.\n")
+                    f"\n[orchestrator] stage timeout after {timeout_seconds:.3f} seconds; "
+                    "subprocess process group terminated.\n")
                 log_handle.flush()
                 return 124, log_path
 
