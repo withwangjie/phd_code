@@ -1258,6 +1258,10 @@ def _ablation_run_case(data: Any, scorer: Any, config: dict, args: Any, artifact
         rotamer_sigma_offsets=args.rotamer_sigma_offsets,
         energy_calibration=calibration,
     ).build(sub)
+    if len(qubo.site_to_variables) != active_sites:
+        raise ValueError(
+            f"Requested {active_sites} active sites but QUBO contains "
+            f"{len(qubo.site_to_variables)} rotamer sites; refusing a mislabeled scaling case")
     # Independent optimize/sample seeds (never the shared perturb/input seed
     # config["seed"] above, and never each other): derived per-case, before
     # this function is ever called, from the master-seed optimize/sample
