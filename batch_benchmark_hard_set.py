@@ -2009,7 +2009,7 @@ def _paired_statistics_main(argv: Optional[Sequence[str]] = None) -> int:
         case=json.loads(path.read_text())
         # Explicit primary output-budget contrast; never silently overwrite
         # all objective/restart/budget variants in a solver-keyed dictionary.
-        if int(case.get("config",{}).get("active_sites",-1)) != args.primary_active_sites:
+        if int(case.get("config",{}).get("active_sites",args.primary_active_sites)) != args.primary_active_sites:
             skipped["nonprimary_active_sites"] += 1
             continue
         selected = [r for r in case["metrics"] if
