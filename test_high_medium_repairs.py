@@ -304,7 +304,7 @@ def test_formal_result_contract_requires_core_experimental_outputs() -> None:
 
 def test_stage_results_manifest_is_written_and_required() -> None:
     source=inspect.getsource(full.Orchestrator)
-    assert "stage_results_manifest" not in source  # legacy singular name must not appear
+    assert "results_manifest_dir" in source
     assert "results_manifests" in source
     assert "_write_stage_results_manifest" in source
     assert "Missing stage results manifest" in source
