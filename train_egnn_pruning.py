@@ -183,18 +183,23 @@ def seed_loader_worker(worker_id: int) -> None:
     np.random.seed(worker_seed)
 
 
-SPLIT_IDENTITY_THRESHOLD = 0.40
+VHH_IDENTITY_THRESHOLD = 0.80
+CDR_H3_IDENTITY_THRESHOLD = 0.50
+ANTIGEN_IDENTITY_THRESHOLD = 0.30
+ANTIGEN_MIN_LENGTH_COVERAGE = 0.70
 
 
-def _sequence_identity(a: str, b: str) -> float:
-    """Global sequence identity used only for leakage-controlled partitioning."""
+def _sequence_identity(a: str, b: str, *, min_length_coverage: float = 0.0) -> float:
+    """Symmetric global identity over alignment length with an explicit length gate."""
+
     a, b = str(a or ""), str(b or "")
     if not a or not b:
         return 0.0
+    coverage = min(len(a), len(b)) / max(len(a), len(b))
+    if coverage < min_length_coverage:
+        return 0.0
     if a == b:
         return 1.0
-    if min(len(a), len(b)) / max(len(a), len(b)) < SPLIT_IDENTITY_THRESHOLD:
-        return 0.0
     values = []
     for left, right in ((a, b), (b, a)):
         result = parasail.nw_stats_striped_16(left, right, 10, 1, parasail.blosum62)
@@ -202,6 +207,23 @@ def _sequence_identity(a: str, b: str) -> float:
             raise ValueError("alignment score saturation while building the split")
         values.append(result.matches / result.length)
     return max(values)
+
+
+def _side_identity(
+    left: Sequence[str],
+    right: Sequence[str],
+    *,
+    min_length_coverage: float = 0.0,
+) -> float:
+    """Maximum global identity across two partner-side sequence sets."""
+
+    return max(
+        (
+            _sequence_identity(a, b, min_length_coverage=min_length_coverage)
+            for a in left for b in right if a and b
+        ),
+        default=0.0,
+    )
 
 
 SPLIT_FOLDS = 5
@@ -236,7 +258,8 @@ def split_paths(paths: Sequence[Path], seed: int) -> Tuple[List[Path], List[Path
                 f"{path.name} lacks full-chain vhh_sequences/antigen_sequences; "
                 "rebuild graphs with build_final_pyg_dataset.py >= 1.2"
             )
-        records.append((path, vhh, antigen))
+        cdr3 = str(getattr(data, "cdr3_seq", "") or "")
+        records.append((path, vhh, antigen, cdr3))
 
     parent = list(range(len(records)))
 
@@ -252,20 +275,28 @@ def split_paths(paths: Sequence[Path], seed: int) -> Tuple[List[Path], List[Path
             parent[b] = a
 
     for i in range(len(records)):
-        _, vhh_i, antigen_i = records[i]
+        _, vhh_i, antigen_i, cdr_i = records[i]
         for j in range(i):
-            _, vhh_j, antigen_j = records[j]
-            if (
-                _side_identity(vhh_i, vhh_j) >= SPLIT_IDENTITY_THRESHOLD
-                or _side_identity(antigen_i, antigen_j) >= SPLIT_IDENTITY_THRESHOLD
-            ):
+            _, vhh_j, antigen_j, cdr_j = records[j]
+            same_vhh = _side_identity(vhh_i, vhh_j) >= VHH_IDENTITY_THRESHOLD
+            same_cdr = (
+                bool(cdr_i and cdr_j)
+                and _sequence_identity(cdr_i, cdr_j) >= CDR_H3_IDENTITY_THRESHOLD
+            )
+            same_antigen = (
+                _side_identity(
+                    antigen_i, antigen_j,
+                    min_length_coverage=ANTIGEN_MIN_LENGTH_COVERAGE,
+                ) >= ANTIGEN_IDENTITY_THRESHOLD
+            )
+            if same_vhh or same_cdr or same_antigen:
                 union(i, j)
 
     components: Dict[int, List[int]] = {}
     for index in range(len(records)):
         components.setdefault(find(index), []).append(index)
     if len(components) < 2:
-        raise RuntimeError("Bilateral 40%-identity clustering produced fewer than two components")
+        raise RuntimeError("Layered VHH/CDR-H3/antigen clustering produced fewer than two components")
 
     train_paths: List[Path] = []
     validation_paths: List[Path] = []
@@ -296,19 +327,31 @@ def split_paths(paths: Sequence[Path], seed: int) -> Tuple[List[Path], List[Path
 
     train_set, validation_set = set(train_paths), set(validation_paths)
     max_vhh_cross = 0.0
+    max_cdr_cross = 0.0
     max_antigen_cross = 0.0
-    for train_path, train_vhh, train_antigen in records:
+    for train_path, train_vhh, train_antigen, train_cdr in records:
         if train_path not in train_set:
             continue
-        for val_path, val_vhh, val_antigen in records:
+        for val_path, val_vhh, val_antigen, val_cdr in records:
             if val_path not in validation_set:
                 continue
             max_vhh_cross = max(max_vhh_cross, _side_identity(train_vhh, val_vhh))
-            max_antigen_cross = max(max_antigen_cross, _side_identity(train_antigen, val_antigen))
-    if max(max_vhh_cross, max_antigen_cross) >= SPLIT_IDENTITY_THRESHOLD:
+            if train_cdr and val_cdr:
+                max_cdr_cross = max(max_cdr_cross, _sequence_identity(train_cdr, val_cdr))
+            max_antigen_cross = max(
+                max_antigen_cross,
+                _side_identity(
+                    train_antigen, val_antigen,
+                    min_length_coverage=ANTIGEN_MIN_LENGTH_COVERAGE,
+                ),
+            )
+    if (max_vhh_cross >= VHH_IDENTITY_THRESHOLD
+            or max_cdr_cross >= CDR_H3_IDENTITY_THRESHOLD
+            or max_antigen_cross >= ANTIGEN_IDENTITY_THRESHOLD):
         raise AssertionError(
-            "Bilateral sequence leakage across train/validation: "
-            f"max VHH={max_vhh_cross:.3f}, max antigen={max_antigen_cross:.3f}"
+            "Layered sequence leakage across train/validation: "
+            f"max VHH={max_vhh_cross:.3f}, max CDR-H3={max_cdr_cross:.3f}, "
+            f"max antigen={max_antigen_cross:.3f}"
         )
     return train_paths, validation_paths
 
@@ -628,7 +671,12 @@ def _checkpoint_payload(
         "training_config": dict(training_config),
         "split": {
             "partition_method": "bilateral_vhh_antigen_identity_components_sha256_5fold",
-            "identity_threshold": float(SPLIT_IDENTITY_THRESHOLD),
+            "homology_isolation": {
+                "vhh_full_chain_identity": float(VHH_IDENTITY_THRESHOLD),
+                "cdr_h3_identity": float(CDR_H3_IDENTITY_THRESHOLD),
+                "antigen_identity": float(ANTIGEN_IDENTITY_THRESHOLD),
+                "antigen_min_length_coverage": float(ANTIGEN_MIN_LENGTH_COVERAGE),
+            },
             "partition_seed": None,
             "training_seed": SEED,
             "train_count": len(train_paths),
@@ -708,13 +756,17 @@ def restore_training_state(
         "validation_names_sha256"
     ) != expected_validation_hash:
         raise RuntimeError("Resume checkpoint uses a different graph split")
-    saved_threshold = split.get("identity_threshold")
-    if saved_threshold is None or not math.isclose(
-        float(saved_threshold), float(SPLIT_IDENTITY_THRESHOLD), rel_tol=0.0, abs_tol=1e-12
-    ):
+    saved_homology = split.get("homology_isolation")
+    current_homology = {
+        "vhh_full_chain_identity": float(VHH_IDENTITY_THRESHOLD),
+        "cdr_h3_identity": float(CDR_H3_IDENTITY_THRESHOLD),
+        "antigen_identity": float(ANTIGEN_IDENTITY_THRESHOLD),
+        "antigen_min_length_coverage": float(ANTIGEN_MIN_LENGTH_COVERAGE),
+    }
+    if saved_homology != current_homology:
         raise RuntimeError(
-            f"Resume checkpoint identity threshold mismatch: saved={saved_threshold}, "
-            f"current={SPLIT_IDENTITY_THRESHOLD}"
+            f"Resume checkpoint homology protocol mismatch: saved={saved_homology}, "
+            f"current={current_homology}"
         )
     current_protocol = graph_protocol(
         torch.load(train_paths[0], map_location="cpu", weights_only=False)
@@ -863,7 +915,7 @@ def write_summary(
         "",
         "## 数据与监督定义",
         "",
-        f"- 双侧同源隔离：训练 {train_count}，验证 {validation_count}；VHH与抗原任一侧全链全局identity≥{SPLIT_IDENTITY_THRESHOLD:.2f}即并入同一连通分量。",
+        f"- 分层同源隔离：训练 {train_count}，验证 {validation_count}；VHH≥{VHH_IDENTITY_THRESHOLD:.2f}、CDR-H3≥{CDR_H3_IDENTITY_THRESHOLD:.2f}、或抗原≥{ANTIGEN_IDENTITY_THRESHOLD:.2f}且长度覆盖≥{ANTIGEN_MIN_LENGTH_COVERAGE:.2f}时并入同一连通分量。",
         "- 分量按SHA-256确定性映射到5个fold，fold 0用于验证；不使用随机90/10切分。",
         f"- 训练节点标签：正例 {train_positives:,}，负例 {train_negatives:,}。",
         "- 正例定义：跨伙伴重原子距离<5 Å的残基；标签与图边独立构建。",
@@ -895,8 +947,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument("--hidden-dim", type=int, default=32)
     parser.add_argument("--learning-rate", type=float, default=1e-3)
-    parser.add_argument("--identity-threshold", type=float, default=SPLIT_IDENTITY_THRESHOLD,
-        help="Bilateral full-chain VHH/antigen identity threshold used for train/validation components.")
+    parser.add_argument("--vhh-identity-threshold", type=float, default=VHH_IDENTITY_THRESHOLD)
+    parser.add_argument("--cdr-h3-identity-threshold", type=float, default=CDR_H3_IDENTITY_THRESHOLD)
+    parser.add_argument("--antigen-identity-threshold", type=float, default=ANTIGEN_IDENTITY_THRESHOLD)
+    parser.add_argument("--antigen-min-length-coverage", type=float, default=ANTIGEN_MIN_LENGTH_COVERAGE)
     parser.add_argument("--weight-decay", type=float, default=1e-5)
     parser.add_argument("--gradient-clip", type=float, default=5.0)
     parser.add_argument("--device", default="auto")
@@ -976,11 +1030,19 @@ def _broadcast_metrics(
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = _parser().parse_args(argv)
-    global SEED, SPLIT_IDENTITY_THRESHOLD
+    global SEED, VHH_IDENTITY_THRESHOLD, CDR_H3_IDENTITY_THRESHOLD
+    global ANTIGEN_IDENTITY_THRESHOLD, ANTIGEN_MIN_LENGTH_COVERAGE
     SEED = args.seed
-    if not 0.0 < args.identity_threshold < 1.0:
-        raise ValueError("identity-threshold must be in (0,1)")
-    SPLIT_IDENTITY_THRESHOLD = float(args.identity_threshold)  # Every existing seed_everything(SEED + rank) / training_summary.json
+    thresholds = (
+        args.vhh_identity_threshold, args.cdr_h3_identity_threshold,
+        args.antigen_identity_threshold, args.antigen_min_length_coverage,
+    )
+    if any(not 0.0 < value <= 1.0 for value in thresholds):
+        raise ValueError("homology thresholds/coverage must lie in (0,1]")
+    VHH_IDENTITY_THRESHOLD = float(args.vhh_identity_threshold)
+    CDR_H3_IDENTITY_THRESHOLD = float(args.cdr_h3_identity_threshold)
+    ANTIGEN_IDENTITY_THRESHOLD = float(args.antigen_identity_threshold)
+    ANTIGEN_MIN_LENGTH_COVERAGE = float(args.antigen_min_length_coverage)  # Every existing seed_everything(SEED + rank) / training_summary.json
                        # "seed": SEED usage below transparently picks up the CLI override.
     if args.max_epochs <= 0 or args.patience <= 0 or args.batch_size <= 0:
         raise ValueError("max-epochs, patience, and batch-size must be positive")
@@ -1064,11 +1126,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     training_config = {
         "seed": SEED,
         "split": (
-            f"bilateral full-chain VHH+antigen connected components at "
-            f"{SPLIT_IDENTITY_THRESHOLD:.3f} identity; deterministic 5-fold hash, "
+            f"layered VHH/CDR-H3/antigen connected components "
+            f"(VHH {VHH_IDENTITY_THRESHOLD:.2f}, CDR-H3 {CDR_H3_IDENTITY_THRESHOLD:.2f}, "
+            f"antigen {ANTIGEN_IDENTITY_THRESHOLD:.2f} with coverage {ANTIGEN_MIN_LENGTH_COVERAGE:.2f}); "
             "validation fold 0; no random 90/10"
         ),
-        "identity_threshold": float(SPLIT_IDENTITY_THRESHOLD),
+        "homology_isolation": {
+            "vhh_full_chain_identity": float(VHH_IDENTITY_THRESHOLD),
+            "cdr_h3_identity": float(CDR_H3_IDENTITY_THRESHOLD),
+            "antigen_identity": float(ANTIGEN_IDENTITY_THRESHOLD),
+            "antigen_min_length_coverage": float(ANTIGEN_MIN_LENGTH_COVERAGE),
+        },
         "graph_protocol": graph_protocol(train_data[0]),
         "max_epochs": args.max_epochs,
         "patience": args.patience,
