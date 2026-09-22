@@ -219,6 +219,10 @@ def test_methods_evidence_register_covers_formal_design() -> None:
         "Foldseek",
         "Simulated annealing",
         "Study-specific preregistration",
+        "GLINTER",
+        "CDR-H3 isolation",
+        "identity <0.30 with >=0.70 coverage",
+        "alpha=0.1",
     ):
         assert token in source
 
@@ -227,4 +231,6 @@ def test_final_report_embeds_methods_references() -> None:
     source=inspect.getsource(full)
     assert "METHODS_EVIDENCE.md" in source
     assert "section_literature_basis" in source
-    assert "The primary p=2 and alpha=0.1 values remain preregistered study choices" in source
+    assert "alpha=0.1 is literature-supported as an empirical CVaR setting" in source
+    manifest_source=inspect.getsource(full.build_run_manifest)
+    assert "methods_evidence_sha256" in manifest_source
