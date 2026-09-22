@@ -283,6 +283,7 @@ qc_benchmark:
     ridge_alpha: 1.0
     acceptance:
       min_train_complexes: 20
+      min_train_groups: 20
       min_cv_folds: 5
       max_cv_rmse_kcal: 10.0
       max_cv_mae_kcal: 7.5
