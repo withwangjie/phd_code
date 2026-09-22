@@ -83,8 +83,40 @@ class InterfaceGraphDataset(Dataset):
         return self.data_list[index]
 
 
+def graph_protocol(data: Data) -> Dict[str, Any]:
+    """Return the versioned scientific graph protocol encoded in one PyG graph."""
+
+    required = (
+        "graph_version", "edge_policy", "label_policy",
+        "intra_chain_ca_cutoff_angstrom", "cross_partner_knn_k",
+        "interface_label_cutoff_angstrom", "min_interface_residues",
+    )
+    missing = [name for name in required if not hasattr(data, name)]
+    if missing:
+        raise ValueError(f"Graph lacks protocol metadata {missing}; rebuild with dataset version >=1.3")
+    protocol = {
+        "graph_version": str(data.graph_version),
+        "edge_policy": str(data.edge_policy),
+        "label_policy": str(data.label_policy),
+        "intra_chain_ca_cutoff_angstrom": float(data.intra_chain_ca_cutoff_angstrom),
+        "cross_partner_knn_k": int(data.cross_partner_knn_k),
+        "interface_label_cutoff_angstrom": float(data.interface_label_cutoff_angstrom),
+        "min_interface_residues": int(data.min_interface_residues),
+    }
+    if protocol["edge_policy"] != "intra_chain_ca_radius_plus_cross_partner_knn":
+        raise ValueError("Unexpected graph edge policy; rebuild with current dataset builder")
+    if protocol["label_policy"] != "cross_partner_heavy_atom_cutoff":
+        raise ValueError("Unexpected graph label policy; rebuild with current dataset builder")
+    if (protocol["intra_chain_ca_cutoff_angstrom"] <= 0
+            or protocol["cross_partner_knn_k"] <= 0
+            or protocol["interface_label_cutoff_angstrom"] <= 0
+            or protocol["min_interface_residues"] <= 0):
+        raise ValueError(f"Invalid graph protocol values: {protocol}")
+    return protocol
+
+
 def preload_graphs(paths: Sequence[Path], *, show_progress: bool) -> List[Data]:
-    """Load every graph exactly once and attach labels before DataLoader use."""
+    """Load every graph once, require one protocol, and attach labels."""
 
     iterator: Iterable[Path] = paths
     if show_progress:
@@ -93,7 +125,15 @@ def preload_graphs(paths: Sequence[Path], *, show_progress: bool) -> List[Data]:
         torch.load(path, map_location="cpu", weights_only=False)
         for path in iterator
     ]
+    expected_protocol: Optional[Dict[str, Any]] = None
     for data in data_list:
+        protocol = graph_protocol(data)
+        if expected_protocol is None:
+            expected_protocol = protocol
+        elif protocol != expected_protocol:
+            raise ValueError(
+                f"Mixed graph protocols in one training run: {expected_protocol} vs {protocol}"
+            )
         data.y = interface_labels(data)
     return data_list
 
@@ -101,9 +141,8 @@ def preload_graphs(paths: Sequence[Path], *, show_progress: bool) -> List[Data]:
 def interface_labels(data: Data) -> Tensor:
     """Return independently constructed heavy-atom interface labels.
 
-    Labels are generated during graph construction from inter-partner
-    heavy-atom contacts within 5 A. They are not reconstructed from the
-    CA graph edge list, removing the previous deterministic shortcut.
+    The exact heavy-atom cutoff is read from graph protocol metadata. Labels
+    are never reconstructed from CA graph edges.
     """
 
     if not hasattr(data, "x") or not hasattr(data, "edge_index"):
@@ -113,7 +152,7 @@ def interface_labels(data: Data) -> Tensor:
     if not hasattr(data, "interface_label"):
         raise ValueError(
             "Graph is missing interface_label; rebuild graphs with "
-            "build_final_pyg_dataset.py version >= 1.1"
+            "build_final_pyg_dataset.py version >= 1.3"
         )
     labels = data.interface_label.detach().cpu().to(torch.float32)
     if labels.shape != (data.num_nodes,):
@@ -122,10 +161,7 @@ def interface_labels(data: Data) -> Tensor:
         )
     if not torch.all((labels == 0) | (labels == 1)):
         raise ValueError("interface_label must contain only binary 0/1 values")
-    if getattr(data, "edge_policy", "") != "intra_chain_ca_lt8_plus_cross_partner_knn":
-        raise ValueError("Graph edge policy is not leakage-controlled; rebuild with dataset version >=1.2")
-    if getattr(data, "label_policy", "") != "cross_partner_heavy_atom_lt5":
-        raise ValueError("Graph label policy is missing or unexpected")
+    graph_protocol(data)
     return labels
 
 def seed_everything(seed: int) -> None:
@@ -188,7 +224,7 @@ def _side_identity(left: Sequence[str], right: Sequence[str]) -> float:
 
 
 def split_paths(paths: Sequence[Path], seed: int) -> Tuple[List[Path], List[Path]]:
-    """Bilateral 40%-identity component split; no random 90/10 partition."""
+    """Bilateral configurable-identity component split; no random 90/10 partition."""
     del seed
     records = []
     for path in paths:
@@ -591,7 +627,8 @@ def _checkpoint_payload(
         "validation_metrics": asdict(metrics),
         "training_config": dict(training_config),
         "split": {
-            "partition_method": "bilateral_vhh_antigen_40pct_components_sha256_5fold",
+            "partition_method": "bilateral_vhh_antigen_identity_components_sha256_5fold",
+            "identity_threshold": float(SPLIT_IDENTITY_THRESHOLD),
             "partition_seed": None,
             "training_seed": SEED,
             "train_count": len(train_paths),
@@ -599,7 +636,8 @@ def _checkpoint_payload(
             "train_names_sha256": _paths_digest(train_paths),
             "validation_names_sha256": _paths_digest(validation_paths),
         },
-        "label_definition": "residue with an inter-partner heavy-atom contact < 5 A, stored independently during graph construction",
+        "graph_protocol": graph_protocol(torch.load(train_paths[0], map_location="cpu", weights_only=False)),
+        "label_definition": "inter-partner heavy-atom cutoff label stored independently during graph construction",
         "history": list(history),
         "early_stopping": {
             "best_auc": best_auc,
@@ -809,7 +847,7 @@ def write_summary(
         "",
         "## 数据与监督定义",
         "",
-        f"- 双侧同源隔离：训练 {train_count}，验证 {validation_count}；VHH与抗原任一侧全链全局identity≥0.40即并入同一连通分量。",
+        f"- 双侧同源隔离：训练 {train_count}，验证 {validation_count}；VHH与抗原任一侧全链全局identity≥{SPLIT_IDENTITY_THRESHOLD:.2f}即并入同一连通分量。",
         "- 分量按SHA-256确定性映射到5个fold，fold 0用于验证；不使用随机90/10切分。",
         f"- 训练节点标签：正例 {train_positives:,}，负例 {train_negatives:,}。",
         "- 正例定义：跨伙伴重原子距离<5 Å的残基；标签与图边独立构建。",
@@ -841,6 +879,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument("--hidden-dim", type=int, default=32)
     parser.add_argument("--learning-rate", type=float, default=1e-3)
+    parser.add_argument("--identity-threshold", type=float, default=SPLIT_IDENTITY_THRESHOLD,
+        help="Bilateral full-chain VHH/antigen identity threshold used for train/validation components.")
     parser.add_argument("--weight-decay", type=float, default=1e-5)
     parser.add_argument("--gradient-clip", type=float, default=5.0)
     parser.add_argument("--device", default="auto")
@@ -920,8 +960,11 @@ def _broadcast_metrics(
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = _parser().parse_args(argv)
-    global SEED
-    SEED = args.seed  # Every existing seed_everything(SEED + rank) / training_summary.json
+    global SEED, SPLIT_IDENTITY_THRESHOLD
+    SEED = args.seed
+    if not 0.0 < args.identity_threshold < 1.0:
+        raise ValueError("identity-threshold must be in (0,1)")
+    SPLIT_IDENTITY_THRESHOLD = float(args.identity_threshold)  # Every existing seed_everything(SEED + rank) / training_summary.json
                        # "seed": SEED usage below transparently picks up the CLI override.
     if args.max_epochs <= 0 or args.patience <= 0 or args.batch_size <= 0:
         raise ValueError("max-epochs, patience, and batch-size must be positive")
