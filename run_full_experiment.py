@@ -179,11 +179,94 @@ def package_versions(names: Sequence[str]) -> Dict[str, Optional[str]]:
 # Config
 # ---------------------------------------------------------------------------
 
+def _validate_scientific_config(config: Dict[str, Any]) -> None:
+    """Fail before any stage when scientific protocol settings are inconsistent."""
+
+    qf = config.get("queue_freeze", {}) or {}
+    graph = qf.get("graph_build", {}) or {}
+    train = config.get("egnn_train", {}) or {}
+    qc = config.get("qc_benchmark", {}) or {}
+    structure = config.get("structure_experiment", {}) or {}
+    validation = qf.get("validation_queue", {}) or {}
+
+    identity = float(qf.get("identity_threshold", 0.40))
+    train_identity = float(train.get("identity_threshold", identity))
+    if not 0.0 < identity < 1.0:
+        raise ValueError("queue_freeze.identity_threshold must be in (0,1)")
+    if not math.isclose(identity, train_identity, rel_tol=0.0, abs_tol=1e-12):
+        raise ValueError(
+            f"Identity threshold must be shared across dataset/EGNN/validation: "
+            f"queue_freeze={identity}, egnn_train={train_identity}"
+        )
+
+    positive_graph = {
+        "interface_label_cutoff_angstrom": float(graph.get("interface_label_cutoff_angstrom", 5.0)),
+        "intra_chain_ca_cutoff_angstrom": float(graph.get("intra_chain_ca_cutoff_angstrom", 8.0)),
+    }
+    if any((not math.isfinite(v)) or v <= 0 for v in positive_graph.values()):
+        raise ValueError(f"Graph distance parameters must be positive finite: {positive_graph}")
+    if int(graph.get("cross_partner_knn_k", 3)) < 1:
+        raise ValueError("graph_build.cross_partner_knn_k must be >=1")
+    if int(graph.get("min_interface_residues", 15)) < 1:
+        raise ValueError("graph_build.min_interface_residues must be >=1")
+
+    if not 0.0 <= float(qc.get("antigen_guidance_weight", 0.25)) <= 1.0:
+        raise ValueError("qc_benchmark.antigen_guidance_weight must be in [0,1]")
+    if not 0.0 <= float(structure.get("antigen_guidance_weight", 0.25)) <= 1.0:
+        raise ValueError("structure_experiment.antigen_guidance_weight must be in [0,1]")
+
+    shared_pairs = (
+        ("antigen_guidance_weight", 0.25),
+        ("antigen_proximity_scale_angstrom", 6.0),
+        ("contact_ca_cutoff_angstrom", 8.0),
+    )
+    for key, default in shared_pairs:
+        left = float(qc.get(key, default))
+        right = float(structure.get(key, default))
+        if key != "antigen_guidance_weight" and (
+            not math.isfinite(left) or left <= 0 or not math.isfinite(right) or right <= 0
+        ):
+            raise ValueError(f"{key} must be positive finite in coarse and structure protocols")
+        if not math.isclose(left, right, rel_tol=0.0, abs_tol=1e-12):
+            raise ValueError(
+                f"Shared site-selection parameter mismatch for {key}: "
+                f"qc_benchmark={left}, structure_experiment={right}"
+            )
+
+    qc_sites = int(qc.get("active_sites", 6))
+    validation_sites = int(validation.get("sites", 6))
+    if not 5 <= qc_sites <= 8:
+        raise ValueError("qc_benchmark.active_sites must be in 5..8")
+    if validation_sites != qc_sites:
+        raise ValueError(
+            f"Formal active-site count must match: qc_benchmark={qc_sites}, validation_queue={validation_sites}"
+        )
+
+    ff = qc.get("coarse_force_field", {}) or {}
+    positive_ff = {
+        "cutoff_angstrom": float(ff.get("cutoff_angstrom", 8.0)),
+        "softcore_delta_angstrom": float(ff.get("softcore_delta_angstrom", 0.5)),
+        "hard_core_fraction": float(ff.get("hard_core_fraction", 0.72)),
+        "hard_sphere_penalty": float(ff.get("hard_sphere_penalty", 25.0)),
+        "lj_repulsion_cap": float(ff.get("lj_repulsion_cap", 50.0)),
+        "lj_attraction_cap": float(ff.get("lj_attraction_cap", 5.0)),
+        "coulomb_cap": float(ff.get("coulomb_cap", 20.0)),
+        "dielectric_base": float(ff.get("dielectric_base", 4.0)),
+        "thermal_energy_kcal": float(ff.get("thermal_energy_kcal", 0.593)),
+    }
+    if any((not math.isfinite(v)) or v <= 0 for v in positive_ff.values()):
+        raise ValueError(f"coarse_force_field positive parameters invalid: {positive_ff}")
+    dielectric_slope = float(ff.get("dielectric_slope", 2.0))
+    if not math.isfinite(dielectric_slope) or dielectric_slope < 0:
+        raise ValueError("coarse_force_field.dielectric_slope must be finite and nonnegative")
+
+
 def load_config(path: Path) -> Dict[str, Any]:
     with Path(path).open("r", encoding="utf-8") as handle:
         config = yaml.safe_load(handle)
     if not isinstance(config, dict):
         raise ValueError(f"{path}: expected a top-level YAML mapping")
+    _validate_scientific_config(config)
     return config
 
 
@@ -534,8 +617,8 @@ class Orchestrator:
         # here. But queue_freeze runs BEFORE egnn_train in STAGE_ORDER, so
         # this bootstrap call cannot use a trained checkpoint yet. Since
         # eligibility (PDB overlap / chain identity / CDR-H3 identity /
-        # structural viability such as "enough interface-neighborhood
-        # candidate sites") does NOT depend on pruning strategy -- only the
+        # structural viability such as "enough chemically movable
+        # VHH candidate sites") does NOT depend on pruning strategy -- only the
         # final residue ranking within an already-eligible target does --
         # this bootstrap call uses `eligibility_bootstrap_pruning` (a cheap,
         # checkpoint-free strategy, e.g. "contact") ONLY to decide TRUE
