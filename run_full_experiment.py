@@ -688,6 +688,10 @@ class Orchestrator:
                 return StageResult(stage, "failed", existing["started_utc"], utc_timestamp(),
                                     existing["returncode"], "Not retried: " + existing["detail"])
         print(f"[{stage}] Starting.")
+        running=StageResult(
+            stage,"running",utc_timestamp(),utc_timestamp(),None,
+            "Stage started; terminal status not yet recorded.")
+        self._save_stage_status(running)
         try:
             result = fn()
         except Exception:
