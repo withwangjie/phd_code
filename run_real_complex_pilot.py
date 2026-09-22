@@ -290,6 +290,8 @@ def main(argv=None) -> int:
     parser.add_argument("--max-evals", type=int, default=90)
     parser.add_argument("--relax-iterations", type=int, default=200)
     parser.add_argument("--candidate-relax-iterations", type=int, default=100)
+    parser.add_argument("--min-perturb-degrees", type=float, default=40.0)
+    parser.add_argument("--max-perturb-degrees", type=float, default=120.0)
     parser.add_argument("--prepare-only", action="store_true")
     parser.add_argument("--eval-shots",type=int,choices=(200,500,1000))
     parser.add_argument("--loop-relax-iterations",type=int,default=100)
@@ -337,6 +339,8 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     if not 1 <= args.sites <= 10 or args.targets < 0:
         parser.error("Require 1..10 sites and a nonnegative target count (0 = unlimited)")
+    if not 0 < args.min_perturb_degrees <= args.max_perturb_degrees <= 180:
+        parser.error("Require 0 < min_perturb_degrees <= max_perturb_degrees <= 180")
     from batch_benchmark_hard_set import _ablation_atomic_json, _ablation_digest, _recovery_benchmark_main
     from filelock import FileLock
     out = args.out_dir.resolve(); out.mkdir(parents=True, exist_ok=True)
@@ -529,6 +533,8 @@ def main(argv=None) -> int:
                         "--outputs",str(args.outputs),"--max-evals",str(args.max_evals),
                         "--relax-iterations",str(args.relax_iterations),
                         "--loop-relax-iterations",str(args.loop_relax_iterations),
+                        "--min-perturb-degrees",str(args.min_perturb_degrees),
+                        "--max-perturb-degrees",str(args.max_perturb_degrees),
                         *(["--eval-shots",str(args.eval_shots)] if args.eval_shots else []),
                         *(["--robust-qaoa","--qaoa-restarts",str(args.qaoa_restarts),
                            "--qaoa-objective",args.qaoa_objective,"--cvar-alpha",str(args.cvar_alpha),
