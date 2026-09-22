@@ -287,6 +287,10 @@ def _validate_scientific_config(config: Dict[str, Any]) -> None:
         raise ValueError("Invalid statistics.primary_structural_contrast")
     if int(stats.get("resamples",10000)) < 1000:
         raise ValueError("statistics.resamples must be >=1000")
+    if int(stats.get("min_primary_clusters",10)) < 2:
+        raise ValueError("statistics.min_primary_clusters must be >=2")
+    if int(stats.get("min_rq5_clusters",10)) < 2:
+        raise ValueError("statistics.min_rq5_clusters must be >=2")
 
     external=config.get("external_validation",{}) or {}
     if external.get("required",False):
@@ -1788,6 +1792,22 @@ class Orchestrator:
             returncode, log_path = self._run_subprocess("structure_statistics", structure_argv)
             if returncode != 0 or not structure_json.is_file():
                 failures.append(f"structure statistics exited {returncode} (see {log_path})")
+            else:
+                structure_payload=json.loads(structure_json.read_text(encoding="utf-8"))
+                primary_clusters=int((structure_payload.get("primary",{}) or {}).get("n_clusters",0) or 0)
+                rq5_clusters=int((structure_payload.get("rq5",{}) or {}).get("n_clusters",0) or 0)
+                min_primary=int(cfg.get("min_primary_clusters",10))
+                min_rq5=int(cfg.get("min_rq5_clusters",10))
+                if primary_clusters < min_primary:
+                    failures.append(
+                        f"Primary structural inference has {primary_clusters} clusters; "
+                        f"requires >= {min_primary}"
+                    )
+                if rq5_clusters < min_rq5:
+                    failures.append(
+                        f"RQ5 energy-structure inference has {rq5_clusters} clusters; "
+                        f"requires >= {min_rq5}"
+                    )
         elif not validation_metrics.is_file():
             failures.append(f"Missing validation structural metrics: {validation_metrics}")
         else:
