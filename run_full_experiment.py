@@ -1347,6 +1347,10 @@ class Orchestrator:
             "--sa-passes", str(cfg.get("sa_passes", 100)),
             "--greedy-passes", str(cfg.get("greedy_passes", 50)),
             "--energy-window", str(cfg.get("energy_window", 2.0)),
+            "--time-donor-objective", str(
+                self.config.get("statistics", {}).get("primary_objective", "cvar")),
+            "--time-donor-restarts", str(
+                self.config.get("statistics", {}).get("primary_restarts", 4)),
             "--max-targets", str(cfg.get("max_targets", 0)),
             "--workers", str(cfg.get("workers", 1)),
             "--omp-threads", str(self.config.get("hardware", {}).get("cpu_threads_per_process", 2)),
