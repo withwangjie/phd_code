@@ -813,6 +813,7 @@ class Orchestrator:
                     "--query-column",str(clustering_cfg.get("query_column",0)),
                     "--target-column",str(clustering_cfg.get("target_column",1)),
                     "--score-column",str(clustering_cfg.get("score_column",2)),
+                    "--score-semantics",str(clustering_cfg.get("score_semantics","unspecified")),
                 ]
                 if universe_path.is_file():
                     cluster_argv += ["--universe",str(universe_path)]
@@ -855,6 +856,24 @@ class Orchestrator:
                     "queue_freeze","failed",started,utc_timestamp(),None,
                     "Cluster-map provenance min_score does not match frozen config"
                 )
+            for key in ("query_column","target_column","score_column"):
+                if int(cluster_prov.get(key,-1)) != int(clustering_cfg.get(key,{"query_column":0,"target_column":1,"score_column":2}[key])):
+                    return StageResult(
+                        "queue_freeze","failed",started,utc_timestamp(),None,
+                        f"Cluster-map provenance {key} does not match frozen config"
+                    )
+            if str(cluster_prov.get("score_semantics","")) != str(clustering_cfg.get("score_semantics","unspecified")):
+                return StageResult(
+                    "queue_freeze","failed",started,utc_timestamp(),None,
+                    "Cluster-map score semantics do not match frozen config"
+                )
+            if universe_path.is_file():
+                universe_sha=sha256_of(universe_path)
+                if cluster_prov.get("universe_sha256") != universe_sha:
+                    return StageResult(
+                        "queue_freeze","failed",started,utc_timestamp(),None,
+                        "Cluster-map provenance is not bound to this run's audited PDB universe"
+                    )
         if clustering_cfg.get("required", False) and (
             cluster_map_path is None or not cluster_map_path.is_file()
         ):
