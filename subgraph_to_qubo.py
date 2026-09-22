@@ -954,8 +954,20 @@ class InterfaceQUBOBuilder:
             if np.any(selected & ~vhh):
                 raise ValueError(f"{mask_name} marks a non-VHH node")
         indices = np.flatnonzero(selected)
+        if self.rotamer_mode == "dunbrack2010":
+            if not hasattr(data, "backbone_phi") or not hasattr(data, "backbone_psi"):
+                raise ValueError("Dunbrack mode requires backbone_phi/backbone_psi")
+            phi = data.backbone_phi.detach().cpu().numpy().astype(np.float64)
+            psi = data.backbone_psi.detach().cpu().numpy().astype(np.float64)
+            if phi.shape != (len(x),) or psi.shape != (len(x),):
+                raise ValueError("backbone_phi/backbone_psi must have shape [N]")
+            allowed = np.asarray([
+                (amino not in {"A","G","P","C"}) and math.isfinite(phi[idx]) and math.isfinite(psi[idx])
+                for idx, amino in enumerate(_decode_amino_acids(x))
+            ], dtype=bool)
+            indices = np.flatnonzero(selected & allowed)
         if not len(indices):
-            raise ValueError("No selected VHH residues were found")
+            raise ValueError("No eligible selected VHH residues were found for the requested rotamer model")
 
         if hasattr(data, "interface_score"):
             scores = data.interface_score.detach().cpu().numpy()
@@ -1315,7 +1327,7 @@ class InterfaceQUBOBuilder:
         raw_pool_sizes_actual: list[int] = []
         for site_index, (node_index, count) in enumerate(zip(site_nodes, counts)):
             aa = amino_acids[int(node_index)]
-            if self.rotamer_mode == "dunbrack2010" and aa not in "AG":
+            if self.rotamer_mode == "dunbrack2010":
                 templates = _dunbrack_templates_for_site(
                     dunbrack_bins, aa, phi_all[int(node_index)], psi_all[int(node_index)],
                     probability_floor=self.rotamer_probability_floor,
@@ -1464,7 +1476,7 @@ class InterfaceQUBOBuilder:
             "rotamers_per_site": counts,
             "raw_rotamer_pool_sizes": raw_pool_sizes_actual,
             "rotamer_state_policy": (
-                "Dunbrack 2010 backbone-dependent chi1 mean±sigma candidates; retain 3--6 states/site under <=30 variables"
+                "Dunbrack 2010 backbone-dependent chi1 mean±sigma candidates on eligible acyclic side chains with finite phi/psi; retain 3--6 states/site under <=30 variables"
                 if self.rotamer_mode == "dunbrack2010"
                 else "legacy 6/9/12 raw chi1 sub-rotamers by flexibility; retain 3--6 states/site under <=30 variables"
             ),
