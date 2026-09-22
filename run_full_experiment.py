@@ -466,8 +466,10 @@ class Orchestrator:
             return result
         for prereq in prerequisites:
             record = self._load_stage_status(prereq)
-            optional_skip = (prereq == "smoke_check" and record
-                             and record["status"] == "skipped")
+            optional_skip = bool(
+                record and record["status"] == "skipped"
+                and not self.config.get("stages", {}).get(prereq, True)
+            )
             if not record or (record["status"] not in ("completed", "completed_with_failures") and not optional_skip):
                 result = StageResult(stage, "failed", utc_timestamp(), utc_timestamp(), None,
                                       f"Prerequisite stage '{prereq}' has not completed; refusing to start.")
