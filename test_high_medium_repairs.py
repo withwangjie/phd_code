@@ -202,3 +202,29 @@ def test_primary_statistics_filter_active_site_scale() -> None:
     assert "--primary-active-sites" in source
     assert 'get("active_sites",args.primary_active_sites)' in source
     assert "primary_active_sites=args.primary_active_sites" in source
+
+
+
+def test_methods_evidence_register_covers_formal_design() -> None:
+    source=Path("METHODS_EVIDENCE.md").read_text(encoding="utf-8")
+    for token in (
+        "E(n)-equivariant",
+        "Dunbrack 2010",
+        "heavy-atom distance <=5",
+        "QAOA",
+        "CVaR",
+        "FASPR",
+        "ff14SB",
+        "OpenMM",
+        "Foldseek",
+        "Simulated annealing",
+        "Study-specific preregistration",
+    ):
+        assert token in source
+
+
+def test_final_report_embeds_methods_references() -> None:
+    source=inspect.getsource(full)
+    assert "METHODS_EVIDENCE.md" in source
+    assert "section_literature_basis" in source
+    assert "The primary p=2 and alpha=0.1 values remain preregistered study choices" in source
