@@ -6,14 +6,14 @@ from pathlib import Path
 
 import pytest
 
-from run_real_complex_pilot import _load_frozen_target_ids, _reconcile_frozen_targets
+from run_real_complex_pilot import _load_frozen_targets, _load_frozen_target_ids, _reconcile_frozen_targets
 
 
 def test_load_frozen_target_ids_accepts_selected_targets_schema(tmp_path: Path) -> None:
     path = tmp_path / "selected_targets.json"
     path.write_text(json.dumps([
-        {"target": "4ABC"},
-        {"pdb_id": "5Def"},
+        {"target": "4ABC", "source_id": "src-a", "graph_path": "graphs/test/a.pt", "graph_sha256": "a"*64},
+        {"pdb_id": "5Def", "source_id": "src-b", "graph_path": "graphs/test/b.pt", "graph_sha256": "b"*64},
     ]), encoding="utf-8")
     assert _load_frozen_target_ids(path) == ["4abc", "5def"]
 
@@ -46,3 +46,28 @@ def test_reconcile_frozen_targets_rejects_target_outside_freeze() -> None:
 def test_reconcile_frozen_targets_rejects_failure_not_selected() -> None:
     with pytest.raises(ValueError, match="outside execution-selected set"):
         _reconcile_frozen_targets(["4abc", "5def"], {"4abc"}, {"5def"})
+
+
+def test_frozen_target_records_preserve_exact_graph_identity(tmp_path: Path) -> None:
+    path = tmp_path / "selected_targets.json"
+    path.write_text(json.dumps([{
+        "target": "4ABC",
+        "source_id": "source-1",
+        "graph_path": "graphs\\test_snac_hard\\sample.pt",
+        "graph_sha256": "ABCDEF",
+    }]), encoding="utf-8")
+    records = _load_frozen_targets(path)
+    assert records == [{
+        "target": "4abc",
+        "source_id": "source-1",
+        "graph_path": "graphs/test_snac_hard/sample.pt",
+        "graph_sha256": "abcdef",
+        "legacy_pdb_only": False,
+    }]
+
+
+def test_structured_frozen_target_requires_graph_identity(tmp_path: Path) -> None:
+    path = tmp_path / "selected_targets.json"
+    path.write_text(json.dumps([{"target": "4ABC", "source_id": "source-1"}]), encoding="utf-8")
+    with pytest.raises(ValueError, match="graph identity"):
+        _load_frozen_targets(path)
