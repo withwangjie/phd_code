@@ -755,6 +755,8 @@ class Orchestrator:
                 "--relax-iterations", str(cfg.get("relax_iterations", 200)),
                 "--candidate-relax-iterations", str(cfg.get("candidate_relax_iterations", 100)),
                 "--loop-relax-iterations", str(cfg.get("loop_relax_iterations", 100)),
+                "--min-perturb-degrees", str(cfg.get("min_perturb_degrees", 40.0)),
+                "--max-perturb-degrees", str(cfg.get("max_perturb_degrees", 120.0)),
                 "--eval-shots", str(cfg.get("eval_shots", 500)),
                 "--seeds", *[str(s) for s in cfg.get("seeds", [42, 43, 44])],
                 # (requirement #2) --master-seed lets run_real_complex_pilot.py
