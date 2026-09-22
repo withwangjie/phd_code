@@ -12,10 +12,10 @@ prediction.
 
 1. **Leakage-controlled data construction**
    - Interface labels: cross-partner heavy-atom contact < 5 A, following antibody-antigen/CAPRI-style contact definitions [R3,R4].
-   - Graph edges: intra-chain CA radius < 8 A plus fixed cross-partner KNN. The 8 A radius and KNN k are study-specific graph-construction choices used to avoid deterministic label leakage; they are not claimed as literature-optimal values.
+   - Graph edges: intra-chain CA radius < 8 A plus fixed cross-partner KNN. An 8 A C-alpha residue-graph cutoff has direct protein-GNN precedent [R22]; the cross-partner KNN degree k=3 remains a study-specific leakage-control choice rather than a literature-optimal constant.
    - EGNN train/validation split: layered connected components. Complexes are
-     joined if VHH full-chain identity >=80%, CDR-H3 identity >=50%, or
-     antigen identity >=30% with >=70% minimum length coverage; no random 90/10 split.
+     joined if VHH full-chain identity >=80% [R24], CDR-H3 identity >=50% [R23], or
+     antigen identity >=30% with >=70% minimum length coverage [R25]; no random 90/10 split.
 
 2. **Antigen-conditioned Active-site selection**
    - E(n)-equivariant EGNN [R1] provides residue-level interface probabilities.
@@ -34,7 +34,7 @@ prediction.
      calibrated to Amber delta-E using training complexes only, with frozen
      coefficients for validation/test.
    - 3--6 states per Active residue are retained under a global <=30-variable
-     budget. The rotamer representation is literature grounded [R2,R10-R12], while the 3--6 retention rule and <=30-bit cap are study-specific preregistered resource constraints.
+     budget. Adaptive residue-dependent coarse rotamer counts including 1/3/6-state schemes have direct precedent [R26]; this study's minimum of 3 states and <=30-bit global cap remain preregistered resource constraints.
    - Formal quantum-classical scaling axis: 4, 6, 8, and 10 Active residues. Six sites remains the preregistered primary confirmatory/all-atom size; the other sizes are scaling conditions, not literature-defined standards.
 
 4. **Constrained discrete optimization**
@@ -42,7 +42,7 @@ prediction.
    - QAOA follows the hybrid variational framework of Farhi et al. [R7]; protein/peptide quantum-optimization precedent is provided by [R16-R18].
    - XY-mixer QAOA preserves local Hamming weight and therefore feasibility.
    - Classical baselines include exact feasible-state enumeration and simulated annealing [R13].
-   - Mean-energy and finite-shot CVaR objectives are compared; CVaR is supported by [R8]. The primary alpha=0.1 remains a study-specific preregistered value checked by development-only sensitivity analysis.
+   - Mean-energy and finite-shot CVaR objectives are compared. CVaR is supported by [R8], which explicitly evaluates alpha=0.10 and recommends approximately 0.1-0.25 as a useful empirical range; alpha=0.1 is therefore literature-supported but still preregistered and sensitivity-tested here.
 
 5. **Structure-level validation**
    - Solver assignments are reconstructed as side-chain conformations.
