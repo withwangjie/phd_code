@@ -1865,11 +1865,19 @@ class Orchestrator:
                     "--faspr",str(faspr),"--phenix-clashscore",str(phenix),
                     "--out-dir",str(out),
                     "--timeout-seconds",str(structural.get("timeout_seconds",1800)),
+                    "--expected-seeds",*[str(v) for v in self.config["structure_experiment"].get("seeds",[42,43,44,45,46])],
                 ]
                 rc,log=self._run_subprocess("external_structure_baselines",argv)
                 logs.append(str(log));argvs.append(argv)
-                if rc!=0 or not (out/"external_baseline_metrics.csv").is_file():
+                baseline_summary=out/"run_summary.json"
+                if rc!=0 or not (out/"external_baseline_metrics.csv").is_file() or not baseline_summary.is_file():
                     failures.append(f"External structural baselines failed (exit={rc}; see {log})")
+                else:
+                    summary=json.loads(baseline_summary.read_text(encoding="utf-8"))
+                    if summary.get("failures"):
+                        failures.append(
+                            f"External structural baselines contain {len(summary['failures'])} failures"
+                        )
 
         status="completed" if not failures else "failed"
         return StageResult(
