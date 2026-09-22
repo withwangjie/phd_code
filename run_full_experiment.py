@@ -47,6 +47,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import platform
 import shutil
@@ -502,6 +503,11 @@ class Orchestrator:
             "--workers", str(qf_cfg["graph_build"].get("workers", 2)),
             "--audit-dir", str(self.run_dir / "audit"),
             "--data-root", str(resolve_path(self.config, self.config["paths"]["data_root"])),
+            "--identity-threshold", str(qf_cfg.get("identity_threshold", 0.40)),
+            "--interface-label-cutoff", str(qf_cfg["graph_build"].get("interface_label_cutoff_angstrom", 5.0)),
+            "--intra-chain-ca-cutoff", str(qf_cfg["graph_build"].get("intra_chain_ca_cutoff_angstrom", 8.0)),
+            "--cross-partner-knn-k", str(qf_cfg["graph_build"].get("cross_partner_knn_k", 3)),
+            "--min-interface-residues", str(qf_cfg["graph_build"].get("min_interface_residues", 15)),
         ]
         if qf_cfg["graph_build"].get("no_cap", True):
             graph_argv += ["--no-cap", "--partition-seed", str(streams["partition"])]
@@ -559,6 +565,9 @@ class Orchestrator:
             "--out-dir", str(validation_dir),
             "--targets", str(vq_cfg.get("target_count", 0)),
             "--sites", str(vq_cfg.get("sites", 6)),
+            "--identity-threshold", str(qf_cfg.get("identity_threshold", 0.40)),
+            "--antigen-proximity-scale", str(self.config.get("structure_experiment", {}).get("antigen_proximity_scale_angstrom", 6.0)),
+            "--contact-ca-cutoff", str(self.config.get("structure_experiment", {}).get("contact_ca_cutoff_angstrom", 8.0)),
             "--seeds", str(streams["perturb"]),
             "--master-seed", str(self.config["master_seed"]),
             "--pruning", bootstrap_pruning,
@@ -589,6 +598,12 @@ class Orchestrator:
     def stage_egnn_train(self) -> StageResult:
         started = utc_timestamp()
         cfg = self.config["egnn_train"]
+        split_threshold = float(cfg.get("identity_threshold", self.config["queue_freeze"].get("identity_threshold", 0.40)))
+        queue_threshold = float(self.config["queue_freeze"].get("identity_threshold", 0.40))
+        if not math.isclose(split_threshold, queue_threshold, rel_tol=0.0, abs_tol=1e-12):
+            raise ValueError(
+                f"Identity-threshold mismatch: queue_freeze={queue_threshold}, egnn_train={split_threshold}"
+            )
         dataset_dir = self.dataset_dir()
         checkpoint_dir = self.checkpoint_dir()
         streams = derive_streams(self.config["master_seed"])
@@ -604,6 +619,7 @@ class Orchestrator:
             "--batch-size", str(cfg.get("batch_size", 2)),
             "--hidden-dim", str(cfg.get("hidden_dim", 32)),
             "--learning-rate", str(cfg.get("learning_rate", 1e-3)),
+            "--identity-threshold", str(split_threshold),
             "--device", cfg.get("device", "auto"),
             "--threads", str(cfg.get("threads", 16)),
             "--num-workers", str(cfg.get("num_workers", 8)),
@@ -648,12 +664,24 @@ class Orchestrator:
             "--out-dir", str(out_dir),
             "--seeds", *[str(s) for s in repeat_seeds],
             "--master-seed", str(self.config["master_seed"]),
-            "--pruning", *cfg.get("pruning", ["egnn", "contact", "cdr", "random"]),
+            "--pruning", *cfg.get("pruning", ["egnn", "contact", "distance", "cdr", "random"]),
             "--radii", *[str(r) for r in cfg.get("radii", [6.0, 10.0])],
             "--depths", *[str(d) for d in cfg.get("depths", [1, 2, 3])],
             "--max-evals", *[str(m) for m in cfg.get("max_evals", [90, 300])],
             "--active-sites", str(cfg.get("active_sites", 6)),
             "--antigen-guidance-weight", str(cfg.get("antigen_guidance_weight", 0.25)),
+            "--antigen-proximity-scale", str(cfg.get("antigen_proximity_scale_angstrom", 6.0)),
+            "--contact-ca-cutoff", str(cfg.get("contact_ca_cutoff_angstrom", 8.0)),
+            "--nonbonded-cutoff", str(cfg.get("coarse_force_field", {}).get("cutoff_angstrom", 8.0)),
+            "--softcore-delta", str(cfg.get("coarse_force_field", {}).get("softcore_delta_angstrom", 0.5)),
+            "--hard-core-fraction", str(cfg.get("coarse_force_field", {}).get("hard_core_fraction", 0.72)),
+            "--hard-sphere-penalty", str(cfg.get("coarse_force_field", {}).get("hard_sphere_penalty", 25.0)),
+            "--lj-repulsion-cap", str(cfg.get("coarse_force_field", {}).get("lj_repulsion_cap", 50.0)),
+            "--lj-attraction-cap", str(cfg.get("coarse_force_field", {}).get("lj_attraction_cap", 5.0)),
+            "--coulomb-cap", str(cfg.get("coarse_force_field", {}).get("coulomb_cap", 20.0)),
+            "--dielectric-base", str(cfg.get("coarse_force_field", {}).get("dielectric_base", 4.0)),
+            "--dielectric-slope", str(cfg.get("coarse_force_field", {}).get("dielectric_slope", 2.0)),
+            "--thermal-energy-kcal", str(cfg.get("coarse_force_field", {}).get("thermal_energy_kcal", 0.593)),
             "--outputs", *[str(o) for o in cfg.get("outputs", [10, 30, 100, 300, 1000])],
             "--qaoa-objective", *cfg.get("qaoa_objective", ["mean", "cvar"]),
             "--qaoa-restarts", *[str(r) for r in cfg.get("qaoa_restarts", [1, 4])],
@@ -730,6 +758,9 @@ class Orchestrator:
                 "--relax-iterations", str(cfg.get("relax_iterations", 200)),
                 "--candidate-relax-iterations", str(cfg.get("candidate_relax_iterations", 100)),
                 "--antigen-guidance-weight", str(cfg.get("antigen_guidance_weight", 0.25)),
+                "--antigen-proximity-scale", str(cfg.get("antigen_proximity_scale_angstrom", 6.0)),
+                "--contact-ca-cutoff", str(cfg.get("contact_ca_cutoff_angstrom", 8.0)),
+                "--identity-threshold", str(qf_cfg.get("identity_threshold", 0.40)),
                 "--loop-relax-iterations", str(cfg.get("loop_relax_iterations", 100)),
                 "--eval-shots", str(cfg.get("eval_shots", 500)),
                 "--seeds", *[str(s) for s in cfg.get("seeds", [42, 43, 44])],
