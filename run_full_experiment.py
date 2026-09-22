@@ -1001,6 +1001,7 @@ class Orchestrator:
             flags = [
                 "--outputs", str(cfg.get("outputs", 1000)),
                 "--max-evals", str(cfg.get("max_evals", 90)),
+                "--perturbation-mode", str(cfg.get("perturbation_mode", "multi_chi")),
                 "--relax-iterations", str(cfg.get("relax_iterations", 200)),
                 "--candidate-relax-iterations", str(cfg.get("candidate_relax_iterations", 100)),
                 "--antigen-guidance-weight", str(cfg.get("antigen_guidance_weight", 0.25)),
