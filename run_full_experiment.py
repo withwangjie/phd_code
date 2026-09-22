@@ -189,15 +189,15 @@ def _validate_scientific_config(config: Dict[str, Any]) -> None:
     structure = config.get("structure_experiment", {}) or {}
     validation = qf.get("validation_queue", {}) or {}
 
-    identity = float(qf.get("identity_threshold", 0.40))
-    train_identity = float(train.get("identity_threshold", identity))
-    if not 0.0 < identity < 1.0:
-        raise ValueError("queue_freeze.identity_threshold must be in (0,1)")
-    if not math.isclose(identity, train_identity, rel_tol=0.0, abs_tol=1e-12):
-        raise ValueError(
-            f"Identity threshold must be shared across dataset/EGNN/validation: "
-            f"queue_freeze={identity}, egnn_train={train_identity}"
-        )
+    homology = qf.get("homology_isolation", {}) or {}
+    required_homology = {
+        "vhh_full_chain_identity": float(homology.get("vhh_full_chain_identity", 0.80)),
+        "cdr_h3_identity": float(homology.get("cdr_h3_identity", 0.50)),
+        "antigen_identity": float(homology.get("antigen_identity", 0.30)),
+        "antigen_min_length_coverage": float(homology.get("antigen_min_length_coverage", 0.70)),
+    }
+    if any(not 0.0 < value <= 1.0 for value in required_homology.values()):
+        raise ValueError(f"homology_isolation values must lie in (0,1]: {required_homology}")
 
     positive_graph = {
         "interface_label_cutoff_angstrom": float(graph.get("interface_label_cutoff_angstrom", 5.0)),
@@ -586,7 +586,7 @@ class Orchestrator:
             "--workers", str(qf_cfg["graph_build"].get("workers", 2)),
             "--audit-dir", str(self.run_dir / "audit"),
             "--data-root", str(resolve_path(self.config, self.config["paths"]["data_root"])),
-            "--identity-threshold", str(qf_cfg.get("identity_threshold", 0.40)),
+            "--cdr-h3-identity-threshold", str(qf_cfg["homology_isolation"].get("cdr_h3_identity", 0.50)),
             "--interface-label-cutoff", str(qf_cfg["graph_build"].get("interface_label_cutoff_angstrom", 5.0)),
             "--intra-chain-ca-cutoff", str(qf_cfg["graph_build"].get("intra_chain_ca_cutoff_angstrom", 8.0)),
             "--cross-partner-knn-k", str(qf_cfg["graph_build"].get("cross_partner_knn_k", 3)),
@@ -648,7 +648,10 @@ class Orchestrator:
             "--out-dir", str(validation_dir),
             "--targets", str(vq_cfg.get("target_count", 0)),
             "--sites", str(vq_cfg.get("sites", 6)),
-            "--identity-threshold", str(qf_cfg.get("identity_threshold", 0.40)),
+            "--vhh-identity-threshold", str(qf_cfg["homology_isolation"].get("vhh_full_chain_identity", 0.80)),
+            "--cdr-h3-identity-threshold", str(qf_cfg["homology_isolation"].get("cdr_h3_identity", 0.50)),
+            "--antigen-identity-threshold", str(qf_cfg["homology_isolation"].get("antigen_identity", 0.30)),
+            "--antigen-min-length-coverage", str(qf_cfg["homology_isolation"].get("antigen_min_length_coverage", 0.70)),
             "--antigen-proximity-scale", str(self.config.get("structure_experiment", {}).get("antigen_proximity_scale_angstrom", 6.0)),
             "--contact-ca-cutoff", str(self.config.get("structure_experiment", {}).get("contact_ca_cutoff_angstrom", 8.0)),
             "--seeds", str(streams["perturb"]),
@@ -681,12 +684,7 @@ class Orchestrator:
     def stage_egnn_train(self) -> StageResult:
         started = utc_timestamp()
         cfg = self.config["egnn_train"]
-        split_threshold = float(cfg.get("identity_threshold", self.config["queue_freeze"].get("identity_threshold", 0.40)))
-        queue_threshold = float(self.config["queue_freeze"].get("identity_threshold", 0.40))
-        if not math.isclose(split_threshold, queue_threshold, rel_tol=0.0, abs_tol=1e-12):
-            raise ValueError(
-                f"Identity-threshold mismatch: queue_freeze={queue_threshold}, egnn_train={split_threshold}"
-            )
+        homology = self.config["queue_freeze"]["homology_isolation"]
         dataset_dir = self.dataset_dir()
         checkpoint_dir = self.checkpoint_dir()
         streams = derive_streams(self.config["master_seed"])
@@ -704,7 +702,10 @@ class Orchestrator:
             "--learning-rate", str(cfg.get("learning_rate", 1e-3)),
             "--weight-decay", str(cfg.get("weight_decay", 1e-5)),
             "--gradient-clip", str(cfg.get("gradient_clip", 5.0)),
-            "--identity-threshold", str(split_threshold),
+            "--vhh-identity-threshold", str(homology.get("vhh_full_chain_identity", 0.80)),
+            "--cdr-h3-identity-threshold", str(homology.get("cdr_h3_identity", 0.50)),
+            "--antigen-identity-threshold", str(homology.get("antigen_identity", 0.30)),
+            "--antigen-min-length-coverage", str(homology.get("antigen_min_length_coverage", 0.70)),
             "--device", cfg.get("device", "auto"),
             "--threads", str(cfg.get("threads", 16)),
             "--num-workers", str(cfg.get("num_workers", 8)),
@@ -756,7 +757,10 @@ class Orchestrator:
             "--depths", *[str(d) for d in cfg.get("depths", [1, 2, 3])],
             "--max-evals", *[str(m) for m in cfg.get("max_evals", [90, 300])],
             "--active-sites", str(cfg.get("active_sites", 6)),
-            "--identity-threshold", str(self.config["queue_freeze"].get("identity_threshold", 0.40)),
+            "--vhh-identity-threshold", str(self.config["queue_freeze"]["homology_isolation"].get("vhh_full_chain_identity", 0.80)),
+            "--cdr-h3-identity-threshold", str(self.config["queue_freeze"]["homology_isolation"].get("cdr_h3_identity", 0.50)),
+            "--antigen-identity-threshold", str(self.config["queue_freeze"]["homology_isolation"].get("antigen_identity", 0.30)),
+            "--antigen-min-length-coverage", str(self.config["queue_freeze"]["homology_isolation"].get("antigen_min_length_coverage", 0.70)),
             "--antigen-guidance-weight", str(cfg.get("antigen_guidance_weight", 0.25)),
             "--antigen-proximity-scale", str(cfg.get("antigen_proximity_scale_angstrom", 6.0)),
             "--contact-ca-cutoff", str(cfg.get("contact_ca_cutoff_angstrom", 8.0)),
@@ -848,7 +852,10 @@ class Orchestrator:
                 "--antigen-guidance-weight", str(cfg.get("antigen_guidance_weight", 0.25)),
                 "--antigen-proximity-scale", str(cfg.get("antigen_proximity_scale_angstrom", 6.0)),
                 "--contact-ca-cutoff", str(cfg.get("contact_ca_cutoff_angstrom", 8.0)),
-                "--identity-threshold", str(qf_cfg.get("identity_threshold", 0.40)),
+                "--vhh-identity-threshold", str(qf_cfg["homology_isolation"].get("vhh_full_chain_identity", 0.80)),
+                "--cdr-h3-identity-threshold", str(qf_cfg["homology_isolation"].get("cdr_h3_identity", 0.50)),
+                "--antigen-identity-threshold", str(qf_cfg["homology_isolation"].get("antigen_identity", 0.30)),
+                "--antigen-min-length-coverage", str(qf_cfg["homology_isolation"].get("antigen_min_length_coverage", 0.70)),
                 "--loop-relax-iterations", str(cfg.get("loop_relax_iterations", 100)),
                 "--eval-shots", str(cfg.get("eval_shots", 500)),
                 "--seeds", *[str(s) for s in cfg.get("seeds", [42, 43, 44])],
