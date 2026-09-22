@@ -57,6 +57,7 @@ import psutil
 import torch
 import yaml
 import openmm as mm
+from openmm import unit
 
 from subgraph_to_qubo import _openmm_context
 
@@ -93,7 +94,7 @@ force.addParticle(0, [])
 system.addForce(force)
 integrator = mm.VerletIntegrator(0.001)
 context = _openmm_context(mm, system, integrator)
-context.setPositions([[0.1, 0.0, 0.0]])
+context.setPositions([mm.Vec3(0.1, 0.0, 0.0)] * unit.nanometer)
 state = context.getState(getEnergy=True)
 energy = state.getPotentialEnergy()
 platform_name = context.getPlatform().getName()
