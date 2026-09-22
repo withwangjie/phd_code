@@ -349,6 +349,35 @@ def section_search_performance(ctx: ReportContext) -> List[str]:
         lines += ["`qc_benchmark/metrics.csv` is empty or missing.", ""]
         return lines
 
+    calibration_cfg=((ctx.frozen_config.get("qc_benchmark",{}) or {}).get("energy_calibration",{}) or {})
+    calibration_raw=calibration_cfg.get("calibration_file","calibration/coarse_to_amber.json")
+    calibration_path=Path(calibration_raw)
+    if not calibration_path.is_absolute():
+        calibration_path=ctx.run_dir/calibration_path
+    calibration=_read_json(calibration_path) or {}
+    lines.append("### 3.0 Training-only coarse-to-Amber calibration")
+    lines.append("")
+    if calibration:
+        lines.append(
+            f"- Training complexes={calibration.get('n_train_complexes')}; samples={calibration.get('n_train_samples')}; "
+            f"CV RMSE={_fmt(calibration.get('cv_rmse_kcal'))} kcal/mol; "
+            f"CV MAE={_fmt(calibration.get('cv_mae_kcal'))}; "
+            f"CV R²={_fmt(calibration.get('cv_r2'))}; "
+            f"CV Spearman={_fmt(calibration.get('cv_spearman'))}."
+        )
+        lines.append(
+            f"- Uncalibrated RMSE={_fmt(calibration.get('uncalibrated_rmse_kcal'))}; "
+            f"uncalibrated Spearman={_fmt(calibration.get('uncalibrated_spearman'))}; "
+            f"RMSE improvement={_fmt(calibration.get('calibration_rmse_improvement_kcal'))} kcal/mol."
+        )
+        lines.append(
+            "- Calibration uses training complexes only, PDB-grouped cross-validation, nonnegative component "
+            "weights, and must satisfy the frozen acceptance thresholds before the formal benchmark can run."
+        )
+    else:
+        lines.append("Frozen calibration artifact is missing or unreadable.")
+    lines.append("")
+
     lines.append("### 3.1 Output-budget curve (equal OUTPUT count across solvers; not equal total compute)")
     lines.append("")
     outputs_values = sorted({r.get("outputs", "") for r in rows if r.get("outputs")}, key=lambda v: float(v))
