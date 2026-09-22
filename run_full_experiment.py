@@ -2718,6 +2718,12 @@ def write_run_inventory(run_dir: Path, results: Dict[str, StageResult]) -> None:
         "failed_stages":failed,
         "stages":stage_status,
         "artifact_inventory":"artifact_inventory.json",
+        "results_audit":"EXPERIMENT_RESULTS_AUDIT.json" if (run_dir/"EXPERIMENT_RESULTS_AUDIT.json").is_file() else None,
+        "results_audit_ok":(
+            json.loads((run_dir/"EXPERIMENT_RESULTS_AUDIT.json").read_text(encoding="utf-8")).get(
+                "all_required_results_present")
+            if (run_dir/"EXPERIMENT_RESULTS_AUDIT.json").is_file() else None
+        ),
         "final_report":"FINAL_RESEARCH_REPORT.md" if (run_dir/"FINAL_RESEARCH_REPORT.md").is_file() else None,
     })
 
@@ -2870,8 +2876,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print(f"  {stage:24s} {result.status}")
             if result.status == "failed":
                 overall_ok = False
+        audit_ok,_=audit_experiment_results(orchestrator,results)
+        if not audit_ok:
+            overall_ok=False
         write_run_inventory(run_dir,results)
         print(f"\nRun directory: {run_dir}")
+        print(f"Results audit: {run_dir/'EXPERIMENT_RESULTS_AUDIT.json'}")
         print(f"Artifact inventory: {run_dir/'artifact_inventory.json'}")
         print(f"Run summary: {run_dir/'RUN_SUMMARY.json'}")
         return 0 if overall_ok else 1
