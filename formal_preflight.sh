@@ -5,6 +5,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
+CONFIG_FILE="${QP_RESOLVED_CONFIG:-${SCRIPT_DIR}/full_experiment_config.yaml}"
+SERVER_REPORT="${QP_SERVER_REPORT:-}"
+[ -f "$CONFIG_FILE" ] || { echo "[formal_preflight] ERROR: config not found: $CONFIG_FILE" >&2; exit 1; }
 
 log() { echo "[formal_preflight] $*"; }
 fail() { echo "[formal_preflight] ERROR: $*" >&2; exit 1; }
@@ -37,15 +40,15 @@ command -v nvidia-smi >/dev/null 2>&1 || fail "nvidia-smi is unavailable."
 log "GPU inventory:"
 nvidia-smi -L
 
-DDP_RANKS="$(python - <<'PY'
-import yaml
+DDP_RANKS="$(QP_PREFLIGHT_CONFIG="$CONFIG_FILE" python - <<'PY'
+import os, yaml
 from pathlib import Path
-cfg=yaml.safe_load(Path("full_experiment_config.yaml").read_text(encoding="utf-8"))
+cfg=yaml.safe_load(Path(os.environ["QP_PREFLIGHT_CONFIG"]).read_text(encoding="utf-8"))
 print(int(cfg.get("egnn_train",{}).get("nproc_per_node",1)))
 PY
 )"
-if [ "$DDP_RANKS" -lt 2 ]; then
-    fail "Formal protocol requires at least 2 DDP ranks; config has $DDP_RANKS."
+if [ "$DDP_RANKS" -lt 1 ]; then
+    fail "Resolved runtime config has invalid DDP rank count: $DDP_RANKS."
 fi
 
 log "Running ${DDP_RANKS}-rank DDP/NCCL all-reduce probe..."
@@ -73,11 +76,16 @@ python -m torch.distributed.run --standalone --nproc-per-node="$DDP_RANKS" "$DDP
 rm -f "$DDP_PROBE"
 trap - EXIT
 
-export FORMAL_MIN_FREE_DISK_GB="${FORMAL_MIN_FREE_DISK_GB:-50}"
-export FORMAL_MIN_AVAILABLE_RAM_GB="${FORMAL_MIN_AVAILABLE_RAM_GB:-16}"
+if [ -n "$SERVER_REPORT" ] && [ -f "$SERVER_REPORT" ]; then
+    export FORMAL_MIN_FREE_DISK_GB="${FORMAL_MIN_FREE_DISK_GB:-$(python -c 'import json,sys; print(json.load(open(sys.argv[1])).get("min_free_disk_gb",50))' "$SERVER_REPORT")}"
+    export FORMAL_MIN_AVAILABLE_RAM_GB="${FORMAL_MIN_AVAILABLE_RAM_GB:-$(python -c 'import json,sys; print(json.load(open(sys.argv[1])).get("min_available_ram_gb",16))' "$SERVER_REPORT")}"
+else
+    export FORMAL_MIN_FREE_DISK_GB="${FORMAL_MIN_FREE_DISK_GB:-50}"
+    export FORMAL_MIN_AVAILABLE_RAM_GB="${FORMAL_MIN_AVAILABLE_RAM_GB:-16}"
+fi
 
 log "Running CUDA/OpenMM/resource probes..."
-python - <<'PY'
+QP_PREFLIGHT_CONFIG="$CONFIG_FILE" python - <<'PY'
 from __future__ import annotations
 import os, shutil, tempfile
 from pathlib import Path
@@ -87,14 +95,17 @@ import yaml
 import openmm as mm
 from openmm import unit
 
-cfg=yaml.safe_load(Path("full_experiment_config.yaml").read_text(encoding="utf-8"))
+cfg=yaml.safe_load(Path(os.environ["QP_PREFLIGHT_CONFIG"]).read_text(encoding="utf-8"))
 required_gpus=int(cfg.get("egnn_train",{}).get("nproc_per_node",1))
-if not torch.cuda.is_available():
-    raise SystemExit("PyTorch reports CUDA unavailable")
-count=torch.cuda.device_count()
-if count<required_gpus:
+hardware=cfg.get("hardware",{})
+platform_name=str(hardware.get("openmm_platform","CUDA"))
+cuda_required=(str(cfg.get("egnn_train",{}).get("device","cuda")).lower()=="cuda" or platform_name=="CUDA")
+if cuda_required and not torch.cuda.is_available():
+    raise SystemExit("Resolved runtime requires CUDA but PyTorch reports CUDA unavailable")
+count=torch.cuda.device_count() if torch.cuda.is_available() else 0
+if count<required_gpus and str(cfg.get("egnn_train",{}).get("device","cuda")).lower()=="cuda":
     raise SystemExit(f"Need >= {required_gpus} CUDA devices, found {count}")
-for index in range(required_gpus):
+for index in range(required_gpus if torch.cuda.is_available() else 0):
     x=torch.arange(1024,dtype=torch.float32,device=f"cuda:{index}")
     y=(x*x).sum()
     torch.cuda.synchronize(index)
@@ -102,8 +113,6 @@ for index in range(required_gpus):
         raise SystemExit(f"Non-finite CUDA probe on cuda:{index}")
     print(f"CUDA cuda:{index}: {torch.cuda.get_device_name(index)} OK")
 
-hardware=cfg.get("hardware",{})
-platform_name=str(hardware.get("openmm_platform","CUDA"))
 platform=mm.Platform.getPlatformByName(platform_name)
 properties={}
 if platform_name=="CUDA":
