@@ -236,6 +236,9 @@ def main(argv=None) -> int:
     parser.add_argument("--antigen-min-length-coverage", type=float, default=0.70)
     parser.add_argument("--seeds", type=int, nargs="+", default=[42,43,44])
     parser.add_argument("--perturbation-mode",choices=("multi_chi","chi1"),default="multi_chi")
+    parser.add_argument("--solvent-model",choices=("vacuum","gbn2"),default="vacuum")
+    parser.add_argument("--min-perturb-degrees",type=float,default=40.0)
+    parser.add_argument("--max-perturb-degrees",type=float,default=120.0)
     parser.add_argument("--outputs", type=int, default=1000)
     parser.add_argument("--max-evals", type=int, default=90)
     parser.add_argument("--relax-iterations", type=int, default=200)
@@ -255,6 +258,8 @@ def main(argv=None) -> int:
              "restricted set as a safety check -- a target can still end up excluded here, but no target "
              "outside the allowlist can ever be added.")
     parser.add_argument("--checkpoint",type=Path,default=Path('quantum-protein/checkpoints_500/best_egnn_pruning.pt'))
+    parser.add_argument("--cluster-map",type=Path,default=None,
+        help="Frozen PDB->family/structure cluster map used for eligibility and independence checks.")
     parser.add_argument("--antigen-guidance-weight",type=float,default=0.25)
     parser.add_argument("--antigen-proximity-scale",type=float,default=6.0)
     parser.add_argument("--contact-ca-cutoff",type=float,default=8.0)
@@ -296,6 +301,8 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     if not 1 <= args.sites <= 10 or args.targets < 0:
         parser.error("Require 1..10 sites and a nonnegative target count (0 = unlimited)")
+    if not 0.0 < args.min_perturb_degrees <= args.max_perturb_degrees <= 180.0:
+        parser.error("Require 0 < min-perturb-degrees <= max-perturb-degrees <= 180")
     homology = {
         "vhh_full_chain_identity": float(args.vhh_identity_threshold),
         "cdr_h3_identity": float(args.cdr_h3_identity_threshold),
@@ -537,6 +544,9 @@ def main(argv=None) -> int:
                     sample_seeds=[derive_child_seed(streams["sample"],"structure",pdb,str(s)) for s in args.seeds]
                     status=_recovery_benchmark_main(["--manifest",str(out/"prepared"/pdb/"recovery_manifest.json"),
                         "--out-dir",str(destination),"--solvent-model",args.solvent_model,
+                        "--perturbation-mode",args.perturbation_mode,
+                        "--min-perturb-degrees",str(args.min_perturb_degrees),
+                        "--max-perturb-degrees",str(args.max_perturb_degrees),
                         "--seeds",*[str(s) for s in args.seeds],
                         "--perturbation-mode",args.perturbation_mode,
                         "--optimize-seeds",*[str(s) for s in optimize_seeds],
