@@ -73,6 +73,30 @@ def _load_frozen_target_ids(path: Path) -> list[str]:
     return [r["target"] for r in _load_frozen_targets(path)]
 
 
+def _match_frozen_manifest_rows(candidates: list[dict], frozen_records: list[dict]) -> tuple[list[dict], list[str]]:
+    """Return only manifest rows matching each frozen graph identity exactly."""
+    frozen_by_id = {r["target"]: r for r in frozen_records}
+    matched: list[dict] = []
+    matched_ids: set[str] = set()
+    for row in candidates:
+        pdb = row["pdb_id"].lower()
+        frozen = frozen_by_id.get(pdb)
+        if frozen is None:
+            continue
+        if frozen.get("legacy_pdb_only"):
+            matched.append(row)
+            matched_ids.add(pdb)
+            continue
+        row_path = row["path"].replace("\\", "/")
+        if (row.get("source_id") == frozen["source_id"]
+                and row_path == frozen["graph_path"]
+                and row.get("sha256", "").lower() == frozen["graph_sha256"]):
+            matched.append(row)
+            matched_ids.add(pdb)
+    missing = sorted(set(frozen_by_id) - matched_ids)
+    return matched, missing
+
+
 def _reconcile_frozen_targets(
     frozen_target_ids: list[str],
     execution_selected_ids: set[str],
@@ -330,24 +354,8 @@ def main(argv=None) -> int:
         frozen_target_records = _load_frozen_targets(args.pdb_allowlist_file)
         frozen_target_ids = [r["target"] for r in frozen_target_records]
         frozen_target_set = set(frozen_target_ids)
-        frozen_by_id = {r["target"]: r for r in frozen_target_records}
-        matched_candidates = []
-        matched_ids = set()
-        for row in candidates:
-            pdb = row["pdb_id"].lower()
-            frozen = frozen_by_id.get(pdb)
-            if frozen is None:
-                continue
-            if frozen.get("legacy_pdb_only"):
-                matched_candidates.append(row); matched_ids.add(pdb); continue
-            row_path = row["path"].replace("\\", "/")
-            if (row.get("source_id") == frozen["source_id"]
-                    and row_path == frozen["graph_path"]
-                    and row.get("sha256", "").lower() == frozen["graph_sha256"]):
-                matched_candidates.append(row)
-                matched_ids.add(pdb)
-        missing_frozen_from_manifest = sorted(frozen_target_set - matched_ids)
-        candidates = matched_candidates
+        candidates, missing_frozen_from_manifest = _match_frozen_manifest_rows(
+            candidates, frozen_target_records)
     excluded_pdb = {x.lower() for x in args.exclude_pdb}
     if args.exclude_pdb_file:
         excluded_pdb |= {line.strip().lower() for line in args.exclude_pdb_file.read_text(encoding="utf-8").splitlines() if line.strip()}
