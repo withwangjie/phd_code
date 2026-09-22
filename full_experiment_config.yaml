@@ -196,6 +196,10 @@ egnn_train:
   batch_size: 2
   hidden_dim: 32
   learning_rate: 1.0e-3
+  weight_decay: 1.0e-5
+  gradient_clip: 5.0
+  amp: true
+  pin_memory: true
   # Bilateral VHH/antigen connected-component split threshold.
   identity_threshold: 0.40
   device: "cuda"
