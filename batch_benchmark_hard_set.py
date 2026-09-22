@@ -1193,24 +1193,42 @@ def _ablation_run_case(data: Any, scorer: Any, config: dict, args: Any, artifact
     records, raw = [], {}
     last_optimization = {}
     optimizations = {}
+    # Optimize each QAOA (objective, restart-count) variant exactly once per
+    # physical case. Output-budget curves differ only in final sampling shots;
+    # repeating the same deterministic finite-shot optimization for every
+    # outputs value wastes compute and injects wall-time jitter without
+    # changing the optimized parameters.
+    qaoa_cache = {}
     for outputs in args.outputs:
         for solver in ("qaoa", "sa", "uniform", "greedy"):
             if solver == "qaoa":
                 for qaoa_objective, qaoa_restarts in itertools.product(args.qaoa_objective, args.qaoa_restarts):
-                    start = time.perf_counter()
-                    opt = sampler.optimize_robust(max_evals=config["max_evals"], restarts=qaoa_restarts,
-                        objective=qaoa_objective, cvar_alpha=args.cvar_alpha,
-                        parameter_scale=args.parameter_scale, eval_shots=args.eval_shots,
-                        optimize_seed=optimize_seed, measurement_seed=measurement_seed)
-                    sampled = sampler.sample(opt, shots=outputs, ground_state=truth, sample_seed=sample_seed)
+                    cache_key = (qaoa_objective, qaoa_restarts)
+                    if cache_key not in qaoa_cache:
+                        optimize_start = time.perf_counter()
+                        opt = sampler.optimize_robust(
+                            max_evals=config["max_evals"], restarts=qaoa_restarts,
+                            objective=qaoa_objective, cvar_alpha=args.cvar_alpha,
+                            parameter_scale=args.parameter_scale, eval_shots=args.eval_shots,
+                            optimize_seed=optimize_seed, measurement_seed=measurement_seed)
+                        optimization_seconds = time.perf_counter() - optimize_start
+                        optimization = dict(
+                            success=opt.success, message=getattr(opt, "message", None),
+                            evaluations=opt.evaluations, history=list(opt.history),
+                            gammas=opt.gammas.tolist(), betas=opt.betas.tolist(),
+                            termination_reason=getattr(opt, "termination_reason", None))
+                        qaoa_cache[cache_key] = (opt, optimization, optimization_seconds)
+                    opt, optimization, optimization_seconds = qaoa_cache[cache_key]
+                    sample_start = time.perf_counter()
+                    sampled = sampler.sample(
+                        opt, shots=outputs, ground_state=truth, sample_seed=sample_seed)
+                    sampling_seconds = time.perf_counter() - sample_start
                     counts = dict(sampled.counts)
-                    optimization = dict(success=opt.success, message=getattr(opt, "message", None),
-                        evaluations=opt.evaluations, history=list(opt.history),
-                        gammas=opt.gammas.tolist(), betas=opt.betas.tolist(),
-                        termination_reason=getattr(opt, "termination_reason", None))
                     last_optimization = optimization
-                    # Expectation evaluations are NOT comparable to single-state energy queries.
-                    elapsed = time.perf_counter()-start
+                    # Logical solver budget remains optimization + this output
+                    # sampling cost, even though optimization is physically
+                    # reused across the output curve.
+                    elapsed = optimization_seconds + sampling_seconds
                     if sum(counts.values()) != outputs or any(s not in energies for s in counts):
                         raise AssertionError("Sample count or local one-hot constraint violated.")
                     metrics = _ablation_summarize(counts, energies, truth.energy, args.energy_window)
@@ -1219,6 +1237,9 @@ def _ablation_run_case(data: Any, scorer: Any, config: dict, args: Any, artifact
                         qaoa_objective=qaoa_objective, qaoa_restarts=qaoa_restarts, eval_shots=args.eval_shots,
                         **metrics, num_bits=len(qubo.physical_self),
                         configuration_count=truth.configuration_count, solver_seconds=elapsed,
+                        optimization_seconds=optimization_seconds,
+                        sampling_seconds=sampling_seconds,
+                        optimization_reused=(outputs != args.outputs[0]),
                         build_seconds=built-begin, oracle_seconds=oracle_seconds,
                         single_state_energy_queries=None,
                         optimizer_success=optimization.get("success"),
@@ -1230,7 +1251,10 @@ def _ablation_run_case(data: Any, scorer: Any, config: dict, args: Any, artifact
                         total_opt_shots=opt.total_opt_shots))
                     records[-1].update(budget_mode="matched_outputs", budget_seconds=None, budget_overrun_seconds=0.0)
                     key = f"qaoa_obj{qaoa_objective}_restarts{qaoa_restarts}_outputs{outputs}"
-                    optimizations[key] = optimization
+                    optimizations[key] = dict(
+                        optimization,
+                        optimization_seconds=optimization_seconds,
+                        reused_across_output_curve=True)
                     raw[key] = [{"bits":"".join(map(str,s)), "count":c} for s,c in sorted(counts.items())]
             else:
                 start = time.perf_counter()
@@ -1253,6 +1277,8 @@ def _ablation_run_case(data: Any, scorer: Any, config: dict, args: Any, artifact
                     qaoa_objective=None, qaoa_restarts=None, eval_shots=None,
                     **metrics, num_bits=len(qubo.physical_self),
                     configuration_count=truth.configuration_count, solver_seconds=elapsed,
+                    optimization_seconds=None, sampling_seconds=None,
+                    optimization_reused=None,
                     build_seconds=built-begin, oracle_seconds=oracle_seconds,
                     single_state_energy_queries=queries,
                     optimizer_success=None, optimizer_evaluations=None, termination_reason=None,
