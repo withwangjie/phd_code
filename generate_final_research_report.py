@@ -209,8 +209,9 @@ def section_data_reliability(ctx: ReportContext) -> List[str]:
     lines.append("")
 
     validation_dir = ctx.run_dir / "validation_queue"
-    eligibility = _read_json(validation_dir / "eligibility.json") or []
-    selected = _read_json(validation_dir / "selected_targets.json") or []
+    freeze_dir = validation_dir / "freeze"
+    eligibility = _read_json(freeze_dir / "eligibility.json") or []
+    selected = _read_json(freeze_dir / "selected_targets.json") or []
     excluded = [d for d in eligibility if d.get("status") == "excluded"]
     dev_pdb = ((ctx.frozen_config.get("queue_freeze", {}) or {}).get("dev_queue", {}) or {}).get("excluded_pdb", [])
     lines.append("### 1.3 Frozen, blind validation-target queue (requirement #2)")
@@ -227,7 +228,7 @@ def section_data_reliability(ctx: ReportContext) -> List[str]:
         lines.append(f"- Top exclusion reasons: {top_reasons}")
     lines.append("- Selection order: seeded-random (never ascending-structure-size), so this queue does not "
                   "inherit the historical dev pilot's smallest-first bias. Every examined PDB and its exact "
-                  "exclusion reason is preserved in `validation_queue/eligibility.json`; nothing was replaced "
+                  "exclusion reason is preserved in `validation_queue/freeze/eligibility.json`; nothing was replaced "
                   "for solver convenience after being selected.")
     # (requirement #1) Independence is never reported as a single pass/fail
     # gate: every examined candidate (selected or excluded) carries a
