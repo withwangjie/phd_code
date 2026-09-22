@@ -56,6 +56,23 @@ def sign_flip_p(values: list[float], seed: int) -> float|None:
     return (extreme+1)/(trials+1)
 
 
+def holm_adjust_named(pvalues: dict[str,float|None]) -> dict[str,float|None]:
+    """Holm step-down adjustment for the pre-registered confirmatory family."""
+    valid=sorted(
+        ((name,float(value)) for name,value in pvalues.items()
+         if value is not None and math.isfinite(float(value))),
+        key=lambda item:item[1],
+    )
+    adjusted={name:None for name in pvalues}
+    running=0.0
+    m=len(valid)
+    for rank,(name,value) in enumerate(valid):
+        candidate=min(1.0,(m-rank)*value)
+        running=max(running,candidate)
+        adjusted[name]=running
+    return adjusted
+
+
 def grouped_primary(
     rows: list[dict], cluster_map: dict[str,str], endpoint: str, contrast: str,
     resamples: int, seed: int,
@@ -310,10 +327,20 @@ def main() -> int:
     rq5=rq5_energy_structure(
         rows,cluster_map,args.primary_contrast,args.resamples,args.seed
     )
+    adjusted=holm_adjust_named({
+        "primary_structural_contrast":primary.get("p_value"),
+        "rq5_energy_structure":rq5.get("p_value"),
+    })
+    primary["p_holm_confirmatory_family"]=adjusted["primary_structural_contrast"]
+    rq5["p_holm_confirmatory_family"]=adjusted["rq5_energy_structure"]
     payload=dict(
         primary=primary,rq5=rq5,resamples=args.resamples,seed=args.seed,
         metrics_sha256=sha256(args.metrics),cluster_map_sha256=sha256(args.cluster_map),
-        multiplicity_policy="single pre-registered primary structural contrast; secondary metrics descriptive unless separately adjusted",
+        multiplicity_policy="Primary structural contrast and RQ5 form one two-hypothesis confirmatory family with Holm FWER adjustment; all other structural metrics are descriptive unless separately adjusted.",
+        confirmatory_family=dict(
+            hypotheses=["primary_structural_contrast","rq5_energy_structure"],
+            correction="Holm FWER",adjusted_p=adjusted,
+        ),
     )
     args.out_json.parent.mkdir(parents=True,exist_ok=True)
     args.out_json.write_text(json.dumps(payload,indent=2,sort_keys=True)+"\n",encoding="utf-8")
@@ -321,13 +348,15 @@ def main() -> int:
         "# Structural primary endpoint and RQ5 analysis","",
         f"Primary endpoint: `{args.primary_endpoint}`; contrast: `{args.primary_contrast}`.",
         f"Clusters: {primary['n_clusters']}; mean difference: {primary['mean_difference']}; "
-        f"95% cluster-bootstrap CI: [{primary['ci_low']}, {primary['ci_high']}]; p={primary['p_value']}.","",
+        f"95% cluster-bootstrap CI: [{primary['ci_low']}, {primary['ci_high']}]; "
+        f"raw p={primary['p_value']}; Holm p={primary.get('p_holm_confirmatory_family')}.","",
         "## Energy-to-structure transfer","",
         f"Spearman rho={rq5.get('spearman_rho')} with 95% cluster-bootstrap CI "
         f"[{rq5.get('ci_low')}, {rq5.get('ci_high')}], "
-        f"cluster-aware permutation p={rq5.get('p_value')}.",
+        f"cluster-aware permutation raw p={rq5.get('p_value')}; "
+        f"Holm p={rq5.get('p_holm_confirmatory_family')}.",
         rq5.get("interpretation",""),"",
-        "Repeated seeds are centered/averaged within target before family-cluster inference; "
+        "Repeated seeds are strictly paired by target+seed, then averaged within target before family-cluster inference; "
         "PDB rows are not treated as independent proteins.",
     ]
     args.out_md.write_text("\n".join(lines)+"\n",encoding="utf-8")
