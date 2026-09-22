@@ -172,8 +172,9 @@ def section_data_reliability(ctx: ReportContext) -> List[str]:
 
     dataset_dir = ctx.resolve_run((ctx.frozen_config.get("paths", {}) or {}).get("dataset_dir", "dataset"))
     run_summary = _read_json(dataset_dir / "run_summary.json") or {}
-    cdr_h3_threshold = float(run_summary.get("cdr_h3_identity_threshold", 0.50))
-    homology = ((ctx.frozen_config.get("queue_freeze", {}) or {}).get("homology_isolation", {}) or {})
+    summary_homology = run_summary.get("homology_isolation", {}) or {}
+    homology = summary_homology or ((ctx.frozen_config.get("queue_freeze", {}) or {}).get("homology_isolation", {}) or {})
+    cdr_h3_threshold = float(homology.get("cdr_h3_identity", 0.50))
     vhh_threshold = float(homology.get("vhh_full_chain_identity", 0.80))
     antigen_threshold = float(homology.get("antigen_identity", 0.30))
     antigen_coverage = float(homology.get("antigen_min_length_coverage", 0.70))
@@ -184,7 +185,14 @@ def section_data_reliability(ctx: ReportContext) -> List[str]:
     lines.append(f"- Admission by source: {json.dumps(run_summary.get('admission', {}))}")
     lines.append(f"- CDR-H3 >=16aa eligible pool: {run_summary.get('long_eligible', 'n/a')}; "
                   f"unique CDR sequences: {run_summary.get('unique_long_cdr', 'n/a')}; "
-                  f"{cdr_h3_threshold*100:.0f}%-CDR-H3-identity clusters: {run_summary.get('clusters', 'n/a')}.")
+                  f"{cdr_h3_threshold*100:.0f}%-CDR-H3-identity initial clusters: {run_summary.get('clusters', 'n/a')}.")
+    lines.append(
+        f"- Final layered graph-level isolation: VHH<{vhh_threshold:.2f}, "
+        f"CDR-H3<{cdr_h3_threshold:.2f}, antigen<{antigen_threshold:.2f} "
+        f"with antigen length coverage>={antigen_coverage:.2f}. "
+        f"Observed train-hard maxima: "
+        f"{json.dumps((run_summary.get('validation', {}) or {}).get('train_hard_layered_cross_max', {}))}"
+    )
     graphs = run_summary.get("graphs", "n/a")
     complete = run_summary.get("complete", None)
     lines.append(f"- Total graphs written this run: {graphs}. Pipeline-level `complete` flag: {complete}.")
