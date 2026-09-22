@@ -611,7 +611,10 @@ class Orchestrator:
             "--workers", str(qf_cfg["graph_build"].get("workers", 2)),
             "--audit-dir", str(self.run_dir / "audit"),
             "--data-root", str(resolve_path(self.config, self.config["paths"]["data_root"])),
+            "--vhh-identity-threshold", str(qf_cfg["homology_isolation"].get("vhh_full_chain_identity", 0.80)),
             "--cdr-h3-identity-threshold", str(qf_cfg["homology_isolation"].get("cdr_h3_identity", 0.50)),
+            "--antigen-identity-threshold", str(qf_cfg["homology_isolation"].get("antigen_identity", 0.30)),
+            "--antigen-min-length-coverage", str(qf_cfg["homology_isolation"].get("antigen_min_length_coverage", 0.70)),
             "--interface-label-cutoff", str(qf_cfg["graph_build"].get("interface_label_cutoff_angstrom", 5.0)),
             "--intra-chain-ca-cutoff", str(qf_cfg["graph_build"].get("intra_chain_ca_cutoff_angstrom", 8.0)),
             "--cross-partner-knn-k", str(qf_cfg["graph_build"].get("cross_partner_knn_k", 3)),
@@ -821,14 +824,37 @@ class Orchestrator:
             "--omp-threads", str(self.config.get("hardware", {}).get("cpu_threads_per_process", 2)),
         ]
         calibration_cfg = cfg.get("energy_calibration", {}) or {}
-        calibration_file = resolve_path(self.config, calibration_cfg.get("calibration_file", "calibration/coarse_to_amber.json"))
+        calibration_file = resolve_path(
+            self.config, calibration_cfg.get("calibration_file", "calibration/coarse_to_amber.json")
+        )
+        calibration_training_csv = resolve_path(
+            self.config, calibration_cfg.get("training_csv", "calibration/coarse_to_amber_train.csv")
+        )
+        if not calibration_file.is_file() and calibration_training_csv.is_file():
+            calibration_file.parent.mkdir(parents=True, exist_ok=True)
+            fit_argv = [
+                self.venv_python, "batch_benchmark_hard_set.py", "--research-ablation",
+                "--fit-energy-calibration-csv", str(calibration_training_csv),
+                "--fit-energy-calibration-out", str(calibration_file),
+                "--calibration-ridge-alpha", str(calibration_cfg.get("ridge_alpha", 1.0)),
+            ]
+            fit_returncode, fit_log = self._run_subprocess("fit_energy_calibration", fit_argv)
+            if fit_returncode != 0 or not calibration_file.is_file():
+                return StageResult(
+                    "qc_benchmark", "failed", started, utc_timestamp(), fit_returncode,
+                    f"Training-only energy calibration fit failed; see {fit_log}",
+                    fit_argv, str(fit_log), False,
+                )
         if calibration_cfg.get("require_calibrated", False):
             argv.append("--require-calibrated-energy")
         if calibration_file.is_file():
             argv += ["--energy-calibration-file", str(calibration_file)]
         elif calibration_cfg.get("require_calibrated", False):
-            return StageResult("qc_benchmark", "failed", started, utc_timestamp(), None,
-                f"Required frozen energy calibration is missing: {calibration_file}")
+            return StageResult(
+                "qc_benchmark", "failed", started, utc_timestamp(), None,
+                f"Required frozen calibration missing. Provide either {calibration_file} "
+                f"or train-only calibration rows at {calibration_training_csv}.",
+            )
         if cfg.get("time_baselines", True):
             argv.append("--time-baselines")
         returncode, log_path = self._run_subprocess("qc_benchmark", argv)
