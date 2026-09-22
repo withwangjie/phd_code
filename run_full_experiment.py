@@ -92,6 +92,7 @@ ORCHESTRATED_SCRIPTS: List[str] = [
     "audit_all_datasets.py",
     "build_final_pyg_dataset.py",
     "train_egnn_pruning.py",
+    "generate_energy_calibration_dataset.py",
     "batch_benchmark_hard_set.py",
     "run_real_complex_pilot.py",
     "generate_final_research_report.py",
@@ -109,6 +110,7 @@ STAGE_ORDER: List[str] = [
     "data_audit",
     "queue_freeze",
     "egnn_train",
+    "energy_calibration",
     "qc_benchmark",
     "structure_experiment",
     "statistics",
@@ -770,7 +772,81 @@ class Orchestrator:
                             argv, str(log_path), ok)
 
     # ================================================================
-    # Stage 5: quantum-vs-classical ablation benchmark
+    # Stage 5: TRAIN-only coarse-to-Amber energy calibration
+    # ================================================================
+    def stage_energy_calibration(self) -> StageResult:
+        started = utc_timestamp()
+        qc_cfg = self.config["qc_benchmark"]
+        cal_cfg = qc_cfg.get("energy_calibration", {}) or {}
+        rot_cfg = qc_cfg.get("rotamer_model", {}) or {}
+        ff = qc_cfg.get("coarse_force_field", {}) or {}
+        training_csv = self.run_dir / cal_cfg.get("training_csv", "calibration/coarse_to_amber_train.csv")
+        calibration_file = self.run_dir / cal_cfg.get("calibration_file", "calibration/coarse_to_amber.json")
+        provenance = training_csv.with_suffix(".provenance.json")
+        training_csv.parent.mkdir(parents=True, exist_ok=True)
+        calibration_file.parent.mkdir(parents=True, exist_ok=True)
+        rotamer_library = resolve_path(
+            self.config, rot_cfg.get("library_path", "data/rotamer/ALL.bbdep.rotamers.lib")
+        )
+        if not rotamer_library.is_file():
+            return StageResult(
+                "energy_calibration", "failed", started, utc_timestamp(), None,
+                f"Required Dunbrack library missing: {rotamer_library}",
+            )
+        argv = [
+            self.venv_python, "generate_energy_calibration_dataset.py",
+            "--dataset", str(self.dataset_dir()),
+            "--data-root", str(resolve_path(self.config, self.config["paths"]["data_root"])),
+            "--rotamer-library", str(rotamer_library),
+            "--out-csv", str(training_csv),
+            "--out-provenance", str(provenance),
+            "--assignments-per-complex", str(cal_cfg.get("assignments_per_complex", 64)),
+            "--active-sites", str(cal_cfg.get("active_sites", qc_cfg.get("active_sites", 6))),
+            "--radius", str(cal_cfg.get("radius_angstrom", qc_cfg.get("radii", [6.0])[0])),
+            "--seed", str(derive_streams(self.config["master_seed"])["partition"]),
+            "--antigen-proximity-scale", str(qc_cfg.get("antigen_proximity_scale_angstrom", 6.0)),
+            "--contact-ca-cutoff", str(qc_cfg.get("contact_ca_cutoff_angstrom", 8.0)),
+            "--nonbonded-cutoff", str(ff.get("cutoff_angstrom", 8.0)),
+            "--softcore-delta", str(ff.get("softcore_delta_angstrom", 0.5)),
+            "--hard-core-fraction", str(ff.get("hard_core_fraction", 0.72)),
+            "--hard-sphere-penalty", str(ff.get("hard_sphere_penalty", 25.0)),
+            "--lj-repulsion-cap", str(ff.get("lj_repulsion_cap", 50.0)),
+            "--lj-attraction-cap", str(ff.get("lj_attraction_cap", 5.0)),
+            "--coulomb-cap", str(ff.get("coulomb_cap", 20.0)),
+            "--dielectric-base", str(ff.get("dielectric_base", 4.0)),
+            "--dielectric-slope", str(ff.get("dielectric_slope", 2.0)),
+            "--thermal-energy-kcal", str(ff.get("thermal_energy_kcal", 0.593)),
+            "--rotamer-probability-floor", str(rot_cfg.get("probability_floor", 1e-4)),
+            "--rotamer-sigma-offsets", *[str(v) for v in rot_cfg.get("sigma_offsets", [-1.0,0.0,1.0])],
+        ]
+        max_complexes = int(cal_cfg.get("max_complexes", 0))
+        if max_complexes:
+            argv += ["--max-complexes", str(max_complexes)]
+        returncode, log_path = self._run_subprocess("energy_calibration_dataset", argv)
+        if returncode != 0 or not training_csv.is_file() or not provenance.is_file():
+            return StageResult(
+                "energy_calibration", "failed", started, utc_timestamp(), returncode,
+                f"Calibration dataset generation failed; see {log_path}", argv, str(log_path), False,
+            )
+
+        fit_argv = [
+            self.venv_python, "batch_benchmark_hard_set.py", "--research-ablation",
+            "--fit-energy-calibration-csv", str(training_csv),
+            "--fit-energy-calibration-out", str(calibration_file),
+            "--calibration-ridge-alpha", str(cal_cfg.get("ridge_alpha", 1.0)),
+        ]
+        fit_returncode, fit_log = self._run_subprocess("energy_calibration_fit", fit_argv)
+        ok = fit_returncode == 0 and calibration_file.is_file() and calibration_file.stat().st_size > 0
+        return StageResult(
+            "energy_calibration", "completed" if ok else "failed", started, utc_timestamp(),
+            fit_returncode,
+            (f"Training-only calibration frozen at {calibration_file}" if ok
+             else f"Calibration fit failed; see {fit_log}"),
+            fit_argv, str(fit_log), ok,
+        )
+
+    # ================================================================
+    # Stage 6: quantum-vs-classical ablation benchmark
     # ================================================================
     def stage_qc_benchmark(self) -> StageResult:
         started = utc_timestamp()
@@ -832,27 +908,9 @@ class Orchestrator:
             "--omp-threads", str(self.config.get("hardware", {}).get("cpu_threads_per_process", 2)),
         ]
         calibration_cfg = cfg.get("energy_calibration", {}) or {}
-        calibration_file = resolve_path(
-            self.config, calibration_cfg.get("calibration_file", "calibration/coarse_to_amber.json")
+        calibration_file = self.run_dir / calibration_cfg.get(
+            "calibration_file", "calibration/coarse_to_amber.json"
         )
-        calibration_training_csv = resolve_path(
-            self.config, calibration_cfg.get("training_csv", "calibration/coarse_to_amber_train.csv")
-        )
-        if not calibration_file.is_file() and calibration_training_csv.is_file():
-            calibration_file.parent.mkdir(parents=True, exist_ok=True)
-            fit_argv = [
-                self.venv_python, "batch_benchmark_hard_set.py", "--research-ablation",
-                "--fit-energy-calibration-csv", str(calibration_training_csv),
-                "--fit-energy-calibration-out", str(calibration_file),
-                "--calibration-ridge-alpha", str(calibration_cfg.get("ridge_alpha", 1.0)),
-            ]
-            fit_returncode, fit_log = self._run_subprocess("fit_energy_calibration", fit_argv)
-            if fit_returncode != 0 or not calibration_file.is_file():
-                return StageResult(
-                    "qc_benchmark", "failed", started, utc_timestamp(), fit_returncode,
-                    f"Training-only energy calibration fit failed; see {fit_log}",
-                    fit_argv, str(fit_log), False,
-                )
         if calibration_cfg.get("require_calibrated", False):
             argv.append("--require-calibrated-energy")
         if calibration_file.is_file():
@@ -860,8 +918,7 @@ class Orchestrator:
         elif calibration_cfg.get("require_calibrated", False):
             return StageResult(
                 "qc_benchmark", "failed", started, utc_timestamp(), None,
-                f"Required frozen calibration missing. Provide either {calibration_file} "
-                f"or train-only calibration rows at {calibration_training_csv}.",
+                f"Required run-specific frozen calibration missing: {calibration_file}",
             )
         if cfg.get("time_baselines", True):
             argv.append("--time-baselines")
@@ -1108,7 +1165,10 @@ class Orchestrator:
         results["data_audit"] = self.run_stage("data_audit", ["env_check", "smoke_check"], self.stage_data_audit)
         results["queue_freeze"] = self.run_stage("queue_freeze", ["data_audit"], self.stage_queue_freeze)
         results["egnn_train"] = self.run_stage("egnn_train", ["queue_freeze"], self.stage_egnn_train)
-        results["qc_benchmark"] = self.run_stage("qc_benchmark", ["egnn_train"], self.stage_qc_benchmark)
+        results["energy_calibration"] = self.run_stage(
+            "energy_calibration", ["queue_freeze"], self.stage_energy_calibration)
+        results["qc_benchmark"] = self.run_stage(
+            "qc_benchmark", ["egnn_train", "energy_calibration"], self.stage_qc_benchmark)
         results["structure_experiment"] = self.run_stage(
             "structure_experiment", ["queue_freeze", "egnn_train"], self.stage_structure_experiment)
         results["statistics"] = self.run_stage(
