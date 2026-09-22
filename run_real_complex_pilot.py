@@ -371,31 +371,69 @@ def main(argv=None) -> int:
     training = [r for r in rows if r["split"] == "train"]
     candidates = sorted([r for r in rows if r["split"] == "test_snac_hard"], key=lambda r: (int(r["nodes"]),r["pdb_id"],r["path"]))
     frozen_target_metadata={}
+    frozen_target_ids=set()
+    frozen_identity_missing=[]
+    formal_frozen_execution=bool(
+        args.pdb_allowlist_file and args.queue_role=="validation" and not args.prepare_only
+    )
     if args.pdb_allowlist_file:
         raw_allowlist = json.loads(args.pdb_allowlist_file.read_text(encoding="utf-8"))
-        allowlist=set()
-        for entry in raw_allowlist:
+        if not isinstance(raw_allowlist,list) or not raw_allowlist:
+            raise ValueError("Frozen target allowlist must be a nonempty JSON list")
+        for index,entry in enumerate(raw_allowlist):
             if isinstance(entry,str):
-                pdb=entry.lower()
-                frozen_target_metadata[pdb]={}
+                pdb=entry.strip().lower()
+                metadata={}
             elif isinstance(entry,dict):
-                pdb=str(entry.get("target") or entry.get("pdb_id") or "").lower()
-                if not pdb:
-                    raise ValueError("Allowlist dict entry lacks target/pdb_id")
-                frozen_target_metadata[pdb]=entry
+                pdb=str(entry.get("target") or entry.get("pdb_id") or "").strip().lower()
+                metadata=dict(entry)
             else:
                 raise ValueError("Allowlist entries must be PDB strings or dicts")
-            allowlist.add(pdb)
-        candidates = [r for r in candidates if r["pdb_id"].lower() in allowlist]
-        if args.queue_role=="validation" and not args.prepare_only:
-            missing_pool=[
-                pdb for pdb in sorted(allowlist)
-                if not frozen_target_metadata.get(pdb,{}).get("eligibility_compatible_residues")
-            ]
-            if missing_pool:
+            if not pdb:
+                raise ValueError(f"Allowlist entry {index} lacks target/pdb_id")
+            if pdb in frozen_target_ids:
+                raise ValueError(f"Duplicate frozen target PDB ID: {pdb}")
+            frozen_target_ids.add(pdb)
+            frozen_target_metadata[pdb]=metadata
+
+        if formal_frozen_execution:
+            required_identity=("source_id","graph_path","graph_sha256")
+            malformed=[]
+            for pdb in sorted(frozen_target_ids):
+                metadata=frozen_target_metadata[pdb]
+                missing=[
+                    key for key in required_identity
+                    if not isinstance(metadata.get(key),str) or not metadata.get(key).strip()
+                ]
+                if not metadata.get("eligibility_compatible_residues"):
+                    missing.append("eligibility_compatible_residues")
+                if missing:
+                    malformed.append((pdb,missing))
+            if malformed:
                 raise ValueError(
-                    f"Frozen validation allowlist lacks compatible-residue pools: {missing_pool[:10]}"
+                    "Formal validation freeze lacks exact graph identity/compatible-residue fields: "
+                    + "; ".join(f"{pdb}:{','.join(fields)}" for pdb,fields in malformed[:10])
                 )
+
+            matched=[]
+            matched_ids=set()
+            for row in candidates:
+                pdb=row["pdb_id"].lower()
+                frozen=frozen_target_metadata.get(pdb)
+                if frozen is None:
+                    continue
+                row_path=row["path"].replace("\\","/")
+                if (
+                    row.get("source_id")==frozen["source_id"]
+                    and row_path==str(frozen["graph_path"]).replace("\\","/")
+                    and row.get("sha256","").lower()==str(frozen["graph_sha256"]).lower()
+                ):
+                    matched.append(row)
+                    matched_ids.add(pdb)
+            frozen_identity_missing=sorted(frozen_target_ids-matched_ids)
+            candidates=matched
+        else:
+            candidates=[r for r in candidates if r["pdb_id"].lower() in frozen_target_ids]
     excluded_pdb = {x.lower() for x in args.exclude_pdb}
     if args.exclude_pdb_file:
         excluded_pdb |= {line.strip().lower() for line in args.exclude_pdb_file.read_text(encoding="utf-8").splitlines() if line.strip()}
@@ -458,6 +496,13 @@ def main(argv=None) -> int:
                 raise ValueError(f"Cluster map missing training PDBs, e.g. {missing[:10]}")
             train_clusters={cluster_map[p] for p in train_pdb}
         selected=[]; decisions=[]; selected_vhh=[]; selected_antigen=[]; selected_cdr=[]; selected_clusters=set(); seen=set()
+        for pdb in frozen_identity_missing:
+            decisions.append(dict(
+                pdb_id=pdb,status="excluded",
+                reason="Frozen graph identity absent or mismatched in current test_snac_hard manifest",
+                development_exposed=pdb in dev_exposed_pdb,
+                independence_status="frozen_graph_identity_mismatch",
+            ))
         for row in tqdm(candidates,desc="Real complex eligibility"):
             if args.targets and len(selected)>=args.targets: break
             pdb=row["pdb_id"].lower()
@@ -594,7 +639,8 @@ def main(argv=None) -> int:
                     del check
                 config.update(target=pdb,native_structure=str(work/"native.cif"),
                     candidate_relax_iterations=args.candidate_relax_iterations,
-                    protocol="validation_control",graph_sha256=row["sha256"],source_id=graph.source_id,
+                    protocol="validation_control",graph_sha256=row["sha256"],
+                    graph_path=row["path"].replace("\\","/"),source_id=graph.source_id,
                     raw_sha256=_ablation_digest(raw),native_sha256=_ablation_digest(work/"native.cif"),
                     development_exposed=development_exposed,chain_identity_audit=chain_identity_audit,
                     cdr3_identity=cdr3_identity,max_vhh_identity=max_vhh_identity,
@@ -683,19 +729,39 @@ def main(argv=None) -> int:
         if results:
             with (out/"real_complex_metrics.csv").open("w",newline="",encoding="utf-8") as f:
                 writer=csv.DictWriter(f,fieldnames=list(results[0]));writer.writeheader();writer.writerows(results)
-        # Closure bookkeeping (requirement #5): every selected target lands in
-        # EITHER completed-with-usable-metrics OR the `failed` list above by
-        # construction of the try/except loop -- this identity is recorded,
-        # not assumed, so a process killed mid-loop (leaving some selected
-        # targets neither attempted nor recorded) is visible as a MISSING
-        # run_summary.json rather than a false "completed".
-        completed_targets=len(selected)-len(failed)
+        # Closure bookkeeping: formal validation closes against the IMMUTABLE
+        # frozen denominator, not merely the subset that re-passed eligibility.
+        # A frozen graph mismatch, re-preparation/eligibility failure, Active-set
+        # construction failure, or solver failure therefore remains a failed
+        # confirmatory target and can never silently disappear or be replaced.
+        selected_ids={case["target"] for case in selected}
+        solver_failed=set(failed)
+        if formal_frozen_execution:
+            frozen_failed=set(frozen_target_ids)-selected_ids
+            frozen_failed.update(solver_failed)
+            completed_ids=selected_ids-solver_failed
+            failed_ids=frozen_failed
+            frozen_set_accounting_ok=(
+                completed_ids.isdisjoint(failed_ids)
+                and completed_ids|failed_ids==set(frozen_target_ids)
+            )
+            closed=frozen_set_accounting_ok
+        else:
+            completed_ids=selected_ids-solver_failed
+            failed_ids=solver_failed
+            frozen_set_accounting_ok=None
+            closed=(len(completed_ids)+len(failed_ids)==len(selected_ids))
+        completed_targets=len(completed_ids)
         _ablation_atomic_json(out/"run_summary.json", dict(
             examined_candidates=len(decisions), qualifying_pool_size=len(candidates),
             target_cap=args.targets or None, selected_targets=len(selected),
+            frozen_target_ids=(sorted(frozen_target_ids) if formal_frozen_execution else None),
+            frozen_target_count=(len(frozen_target_ids) if formal_frozen_execution else None),
             structure_experiment_completed_targets=completed_targets,
-            structure_experiment_failed_targets=sorted(failed),
-            closed=(completed_targets+len(failed)==len(selected))))
+            structure_experiment_completed_target_ids=sorted(completed_ids),
+            structure_experiment_failed_targets=sorted(failed_ids),
+            frozen_set_accounting_ok=frozen_set_accounting_ok,
+            closed=closed))
         coverage_pct = (len(selected)/len(decisions)*100) if decisions else 0.0
         report=["# Real VHH retrospective side-chain recovery pilot", "",
             f"Queue role: {args.queue_role}. Selection order: {args.selection_order}{' (seed '+str(args.selection_seed)+')' if args.selection_order=='seeded_random' else ''}. "
@@ -718,6 +784,8 @@ def main(argv=None) -> int:
         report += ["", "Eligibility and every exclusion reason are in eligibility.json; no replacement based on solver results. Failed/incomplete targets remain listed. Target means weight seeds within each target first. No significance or quantum advantage is inferred from a small pilot."]
         (out/"real_complex_report.md").write_text("\n".join(report),encoding="utf-8")
         print(out/"real_complex_report.md")
+        if formal_frozen_execution:
+            return int(bool(failed_ids) or not frozen_set_accounting_ok)
         return int(bool(failed) or len(selected)<args.targets)
 
 
