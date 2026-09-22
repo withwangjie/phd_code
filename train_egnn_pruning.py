@@ -230,23 +230,8 @@ SPLIT_FOLDS = 5
 VALIDATION_FOLD = 0
 
 
-def _side_identity(left: Sequence[str], right: Sequence[str]) -> float:
-    """Maximum threshold-aware identity across two partner-side sequence sets."""
-    best = 0.0
-    for a in left:
-        for b in right:
-            if not a or not b:
-                continue
-            if min(len(a), len(b)) / max(len(a), len(b)) < SPLIT_IDENTITY_THRESHOLD:
-                continue
-            best = max(best, _sequence_identity(a, b))
-            if best >= SPLIT_IDENTITY_THRESHOLD:
-                return best
-    return best
-
-
 def split_paths(paths: Sequence[Path], seed: int) -> Tuple[List[Path], List[Path]]:
-    """Bilateral configurable-identity component split; no random 90/10 partition."""
+    """Layered VHH/CDR-H3/antigen component split; no random 90/10 partition."""
     del seed
     records = []
     for path in paths:
