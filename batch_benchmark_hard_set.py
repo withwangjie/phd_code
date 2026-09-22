@@ -213,8 +213,10 @@ def _graph_protocol_signature(data: Any) -> Dict[str, Any]:
     }
 
 
-def assert_checkpoint_graph_compatible(info: ModelLoadInfo, data: Any) -> None:
-    """Fail closed when model weights and graph semantics differ."""
+def assert_checkpoint_graph_compatible(
+    info: ModelLoadInfo, data: Any, *, identity_threshold: Optional[float] = None
+) -> None:
+    """Fail closed when model weights, split threshold, and graph semantics differ."""
 
     if info.status != "checkpoint_loaded":
         raise ValueError("A trained checkpoint is required")
@@ -225,6 +227,15 @@ def assert_checkpoint_graph_compatible(info: ModelLoadInfo, data: Any) -> None:
         raise ValueError(
             f"Checkpoint/graph protocol mismatch: checkpoint={info.graph_protocol}, graph={current}"
         )
+    if identity_threshold is not None:
+        if info.identity_threshold is None or not math.isclose(
+            float(info.identity_threshold), float(identity_threshold),
+            rel_tol=0.0, abs_tol=1e-12
+        ):
+            raise ValueError(
+                f"Checkpoint identity threshold mismatch: checkpoint={info.identity_threshold}, "
+                f"current={identity_threshold}"
+            )
 
 
 def load_interface_scorer(
@@ -1423,7 +1434,9 @@ def _ablation_worker(task: tuple) -> tuple:
                 raise ValueError("A trained matching checkpoint is mandatory")
             _ABLATION_SCORER.eval()
         if config["pruning"] == "egnn":
-            assert_checkpoint_graph_compatible(_ABLATION_MODEL_INFO, data)
+            assert_checkpoint_graph_compatible(
+                _ABLATION_MODEL_INFO, data, identity_threshold=args.identity_threshold
+            )
         config["pdb_id"] = getattr(data, "pdb_id", "")
         _ablation_run_case(data, _ABLATION_SCORER, config, args, artifact)
         return key, config, None
@@ -1470,6 +1483,8 @@ def _ablation_main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--depths", type=int, nargs="+", default=[1,2,3])
     parser.add_argument("--max-evals", type=int, nargs="+", default=[90,300])
     parser.add_argument("--active-sites", type=int, default=6)
+    parser.add_argument("--identity-threshold", type=float, default=0.40,
+        help="Expected EGNN bilateral train/validation identity threshold.")
     parser.add_argument("--antigen-guidance-weight", type=float, default=0.25,
         help="Blend weight for label-free nearest-antigen proximity in EGNN site ranking.")
     parser.add_argument("--antigen-proximity-scale", type=float, default=6.0,
@@ -1510,6 +1525,7 @@ def _ablation_main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--omp-threads", type=int, default=2)
     args = parser.parse_args(argv)
     if (not 5 <= args.active_sites <= 8
+            or not 0.0 < args.identity_threshold < 1.0
             or not 0.0 <= args.antigen_guidance_weight <= 1.0
             or min(*args.outputs, args.sa_passes, args.greedy_passes, *args.max_evals) <= 0
             or min(args.qaoa_restarts) <= 0 or args.eval_shots <= 0):
@@ -1561,7 +1577,8 @@ def _ablation_main(argv: Optional[Sequence[str]] = None) -> int:
             if status.status != "checkpoint_loaded":
                 raise ValueError("A trained matching checkpoint is mandatory; no random fallback.")
             assert_checkpoint_graph_compatible(
-                status, torch.load(files[0], map_location="cpu", weights_only=False)
+                status, torch.load(files[0], map_location="cpu", weights_only=False),
+                identity_threshold=args.identity_threshold,
             )
             scorer.eval()
         _ablation_export_results(out)
