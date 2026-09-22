@@ -44,6 +44,31 @@ nvidia-smi -L
 export FORMAL_MIN_FREE_DISK_GB="${FORMAL_MIN_FREE_DISK_GB:-50}"
 export FORMAL_MIN_AVAILABLE_RAM_GB="${FORMAL_MIN_AVAILABLE_RAM_GB:-16}"
 
+log "Running 2-rank DDP/NCCL all-reduce probe..."
+DDP_PROBE="$(mktemp "${TMPDIR:-/tmp}/formal_ddp_probe.XXXXXX.py")"
+cat >"$DDP_PROBE" <<'PY'
+import os
+import torch
+import torch.distributed as dist
+
+rank = int(os.environ["RANK"])
+local_rank = int(os.environ["LOCAL_RANK"])
+world_size = int(os.environ["WORLD_SIZE"])
+if world_size < 2:
+    raise SystemExit(f"DDP preflight requires at least 2 ranks, got {world_size}")
+torch.cuda.set_device(local_rank)
+dist.init_process_group(backend="nccl")
+x = torch.tensor([float(rank + 1)], device=f"cuda:{local_rank}")
+dist.all_reduce(x, op=dist.ReduceOp.SUM)
+expected = world_size * (world_size + 1) / 2
+if abs(x.item() - expected) > 1e-6:
+    raise SystemExit(f"NCCL all-reduce mismatch on rank {rank}: got {x.item()}, expected {expected}")
+print(f"DDP/NCCL rank {rank}/{world_size} on cuda:{local_rank}: all_reduce={x.item()} OK", flush=True)
+dist.destroy_process_group()
+PY
+python -m torch.distributed.run --standalone --nproc-per-node=2 "$DDP_PROBE"
+rm -f "$DDP_PROBE"
+
 log "Running CUDA/OpenMM/resource probes..."
 python - <<'PY'
 from __future__ import annotations
