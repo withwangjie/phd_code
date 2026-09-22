@@ -51,9 +51,26 @@ def assignment_components(qubo, selected: list[int]) -> tuple[float,float,float,
     )
 
 
-def chi1_assignment(qubo, selected: list[int]) -> dict[str,float]:
-    records={row.variable_index:row for row in qubo.variable_map}
-    return {records[index].residue_id:float(records[index].chi1_degrees) for index in selected}
+def chi_assignment(qubo, selected: list[int]) -> dict[str,tuple[float,...]]:
+    """Recover the exact multi-chi rotamer represented by each selected QUBO bit."""
+    by_variable={
+        int(row["variable_index"]):row
+        for row in qubo.metadata.get("rotamer_state_records",[])
+    }
+    result={}
+    for index in selected:
+        record=by_variable.get(int(index))
+        if record is None:
+            # Legacy/debug compatibility only; formal Dunbrack runs must carry
+            # complete rotamer-state metadata.
+            variable=qubo.variable_map[int(index)]
+            result[variable.residue_id]=(float(variable.chi1_degrees),)
+            continue
+        chis=tuple(float(v) for v in record.get("chi_degrees",[]))
+        if not chis:
+            raise ValueError(f"Missing multi-chi metadata for QUBO variable {index}")
+        result[str(record["residue_id"])]=chis
+    return result
 
 
 def legal_assignment(groups: dict[int,tuple[int,...]], rng: np.random.Generator) -> list[int]:
@@ -124,7 +141,7 @@ def main() -> int:
     fieldnames=[
         "pdb_id","split","assignment_index",
         "prior_energy","vhh_environment_energy","antigen_energy","pair_energy",
-        "amber_delta_kcal","anchor_amber_kcal","active_residues","chi1_assignment",
+        "amber_delta_kcal","anchor_amber_kcal","active_residues","chi_assignment",
         "graph_sha256","source_id",
     ]
     written=0
@@ -184,8 +201,8 @@ def main() -> int:
                         for _,group in sorted(coarse.site_to_variables.items())
                     ]
                     anchor_components=np.asarray(assignment_components(coarse,anchor),dtype=float)
-                    anchor_angles=chi1_assignment(coarse,anchor)
-                    anchor_amber=atomistic.energy_for_chi1_assignment(anchor_angles)
+                    anchor_angles=chi_assignment(coarse,anchor)
+                    anchor_amber=atomistic.energy_for_chi_assignment(anchor_angles)
 
                     seen={tuple(anchor)}
                     assignments=[anchor]
@@ -200,8 +217,8 @@ def main() -> int:
 
                     for index,selected in enumerate(assignments):
                         components=np.asarray(assignment_components(coarse,selected),dtype=float)-anchor_components
-                        angles=chi1_assignment(coarse,selected)
-                        amber=atomistic.energy_for_chi1_assignment(angles)-anchor_amber
+                        angles=chi_assignment(coarse,selected)
+                        amber=atomistic.energy_for_chi_assignment(angles)-anchor_amber
                         writer.writerow(dict(
                             pdb_id=pdb,split="train",assignment_index=index,
                             prior_energy=components[0],
@@ -211,7 +228,7 @@ def main() -> int:
                             amber_delta_kcal=amber,
                             anchor_amber_kcal=anchor_amber,
                             active_residues=json.dumps(active_residues,separators=(",",":")),
-                            chi1_assignment=json.dumps(angles,separators=(",",":"),sort_keys=True),
+                            chi_assignment=json.dumps(angles,separators=(",",":"),sort_keys=True),
                             graph_sha256=row["sha256"],source_id=data.source_id,
                         ))
                         written+=1
