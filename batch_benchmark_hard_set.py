@@ -2454,6 +2454,7 @@ def _recovery_benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
                         candidate_relax_iterations=int(case.get("candidate_relax_iterations",0)),
                         active_residues=case["active_residues"],
                         active_site_scores=case.get("active_site_scores"),
+                        rotamer_model=case.get("rotamer_model"),
                         alignment_residues=case["alignment_residues"],
                         partner_residues=case["partner_residues"],protocol="validation_control",
                         selection_origin=case["selection_origin"]+"; retrospective fixed-backbone perturbation-recovery")
@@ -2465,6 +2466,7 @@ def _recovery_benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
                         "--relax-iterations",str(args.relax_iterations),"--seed",str(seed),
                         "--optimize-seed",str(optimize_seed),"--measurement-seed",str(measurement_seed),"--sample-seed",str(sample_seed),
                         "--loop-relax-iterations",str(args.loop_relax_iterations),
+                        "--solvent-model",args.solvent_model,
                         *(["--eval-shots",str(args.eval_shots)] if args.eval_shots else []),
                         *(["--robust-qaoa","--qaoa-restarts",str(args.qaoa_restarts),
                            "--qaoa-objective",args.qaoa_objective,"--cvar-alpha",str(args.cvar_alpha),
