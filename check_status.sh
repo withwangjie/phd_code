@@ -11,11 +11,14 @@
 #
 set -eo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONFIG="${SCRIPT_DIR}/full_experiment_config.yaml"
-
-RUN_ROOT="$(sed -n '/^paths:/,/^[a-zA-Z_][a-zA-Z_]*:/{/run_root:/p}' "$CONFIG" | head -1 \
-    | sed -E 's/.*run_root:[[:space:]]*"?([^"#]*)"?.*/\1/')"
-[ -n "$RUN_ROOT" ] || RUN_ROOT="/data/quantum-protein/runs"
+SERVER_REPORT="${SCRIPT_DIR}/.runtime/server_resolution.json"
+if [ -n "${QP_RUN_ROOT:-}" ]; then
+    RUN_ROOT="$QP_RUN_ROOT"
+elif [ -f "$SERVER_REPORT" ]; then
+    RUN_ROOT="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["run_root"])' "$SERVER_REPORT")"
+else
+    RUN_ROOT="/data/quantum-protein/runs"
+fi
 
 if [ -n "${1:-}" ]; then
     if [[ "$1" = /* ]]; then RUN_DIR="$1"; else RUN_DIR="${RUN_ROOT}/$1"; fi
