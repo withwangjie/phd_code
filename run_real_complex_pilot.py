@@ -89,10 +89,16 @@ def complete_terminal_oxygen(path: Path) -> list[str]:
 
 def prepare(graph, source: Path, destination: Path, sites: int, *, pruning: str = 'cdr',
             seed: int = 42, checkpoint: Path | None = None,
-            antigen_guidance_weight: float = 0.25) -> dict:
+            antigen_guidance_weight: float = 0.25,
+            antigen_proximity_scale: float = 6.0,
+            contact_ca_cutoff: float = 8.0) -> dict:
     """Resolve structure and select Active sites under the shared main protocol."""
     if not 0.0 <= antigen_guidance_weight <= 1.0:
         raise ValueError("antigen_guidance_weight must be in [0,1]")
+    if not np.isfinite(antigen_proximity_scale) or antigen_proximity_scale <= 0:
+        raise ValueError("antigen_proximity_scale must be positive finite")
+    if not np.isfinite(contact_ca_cutoff) or contact_ca_cutoff <= 0:
+        raise ValueError("contact_ca_cutoff must be positive finite")
     residues = read_atomistic_structure(source)
     st = gemmi.read_structure(str(source))
     if len(st) != 1:
@@ -154,7 +160,7 @@ def prepare(graph, source: Path, destination: Path, sites: int, *, pruning: str 
             continue
         ca_distances = torch.linalg.norm(graph.pos[antigen_nodes] - graph.pos[i], dim=1)
         dist = float(ca_distances.min().item())
-        contact_count = int((ca_distances < 8.0).sum().item())
+        contact_count = int((ca_distances < float(contact_ca_cutoff)).sum().item())
         scored.append((dist, rid, contact_count, i))
     if len(scored) < sites:
         raise ValueError(f"Only {len(scored)} chemically movable VHH sites")
@@ -177,7 +183,7 @@ def prepare(graph, source: Path, destination: Path, sites: int, *, pruning: str 
             model_scores=model(graph.x,graph.pos,graph.edge_index).reshape(-1)
         candidate_indices=torch.tensor([item[3] for item in scored],dtype=torch.long)
         nearest=torch.cdist(graph.pos[candidate_indices],graph.pos[antigen_nodes]).min(1).values
-        proximity=torch.exp(-nearest/6.0)
+        proximity=torch.exp(-nearest/float(antigen_proximity_scale))
         composite=(1.0-antigen_guidance_weight)*model_scores[candidate_indices]+antigen_guidance_weight*proximity
         composite_map={int(idx):float(score) for idx,score in zip(candidate_indices,composite)}
         ordered=sorted(scored,key=lambda x:(-composite_map[x[3]],x[1]))
@@ -191,7 +197,7 @@ def prepare(graph, source: Path, destination: Path, sites: int, *, pruning: str 
         denom = max(float(values.max()), 1.0)
         active_site_scores = [float(item[2]) / denom for item in chosen]
     elif pruning == 'distance':
-        active_site_scores = [float(np.exp(-item[0] / 6.0)) for item in chosen]
+        active_site_scores = [float(np.exp(-item[0] / antigen_proximity_scale)) for item in chosen]
     elif pruning == 'cdr':
         active_site_scores = [1.0 if item[1] in cdr_ids else 0.0 for item in chosen]
     else:
@@ -202,8 +208,10 @@ def prepare(graph, source: Path, destination: Path, sites: int, *, pruning: str 
                 preparation_changes=changes, cdr3_residues=cdr_ids,pruning=pruning,
                 pruning_candidate_count=len(scored),pruning_seed=seed,model_status=model_status,
                 antigen_guidance_weight=float(antigen_guidance_weight),
+                antigen_proximity_scale=float(antigen_proximity_scale),
+                contact_ca_cutoff_angstrom=float(contact_ca_cutoff),
                 selection_origin=(f"{pruning} selection across all chemically movable VHH residues; native distance/contact used only as explicit baselines; "
-                    f"EGNN path uses shared composite score=(1-w)*EGNN+w*exp(-dAg/6A), w={antigen_guidance_weight:.3f}; "
+                    f"EGNN path uses shared composite score=(1-w)*EGNN+w*exp(-dAg/{antigen_proximity_scale:.3g}A), w={antigen_guidance_weight:.3f}; "
                     "fixed before perturbation; retrospective control"))
 
 
@@ -239,6 +247,8 @@ def main(argv=None) -> int:
              "outside the allowlist can ever be added.")
     parser.add_argument("--checkpoint",type=Path,default=Path('quantum-protein/checkpoints_500/best_egnn_pruning.pt'))
     parser.add_argument("--antigen-guidance-weight",type=float,default=0.25)
+    parser.add_argument("--antigen-proximity-scale",type=float,default=6.0)
+    parser.add_argument("--contact-ca-cutoff",type=float,default=8.0)
     parser.add_argument("--robust-qaoa", action="store_true")
     parser.add_argument("--qaoa-restarts",type=int,default=4)
     parser.add_argument("--qaoa-objective",choices=("mean","cvar"),default="cvar")
@@ -356,7 +366,9 @@ def main(argv=None) -> int:
                 raw=extract_source(graph.source_id,args.data_root,work/"raw.pdb")
                 config=prepare(graph,raw,work/"native.cif",args.sites,pruning=args.pruning,
                     seed=args.seeds[0],checkpoint=args.checkpoint,
-                    antigen_guidance_weight=args.antigen_guidance_weight)
+                    antigen_guidance_weight=args.antigen_guidance_weight,
+                    antigen_proximity_scale=args.antigen_proximity_scale,
+                    contact_ca_cutoff=args.contact_ca_cutoff)
                 # Every chain is audited and RECORDED (role + actual best
                 # identity/coverage against every training/already-selected
                 # sequence), never collapsed to only a pass/fail boolean --
