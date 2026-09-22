@@ -1550,6 +1550,12 @@ class Orchestrator:
                 failures.append(f"{label}: not closed -- selected={summary.get('selected_targets')} "
                                  f"completed={summary.get('structure_experiment_completed_targets')} "
                                  f"failed={summary.get('structure_experiment_failed_targets')} (see {log_path})")
+            elif label=="validation_queue" and summary.get("frozen_set_accounting_ok") is not True:
+                failures.append(
+                    f"{label}: frozen denominator accounting failed; "
+                    f"frozen={summary.get('frozen_target_ids')} "
+                    f"completed={summary.get('structure_experiment_completed_target_ids')} "
+                    f"failed={summary.get('structure_experiment_failed_targets')} (see {log_path})")
             elif summary.get("structure_experiment_failed_targets"):
                 message=(f"{label}: completed with target failures "
                          f"{summary['structure_experiment_failed_targets']}")
