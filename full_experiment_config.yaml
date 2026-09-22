@@ -136,6 +136,14 @@ queue_freeze:
   independence_clustering:
     required: true
     cluster_map: "data/independence/pdb_family_clusters.json"
+    pair_tsv: "data/independence/foldseek_pairs.tsv"
+    # Pair TSV third column must be a symmetric/normalized structure-similarity
+    # score such as TM-score. >=0.50 joins two PDBs into one component.
+    min_score: 0.50
+    score_semantics: "TM-score"
+    query_column: 0
+    target_column: 1
+    score_column: 2
   # Homology-isolation protocol. Any criterion that fires joins two complexes
   # into the same connected component; a component may never cross a split.
   homology_isolation:
