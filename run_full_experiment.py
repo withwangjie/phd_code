@@ -480,10 +480,27 @@ class Orchestrator:
                 return False, "Frozen validation selected_targets.json is empty or invalid"
             return True, "queue-freeze dataset and frozen validation artifacts verified"
         if stage == "egnn_train":
-            return require([
-                self.checkpoint_dir() / "best_egnn_pruning.pt",
-                self.checkpoint_dir() / "training_summary.json",
-            ])
+            checkpoint = self.checkpoint_dir() / "best_egnn_pruning.pt"
+            summary_path = self.checkpoint_dir() / "training_summary.json"
+            ok, detail = require([checkpoint, summary_path])
+            if not ok:
+                return ok, detail
+            summary, error = read_json(summary_path)
+            if error:
+                return False, error
+            if summary.get("status") != "complete":
+                return False, "training_summary.json status is not complete"
+            checkpoint_info = summary.get("checkpoint") or {}
+            if checkpoint_info.get("strict_reload_verified") is not True:
+                return False, "training_summary.json does not record strict_reload_verified=true"
+            expected_sha = checkpoint_info.get("sha256")
+            if not expected_sha:
+                return False, "training_summary.json has no checkpoint sha256"
+            actual_sha = sha256_of(checkpoint)
+            if actual_sha != expected_sha:
+                return False, (
+                    f"EGNN checkpoint sha256 mismatch: summary={expected_sha}, actual={actual_sha}")
+            return True, "EGNN checkpoint status, strict reload flag, and sha256 verified"
         if stage == "qc_benchmark":
             root = self.run_dir / "qc_benchmark"
             ok, detail = require([root / "run_manifest.json", root / "run_summary.json"])
@@ -1248,7 +1265,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             manifest = build_run_manifest(config, repo_root)
             atomic_write_json(run_dir / "run_manifest.json", manifest)
             frozen_config_path = run_dir / "frozen_config.yaml"
-            shutil.copy2(args.config, frozen_config_path)
+            # Freeze the effective runtime configuration, including explicit
+            # CLI mode overrides such as --smoke-only, so run_manifest.json
+            # and frozen_config.yaml always describe the same executed protocol.
+            frozen_config_path.write_text(
+                yaml.safe_dump(config, sort_keys=False, allow_unicode=True),
+                encoding="utf-8",
+            )
             streams = derive_streams(config["master_seed"])
             save_stream_map(run_dir / "seed_streams.json", config["master_seed"], streams)
             print(f"New run: {run_dir}")
