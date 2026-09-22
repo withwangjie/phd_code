@@ -421,6 +421,7 @@ statistics:
   min_primary_clusters: 10  # adequacy gate, not a formal power guarantee
   min_rq5_clusters: 10
   budget_modes: ["outputs", "time"]
+  primary_pruning: "egnn"  # confirmatory solver/scaling inference uses the main EGNN-pruned problem only
   primary_outputs: 1000
   primary_objective: "cvar"
   primary_restarts: 4
