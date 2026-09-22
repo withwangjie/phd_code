@@ -551,12 +551,13 @@ class Orchestrator:
                 "'contact'); the real 'egnn' protocol in validation_queue.pruning is applied later, "
                 "per-target, in stage_structure_experiment once egnn_train has completed.")
         validation_seed = save_derived_child(streams, "perturb", "validation_queue_selection_order")
-        validation_dir = self.run_dir / "validation_queue"
+        validation_root = self.run_dir / "validation_queue"
+        validation_freeze_dir = validation_root / "freeze"
         vq_argv = [
             self.venv_python, "run_real_complex_pilot.py",
             "--dataset", str(dataset_dir),
             "--data-root", str(resolve_path(self.config, self.config["paths"]["data_root"])),
-            "--out-dir", str(validation_dir),
+            "--out-dir", str(validation_freeze_dir),
             "--targets", str(vq_cfg.get("target_count", 0)),
             "--sites", str(vq_cfg.get("sites", 5)),
             "--seeds", str(streams["perturb"]),
@@ -570,13 +571,13 @@ class Orchestrator:
             "--prepare-only",
         ]
         returncode, vq_log = self._run_subprocess("queue_freeze_validation_queue", vq_argv)
-        vq_expected = [validation_dir / name for name in ("eligibility.json", "selected_targets.json")]
+        vq_expected = [validation_freeze_dir / name for name in ("eligibility.json", "selected_targets.json", "run_manifest.json")]
         vq_ok, vq_detail = self._artifacts_present(vq_expected)
         if returncode != 0 or not vq_ok:
             return StageResult("queue_freeze", "failed", started, utc_timestamp(), returncode,
                                 f"run_real_complex_pilot.py (validation queue) exited {returncode}; {vq_detail} (see {vq_log})",
                                 vq_argv, str(vq_log), vq_ok)
-        selected = json.loads((validation_dir / "selected_targets.json").read_text(encoding="utf-8"))
+        selected = json.loads((validation_freeze_dir / "selected_targets.json").read_text(encoding="utf-8"))
         cap_label = vq_cfg.get("target_count", 0) or "unlimited (all qualifying targets)"
         detail = (f"Graph build: {graph_detail} Validation queue: {len(selected)} targets frozen "
                   f"(cap: {cap_label}; dev queue excluded+exposure-flagged: {dev_cfg.get('excluded_pdb', [])}). {vq_detail}")
@@ -718,7 +719,9 @@ class Orchestrator:
         cfg = self.config["structure_experiment"]
         dataset_dir = self.dataset_dir()
         checkpoint_dir = self.checkpoint_dir()
-        validation_dir = self.run_dir / "validation_queue"
+        validation_root = self.run_dir / "validation_queue"
+        validation_freeze_dir = validation_root / "freeze"
+        validation_execution_dir = validation_root / "execution"
         dev_dir = self.run_dir / "dev_queue"
         qf_cfg = self.config["queue_freeze"]
 
@@ -746,7 +749,7 @@ class Orchestrator:
 
         runs = [
             ("dev_queue", dev_dir, qf_cfg["dev_queue"], list(qf_cfg["dev_queue"].get("excluded_pdb", []))),
-            ("validation_queue", validation_dir, qf_cfg["validation_queue"], None),
+            ("validation_queue", validation_execution_dir, qf_cfg["validation_queue"], None),
         ]
         failures = []
         queue_partial = []
@@ -804,10 +807,15 @@ class Orchestrator:
             # A target can still fail re-verification here (recorded, not
             # silently dropped), but no target outside the frozen set can
             # ever be added.
-            frozen_targets = validation_dir / "selected_targets.json"
-            argv += ["--targets", str(queue_cfg.get("target_count", 0))]
-            if frozen_targets.is_file():
-                argv += ["--pdb-allowlist-file", str(frozen_targets)]
+            frozen_targets = validation_freeze_dir / "selected_targets.json"
+            if not frozen_targets.is_file():
+                failures.append(
+                    f"{label}: frozen target file missing at {frozen_targets}; refusing to reselect validation targets")
+                continue
+            # In formal validation mode the frozen file, not a fresh target cap,
+            # defines the denominator. --targets 0 prevents a second selection
+            # cap from silently shrinking the immutable frozen set.
+            argv += ["--targets", "0", "--pdb-allowlist-file", str(frozen_targets)]
             returncode, log_path = self._run_subprocess(f"structure_experiment_{label}", argv)
             logs.append(str(log_path)); argvs.append(argv)
             # (requirement #5) Reconciled against run_real_complex_pilot.py's
@@ -818,6 +826,12 @@ class Orchestrator:
                 failures.append(f"{label}: no run_summary.json produced (cannot confirm completion; see {log_path})")
                 continue
             summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            if not summary.get("frozen_set_accounting_ok"):
+                failures.append(
+                    f"{label}: frozen-set accounting failed -- frozen={summary.get('frozen_target_ids')} "
+                    f"completed={summary.get('structure_experiment_completed_target_ids')} "
+                    f"failed={summary.get('structure_experiment_failed_targets')} (see {log_path})")
+                continue
             if not summary.get("closed"):
                 failures.append(f"{label}: not closed -- selected={summary.get('selected_targets')} "
                                  f"completed={summary.get('structure_experiment_completed_targets')} "
