@@ -515,9 +515,19 @@ def select_ablation_active(data: Any, method: str, k: int, seed: int,
         raise ValueError("antigen_proximity_scale must be positive finite")
     if not math.isfinite(contact_ca_cutoff) or contact_ca_cutoff <= 0:
         raise ValueError("contact_ca_cutoff must be positive finite")
-    candidates = torch.where(data.x[:, -1] == 0)[0]
+    vhh_candidates = torch.where(data.x[:, -1] == 0)[0]
+    # Formal coarse/all-atom protocol uses the same chemically movable set:
+    # A/G lack chi1, Pro is cyclic, and Cys is excluded to avoid disulfide risk.
+    allowed = []
+    for idx in vhh_candidates.tolist():
+        aa = AA[int(data.x[idx, :20].argmax())]
+        if aa not in {"A", "G", "P", "C"}:
+            allowed.append(idx)
+    candidates = torch.tensor(allowed, dtype=torch.long)
     if len(candidates) < k:
-        raise ValueError("Not enough VHH residues for matched site budget.")
+        raise ValueError(
+            f"Not enough chemically movable VHH residues for matched site budget: {len(candidates)} < {k}"
+        )
     partner = torch.where(data.x[:, -1] == 1)[0]
     if not len(partner):
         raise ValueError("No antigen/group-1 residues.")
@@ -544,7 +554,9 @@ def select_ablation_active(data: Any, method: str, k: int, seed: int,
         return torch.tensor(sorted(ids), dtype=torch.long)
     elif method == "cdr":
         # Prioritize observed CDR-H3, then contact degree within each tier.
-        scores[_ablation_cdr_indices(data)] += float(scores.max()) + 1
+        cdr_allowed = [i for i in _ablation_cdr_indices(data) if i in set(candidates.tolist())]
+        if cdr_allowed:
+            scores[cdr_allowed] += float(scores.max()) + 1
     elif method != "contact":
         raise ValueError(method)
     order = sorted(candidates.tolist(), key=lambda i: (-float(scores[i]), i))
