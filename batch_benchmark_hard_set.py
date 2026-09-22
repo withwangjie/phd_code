@@ -2158,7 +2158,7 @@ def _allatom_experiment_main(argv: Optional[Sequence[str]] = None) -> int:
     """One explicit all-atom case: QUBO -> matched-output solvers -> CIF -> evaluation."""
     from subgraph_to_qubo import AllAtomInterfaceQUBOBuilder, evaluate_atomistic_prediction
     import openmm
-    parser=argparse.ArgumentParser(description="All-atom fixed-backbone chi1 experiment")
+    parser=argparse.ArgumentParser(description="All-atom fixed-backbone multi-chi side-chain experiment")
     parser.add_argument("--eval-shots",type=int,choices=(200,500,1000))
     parser.add_argument("--loop-relax-iterations",type=int,default=0)
     parser.add_argument("--manifest",type=Path,required=True)
