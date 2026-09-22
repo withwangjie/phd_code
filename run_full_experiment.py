@@ -328,6 +328,15 @@ def _validate_scientific_config(config: Dict[str, Any]) -> None:
                 f"qc_benchmark={left}, structure_experiment={right}"
             )
 
+    qc_depths=[int(v) for v in qc.get("depths",[2])]
+    if not qc_depths or any(v<=0 for v in qc_depths):
+        raise ValueError("qc_benchmark.depths must contain positive integers")
+    structure_depth=int(structure.get("qaoa_depth",qc_depths[0]))
+    if structure_depth != qc_depths[0]:
+        raise ValueError(
+            f"Primary QAOA depth mismatch: qc_benchmark={qc_depths[0]}, "
+            f"structure_experiment={structure_depth}"
+        )
     qc_sites = int(qc.get("active_sites", 6))
     validation_sites = int(validation.get("sites", 6))
     if not 5 <= qc_sites <= 8:
@@ -1423,6 +1432,7 @@ class Orchestrator:
             flags = [
                 "--outputs", str(cfg.get("outputs", 1000)),
                 "--max-evals", str(cfg.get("max_evals", 90)),
+                "--qaoa-depth", str(cfg.get("qaoa_depth", 2)),
                 "--perturbation-mode", str(cfg.get("perturbation_mode", "multi_chi")),
                 "--solvent-model", str(cfg.get("solvent_model", "vacuum")),
                 "--min-perturb-degrees", str(cfg.get("min_perturb_degrees", 40.0)),
