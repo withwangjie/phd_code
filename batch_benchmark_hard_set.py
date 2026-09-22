@@ -1997,6 +1997,9 @@ def _paired_statistics_main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--cluster-map",type=Path,help="JSON mapping every PDB ID to antigen/sequence-family cluster")
     parser.add_argument("--budget-mode",choices=["outputs","time"],default="outputs")
     parser.add_argument("--primary-pruning", type=str, default="egnn")
+    parser.add_argument("--primary-radius", type=float, default=6.0)
+    parser.add_argument("--primary-depth", type=int, default=2)
+    parser.add_argument("--primary-max-evals", type=int, default=90)
     parser.add_argument("--primary-outputs", type=int, default=1000)
     parser.add_argument("--primary-objective", choices=("mean", "cvar"), default="cvar")
     parser.add_argument("--primary-restarts", type=int, default=4)
@@ -2017,6 +2020,16 @@ def _paired_statistics_main(argv: Optional[Sequence[str]] = None) -> int:
         # all objective/restart/budget variants in a solver-keyed dictionary.
         if str(case.get("config",{}).get("pruning","")) != args.primary_pruning:
             skipped["nonprimary_pruning"] += 1
+            continue
+        config=case.get("config",{}) or {}
+        if not math.isclose(float(config.get("radius",float("nan"))),args.primary_radius,rel_tol=0,abs_tol=1e-12):
+            skipped["nonprimary_radius"] += 1
+            continue
+        if int(config.get("depth",-1)) != args.primary_depth:
+            skipped["nonprimary_depth"] += 1
+            continue
+        if int(config.get("max_evals",-1)) != args.primary_max_evals:
+            skipped["nonprimary_max_evals"] += 1
             continue
         if int(case.get("config",{}).get("active_sites",args.primary_active_sites)) != args.primary_active_sites:
             skipped["nonprimary_active_sites"] += 1
@@ -2080,7 +2093,8 @@ def _paired_statistics_main(argv: Optional[Sequence[str]] = None) -> int:
     for effect,pvalue in zip(tested,_holm_adjust([e["p_value"] for e in tested])):
         effect["p_holm"] = pvalue
     payload=dict(budget_mode=args.budget_mode,seed=args.seed,resamples=args.resamples,
-        primary_pruning=args.primary_pruning,
+        primary_pruning=args.primary_pruning, primary_radius=args.primary_radius,
+        primary_depth=args.primary_depth, primary_max_evals=args.primary_max_evals,
         primary_outputs=args.primary_outputs, primary_objective=args.primary_objective,
         primary_restarts=args.primary_restarts, primary_active_sites=args.primary_active_sites,
         cluster_unit="provided family clusters" if cluster_map is not None else "PDB (homology dependence unresolved)",
@@ -2090,7 +2104,7 @@ def _paired_statistics_main(argv: Optional[Sequence[str]] = None) -> int:
         max_time_overrun_fraction=args.max_time_overrun_fraction,
         analysis_code_sha256=_ablation_digest(Path(__file__)))
     lines=["# Exploratory paired statistics", "", "Differences = QAOA - classical; negative gap favours QAOA, positive hit favours QAOA.",
-        f"Primary contrast: pruning={args.primary_pruning}, active_sites={args.primary_active_sites}, outputs={args.primary_outputs}, objective={args.primary_objective}, restarts={args.primary_restarts}. Time-mode uses the explicitly recorded budget donor at the same output budget; other pruning strategies/sizes/curves remain ablation/scaling/raw records.",
+        f"Primary contrast: pruning={args.primary_pruning}, radius={args.primary_radius}, p={args.primary_depth}, max_evals={args.primary_max_evals}, active_sites={args.primary_active_sites}, outputs={args.primary_outputs}, objective={args.primary_objective}, restarts={args.primary_restarts}. Time-mode uses the explicitly recorded budget donor at the same output budget; all other dimensions remain ablation/scaling/raw records.",
         "Repeats averaged within PDB, then PDBs within supplied families. Equal cluster weighting.",
         "95% percentile bootstrap intervals are marginal, not simultaneous. Two-sided sign-flip p values assume exchangeability/symmetry; Holm correction covers every tested contrast in this report.",
         "PDB clusters do not remove homologous-family dependence. Small cluster counts give unreliable intervals. One cluster: no CI or p value.",
