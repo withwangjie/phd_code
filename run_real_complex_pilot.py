@@ -328,8 +328,8 @@ def main(argv=None) -> int:
                 # identity/coverage against every training/already-selected
                 # sequence), never collapsed to only a pass/fail boolean --
                 # so a reviewer can see near-misses, not only the final
-                # exclude/pass decision. Exclusion threshold is unchanged
-                # (>=40% full-chain global identity).
+                # exclude/pass decision. The revised leakage-control threshold
+                # is >=40% full-chain global identity.
                 groups=dict(zip(graph.chain_ids,graph.chain_groups))
                 pool=list(sequences)+test_seqs
                 max_chain_identity=0.
