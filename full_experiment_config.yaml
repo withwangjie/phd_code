@@ -257,7 +257,10 @@ qc_benchmark:
   radii: [6.0]
   depths: [2]
   max_evals: [90]
-  active_sites: 6
+  # Active-site scaling axis for the quantum-vs-classical benchmark.
+  # 6 sites remains the frozen primary confirmatory size; 4/8/10 are
+  # pre-declared scaling conditions used to study size-dependent performance.
+  active_sites: [4, 6, 8, 10]
   antigen_guidance_weight: 0.25  # EGNN probability / label-free nearest-antigen proximity blend
   antigen_proximity_scale_angstrom: 6.0
   contact_ca_cutoff_angstrom: 8.0
@@ -323,6 +326,7 @@ qc_benchmark:
   sensitivity:
     input_dir: "graphs/train"
     max_targets: 20
+    active_sites: 6  # development-only hyperparameter sensitivity at the primary size
     outputs: 300
     repeats: 3
     depths: [1, 2, 3]
@@ -413,6 +417,7 @@ statistics:
   primary_outputs: 1000
   primary_objective: "cvar"
   primary_restarts: 4
+  primary_active_sites: 6  # confirmatory size; other active-site counts are scaling analyses
   primary_structural_endpoint: "final_rmsd"
   primary_structural_contrast: "qaoa_vs_sa"
   max_time_overrun_fraction: 0.10
