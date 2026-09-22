@@ -281,6 +281,8 @@ qc_benchmark:
     require_calibrated: true
     ridge_alpha: 1.0
     acceptance:
+      min_train_complexes: 20
+      min_cv_folds: 5
       max_cv_rmse_kcal: 10.0
       max_cv_mae_kcal: 7.5
       min_cv_r2: 0.20
@@ -402,6 +404,8 @@ external_validation:
 # ---------------------------------------------------------------------------
 statistics:
   resamples: 10000
+  min_primary_clusters: 10  # adequacy gate, not a formal power guarantee
+  min_rq5_clusters: 10
   budget_modes: ["outputs", "time"]
   primary_structural_endpoint: "final_rmsd"
   primary_structural_contrast: "qaoa_vs_sa"
