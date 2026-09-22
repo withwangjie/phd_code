@@ -1,0 +1,311 @@
+# full_experiment_config.yaml
+#
+# Single configuration file for run_full_experiment.py / run_full_experiment.sh.
+# Every parameter that governs a scientific decision (queue sizes, budgets,
+# thresholds, pruning strategies) lives here, not hardcoded in the
+# orchestrator, so the whole protocol is frozen and auditable by reading one
+# file. Frozen BEFORE a formal run starts, per the project's own rule that
+# parameters/endpoints/queues/repeat-counts must not change after looking at
+# results: copy this file alongside every run's own output directory the
+# first time you launch (run_full_experiment.py does this automatically into
+# <run_dir>/frozen_config.yaml) and treat that frozen copy, not this source
+# file, as the record of what a given run actually used.
+
+# ---------------------------------------------------------------------------
+# Identity / reproducibility
+# ---------------------------------------------------------------------------
+master_seed: 20260917  # Derives independent partition/train/perturb/optimize/sample
+                        # streams via seed_streams.py -- never used bare anywhere.
+
+# ---------------------------------------------------------------------------
+# Paths (all relative to the repository root unless absolute)
+# ---------------------------------------------------------------------------
+paths:
+  repo_root: "."
+  data_root: "/data/quantum-protein/data"
+  # Directory NAMES (not paths), resolved under THIS run's own run_dir
+  # (run_dir/dataset_dir, run_dir/checkpoint_dir) -- never a fixed,
+  # repo-root-level path shared across runs. This is what makes every run's
+  # dataset/checkpoints/qc_benchmark/structure artifacts fully isolated:
+  # two runs launched from the same repo never overwrite or silently read
+  # each other's dataset_clean_full/checkpoints_full (requirement #4). The
+  # historical capped dataset_clean_500/checkpoints_500 directories are
+  # never touched by this orchestrator regardless of this setting.
+  dataset_dir: "dataset"
+  checkpoint_dir: "checkpoints"
+  # Root under which every run gets its own unique, timestamped directory
+  # (run_full_experiment.py creates experiments_full_run_<UTC timestamp>/
+  # under this root; it never reuses or overwrites an existing one).
+  run_root: "/data/quantum-protein/runs"
+  run_prefix: "experiments_full_run_"
+
+# ---------------------------------------------------------------------------
+# Stage toggles -- allows re-running a subset without editing the script.
+# Every stage still individually checks its own prerequisites' completion
+# markers before running, regardless of these toggles.
+# ---------------------------------------------------------------------------
+stages:
+  env_check: true
+  smoke_check: false
+  data_audit: true
+  queue_freeze: true          # dataset split (no-cap) + validation-queue selection
+  graph_build: true           # produced as part of queue_freeze (build_final_pyg_dataset.py)
+  egnn_train: true
+  qc_benchmark: true          # --research-ablation: pruning x budget x objective sweep
+  structure_experiment: true  # dev queue + validation queue recovery-benchmark
+  statistics: true            # --paired-statistics
+  final_report: true
+
+# ---------------------------------------------------------------------------
+# Stage 0: required dependency imports; fail closed when unavailable.
+# No installation or trial experiment is performed.
+# Dependency failures stop dependent stages.
+# ---------------------------------------------------------------------------
+env_check:
+  required_python_packages:
+    - numpy
+    - scipy
+    - torch
+    - torch_geometric
+    - gemmi
+    - pennylane
+    - filelock
+    - openmm
+    - pdbfixer
+    - parasail
+    - psutil
+    - tqdm
+    - yaml  # PyYAML, required by run_full_experiment.py itself
+
+# ---------------------------------------------------------------------------
+# Stage: smoke check. A tiny, fast, self-contained pass through each stage's
+# CLI (--max-targets 1 / --targets 1 / --dry-run style flags) BEFORE the real
+# run, so a broken environment or code change is caught in seconds/minutes,
+# not hours into a real run. Kept fully separate from the real run's output
+# directory and never mixed into its results (per "检查结果与正式实验分开保存").
+# ---------------------------------------------------------------------------
+smoke_check:
+  ablation_max_targets: 1
+  recovery_pilot_targets: 1
+  recovery_pilot_sites: 5
+  recovery_pilot_seeds: [42]
+  recovery_pilot_max_evals: 12
+  recovery_pilot_outputs: 20
+
+# ---------------------------------------------------------------------------
+# Stage 1: data audit (audit_all_datasets.py). Unchanged upstream script;
+# orchestrator only supplies --workers/--limit and checks the four output
+# files (data_audit_report.md/_details.csv/_details.jsonl/_inventory.json)
+# exist and are non-empty before marking the stage complete.
+# ---------------------------------------------------------------------------
+data_audit:
+  workers: 16
+  limit: 0  # 0 = no limit; audits every discovered structure
+
+# ---------------------------------------------------------------------------
+# Stage 2: queue freeze + isolation (no cap) + graph construction.
+# 2a. build_final_pyg_dataset.py --no-cap: dedups (80% CDR-H3 identity
+#     clustering, one candidate per cluster kept), applies the existing
+#     PDB-overlap / CDR3-overlap isolation rules, and DOES NOT cap the
+#     resulting test_snac_hard split at any fixed count -- every qualifying,
+#     independent cluster is kept (requirement #1: cancel the 500 cap).
+# 2b. run_real_complex_pilot.py --prepare-only: freezes a NEW, blind,
+#     validation-only target queue, explicitly excluding every historical
+#     development target (dev_queue.excluded_pdb below) and using a
+#     seeded-random (not "smallest structure first") selection order, so it
+#     cannot inherit the ascending-residue-count bias the 0918 status report
+#     flagged in the original 4S10/8YVO/9GCN pilot. Produces
+#     eligibility.json + selected_targets.json + one recovery_manifest.json
+#     per selected target, BEFORE any solver is run against them --
+#     "freezing" means exactly this: nothing past this point may change
+#     which targets were selected or why.
+# ---------------------------------------------------------------------------
+queue_freeze:
+  graph_build:
+    workers: 8
+    # build_final_pyg_dataset.py --no-cap ignores target_hard's 300..500
+    # range check entirely; this value is recorded for provenance only and
+    # has no selection effect when no_cap is true.
+    no_cap: true
+    target_hard_if_capped: 500
+
+  dev_queue:
+    # Historical engineering-pilot targets. Permanently barred from ever
+    # re-entering the validation queue below, regardless of future reruns.
+    excluded_pdb: ["4s10", "8yvo", "9gcn"]
+    role_label: "dev"
+    # Formal structural-experiment protocol for the dev/regression queue,
+    # explicit rather than left to a hardcoded default (requirement #3);
+    # same "egnn" main-protocol rule as validation_queue.pruning below.
+    pruning: "egnn"
+
+  validation_queue:
+    role_label: "validation"
+    # 0 = no hidden cap: every qualifying, independent, all-atom-ready
+    # target is processed (requirement #3). A positive number freezes an
+    # EXPLICIT subset and must be decided before the run starts, never
+    # adjusted after inspecting results; run_real_complex_pilot.py's own
+    # report and run_summary.json state the actual coverage (selected /
+    # examined qualifying pool), so a capped run is never silently reported
+    # as if every qualifying target ran.
+    target_count: 0
+    sites: 5
+    selection_order: "seeded_random"  # never "ascending_size" for this queue
+    # The REAL, final validation protocol: formal validation uses the
+    # trained EGNN main pipeline, not contact/cdr/random (those are
+    # matched-budget ABLATION baselines only, swept explicitly in
+    # qc_benchmark.pruning -- never silently substituted for the main
+    # validation strategy here).
+    pruning: "egnn"
+    # Used ONLY by stage_queue_freeze's --prepare-only bootstrap call, which
+    # runs BEFORE egnn_train in STAGE_ORDER and therefore cannot use a
+    # trained checkpoint yet. Eligibility (PDB overlap / chain identity /
+    # CDR-H3 identity / structural viability -- e.g. enough interface-
+    # neighborhood candidate sites) does not depend on pruning strategy: only
+    # the FINAL residue ranking within an already-eligible target does. So a
+    # cheap, checkpoint-free strategy here decides TRUE eligibility/target
+    # membership (the actual freeze) without needing not-yet-trained
+    # weights; the exact same target set is then reproduced explicitly (via
+    # --pdb-allowlist-file, not mere re-derivation) once egnn_train has
+    # completed, and REAL site selection is performed then, with `pruning`
+    # above ("egnn") and the trained checkpoint -- see
+    # stage_structure_experiment. Never "egnn" here.
+    eligibility_bootstrap_pruning: "contact"
+
+# ---------------------------------------------------------------------------
+# Stage 3: EGNN training (train_egnn_pruning.py). Runs against the uncapped
+# dataset's train split. checkpoint_dir matches queue_freeze.validation_queue
+# .checkpoint's directory above so the freshly trained weights are what the
+# validation-queue EGNN pruning selection actually uses.
+# ---------------------------------------------------------------------------
+egnn_train:
+  nproc_per_node: 2  # two T4 ranks; batch_size is per GPU
+  max_epochs: 50
+  patience: 5
+  batch_size: 2
+  hidden_dim: 32
+  learning_rate: 1.0e-3
+  device: "cuda"
+  threads: 4
+  num_workers: 8
+
+# ---------------------------------------------------------------------------
+# Stage 4: quantum-vs-classical coarse-grained benchmark
+# (batch_benchmark_hard_set.py --research-ablation). This is the ablation
+# sweep: four pruning strategies x output-budget curve x QAOA objective x
+# single/multi-start, all sharing one perturbed input / candidate set /
+# fixed evaluation region per (pruning, radius, depth, max_evals, seed)
+# case, with every solver's cost fields (solver_seconds, oracle_seconds,
+# single_state_energy_queries) recorded explicitly so equal-output is never
+# read as equal-budget.
+# ---------------------------------------------------------------------------
+qc_benchmark:
+  # Relative to THIS run's own dataset_dir/checkpoint_dir (paths.dataset_dir/
+  # paths.checkpoint_dir under run_dir), never a fixed repo-root path -- see
+  # requirement #4. run_full_experiment.py resolves these as
+  # run_dir/<paths.dataset_dir>/<input_dir> and run_dir/<paths.checkpoint_dir>/<checkpoint>.
+  input_dir: "graphs/test_snac_hard"
+  checkpoint: "best_egnn_pruning.pt"
+  workers: 16  # CPU legal-subspace simulation, not 2^n GPU state vectors
+  max_targets: 0  # 0 = every qualifying graph in input_dir, no silent subset
+  pruning: ["egnn", "contact", "cdr", "random"]  # the four strategies requirement #4 asks for
+  radii: [6.0]
+  depths: [2]
+  max_evals: [90]
+  active_sites: 10
+  outputs: [10, 30, 100, 300, 1000]  # the output-budget curve
+  qaoa_objective: ["mean", "cvar"]
+  qaoa_restarts: [1, 4]  # 1 = single-start, 4 = multi-start
+  cvar_alpha: 0.1
+  eval_shots: 500
+  parameter_scale: "max_coefficient"
+  time_baselines: true
+  sa_passes: 100
+  greedy_passes: 50
+  energy_window: 2.0
+  # Number of independent repeat/perturb identities per (pruning, radius,
+  # depth, max_evals) case -- passed as --seeds to _ablation_main, which now
+  # derives each case's independent --master-seed-based optimize/sample
+  # sub-seeds itself (requirement #2; never two flat values guessed at by
+  # this orchestrator and stuffed into --seeds as if they were ordinary
+  # repeats).
+  repeats: 3
+
+# ---------------------------------------------------------------------------
+# Stage 5: real-atom structural experiment (run_real_complex_pilot.py, run
+# without --prepare-only against the already-frozen dev and validation
+# queues from stage 2b). Saves perturbed/relax-only/discrete/stage1/stage2
+# structures and their metrics for every case, supporting the paired
+# energy-down/RMSD-up analysis in the final report.
+# ---------------------------------------------------------------------------
+structure_experiment:
+  # Shared chi1-perturbation repeat identities, passed through to
+  # run_real_complex_pilot.py as --seeds. run_real_complex_pilot.py itself
+  # now derives each selected target's independent --optimize-seeds/
+  # --sample-seeds from streams["optimize"]/streams["sample"] keyed by
+  # (target pdb, each seed here) -- see requirement #2 -- so these values
+  # are never reused directly as the QAOA search or final-sampling seed.
+  seeds: [42, 43, 44]
+  outputs: 1000
+  max_evals: 90
+  relax_iterations: 200
+  candidate_relax_iterations: 100
+  loop_relax_iterations: 100
+  eval_shots: 500
+  robust_qaoa: true
+  qaoa_restarts: 4
+  qaoa_objective: "cvar"
+  cvar_alpha: 0.1
+  parameter_scale: "max_coefficient"
+  min_perturb_degrees: 40.0
+  max_perturb_degrees: 120.0
+
+# ---------------------------------------------------------------------------
+# Stage 6: paired statistics (batch_benchmark_hard_set.py --paired-statistics)
+# ---------------------------------------------------------------------------
+statistics:
+  resamples: 10000
+  budget_modes: ["outputs", "time"]
+  max_time_overrun_fraction: 0.10
+  cluster_map: null  # path to a PDB->family JSON if/when one exists; without
+                      # it, PDB itself is the cluster (documented limitation).
+
+# ---------------------------------------------------------------------------
+# Stage 7: final report (generate_final_research_report.py)
+# ---------------------------------------------------------------------------
+final_report:
+  filename: "FINAL_RESEARCH_REPORT.md"
+
+# ---------------------------------------------------------------------------
+# Hardware resource limits; worker counts live in their owning stages.
+# Training uses DDP; ablations use spawned CPU worker processes.
+# Structural target execution remains sequential; platform is explicit.
+# See HARDWARE_REVIEW.md for limitations and protocol amendments.
+# ---------------------------------------------------------------------------
+hardware:
+  cpu_threads_per_process: 2
+  openmm_cpu_threads: 8
+  # Explicit GPU protocol; strict energy-decomposition tolerances remain.
+  # Structural targets run sequentially on visible GPU 0; training uses both GPUs.
+  openmm_platform: "CUDA"
+  openmm_device: "0"
+  openmm_precision: "double"
+# ---------------------------------------------------------------------------
+# Resume / duplicate-launch protection
+# ---------------------------------------------------------------------------
+control:
+  lock_file_name: ".run_full_experiment.lock"
+  stage_timeout_seconds: 0  # 0 = no per-stage timeout
+
+# ---------------------------------------------------------------------------
+# DEPLOYMENT OVERRIDE (applied by build_bundle.py when packaging this
+# server bundle, 2026-09-19 02:44:13Z):
+#   data_root -> /data/quantum-protein/data (server's existing raw data; not bundled)
+#   run_root  -> /data/quantum-protein/runs (shared, outside this versioned code dir;
+#                survives future code re-deploys)
+#   stages.smoke_check -> false (the formal one-command launch never runs a
+#                smoke/trial sub-run; see run_stage()'s config-disabled-stage
+#                fix in run_full_experiment.py for why this is now safe)
+# Hardware/protocol amendments are documented in HARDWARE_REVIEW.md.
+# This revised configuration must not be mixed into an existing frozen run.
+# ---------------------------------------------------------------------------
