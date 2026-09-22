@@ -407,6 +407,9 @@ statistics:
   min_primary_clusters: 10  # adequacy gate, not a formal power guarantee
   min_rq5_clusters: 10
   budget_modes: ["outputs", "time"]
+  primary_outputs: 1000
+  primary_objective: "cvar"
+  primary_restarts: 4
   primary_structural_endpoint: "final_rmsd"
   primary_structural_contrast: "qaoa_vs_sa"
   max_time_overrun_fraction: 0.10
