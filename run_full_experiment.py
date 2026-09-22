@@ -748,6 +748,17 @@ class Orchestrator:
                 return False,f"Unreadable frozen selected_targets.json: {exc}"
             if not isinstance(frozen,list) or not frozen:
                 return False,"Frozen validation selected_targets.json is empty or invalid"
+            for row in frozen:
+                pdb=str((row or {}).get("target","")).strip().lower()
+                if not pdb:
+                    return False,"Frozen validation selected target lacks target identity"
+                recovery_manifest=freeze/"prepared"/pdb/"recovery_manifest.json"
+                if not recovery_manifest.is_file():
+                    # prepare-only layout may store prepared targets one level above freeze.
+                    recovery_manifest=self.run_dir/"validation_queue"/"freeze"/"prepared"/pdb/"recovery_manifest.json"
+                ok,detail=require([recovery_manifest])
+                if not ok:
+                    return False,f"Frozen target {pdb} lacks recovery_manifest.json: {detail}"
             freeze_manifest,error=read_json(freeze/"freeze_manifest.json")
             if error:return False,error
             expected_pairs={
@@ -849,6 +860,12 @@ class Orchestrator:
                     if (error or not summary.get("closed")
                             or int(summary.get("failures_total",0) or 0)!=0):
                         missing.append(str(summary_path))
+                        continue
+                    case_count=len(list((sub/"cases").glob("*.json")))
+                    if case_count!=int(summary.get("cases_completed_total",0) or 0):
+                        missing.append(
+                            f"{sub}: case count mismatch files={case_count}, "
+                            f"summary={summary.get('cases_completed_total')}")
             aggregate=[
                 self.run_dir/"method_sensitivity"/"sensitivity_summary.csv",
                 self.run_dir/"method_sensitivity"/"sensitivity_summary.json",
@@ -880,7 +897,11 @@ class Orchestrator:
             dev=dev_root/"run_summary.json"
             validation=val_root/"run_summary.json"
             ok,detail=require([
+                dev_root/"run_manifest.json",dev_root/"seed_streams.json",
+                dev_root/"eligibility.json",dev_root/"selected_targets.json",
                 dev,dev_root/"real_complex_metrics.csv",dev_root/"real_complex_report.md",
+                val_root/"run_manifest.json",val_root/"seed_streams.json",
+                val_root/"eligibility.json",val_root/"selected_targets.json",
                 val_root/"run_summary.json",val_root/"real_complex_metrics.csv",
                 val_root/"real_complex_report.md",
             ])
@@ -935,7 +956,13 @@ class Orchestrator:
                     return False,f"External validation summary not closed/clean: {path}"
                 if "failures_total" in summary and int(summary.get("failures_total",0) or 0)!=0:
                     return False,f"External validation summary reports failed cases: {path}"
-            return True,"external validation artifacts verified"
+                if path.parent.name=="vhh_coarse" and "cases_completed_total" in summary:
+                    case_count=len(list((path.parent/"cases").glob("*.json")))
+                    if case_count!=int(summary.get("cases_completed_total",0) or 0):
+                        return False,(
+                            f"External VHH case count mismatch: files={case_count}, "
+                            f"summary={summary.get('cases_completed_total')}")
+            return True,"external validation raw/aggregate/statistical artifacts verified"
         if stage=="statistics":
             root=self.run_dir/"qc_benchmark"
             modes=(self.config.get("statistics",{}) or {}).get("budget_modes",["outputs","time"])
