@@ -143,78 +143,146 @@ def grouped_primary(
     )
 
 
-def rq5_energy_structure(rows: list[dict], cluster_map: dict[str,str], resamples: int, seed: int) -> dict:
-    # Within each target/method, center both quantities so between-complex
-    # absolute energy offsets cannot create a spurious pooled correlation.
-    centered=[]
-    grouped=defaultdict(list)
+def rq5_energy_structure(
+    rows: list[dict], cluster_map: dict[str,str], contrast: str,
+    resamples: int, seed: int,
+) -> dict:
+    """Relate paired solver energy gains to paired structural gains.
+
+    For the pre-registered contrast (normally QAOA-SA), compute same-target,
+    same-perturbation-seed differences in discrete all-atom energy and final
+    side-chain RMSD. Differences are averaged within target and then within
+    family/structure cluster before Spearman inference, so repeated seeds and
+    homologous PDBs are not treated as independent observations.
+    """
+
+    baseline_map={
+        "qaoa_vs_sa":"sa",
+        "qaoa_vs_greedy":"greedy",
+        "qaoa_vs_uniform":"uniform",
+    }
+    if contrast not in baseline_map:
+        raise ValueError(f"Unsupported RQ5 contrast: {contrast}")
+    baseline=baseline_map[contrast]
+
+    values={}
+    duplicates=[]
     for row in rows:
-        target=row.get("target","").lower()
-        method=row.get("method","")
-        e=row.get("discrete_energy_kcal")
-        r=row.get("sidechain_rmsd_after_relaxation") or row.get("final_rmsd")
-        if target and method and e not in (None,"","None") and r not in (None,"","None"):
-            grouped[(target,method)].append((float(e),float(r)))
-    for (target,method),pairs in grouped.items():
+        target=str(row.get("target","")).lower()
+        seed_value=str(row.get("seed",""))
+        method=str(row.get("method",""))
+        energy=row.get("discrete_energy_kcal")
+        rmsd=row.get("sidechain_rmsd_after_relaxation") or row.get("final_rmsd")
+        if (
+            target and seed_value!="" and method in ("qaoa",baseline)
+            and energy not in (None,"","None") and rmsd not in (None,"","None")
+        ):
+            key=(target,seed_value,method)
+            if key in values:
+                duplicates.append(key)
+            else:
+                values[key]=(float(energy),float(rmsd))
+    if duplicates:
+        raise ValueError(f"Duplicate RQ5 rows: {duplicates[:10]}")
+
+    seeds_by_target=defaultdict(set)
+    for target,seed_value,_ in values:
+        seeds_by_target[target].add(seed_value)
+
+    target_points=[]
+    incomplete_seed_count=0
+    for target,seeds in sorted(seeds_by_target.items()):
         if target not in cluster_map:
             raise ValueError(f"Missing cluster mapping for structural target {target}")
-        energies=np.asarray([p[0] for p in pairs],float)
-        rmsds=np.asarray([p[1] for p in pairs],float)
-        for e,r in zip(energies-energies.mean(),rmsds-rmsds.mean()):
-            centered.append((target,cluster_map[target],method,float(e),float(r)))
-    if len(centered)<3:
-        return dict(n_rows=len(centered),spearman_rho=None,p_value=None,ci_low=None,ci_high=None)
+        de=[];dr=[];paired=0
+        for seed_value in sorted(seeds):
+            qkey=(target,seed_value,"qaoa")
+            bkey=(target,seed_value,baseline)
+            if qkey not in values or bkey not in values:
+                incomplete_seed_count+=1
+                continue
+            qe,qr=values[qkey];be,br=values[bkey]
+            de.append(qe-be)
+            dr.append(qr-br)
+            paired+=1
+        if paired:
+            target_points.append(dict(
+                target=target,cluster=cluster_map[target],paired_seeds=paired,
+                delta_energy=float(np.mean(de)),
+                delta_rmsd=float(np.mean(dr)),
+            ))
 
-    e=np.asarray([x[3] for x in centered],float)
-    r=np.asarray([x[4] for x in centered],float)
-    rho=float(spearmanr(e,r).statistic)
-    clusters=sorted({x[1] for x in centered})
+    by_cluster=defaultdict(list)
+    for point in target_points:
+        by_cluster[point["cluster"]].append(point)
+
+    cluster_points=[]
+    for cluster,points in sorted(by_cluster.items()):
+        cluster_points.append(dict(
+            cluster=cluster,
+            target_count=len(points),
+            delta_energy=float(np.mean([p["delta_energy"] for p in points])),
+            delta_rmsd=float(np.mean([p["delta_rmsd"] for p in points])),
+        ))
+
+    if len(cluster_points)<3:
+        return dict(
+            definition=f"paired QAOA-{baseline} discrete-energy difference vs final-RMSD difference",
+            contrast=contrast,n_targets=len(target_points),n_clusters=len(cluster_points),
+            paired_seed_count=sum(p["paired_seeds"] for p in target_points),
+            incomplete_seed_count=incomplete_seed_count,
+            spearman_rho=None,p_value=None,ci_low=None,ci_high=None,
+            target_points=target_points,cluster_points=cluster_points,
+        )
+
+    energy=np.asarray([p["delta_energy"] for p in cluster_points],float)
+    rmsd=np.asarray([p["delta_rmsd"] for p in cluster_points],float)
+    rho_value=spearmanr(energy,rmsd).statistic
+    rho=None if not math.isfinite(float(rho_value)) else float(rho_value)
+
     rng=np.random.default_rng(seed)
     boots=[]
-    by_cluster={cluster:[x for x in centered if x[1]==cluster] for cluster in clusters}
-    if len(clusters)>=2:
+    if rho is not None:
+        n=len(cluster_points)
         for _ in range(resamples):
-            sampled=rng.choice(clusters,size=len(clusters),replace=True)
-            sample=[]
-            for cluster in sampled:
-                sample.extend(by_cluster[str(cluster)])
-            se=np.asarray([x[3] for x in sample],float)
-            sr=np.asarray([x[4] for x in sample],float)
-            value=spearmanr(se,sr).statistic
+            idx=rng.integers(0,n,size=n)
+            if len(set(idx.tolist()))<2:
+                continue
+            value=spearmanr(energy[idx],rmsd[idx]).statistic
             if math.isfinite(float(value)):
                 boots.append(float(value))
 
-    # Cluster-aware null: preserve target/method blocks and permute only the
-    # centered RMSD residuals within each block. This avoids treating repeated
-    # seeds or different proteins as exchangeable independent observations.
-    blocks=defaultdict(list)
-    for item in centered:
-        blocks[(item[0],item[2])].append(item)
+    # Exact/Monte-Carlo permutation at the independent cluster unit.
     trials=max(1000,min(int(resamples),20000))
-    extreme=0;valid_trials=0
-    if math.isfinite(rho):
+    extreme=0;valid=0
+    if rho is not None:
         for _ in range(trials):
-            pe=[];pr=[]
-            for block in blocks.values():
-                be=np.asarray([x[3] for x in block],float)
-                br=np.asarray([x[4] for x in block],float)
-                shuffled=rng.permutation(br)
-                pe.extend(be.tolist());pr.extend(shuffled.tolist())
-            value=spearmanr(np.asarray(pe,float),np.asarray(pr,float)).statistic
+            permuted=rng.permutation(rmsd)
+            value=spearmanr(energy,permuted).statistic
             if math.isfinite(float(value)):
-                valid_trials+=1
+                valid+=1
                 if abs(float(value))>=abs(rho)-1e-15:
                     extreme+=1
-    permutation_p=None if valid_trials==0 else (extreme+1)/(valid_trials+1)
+    pvalue=None if valid==0 else (extreme+1)/(valid+1)
+
     return dict(
-        definition="within-target/method centered discrete energy vs post-relaxation side-chain RMSD",
-        n_rows=len(centered),n_clusters=len(clusters),
-        spearman_rho=rho,p_value=permutation_p,
-        p_value_method="within-target/method centered-RMSD permutation",
-        permutation_trials=valid_trials,
+        definition=f"paired QAOA-{baseline} discrete-energy difference vs final-RMSD difference",
+        contrast=contrast,
+        difference_sign="negative delta means QAOA lower than baseline",
+        n_targets=len(target_points),n_clusters=len(cluster_points),
+        paired_seed_count=sum(p["paired_seeds"] for p in target_points),
+        incomplete_seed_count=incomplete_seed_count,
+        spearman_rho=rho,p_value=pvalue,
+        p_value_method="family/structure-cluster-level RMSD-difference permutation",
+        permutation_trials=valid,
         ci_low=(None if not boots else float(np.percentile(boots,2.5))),
         ci_high=(None if not boots else float(np.percentile(boots,97.5))),
-        interpretation="positive rho means higher discrete energy is associated with worse final RMSD",
+        interpretation=(
+            "positive rho means targets/clusters with a larger QAOA energy disadvantage "
+            "also tend to have a larger QAOA RMSD disadvantage; negative energy and RMSD "
+            "differences together represent solver energy gains propagating to structural gains"
+        ),
+        target_points=target_points,cluster_points=cluster_points,
     )
 
 
@@ -239,7 +307,9 @@ def main() -> int:
     raw=json.loads(args.cluster_map.read_text(encoding="utf-8"))
     cluster_map={str(k).lower():str(v) for k,v in raw.items()}
     primary=grouped_primary(rows,cluster_map,args.primary_endpoint,args.primary_contrast,args.resamples,args.seed)
-    rq5=rq5_energy_structure(rows,cluster_map,args.resamples,args.seed)
+    rq5=rq5_energy_structure(
+        rows,cluster_map,args.primary_contrast,args.resamples,args.seed
+    )
     payload=dict(
         primary=primary,rq5=rq5,resamples=args.resamples,seed=args.seed,
         metrics_sha256=sha256(args.metrics),cluster_map_sha256=sha256(args.cluster_map),
