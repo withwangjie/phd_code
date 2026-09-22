@@ -201,7 +201,7 @@ def _graph_protocol_signature(data: Any) -> Dict[str, Any]:
     )
     missing = [name for name in required if not hasattr(data, name)]
     if missing:
-        raise ValueError(f"Graph lacks v1.3 protocol metadata: {missing}")
+        raise ValueError(f"Graph lacks v1.4 protocol metadata: {missing}")
     return {
         "graph_version": str(data.graph_version),
         "edge_policy": str(data.edge_policy),
