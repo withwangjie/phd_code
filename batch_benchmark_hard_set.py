@@ -1486,11 +1486,53 @@ def _ablation_dispatch(tasks: Iterable[tuple], workers: int) -> Iterable[tuple]:
                     yield future.result()
 
 
+def fit_energy_calibration_csv(input_csv: Path, output_json: Path, ridge_alpha: float) -> dict:
+    """Fit coarse component weights to Amber delta-E using TRAIN rows only."""
+    if ridge_alpha < 0 or not math.isfinite(ridge_alpha):
+        raise ValueError("ridge_alpha must be finite and nonnegative")
+    with Path(input_csv).open(newline="",encoding="utf-8-sig") as handle:
+        rows=list(csv.DictReader(handle))
+    if not rows:
+        raise ValueError("Calibration CSV is empty")
+    required=("prior_energy","vhh_environment_energy","antigen_energy","pair_energy","amber_delta_kcal")
+    missing=[key for key in required if key not in rows[0]]
+    if missing: raise ValueError(f"Calibration CSV missing columns: {missing}")
+    if "split" in rows[0] and any(str(row["split"]).lower()!="train" for row in rows):
+        raise ValueError("Energy calibration may use training rows only")
+    X=np.asarray([[float(row[k]) for k in required[:-1]] for row in rows],dtype=float)
+    y=np.asarray([float(row[required[-1]]) for row in rows],dtype=float)
+    if not np.isfinite(X).all() or not np.isfinite(y).all():
+        raise ValueError("Calibration data contain non-finite values")
+    design=np.column_stack([np.ones(len(X)),X])
+    penalty=np.diag([0.0]+[float(ridge_alpha)]*X.shape[1])
+    beta=np.linalg.solve(design.T@design+penalty,design.T@y)
+    pred=design@beta
+    residual=y-pred
+    ss_tot=float(np.sum((y-y.mean())**2))
+    payload={
+        "intercept":float(beta[0]),
+        "prior_weight":float(beta[1]),
+        "vhh_environment_weight":float(beta[2]),
+        "antigen_weight":float(beta[3]),
+        "pair_weight":float(beta[4]),
+        "ridge_alpha":float(ridge_alpha),
+        "n_train_samples":int(len(y)),
+        "rmse_kcal":float(np.sqrt(np.mean(residual**2))),
+        "r2":(None if ss_tot<=0 else float(1.0-np.sum(residual**2)/ss_tot)),
+        "input_sha256":_ablation_digest(Path(input_csv)),
+        "scope":"fit on training complexes only; freeze before validation/test",
+    }
+    _ablation_atomic_json(Path(output_json),payload)
+    return payload
+
 def _ablation_main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Matched-output research ablations on the existing coarse-grained model.")
     parser.add_argument("--input-dir", type=Path, default=Path("dataset_clean_500/graphs/test_snac_hard"))
     parser.add_argument("--checkpoint", type=Path, default=Path("quantum-protein/checkpoints_500/best_egnn_pruning.pt"))
     parser.add_argument("--out-dir", type=Path, default=Path("benchmark_results_ablation"))
+    parser.add_argument("--fit-energy-calibration-csv", type=Path)
+    parser.add_argument("--fit-energy-calibration-out", type=Path)
+    parser.add_argument("--calibration-ridge-alpha", type=float, default=1.0)
     parser.add_argument("--seeds", type=int, nargs="+", default=[42,43,44])
     parser.add_argument("--master-seed", type=int, default=DEFAULT_MASTER_SEED,
         help="Derives independent, saved, per-case optimize/sample sub-seeds (see seed_streams.py) -- "
@@ -1549,6 +1591,14 @@ def _ablation_main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--omp-threads", type=int, default=2)
     args = parser.parse_args(argv)
+    if args.fit_energy_calibration_csv is not None:
+        if args.fit_energy_calibration_out is None:
+            parser.error("--fit-energy-calibration-out is required with --fit-energy-calibration-csv")
+        payload=fit_energy_calibration_csv(
+            args.fit_energy_calibration_csv,args.fit_energy_calibration_out,args.calibration_ridge_alpha
+        )
+        print(json.dumps(payload,indent=2,sort_keys=True))
+        return 0
     if (not 5 <= args.active_sites <= 8
             or any(not 0.0 < value <= 1.0 for value in (
                 args.vhh_identity_threshold, args.cdr_h3_identity_threshold,
