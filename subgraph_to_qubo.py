@@ -465,10 +465,21 @@ class EnergyCalibration:
         payload=json.loads(Path(path).read_text(encoding="utf-8"))
         required=("prior_weight","vhh_environment_weight","antigen_weight","pair_weight","intercept")
         missing=[key for key in required if key not in payload]
-        if missing: raise ValueError(f"Calibration file missing keys: {missing}")
+        if missing:
+            raise ValueError(f"Calibration file missing keys: {missing}")
         values={key:float(payload[key]) for key in required}
         if not all(math.isfinite(v) for v in values.values()):
             raise ValueError("Calibration coefficients must be finite")
+        for key in ("prior_weight","vhh_environment_weight","antigen_weight","pair_weight"):
+            if values[key] < 0:
+                raise ValueError(f"Calibration component weight must be nonnegative: {key}={values[key]}")
+        scope=str(payload.get("scope",""))
+        if "training complexes only" not in scope:
+            raise ValueError(
+                "Calibration provenance must state that coefficients were fit on training complexes only"
+            )
+        if int(payload.get("n_train_complexes",0)) < 2:
+            raise ValueError("Calibration must report at least two training complexes")
         return cls(**values,source=str(path))
 
 @dataclass(frozen=True)
@@ -618,9 +629,18 @@ def _load_dunbrack_bins(library_path: Path, requested_bins: set[tuple[str,int,in
             line=raw.strip()
             if not line or line.startswith("#"): continue
             fields=line.split()
-            if len(fields)<17: continue
+            if len(fields)<17:
+                continue
             try:
-                key=(fields[0].upper(),int(round(float(fields[1]))),int(round(float(fields[2]))))
+                residue=fields[0].upper()
+                phi=float(fields[1]); psi=float(fields[2])
+                if residue not in _THREE_LETTER.values():
+                    continue
+                if not (-180.0 <= phi <= 180.0 and -180.0 <= psi <= 180.0):
+                    raise ValueError(f"Invalid Dunbrack backbone bin: {residue} {phi} {psi}")
+                if abs(phi/10.0-round(phi/10.0))>1e-6 or abs(psi/10.0-round(psi/10.0))>1e-6:
+                    raise ValueError(f"Dunbrack traditional library must use 10-degree bins: {residue} {phi} {psi}")
+                key=(residue,int(round(phi)),int(round(psi)))
             except ValueError:
                 continue
             if key not in found: continue
