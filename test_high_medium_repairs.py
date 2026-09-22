@@ -175,3 +175,30 @@ def test_statistics_resume_checks_statistics_subdirectory(tmp_path: Path) -> Non
     (stats/"structure_statistics.md").write_text("ok",encoding="utf-8")
     ok,detail=Orchestrator._validate_completed_stage_artifacts(Dummy(),"statistics")
     assert ok is True, detail
+
+
+
+def test_active_site_scaling_axis_and_primary_size_are_frozen() -> None:
+    import yaml
+    cfg=yaml.safe_load(Path("full_experiment_config.yaml").read_text(encoding="utf-8"))
+    assert cfg["qc_benchmark"]["active_sites"] == [4,6,8,10]
+    assert cfg["statistics"]["primary_active_sites"] == 6
+    assert cfg["queue_freeze"]["validation_queue"]["sites"] == 6
+    assert cfg["qc_benchmark"]["sensitivity"]["active_sites"] == 6
+
+
+def test_ablation_active_sites_are_a_case_dimension() -> None:
+    source=inspect.getsource(bbh._ablation_main)
+    case_source=inspect.getsource(bbh._ablation_run_case)
+    assert "args.active_sites,args.seeds" in source
+    assert "active_sites=setting[4]" in source
+    assert 'active_sites=int(config["active_sites"])' in case_source
+    assert "min_variables=3 * active_sites" in case_source
+    assert "max_sites=active_sites" in case_source
+
+
+def test_primary_statistics_filter_active_site_scale() -> None:
+    source=inspect.getsource(bbh._paired_statistics_main)
+    assert "--primary-active-sites" in source
+    assert 'get("active_sites",-1)' in source
+    assert "primary_active_sites=args.primary_active_sites" in source
