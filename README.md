@@ -164,10 +164,38 @@ primary structural contrast. RQ5 additionally reports a within-target/method
 centered Spearman association between discrete energy and final RMSD with
 family-cluster bootstrap confidence intervals.
 
+## Formal external resources and fail-closed preflight
+
+A formal run intentionally fails before expensive computation when required
+scientific inputs are unavailable. The preflight verifies the Dunbrack 2010
+library, a frozen family/structure similarity input (cluster map or pair TSV),
+the external VHH graph set, FASPR, Phenix clashscore, and OpenMM GBN2
+parameters when the declared solvent sensitivity is enabled.
+
+Family/structure clusters can be reproducibly built from a frozen Foldseek (or
+equivalent) pair table with `build_independence_cluster_map.py`. The script
+keeps connected components, supports singleton universe IDs, and records the
+pair-table SHA256 and threshold. Dataset resume is invalidated if the frozen
+cluster map changes.
+
+External VHH independence is not accepted from a hand-written Boolean alone.
+`audit_external_vhh_independence.py` compares every external graph against
+the frozen training graphs using the same VHH/CDR-H3/antigen thresholds and
+the same family/structure cluster map, then writes a per-target auditable
+manifest. The external-validation stage verifies that manifest before running
+the frozen model.
+
+The primary all-atom protocol uses vacuum/NoCutoff Amber14 packing energy.
+A pre-declared GBN2 sensitivity run is performed on development targets only;
+the validation queue never chooses its solvent model after inspecting results.
+
 ## Main entry points
 
 - `run_full_experiment.py`: end-to-end orchestrator.
 - `build_final_pyg_dataset.py`: audited graph construction.
+- `build_independence_cluster_map.py`: frozen family/structure cluster-map construction.
+- `audit_external_vhh_independence.py`: external VHH train-overlap audit.
+- `generate_energy_calibration_dataset.py`: training-only multi-chi coarse/Amber calibration rows.
 - `train_egnn_pruning.py`: leakage-controlled EGNN training.
 - `model_egnn_pruning.py`: interface scoring and Active-site selection.
 - `subgraph_to_qubo.py`: coarse/all-atom adaptive side-chain QUBO builders.
@@ -175,3 +203,5 @@ family-cluster bootstrap confidence intervals.
 - `batch_benchmark_hard_set.py`: matched quantum/classical benchmark.
 - `run_real_complex_pilot.py`: all-atom retrospective recovery experiment.
 - `evaluate_complex_metrics.py`: structure-level evaluation.
+- `analyze_structure_recovery.py`: pre-registered structural endpoint and RQ5 inference.
+- `run_external_structure_baselines.py`: FASPR and Phenix clashscore baselines.
