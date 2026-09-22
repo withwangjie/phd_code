@@ -3078,7 +3078,16 @@ def audit_experiment_results(
         if result.status in ("completed","completed_with_failures"):
             ok,detail=orchestrator._validate_completed_stage_artifacts(stage)
         elif result.status=="skipped":
-            ok,detail=True,"stage skipped by protocol/runtime mode; no experimental result required"
+            existing=orchestrator._load_stage_status(stage)
+            protocol_disabled=not orchestrator.config.get("stages",{}).get(stage,True)
+            optional_smoke=(stage=="smoke_check")
+            if existing and existing.get("status") in ("completed","completed_with_failures"):
+                ok,detail=orchestrator._validate_completed_stage_artifacts(stage)
+                detail="skipped this invocation; existing completed artifacts revalidated: "+detail
+            elif protocol_disabled or optional_smoke:
+                ok,detail=True,"stage skipped by frozen protocol as optional/disabled"
+            else:
+                ok,detail=False,"required stage skipped without a previously completed auditable result"
         else:
             ok,detail=False,"stage failed; no complete experimental result set"
         records.append({
