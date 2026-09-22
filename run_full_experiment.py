@@ -275,6 +275,9 @@ def _validate_scientific_config(config: Dict[str, Any]) -> None:
         raise ValueError("structure_experiment.seeds must contain >=3 unique nonnegative values")
     if int(qc.get("repeats",10)) < 3:
         raise ValueError("qc_benchmark.repeats must be >=3")
+    max_failure_fraction=float(qc.get("max_failure_fraction",0.0))
+    if not math.isfinite(max_failure_fraction) or not 0.0 <= max_failure_fraction < 1.0:
+        raise ValueError("qc_benchmark.max_failure_fraction must be in [0,1)")
 
     stats=config.get("statistics",{}) or {}
     if stats.get("primary_structural_endpoint","final_rmsd") not in (
@@ -1336,9 +1339,21 @@ class Orchestrator:
         elif returncode == 1 and not summary.get("failures_this_invocation", 0):
             status = "failed"
             detail = "Nonzero exit is inconsistent with case summary; inspect the stage log."
+        elif (
+            summary.get("failures_total",0) / max(1,summary.get("total_cases_planned",1))
+            > float(cfg.get("max_failure_fraction",0.0))
+        ):
+            status = "failed"
+            failure_fraction=summary.get("failures_total",0)/max(1,summary.get("total_cases_planned",1))
+            detail = (
+                f"Closed but failure fraction {failure_fraction:.6f} exceeds frozen "
+                f"max_failure_fraction={float(cfg.get('max_failure_fraction',0.0)):.6f}; "
+                f"planned={summary['total_cases_planned']} completed={summary['cases_completed_total']} "
+                f"failed={summary['failures_total']} (see {out_dir}/failed_cases.log)."
+            )
         elif summary.get("failures_total", 0) > 0:
             status = "completed_with_failures"
-            detail = (f"Closed with per-instance failures: planned={summary['total_cases_planned']} "
+            detail = (f"Closed within allowed failure fraction: planned={summary['total_cases_planned']} "
                       f"completed={summary['cases_completed_total']} failed={summary['failures_total']} "
                       f"(see {out_dir}/failed_cases.log). {artifact_detail}")
         else:
@@ -1730,8 +1745,17 @@ class Orchestrator:
                 ]
                 rc,log=self._run_subprocess("external_vhh_benchmark",argv)
                 logs.append(str(log));argvs.append(argv)
-                if rc not in (0,1) or not (out/"run_summary.json").is_file():
+                summary_path=out/"run_summary.json"
+                if rc!=0 or not summary_path.is_file():
                     failures.append(f"External VHH benchmark failed (exit={rc}; see {log})")
+                else:
+                    external_summary=json.loads(summary_path.read_text(encoding="utf-8"))
+                    if not external_summary.get("closed",False):
+                        failures.append("External VHH benchmark is not closed")
+                    if int(external_summary.get("failures_total",0) or 0)!=0:
+                        failures.append(
+                            f"External VHH benchmark has {external_summary.get('failures_total')} failed cases"
+                        )
 
         structural=cfg.get("structural_baselines", {}) or {}
         if structural.get("required", False):
