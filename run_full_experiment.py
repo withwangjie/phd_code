@@ -18,9 +18,11 @@ under `stages:`):
 
     env_check -> smoke_check -> data_audit -> queue_freeze (dataset split,
     no cap, + validation-queue selection+freeze) -> egnn_train ->
+    energy_calibration -> method_sensitivity ->
     qc_benchmark (pruning x budget x objective ablation) ->
-    structure_experiment (dev queue + validation queue recovery-benchmark)
-    -> statistics (paired analysis) -> final_report
+    structure_experiment (dev queue + validation queue recovery-benchmark) ->
+    external_validation -> statistics (paired + structural analysis) ->
+    final_report
 
 Every run gets its own fresh, uniquely timestamped directory under
 `paths.run_root` (never reused, never overwritten); raw data, historical
@@ -547,23 +549,10 @@ class Orchestrator:
             return StageResult(stage, "skipped", utc_timestamp(), utc_timestamp(),
                                 None, "Skipped (--only targets a different stage; not yet run).")
         if not self.config.get("stages", {}).get(stage, True):
-            # (packaging-round fix) A stage disabled via
-            # `stages.<name>: false` in config -- e.g. smoke_check disabled
-            # for a formal deployment run that must never execute a
-            # trial/smoke sub-run -- must still PERSIST a "skipped" status
-            # marker. Previously this branch returned without calling
-            # _save_stage_status(), so on a fresh run_dir no
-            # stage_status/<stage>.json ever existed for it; any downstream
-            # stage listing it as a prerequisite would then find `record is
-            # None` below and refuse to start ("Prerequisite stage has not
-            # completed"), silently deadlocking the whole pipeline the
-            # first time anyone disabled a stage on a brand-new run rather
-            # than an already-completed one. Persisting "skipped" here (and
-            # accepting "skipped" as a satisfied prerequisite just below)
-            # makes disabling a stage in config behave the way the config
-            # file's own comment already promises ("allows re-running a
-            # subset without editing the script") for a fresh run too, not
-            # only for a --resume of a run where it had previously run.
+            # Persist an auditable skipped marker. A disabled stage is NOT
+            # generally equivalent to completion: only smoke_check is an
+            # explicitly optional prerequisite. Scientific dependencies
+            # remain fail-closed and cannot be bypassed with a stage toggle.
             result = StageResult(stage, "skipped", utc_timestamp(), utc_timestamp(),
                                   None, "Skipped (disabled in full_experiment_config.yaml).")
             self._save_stage_status(result)
