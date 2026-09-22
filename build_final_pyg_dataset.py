@@ -584,7 +584,9 @@ def main():
     if not args.no_cap and not 300<=args.target_hard<=500:parser.error('--target-hard must be between 300 and 500 (or pass --no-cap to remove the cap entirely)')
     output=args.out.resolve();output.mkdir(parents=True,exist_ok=True)
     cluster_map=None
+    cluster_map_sha256=None
     if args.cluster_map is not None:
+        cluster_map_sha256=sha256(args.cluster_map)
         raw_clusters=json.loads(args.cluster_map.read_text(encoding='utf-8'))
         if not isinstance(raw_clusters,dict) or not raw_clusters:
             raise ValueError('--cluster-map must contain a nonempty JSON object')
@@ -605,6 +607,12 @@ def main():
             min_interface_residues=MIN_INTERFACE_RESIDUES,graph_version=VERSION)
         if prior.get('graph_protocol')!=expected_protocol:
             raise ValueError('Resume graph protocol differs; choose a fresh output directory')
+        prior_cluster_sha=(prior.get('validation',{}) or {}).get('family_cluster_map_sha256')
+        if prior_cluster_sha != cluster_map_sha256:
+            raise ValueError(
+                f'Resume family/structure cluster map differs: prior={prior_cluster_sha}, '
+                f'current={cluster_map_sha256}; choose a fresh output directory'
+            )
     if any((output/'graphs').rglob('*.pt')) and not RESUME:raise FileExistsError('Output already contains graphs; choose a fresh --out directory or explicit --resume')
     for split in ['train','test_db55','test_snac_hard']:(output/'graphs'/split).mkdir(parents=True,exist_ok=True)
     torch.set_num_threads(1);start=time.time();manifest=[];exclusions=[];failures=[];summary={};complete=False;previous_elapsed=0
@@ -805,7 +813,7 @@ def main():
             hard_layered_pair_max=hard_pair_max,train_hard_layered_cross_max=cross_max,
             layered_train_hard_isolation=True,
             family_cluster_map_used=cluster_map is not None,
-            family_cluster_map_sha256=(sha256(args.cluster_map) if args.cluster_map is not None else None),
+            family_cluster_map_sha256=cluster_map_sha256,
             family_cluster_train_hard_overlap=0 if cluster_map is not None else None,
             pyg_batch=True),known_train_cdr=known_train_cdr)
         cluster_output=[dict(cluster_id=cl['cluster_id'],representative=cl['representative'],sequences=cl['sequences'],source_ids=[r['id'] for r in cl['members']],selected=any(r['cluster_id']==cl['cluster_id'] for r in manifest)) for cl in clusters]
