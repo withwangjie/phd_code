@@ -22,7 +22,7 @@ master_seed: 20260917  # Derives independent partition/train/perturb/optimize/sa
 # ---------------------------------------------------------------------------
 paths:
   repo_root: "."
-  data_root: "/data/quantum-protein/data"
+  data_root: "/data/quantum-protein/data"  # fallback only; resolve_server_config.py overrides from server_config/QP_DATA_ROOT
   # Directory NAMES (not paths), resolved under THIS run's own run_dir
   # (run_dir/dataset_dir, run_dir/checkpoint_dir) -- never a fixed,
   # repo-root-level path shared across runs. This is what makes every run's
@@ -36,7 +36,7 @@ paths:
   # Root under which every run gets its own unique, timestamped directory
   # (run_full_experiment.py creates experiments_full_run_<UTC timestamp>/
   # under this root; it never reuses or overwrites an existing one).
-  run_root: "/data/quantum-protein/runs"
+  run_root: "/data/quantum-protein/runs"  # fallback only; runtime resolver selects server-specific run_root
   run_prefix: "experiments_full_run_"
 
 # ---------------------------------------------------------------------------
@@ -105,7 +105,7 @@ smoke_check:
 # exist and are non-empty before marking the stage complete.
 # ---------------------------------------------------------------------------
 data_audit:
-  workers: 16
+  workers: 16  # runtime fallback; auto-resolved from server CPU resources before formal launch
   limit: 0  # 0 = no limit; audits every discovered structure
   # High-confidence structure benchmark gates.
   max_resolution_angstrom: 3.0
@@ -159,7 +159,7 @@ queue_freeze:
     antigen_identity: 0.30
     antigen_min_length_coverage: 0.70
   graph_build:
-    workers: 8
+    workers: 8  # runtime fallback; auto-resolved from server CPU resources
     # Scientific graph protocol. Changing any value requires a fresh dataset;
     # graph v1.6 records these values in every .pt and run_summary.json.
     # 5 A cross-partner atom contact is literature-supported for antibody-antigen/CAPRI-style interfaces [METHODS_EVIDENCE R3,R4].
@@ -219,10 +219,10 @@ queue_freeze:
 # validation-queue EGNN pruning selection actually uses.
 # ---------------------------------------------------------------------------
 egnn_train:
-  nproc_per_node: 2  # two T4 ranks; batch_size is per GPU
+  nproc_per_node: 2  # runtime fallback; resolver derives DDP ranks from available GPUs while preserving target global batch
   max_epochs: 50
   patience: 5
-  batch_size: 2
+  batch_size: 2  # runtime fallback; resolver recomputes per-rank batch from target global batch
   hidden_dim: 32
   num_layers: 4
   dropout: 0.10
@@ -236,8 +236,8 @@ egnn_train:
   pin_memory: true
   # Uses queue_freeze.homology_isolation exactly; no independent threshold.
   device: "cuda"
-  threads: 4
-  num_workers: 8
+  threads: 4      # runtime fallback; auto-resolved
+  num_workers: 8  # runtime fallback; auto-resolved
 
 # ---------------------------------------------------------------------------
 # Stage 4: quantum-vs-classical coarse-grained benchmark
@@ -256,7 +256,7 @@ qc_benchmark:
   # run_dir/<paths.dataset_dir>/<input_dir> and run_dir/<paths.checkpoint_dir>/<checkpoint>.
   input_dir: "graphs/test_snac_hard"
   checkpoint: "best_egnn_pruning.pt"
-  workers: 16  # CPU legal-subspace simulation, not 2^n GPU state vectors
+  workers: 16  # runtime fallback; auto-resolved CPU workers for legal-subspace simulation
   max_targets: 0  # 0 = every qualifying graph in input_dir, no silent subset
   max_failure_fraction: 0.0  # formal benchmark is fail-closed by default
   pruning: ["egnn", "contact", "distance", "cdr", "random"]
@@ -409,8 +409,8 @@ external_validation:
     min_clusters: 10
   structural_baselines:
     required: true
-    faspr_executable: "/opt/FASPR/FASPR"
-    phenix_clashscore_executable: "/opt/phenix/phenix.clashscore"
+    faspr_executable: "/opt/FASPR/FASPR"  # fallback only; server resolver uses QP_FASPR/server_config/PATH
+    phenix_clashscore_executable: "/opt/phenix/phenix.clashscore"  # fallback only; auto-resolved at launch
     timeout_seconds: 1800
 
 # ---------------------------------------------------------------------------
@@ -447,8 +447,8 @@ final_report:
 hardware:
   cpu_threads_per_process: 2
   openmm_cpu_threads: 8
-  # Explicit GPU protocol; strict energy-decomposition tolerances remain.
-  # Structural targets run sequentially on visible GPU 0; training uses both GPUs.
+  # Runtime fallbacks only. resolve_server_config.py selects CPU/GPU resources
+  # for the current server; scientific energy-decomposition tolerances remain unchanged.
   openmm_platform: "CUDA"
   openmm_device: "0"
   openmm_precision: "double"
