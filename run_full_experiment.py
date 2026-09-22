@@ -628,6 +628,153 @@ class Orchestrator:
             return False, "Missing or empty expected artifact(s): " + ", ".join(missing)
         return True, "All expected artifacts present and non-empty."
 
+    def _validate_completed_stage_artifacts(self, stage: str) -> tuple[bool, str]:
+        """Revalidate critical artifacts before trusting a completed stage marker."""
+        def require(paths: Sequence[Path]) -> tuple[bool, str]:
+            return self._artifacts_present(paths)
+
+        def read_json(path: Path) -> tuple[Optional[dict], Optional[str]]:
+            try:
+                value=json.loads(path.read_text(encoding="utf-8"))
+            except Exception as exc:
+                return None,f"Unreadable JSON {path}: {type(exc).__name__}: {exc}"
+            if not isinstance(value,dict):
+                return None,f"Expected JSON object at {path}"
+            return value,None
+
+        if stage=="smoke_check":
+            return True,"optional smoke marker accepted"
+        if stage=="env_check":
+            return require([self.run_dir/"env_check.json"])
+        if stage=="data_audit":
+            return require([self.run_dir/"audit"/name for name in (
+                "data_audit_report.md","data_audit_details.csv","data_audit_details.jsonl",
+                "data_audit_inventory.json","data_audit_db55_pairs.json")])
+        if stage=="queue_freeze":
+            dataset=self.dataset_dir()
+            freeze=self.run_dir/"validation_queue"/"freeze"
+            ok,detail=require([
+                dataset/"graph_manifest.csv",dataset/"graph_manifest.json",
+                dataset/"run_summary.json",dataset/"graph_dataset_delivery_report.md",
+                freeze/"selected_targets.json",freeze/"eligibility.json",freeze/"run_manifest.json",
+            ])
+            if not ok:return ok,detail
+            summary,error=read_json(dataset/"run_summary.json")
+            if error:return False,error
+            if not summary.get("complete"):
+                return False,"dataset run_summary.json is not complete"
+            try:
+                frozen=json.loads((freeze/"selected_targets.json").read_text(encoding="utf-8"))
+            except Exception as exc:
+                return False,f"Unreadable frozen selected_targets.json: {exc}"
+            if not isinstance(frozen,list) or not frozen:
+                return False,"Frozen validation selected_targets.json is empty or invalid"
+            return True,"queue-freeze artifacts verified"
+        if stage=="egnn_train":
+            checkpoint=self.checkpoint_dir()/"best_egnn_pruning.pt"
+            summary_path=self.checkpoint_dir()/"training_summary.json"
+            ok,detail=require([checkpoint,summary_path])
+            if not ok:return ok,detail
+            summary,error=read_json(summary_path)
+            if error:return False,error
+            if summary.get("status")!="complete":
+                return False,"training_summary.json status is not complete"
+            checkpoint_info=summary.get("checkpoint") or {}
+            expected_sha=checkpoint_info.get("sha256")
+            if not expected_sha:
+                return False,"training_summary.json has no checkpoint sha256"
+            if sha256_of(checkpoint)!=expected_sha:
+                return False,"EGNN checkpoint sha256 mismatch"
+            return True,"EGNN checkpoint and training summary verified"
+        if stage=="energy_calibration":
+            qc=self.config.get("qc_benchmark",{}) or {}
+            cal=qc.get("energy_calibration",{}) or {}
+            training=self.run_dir/cal.get("training_csv","calibration/coarse_to_amber_train.csv")
+            calibration=self.run_dir/cal.get("calibration_file","calibration/coarse_to_amber.json")
+            provenance=training.with_suffix(".provenance.json")
+            ok,detail=require([training,provenance,calibration])
+            if not ok:return ok,detail
+            payload,error=read_json(calibration)
+            if error:return False,error
+            if not payload.get("accepted",True) and "cv_rmse_kcal" not in payload:
+                return False,"Calibration artifact does not contain accepted calibration metrics"
+            return True,"energy calibration artifacts verified"
+        if stage=="method_sensitivity":
+            qc=self.config.get("qc_benchmark",{}) or {}
+            cfg=qc.get("sensitivity",{}) or {}
+            missing=[]
+            for shots in cfg.get("eval_shots",[200,500,1000]):
+                for alpha in cfg.get("cvar_alpha",[0.05,0.1,0.25,0.5,1.0]):
+                    sub=self.run_dir/"method_sensitivity"/f"shots_{shots}_alpha_{str(alpha).replace('.','p')}"
+                    summary_path=sub/"run_summary.json"
+                    if not summary_path.is_file():
+                        missing.append(str(summary_path));continue
+                    summary,error=read_json(summary_path)
+                    if error or not summary.get("closed"):
+                        missing.append(str(summary_path))
+            if missing:
+                return False,"Sensitivity sub-runs missing/not closed: "+", ".join(missing[:10])
+            return True,"all configured sensitivity sub-runs are closed"
+        if stage=="qc_benchmark":
+            root=self.run_dir/"qc_benchmark"
+            ok,detail=require([root/"run_manifest.json",root/"run_summary.json"])
+            if not ok:return ok,detail
+            summary,error=read_json(root/"run_summary.json")
+            if error:return False,error
+            if not summary.get("closed") or int(summary.get("cases_completed_total",0) or 0)<=0:
+                return False,"qc_benchmark run_summary.json is not closed with completed cases"
+            return True,"qc_benchmark closure verified"
+        if stage=="structure_experiment":
+            dev=self.run_dir/"dev_queue"/"run_summary.json"
+            validation=self.run_dir/"validation_queue"/"execution"/"run_summary.json"
+            ok,detail=require([dev,validation])
+            if not ok:return ok,detail
+            dev_summary,error=read_json(dev)
+            if error:return False,error
+            val_summary,error=read_json(validation)
+            if error:return False,error
+            if not dev_summary.get("closed"):
+                return False,"dev_queue run_summary.json is not closed"
+            if not val_summary.get("closed") or val_summary.get("frozen_set_accounting_ok") is not True:
+                return False,"validation execution is not closed against frozen denominator"
+            return True,"structural queue closure verified"
+        if stage=="external_validation":
+            cfg=self.config.get("external_validation",{}) or {}
+            paths=[]
+            ext=cfg.get("external_vhh",{}) or {}
+            if ext.get("required",False):
+                root=self.run_dir/"external_validation"/"vhh_coarse"
+                paths += [root/"run_summary.json",root/"statistics_outputs.json"]
+            structural=cfg.get("structural_baselines",{}) or {}
+            if structural.get("required",False):
+                root=self.run_dir/"external_validation"/"structural_baselines"
+                paths += [root/"run_summary.json",root/"external_baseline_metrics.csv"]
+            ok,detail=require(paths)
+            if not ok:return ok,detail
+            for path in [p for p in paths if p.name=="run_summary.json"]:
+                summary,error=read_json(path)
+                if error:return False,error
+                if summary.get("closed") is False or summary.get("failures"):
+                    return False,f"External validation summary not closed/clean: {path}"
+            return True,"external validation artifacts verified"
+        if stage=="statistics":
+            root=self.run_dir/"qc_benchmark"
+            modes=(self.config.get("statistics",{}) or {}).get("budget_modes",["outputs","time"])
+            paths=[
+                root/f"statistics_{mode}.{suffix}"
+                for mode in modes for suffix in ("json","md")
+            ]
+            paths += [
+                self.run_dir/"structure_statistics.json",
+                self.run_dir/"structure_statistics.md",
+            ]
+            return require(paths)
+        if stage=="final_report":
+            filename=(self.config.get("final_report",{}) or {}).get(
+                "filename","FINAL_RESEARCH_REPORT.md")
+            return require([self.run_dir/filename])
+        return False,f"No resume artifact policy defined for stage {stage!r}"
+
     # ================================================================
     # Stage 0: environment check
     # ================================================================
