@@ -6,7 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from run_real_complex_pilot import _load_frozen_targets, _load_frozen_target_ids, _reconcile_frozen_targets
+from run_real_complex_pilot import (
+    _load_frozen_targets, _load_frozen_target_ids, _match_frozen_manifest_rows,
+    _reconcile_frozen_targets,
+)
 
 
 def test_load_frozen_target_ids_accepts_selected_targets_schema(tmp_path: Path) -> None:
@@ -71,3 +74,40 @@ def test_structured_frozen_target_requires_graph_identity(tmp_path: Path) -> Non
     path.write_text(json.dumps([{"target": "4ABC", "source_id": "source-1"}]), encoding="utf-8")
     with pytest.raises(ValueError, match="graph identity"):
         _load_frozen_targets(path)
+
+
+def test_exact_frozen_graph_match_rejects_same_pdb_different_graph() -> None:
+    frozen = [{
+        "target": "4abc",
+        "source_id": "source-a",
+        "graph_path": "graphs/test_snac_hard/a.pt",
+        "graph_sha256": "a"*64,
+        "legacy_pdb_only": False,
+    }]
+    candidates = [
+        {"pdb_id": "4ABC", "source_id": "source-b",
+         "path": "graphs/test_snac_hard/b.pt", "sha256": "b"*64},
+    ]
+    matched, missing = _match_frozen_manifest_rows(candidates, frozen)
+    assert matched == []
+    assert missing == ["4abc"]
+
+
+def test_exact_frozen_graph_match_accepts_only_identical_manifest_row() -> None:
+    frozen = [{
+        "target": "4abc",
+        "source_id": "source-a",
+        "graph_path": "graphs/test_snac_hard/a.pt",
+        "graph_sha256": "a"*64,
+        "legacy_pdb_only": False,
+    }]
+    candidates = [
+        {"pdb_id": "4ABC", "source_id": "source-a",
+         "path": "graphs\\test_snac_hard\\a.pt", "sha256": "A"*64},
+        {"pdb_id": "4ABC", "source_id": "source-b",
+         "path": "graphs/test_snac_hard/b.pt", "sha256": "b"*64},
+    ]
+    matched, missing = _match_frozen_manifest_rows(candidates, frozen)
+    assert len(matched) == 1
+    assert matched[0]["source_id"] == "source-a"
+    assert missing == []
