@@ -559,7 +559,10 @@ class Orchestrator:
             "energy_calibration":[self.run_dir/"calibration"],
             "method_sensitivity":[self.run_dir/"method_sensitivity"],
             "qc_benchmark":[self.run_dir/"qc_benchmark"],
-            "structure_experiment":[self.run_dir/"dev_queue",self.run_dir/"validation_queue"],
+            "structure_experiment":[
+                self.run_dir/"dev_queue",self.run_dir/"validation_queue",
+                *sorted(self.run_dir.glob("dev_queue_solvent_*")),
+            ],
             "external_validation":[self.run_dir/"external_validation"],
             "statistics":[self.run_dir/"statistics",self.run_dir/"qc_benchmark"],
             "final_report":[self.run_dir/(self.config.get("final_report",{}) or {}).get(
@@ -914,20 +917,50 @@ class Orchestrator:
                 return False,"dev_queue run_summary.json is not closed"
             if not val_summary.get("closed") or val_summary.get("frozen_set_accounting_ok") is not True:
                 return False,"validation execution is not closed against frozen denominator"
+            expected_seeds={str(int(v)) for v in self.config.get("structure_experiment",{}).get(
+                "seeds",[42,43,44,45,46])}
+            expected_methods={"qaoa","sa","uniform","greedy"}
             for root,summary,label in (
                 (dev_root,dev_summary,"dev_queue"),
                 (val_root,val_summary,"validation_queue"),
             ):
                 for pdb in summary.get("structure_experiment_completed_target_ids",[]) or []:
-                    target=root/"results"/str(pdb)
+                    target=(root/str(pdb)/"results"/str(pdb)) if label=="dev_queue" else (root/"results"/str(pdb))
+                    metrics_path=target/"recovery_metrics.csv"
                     ok,detail=require([
-                        target/"run_manifest.json",
-                        target/"recovery_metrics.csv",
-                        target/"recovery_report.md",
+                        target/"run_manifest.json",metrics_path,target/"recovery_report.md",
                     ])
                     if not ok:
                         return False,f"{label}/{pdb} missing completed-target results: {detail}"
-            return True,"structural aggregate and per-target result contracts verified"
+                    with metrics_path.open(newline="",encoding="utf-8") as handle:
+                        rows=list(csv.DictReader(handle))
+                    observed=[(str(r.get("seed","")),str(r.get("method",""))) for r in rows]
+                    expected={(seed,method) for seed in expected_seeds for method in expected_methods}
+                    if len(observed)!=len(set(observed)):
+                        return False,f"{label}/{pdb} contains duplicate seed/method structural rows"
+                    if set(observed)!=expected:
+                        missing=sorted(expected-set(observed))
+                        extra=sorted(set(observed)-expected)
+                        return False,(
+                            f"{label}/{pdb} structural denominator mismatch: "
+                            f"missing={missing[:10]}, extra={extra[:10]}")
+            for solvent in [
+                str(v) for v in self.config.get("structure_experiment",{}).get("solvent_sensitivity",[])
+                if str(v)!=str(self.config.get("structure_experiment",{}).get("solvent_model","vacuum"))
+            ]:
+                solvent_root=self.run_dir/f"dev_queue_solvent_{solvent}"
+                ok,detail=require([
+                    solvent_root/"run_summary.json",
+                    solvent_root/"recovery_metrics.csv",
+                    solvent_root/"recovery_report.md",
+                ])
+                if not ok:
+                    return False,f"Missing development solvent-sensitivity results: {detail}"
+                solvent_summary,error=read_json(solvent_root/"run_summary.json")
+                if error:return False,error
+                if not solvent_summary.get("closed") or solvent_summary.get("failed_target_ids"):
+                    return False,f"Development solvent sensitivity {solvent} is not closed/clean"
+            return True,"structural aggregate, per-target denominators, and sensitivity results verified"
         if stage=="external_validation":
             cfg=self.config.get("external_validation",{}) or {}
             paths=[]
@@ -2050,9 +2083,60 @@ class Orchestrator:
                     set(dev_completed)|set(dev_failed)==set(planned)
                     and not (set(dev_completed)&set(dev_failed))
                 )
+
+                # Aggregate every child dev run into one queue-level result set.
+                dev_eligibility=[];dev_selected=[];dev_metrics=[]
+                child_manifest_sha256={}
+                for pdb in explicit_targets:
+                    child=out_dir/pdb
+                    child_manifest=child/"run_manifest.json"
+                    if child_manifest.is_file():
+                        child_manifest_sha256[pdb.lower()]=sha256_of(child_manifest)
+                    for name,destination in (
+                        ("eligibility.json",dev_eligibility),
+                        ("selected_targets.json",dev_selected),
+                    ):
+                        p=child/name
+                        if p.is_file():
+                            payload=json.loads(p.read_text(encoding="utf-8"))
+                            if isinstance(payload,list):
+                                destination.extend(payload)
+                    metrics_path=child/"real_complex_metrics.csv"
+                    if metrics_path.is_file():
+                        with metrics_path.open(newline="",encoding="utf-8") as handle:
+                            dev_metrics.extend(csv.DictReader(handle))
+                atomic_write_json(out_dir/"run_manifest.json",{
+                    "queue_role":"dev",
+                    "master_seed":self.config["master_seed"],
+                    "planned_target_ids":sorted(planned),
+                    "child_run_manifest_sha256":child_manifest_sha256,
+                    "checkpoint_sha256":sha256_of(checkpoint_dir/"best_egnn_pruning.pt"),
+                    "protocol":"historical development/regression queue; never confirmatory validation",
+                })
+                save_stream_map(
+                    out_dir/"seed_streams.json",self.config["master_seed"],
+                    derive_streams(self.config["master_seed"]))
+                atomic_write_json(out_dir/"eligibility.json",dev_eligibility)
+                atomic_write_json(out_dir/"selected_targets.json",dev_selected)
+                if dev_metrics:
+                    fields=list(dict.fromkeys(k for row in dev_metrics for k in row))
+                    with (out_dir/"real_complex_metrics.csv").open("w",newline="",encoding="utf-8") as handle:
+                        writer=csv.DictWriter(handle,fieldnames=fields)
+                        writer.writeheader();writer.writerows(dev_metrics)
+                report=[
+                    "# Development structural recovery queue","",
+                    "Historical development/regression targets only; never used as confirmatory validation.",
+                    f"Planned targets: {len(planned)}; completed: {len(dev_completed)}; failed: {len(dev_failed)}.",
+                    f"Aggregated metric rows: {len(dev_metrics)}.",
+                    "",
+                    f"Completed target IDs: {sorted(dev_completed)}",
+                    f"Failed target IDs: {sorted(dev_failed)}",
+                ]
+                (out_dir/"real_complex_report.md").write_text("\n".join(report)+"\n",encoding="utf-8")
                 atomic_write_json(out_dir/"run_summary.json",dict(
                     queue_role="dev",
                     planned_target_ids=sorted(planned),
+                    selected_targets=len(dev_selected),
                     structure_experiment_completed_targets=len(dev_completed),
                     structure_experiment_completed_target_ids=sorted(dev_completed),
                     structure_experiment_failed_targets=sorted(dev_failed),
@@ -2133,14 +2217,15 @@ class Orchestrator:
             if solvent not in ("vacuum","gbn2"):
                 failures.append(f"Unsupported solvent sensitivity model: {solvent}")
                 continue
-            prepared_root=dev_dir/"prepared"
-            manifests=sorted(prepared_root.glob("*/recovery_manifest.json")) if prepared_root.is_dir() else []
+            manifests=sorted(dev_dir.glob("*/prepared/*/recovery_manifest.json"))
             if not manifests:
                 failures.append(f"solvent sensitivity {solvent}: no frozen dev recovery manifests")
                 continue
+            solvent_root=self.run_dir/f"dev_queue_solvent_{solvent}"
+            solvent_completed=[];solvent_failed=[];solvent_rows=[]
             for manifest in manifests:
                 target=manifest.parent.name
-                out=self.run_dir/f"dev_queue_solvent_{solvent}"/"results"/target
+                out=solvent_root/"results"/target
                 optimize_seeds=[
                     derive_child_seed(derive_streams(self.config["master_seed"])["optimize"],
                                       "solvent_sensitivity",solvent,target,str(seed))
@@ -2180,8 +2265,42 @@ class Orchestrator:
                 ]
                 rc,log=self._run_subprocess(f"dev_solvent_{solvent}_{target}",sensitivity_argv)
                 logs.append(str(log));argvs.append(sensitivity_argv)
-                if rc!=0 or not (out/"recovery_metrics.csv").is_file():
+                metrics_path=out/"recovery_metrics.csv"
+                if rc!=0 or not metrics_path.is_file():
+                    solvent_failed.append(target.lower())
                     failures.append(f"dev solvent sensitivity {solvent}/{target} failed (exit={rc}; see {log})")
+                else:
+                    solvent_completed.append(target.lower())
+                    with metrics_path.open(newline="",encoding="utf-8") as handle:
+                        solvent_rows.extend(csv.DictReader(handle))
+            solvent_root.mkdir(parents=True,exist_ok=True)
+            if solvent_rows:
+                fields=list(dict.fromkeys(k for row in solvent_rows for k in row))
+                with (solvent_root/"recovery_metrics.csv").open("w",newline="",encoding="utf-8") as handle:
+                    writer=csv.DictWriter(handle,fieldnames=fields)
+                    writer.writeheader();writer.writerows(solvent_rows)
+            solvent_planned=sorted({m.parent.name.lower() for m in manifests})
+            solvent_closed=(
+                set(solvent_completed)|set(solvent_failed)==set(solvent_planned)
+                and not (set(solvent_completed)&set(solvent_failed))
+            )
+            atomic_write_json(solvent_root/"run_summary.json",{
+                "scope":"development-only solvent sensitivity",
+                "solvent_model":solvent,
+                "planned_target_ids":solvent_planned,
+                "completed_target_ids":sorted(solvent_completed),
+                "failed_target_ids":sorted(solvent_failed),
+                "rows":len(solvent_rows),
+                "closed":solvent_closed,
+            })
+            (solvent_root/"recovery_report.md").write_text("\n".join([
+                f"# Development solvent sensitivity: {solvent}","",
+                "Development-only robustness analysis; confirmatory validation solvent is unchanged.",
+                f"Planned targets: {len(solvent_planned)}; completed: {len(solvent_completed)}; failed: {len(solvent_failed)}.",
+                f"Aggregated metric rows: {len(solvent_rows)}.",
+            ])+"\n",encoding="utf-8")
+            if not solvent_closed:
+                failures.append(f"dev solvent sensitivity {solvent}: target accounting not closed")
 
         status = "failed" if failures else ("completed_with_failures" if queue_partial else "completed")
         detail = "; ".join(failures + queue_partial) if (failures or queue_partial) else \
