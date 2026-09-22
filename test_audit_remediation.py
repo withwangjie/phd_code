@@ -32,6 +32,7 @@ Run with: pytest test_audit_remediation.py -v
 from __future__ import annotations
 
 import copy
+import csv
 from pathlib import Path
 from typing import Any, Dict, Tuple
 from unittest.mock import patch
@@ -280,6 +281,55 @@ def test_checkpoint_graph_protocol_gate_rejects_semantic_mismatch() -> None:
     altered = dict(homology); altered["cdr_h3_identity"] = 0.60
     with pytest.raises(ValueError, match="homology protocol mismatch"):
         bbh.assert_checkpoint_graph_compatible(info, graph, homology_isolation=altered)
+
+
+
+def test_dunbrack_parser_and_sigma_expansion(tmp_path: Path) -> None:
+    library = tmp_path / "ALL.bbdep.rotamers.lib"
+    library.write_text(
+        "# T Phi Psi Count r1 r2 r3 r4 Probabil chi1Val chi2Val chi3Val chi4Val chi1Sig chi2Sig chi3Sig chi4Sig\n"
+        "LYS -60 -40 100 1 1 1 1 0.75 -60.0 180.0 180.0 180.0 10.0 12.0 12.0 12.0\n"
+        "LYS -60 -40 100 2 1 1 1 0.25 180.0 60.0 180.0 180.0 8.0 10.0 12.0 12.0\n",
+        encoding="utf-8",
+    )
+    bins = stq._load_dunbrack_bins(library, {("LYS", -60, -40)})
+    templates = stq._dunbrack_templates_for_site(
+        bins, "K", -61.0, -39.0,
+        probability_floor=1e-4, sigma_offsets=(-1.0, 0.0, 1.0),
+    )
+    assert len(templates) == 6
+    assert sum(t.prior_probability for t in templates) == pytest.approx(1.0)
+    assert all(t.source == "dunbrack2010" for t in templates)
+    assert any(t.chi1_degrees == pytest.approx(-60.0) for t in templates)
+
+
+def test_training_only_energy_calibration_fit(tmp_path: Path) -> None:
+    csv_path = tmp_path / "calibration.csv"
+    rows = [
+        ("train",0,0,0,0,1),
+        ("train",1,0,0,0,3),
+        ("train",0,1,0,0,4),
+        ("train",0,0,1,0,5),
+        ("train",0,0,0,1,6),
+    ]
+    with csv_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["split","prior_energy","vhh_environment_energy","antigen_energy","pair_energy","amber_delta_kcal"])
+        writer.writerows(rows)
+    out = tmp_path / "calibration.json"
+    result = bbh.fit_energy_calibration_csv(csv_path, out, 0.0)
+    assert result["intercept"] == pytest.approx(1.0)
+    assert result["prior_weight"] == pytest.approx(2.0)
+    assert result["vhh_environment_weight"] == pytest.approx(3.0)
+    assert result["antigen_weight"] == pytest.approx(4.0)
+    assert result["pair_weight"] == pytest.approx(5.0)
+    assert result["rmse_kcal"] == pytest.approx(0.0, abs=1e-10)
+
+    bad = tmp_path / "bad.csv"
+    text = csv_path.read_text(encoding="utf-8").replace("train,1,0,0,0,3", "validation,1,0,0,0,3")
+    bad.write_text(text, encoding="utf-8")
+    with pytest.raises(ValueError, match="training rows only"):
+        bbh.fit_energy_calibration_csv(bad, tmp_path/"bad.json", 0.0)
 
 
 # ---------------------------------------------------------------------------
