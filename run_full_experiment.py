@@ -2702,6 +2702,14 @@ class Orchestrator:
                                 if int(ext_exclusions.get("missing_or_ambiguous_primary_contrast",0) or 0):
                                     failures.append(
                                         "External VHH statistics lack an unambiguous primary QAOA contrast")
+                                external_missing_pairs=sum(
+                                    int(v or 0) for k,v in ext_exclusions.items()
+                                    if str(k).endswith(":missing_pair")
+                                )
+                                if external_missing_pairs:
+                                    failures.append(
+                                        f"External VHH statistics have {external_missing_pairs} missing "
+                                        "primary matched solver pairs; refusing denominator shrinkage")
                                 sa_gap=next(
                                     (e for e in stats_payload.get("effects",[])
                                      if e.get("baseline")=="sa" and e.get("metric")=="gap"),
