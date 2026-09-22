@@ -1057,6 +1057,17 @@ class Orchestrator:
             "--rotamer-probability-floor", str(rot_cfg.get("probability_floor", 1e-4)),
             "--rotamer-sigma-offsets", *[str(v) for v in rot_cfg.get("sigma_offsets", [-1.0,0.0,1.0])],
         ]
+        cluster_setting=(
+            (self.config["queue_freeze"].get("independence_clustering", {}) or {}).get("cluster_map")
+        )
+        cluster_path=resolve_path(self.config,cluster_setting) if cluster_setting else None
+        if cluster_path is not None:
+            if not cluster_path.is_file():
+                return StageResult(
+                    "energy_calibration","failed",started,utc_timestamp(),None,
+                    f"Calibration requires frozen family/structure cluster map: {cluster_path}",
+                )
+            argv += ["--cluster-map", str(cluster_path)]
         max_complexes = int(cal_cfg.get("max_complexes", 0))
         if max_complexes:
             argv += ["--max-complexes", str(max_complexes)]
@@ -1066,6 +1077,26 @@ class Orchestrator:
                 "energy_calibration", "failed", started, utc_timestamp(), returncode,
                 f"Calibration dataset generation failed; see {log_path}", argv, str(log_path), False,
             )
+
+        generation=json.loads(provenance.read_text(encoding="utf-8"))
+        limits=cal_cfg.get("acceptance", {}) or {}
+        generation_failure_fraction=float(generation.get("generation_failure_fraction",1.0))
+        max_failure_fraction=float(limits.get("max_generation_failure_fraction",1.0))
+        if not math.isfinite(generation_failure_fraction) or generation_failure_fraction > max_failure_fraction:
+            return StageResult(
+                "energy_calibration","failed",started,utc_timestamp(),None,
+                f"Calibration row generation failure fraction {generation_failure_fraction:.4f} "
+                f"exceeds {max_failure_fraction:.4f}",
+                argv,str(log_path),False,
+            )
+        if cluster_path is not None:
+            expected_cluster_sha=sha256_of(cluster_path)
+            if generation.get("cluster_map_sha256") != expected_cluster_sha:
+                return StageResult(
+                    "energy_calibration","failed",started,utc_timestamp(),None,
+                    "Calibration dataset provenance is not bound to the frozen cluster map",
+                    argv,str(log_path),False,
+                )
 
         fit_argv = [
             self.venv_python, "batch_benchmark_hard_set.py", "--research-ablation",
@@ -1090,6 +1121,10 @@ class Orchestrator:
             failed_checks=[]
             min_train_complexes=int(limits.get("min_train_complexes",0))
             min_cv_folds=int(limits.get("min_cv_folds",0))
+            if limits.get("require_family_grouped_cv",False) and payload.get("cv_grouping")!="family_cluster":
+                failed_checks.append(
+                    f"cv_grouping={payload.get('cv_grouping')} but family_cluster grouping is required"
+                )
             observed_complexes=int(payload.get("n_train_complexes",0) or 0)
             observed_folds=int(payload.get("cv_fold_count",len(payload.get("cv_folds",[]) or [])) or 0)
             if observed_complexes < min_train_complexes:
