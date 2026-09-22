@@ -2172,6 +2172,7 @@ def _allatom_experiment_main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--out-dir",type=Path,required=True)
     parser.add_argument("--outputs",type=int,default=1000)
     parser.add_argument("--max-evals",type=int,default=90)
+    parser.add_argument("--qaoa-depth",type=int,default=2)
     parser.add_argument("--sa-passes",type=int,default=100)
     parser.add_argument("--robust-qaoa",action="store_true",help="Exact-subspace multistart optimization; total max-evals budget")
     parser.add_argument("--qaoa-restarts",type=int,default=4)
@@ -2192,7 +2193,7 @@ def _allatom_experiment_main(argv: Optional[Sequence[str]] = None) -> int:
              "Drives optimize_robust's CVaR/mean objective-evaluation draws WHILE searching -- distinct "
              "from both --optimize-seed (restart initialization) and --sample-seed (final output draw).")
     args=parser.parse_args(argv)
-    if min(args.outputs,args.max_evals,args.sa_passes)<=0 or args.relax_iterations<0:
+    if min(args.outputs,args.max_evals,args.sa_passes,args.qaoa_depth)<=0 or args.relax_iterations<0:
         parser.error("Invalid budgets")
     optimize_seed = args.optimize_seed if args.optimize_seed is not None else args.seed
     measurement_seed = args.measurement_seed if args.measurement_seed is not None else args.seed
@@ -2253,7 +2254,7 @@ def _allatom_experiment_main(argv: Optional[Sequence[str]] = None) -> int:
         # .simulated_annealing already accept explicit optimize_seed/
         # measurement_seed/sample_seed overrides directly.
         sampler=XYMixerQAOASampler(qubo.physical_self,qubo.physical_pair,qubo.site_to_variables,
-            simulation_mode="subspace",p=2,seed=optimize_seed,shots=args.outputs)
+            simulation_mode="subspace",p=args.qaoa_depth,seed=optimize_seed,shots=args.outputs)
         truth=sampler.enumerate_ground_states();energies=sampler.feasible_energy_map()
         records=[]
         def evaluate(path):
@@ -2402,6 +2403,7 @@ def _recovery_benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--max-perturb-degrees",type=float,default=120.)
     parser.add_argument("--outputs",type=int,default=1000)
     parser.add_argument("--max-evals",type=int,default=90)
+    parser.add_argument("--qaoa-depth",type=int,default=2)
     parser.add_argument("--sa-passes",type=int,default=100)
     parser.add_argument("--relax-iterations",type=int,default=200)
     parser.add_argument("--robust-qaoa",action="store_true")
@@ -2420,7 +2422,7 @@ def _recovery_benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
         parser.error("--measurement-seeds must match --seeds length")
     if not 0<args.min_perturb_degrees<=args.max_perturb_degrees<=180:
         parser.error("Invalid perturbation angle range")
-    if min(args.outputs,args.max_evals,args.sa_passes)<=0 or args.relax_iterations<0:
+    if min(args.outputs,args.max_evals,args.sa_passes,args.qaoa_depth)<=0 or args.relax_iterations<0:
         parser.error("Invalid solver budgets")
     manifest=args.manifest.resolve();case=json.loads(manifest.read_text())
     native=(manifest.parent/case["native_structure"]).resolve()
@@ -2485,7 +2487,8 @@ def _recovery_benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
                     _ablation_atomic_json(child_manifest,child_case)
                     experiment=directory/"experiment"
                     _allatom_experiment_main(["--manifest",str(child_manifest),"--out-dir",str(experiment),
-                        "--outputs",str(args.outputs),"--max-evals",str(args.max_evals),"--sa-passes",str(args.sa_passes),
+                        "--outputs",str(args.outputs),"--max-evals",str(args.max_evals),
+                        "--qaoa-depth",str(args.qaoa_depth),"--sa-passes",str(args.sa_passes),
                         "--relax-iterations",str(args.relax_iterations),"--seed",str(seed),
                         "--optimize-seed",str(optimize_seed),"--measurement-seed",str(measurement_seed),"--sample-seed",str(sample_seed),
                         "--loop-relax-iterations",str(args.loop_relax_iterations),
