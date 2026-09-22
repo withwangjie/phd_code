@@ -1223,8 +1223,9 @@ def _ablation_run_case(data: Any, scorer: Any, config: dict, args: Any, artifact
     objective/restart ablation vary within this one case; pruning/radius/depth/max_evals/seed (the
     shared input and fixed evaluation region) are fixed by ``config`` before any solver runs."""
     begin = time.perf_counter()
+    active_sites=int(config["active_sites"])
     active = select_ablation_active(
-        data, config["pruning"], args.active_sites, config["seed"], scorer,
+        data, config["pruning"], active_sites, config["seed"], scorer,
         antigen_guidance_weight=args.antigen_guidance_weight,
         antigen_proximity_scale=args.antigen_proximity_scale,
         contact_ca_cutoff=args.contact_ca_cutoff,
@@ -1247,9 +1248,9 @@ def _ablation_run_case(data: Any, scorer: Any, config: dict, args: Any, artifact
         if args.energy_calibration_file is not None else EnergyCalibration()
     )
     qubo = InterfaceQUBOBuilder(
-        min_variables=3 * args.active_sites,
+        min_variables=3 * active_sites,
         max_variables=30,
-        max_sites=args.active_sites,
+        max_sites=active_sites,
         force_field=force_field,
         rotamer_mode=args.rotamer_mode,
         rotamer_library_path=args.rotamer_library,
@@ -1695,7 +1696,8 @@ def _ablation_main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--radii", type=float, nargs="+", default=[6.,10.])
     parser.add_argument("--depths", type=int, nargs="+", default=[1,2,3])
     parser.add_argument("--max-evals", type=int, nargs="+", default=[90,300])
-    parser.add_argument("--active-sites", type=int, default=6)
+    parser.add_argument("--active-sites", type=int, nargs="+", default=[6],
+        help="Active-site scaling axis. Each value defines a separate paired QUBO case family.")
     parser.add_argument("--vhh-identity-threshold", type=float, default=0.80)
     parser.add_argument("--cdr-h3-identity-threshold", type=float, default=0.50)
     parser.add_argument("--antigen-identity-threshold", type=float, default=0.30)
@@ -1757,14 +1759,15 @@ def _ablation_main(argv: Optional[Sequence[str]] = None) -> int:
         )
         print(json.dumps(payload,indent=2,sort_keys=True))
         return 0
-    if (not 5 <= args.active_sites <= 8
+    if (not args.active_sites or any(site < 4 or site > 10 for site in args.active_sites)
+            or len(args.active_sites) != len(set(args.active_sites))
             or any(not 0.0 < value <= 1.0 for value in (
                 args.vhh_identity_threshold, args.cdr_h3_identity_threshold,
                 args.antigen_identity_threshold, args.antigen_min_length_coverage))
             or not 0.0 <= args.antigen_guidance_weight <= 1.0
             or min(*args.outputs, args.sa_passes, args.greedy_passes, *args.max_evals) <= 0
             or min(args.qaoa_restarts) <= 0 or args.eval_shots <= 0):
-        parser.error("Require 5..8 active sites, antigen-guidance-weight in [0,1], and positive budgets.")
+        parser.error("Require unique active-site values in 4..10, antigen-guidance-weight in [0,1], and positive budgets.")
     positive_scientific = (
         args.antigen_proximity_scale, args.contact_ca_cutoff, args.nonbonded_cutoff,
         args.softcore_delta, args.hard_core_fraction, args.hard_sphere_penalty,
@@ -1838,7 +1841,8 @@ def _ablation_main(argv: Optional[Sequence[str]] = None) -> int:
             )
             scorer.eval()
         _ablation_export_results(out)
-        settings = list(itertools.product(args.pruning,args.radii,args.depths,args.max_evals,args.seeds))
+        settings = list(itertools.product(
+            args.pruning,args.radii,args.depths,args.max_evals,args.active_sites,args.seeds))
         total_planned = len(files)*len(settings)
         failed_keys_path = out/"failed_case_keys.json"
         failed_keys = set(json.loads(failed_keys_path.read_text())) if failed_keys_path.exists() else set()
@@ -1846,9 +1850,11 @@ def _ablation_main(argv: Optional[Sequence[str]] = None) -> int:
         tasks = []
         for path, setting in itertools.product(files, settings):
             config = dict(target=path.stem, pruning=setting[0], radius=setting[1],
-                          depth=setting[2], max_evals=setting[3], seed=setting[4])
+                          depth=setting[2], max_evals=setting[3],
+                          active_sites=setting[4], seed=setting[5])
             labels = ("ablation", config["target"], config["pruning"], str(config["radius"]),
-                      str(config["depth"]), str(config["max_evals"]), str(config["seed"]))
+                      str(config["depth"]), str(config["max_evals"]),
+                      str(config["active_sites"]), str(config["seed"]))
             for stream in ("optimize", "measurement", "sample"):
                 config[stream+"_seed"] = derive_child_seed(streams[stream], *labels)
             key = hashlib.sha256(json.dumps(config, sort_keys=True).encode()).hexdigest()[:24]
@@ -1988,6 +1994,7 @@ def _paired_statistics_main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--primary-outputs", type=int, default=1000)
     parser.add_argument("--primary-objective", choices=("mean", "cvar"), default="cvar")
     parser.add_argument("--primary-restarts", type=int, default=4)
+    parser.add_argument("--primary-active-sites", type=int, default=6)
     parser.add_argument("--max-time-overrun-fraction",type=float,default=.10)
     args=parser.parse_args(argv)
     if args.resamples < 100 or not math.isfinite(args.max_time_overrun_fraction) or args.max_time_overrun_fraction<0:
@@ -2002,6 +2009,9 @@ def _paired_statistics_main(argv: Optional[Sequence[str]] = None) -> int:
         case=json.loads(path.read_text())
         # Explicit primary output-budget contrast; never silently overwrite
         # all objective/restart/budget variants in a solver-keyed dictionary.
+        if int(case.get("config",{}).get("active_sites",-1)) != args.primary_active_sites:
+            skipped["nonprimary_active_sites"] += 1
+            continue
         selected = [r for r in case["metrics"] if
                     (r.get("reference_outputs", r.get("outputs")) if r["solver"].endswith("_time")
                      else r.get("outputs")) == args.primary_outputs]
@@ -2060,7 +2070,7 @@ def _paired_statistics_main(argv: Optional[Sequence[str]] = None) -> int:
         effect["p_holm"] = pvalue
     payload=dict(budget_mode=args.budget_mode,seed=args.seed,resamples=args.resamples,
         primary_outputs=args.primary_outputs, primary_objective=args.primary_objective,
-        primary_restarts=args.primary_restarts,
+        primary_restarts=args.primary_restarts, primary_active_sites=args.primary_active_sites,
         cluster_unit="provided family clusters" if cluster_map is not None else "PDB (homology dependence unresolved)",
         effects=effects,cluster_differences=cluster_values,paired_cases=dict(pair_count),exclusions=dict(skipped),
         source_sha256={p.name:_ablation_digest(p) for p in paths},
@@ -2068,7 +2078,7 @@ def _paired_statistics_main(argv: Optional[Sequence[str]] = None) -> int:
         max_time_overrun_fraction=args.max_time_overrun_fraction,
         analysis_code_sha256=_ablation_digest(Path(__file__)))
     lines=["# Exploratory paired statistics", "", "Differences = QAOA - classical; negative gap favours QAOA, positive hit favours QAOA.",
-        f"Output-mode primary contrast: outputs={args.primary_outputs}, objective={args.primary_objective}, restarts={args.primary_restarts}. Time-mode uses the explicitly recorded budget donor at the same output budget; other curves remain in raw records.",
+        f"Primary contrast: active_sites={args.primary_active_sites}, outputs={args.primary_outputs}, objective={args.primary_objective}, restarts={args.primary_restarts}. Time-mode uses the explicitly recorded budget donor at the same output budget; other sizes/curves remain scaling or raw records.",
         "Repeats averaged within PDB, then PDBs within supplied families. Equal cluster weighting.",
         "95% percentile bootstrap intervals are marginal, not simultaneous. Two-sided sign-flip p values assume exchangeability/symmetry; Holm correction covers every tested contrast in this report.",
         "PDB clusters do not remove homologous-family dependence. Small cluster counts give unreliable intervals. One cluster: no CI or p value.",
