@@ -70,12 +70,22 @@ if [ -f "$LOCK_FILE" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 3. Formal execution only; no compilation or trial stage.
+# 3. Formal preflight gate.
 # ---------------------------------------------------------------------------
-# No compilation or smoke runs in the formal launcher.
+# Runs synchronously before any background process is created. Any regression,
+# CUDA/DDP/NCCL/OpenMM/resource failure aborts the formal launch.
+PREFLIGHT_SCRIPT="${SCRIPT_DIR}/formal_preflight.sh"
+[ -f "$PREFLIGHT_SCRIPT" ] || fail "Formal preflight script missing: $PREFLIGHT_SCRIPT"
+log "Running formal preflight gate..."
+bash "$PREFLIGHT_SCRIPT"
+log "Formal preflight gate passed."
 
 # ---------------------------------------------------------------------------
-# 4. Launch run_full_experiment.py in the background under nohup, so this
+# 4. Formal execution only; no trial/smoke stage is injected here.
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# 5. Launch run_full_experiment.py in the background under nohup, so this
 #    command returns immediately even though the full pipeline can run for
 #    many hours to days. Resolve one shared timestamped log file up front so
 #    it can be reported below regardless of which/how many run directories
