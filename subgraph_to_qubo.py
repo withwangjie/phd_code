@@ -436,6 +436,7 @@ class RotamerState:
     charges: np.ndarray
     prior_energy: float = 0.0
     environment_energy: float = 0.0
+    antigen_guidance_energy: float = 0.0
 
     @property
     def self_energy(self) -> float:
@@ -568,6 +569,13 @@ _NET_CHARGE: Mapping[str, float] = {
 
 _FLEXIBILITY_RANK: Mapping[str, int] = {
     aa: rank for rank, aa in enumerate("GAPVITSCNDFYWHLMEQKR")
+}
+
+# Approximate side-chain torsional freedom used for adaptive state allocation.
+_SIDECHAIN_CHI_COUNT: Mapping[str, int] = {
+    "A": 0, "C": 1, "D": 2, "E": 3, "F": 2, "G": 0, "H": 2,
+    "I": 2, "K": 4, "L": 2, "M": 3, "N": 2, "P": 2, "Q": 3,
+    "R": 4, "S": 1, "T": 1, "V": 1, "W": 2, "Y": 2,
 }
 
 
@@ -775,7 +783,13 @@ class InterfaceQUBOBuilder:
     def _allocate_rotamer_counts(
         self, site_indices: np.ndarray, amino_acids: Sequence[str]
     ) -> list[int]:
-        """Assign two or three states per site within the requested bit range."""
+        """Assign residue-type-aware two/three-state local representations.
+
+        Residues with at least two side-chain chi torsions prefer three
+        microstates; simpler side chains retain two. If the global bit budget
+        cannot accommodate every preferred third state, the least flexible
+        residues are reduced first.
+        """
 
         site_count = len(site_indices)
         minimum_possible = 2 * site_count
@@ -791,19 +805,38 @@ class InterfaceQUBOBuilder:
                 f"limit is {self.max_variables}"
             )
 
-        counts = [2] * site_count
-        needed = max(0, self.min_variables - minimum_possible)
-        # Give third states first to chemically flexible side chains, then by
-        # deterministic node order. Every residue still gets 2--3 states.
-        priority = sorted(
-            range(site_count),
-            key=lambda site: (
-                -_FLEXIBILITY_RANK.get(amino_acids[int(site_indices[site])], 0),
-                int(site_indices[site]),
-            ),
-        )
-        for site in priority[:needed]:
+        counts = [
+            3 if _SIDECHAIN_CHI_COUNT.get(amino_acids[int(node)], 1) >= 2 else 2
+            for node in site_indices
+        ]
+        while sum(counts) > self.max_variables:
+            candidates = [site for site, count in enumerate(counts) if count == 3]
+            if not candidates:
+                break
+            site = min(
+                candidates,
+                key=lambda idx: (
+                    _SIDECHAIN_CHI_COUNT.get(amino_acids[int(site_indices[idx])], 1),
+                    _FLEXIBILITY_RANK.get(amino_acids[int(site_indices[idx])], 0),
+                    int(site_indices[idx]),
+                ),
+            )
+            counts[site] = 2
+
+        while sum(counts) < self.min_variables:
+            candidates = [site for site, count in enumerate(counts) if count == 2]
+            if not candidates:
+                break
+            site = max(
+                candidates,
+                key=lambda idx: (
+                    _SIDECHAIN_CHI_COUNT.get(amino_acids[int(site_indices[idx])], 1),
+                    _FLEXIBILITY_RANK.get(amino_acids[int(site_indices[idx])], 0),
+                    -int(site_indices[idx]),
+                ),
+            )
             counts[site] = 3
+
         total = sum(counts)
         if not self.min_variables <= total <= self.max_variables:
             raise RuntimeError(f"Internal rotamer allocation error: {total} variables")
@@ -935,6 +968,35 @@ class InterfaceQUBOBuilder:
         ]
         return env_pos, env_sigma, env_epsilon, np.asarray(charges)
 
+    def _antigen_environment(
+        self,
+        pos: np.ndarray,
+        x: np.ndarray,
+        amino_acids: Sequence[str],
+        node_index: int,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Return a coarse antigen-only environment for candidate guidance."""
+
+        antigen = np.flatnonzero(np.isclose(x[:, -1], 1.0))
+        if not len(antigen):
+            return (
+                np.empty((0, 3), dtype=np.float64),
+                np.empty(0, dtype=np.float64),
+                np.empty(0, dtype=np.float64),
+                np.empty(0, dtype=np.float64),
+            )
+        center = pos[int(node_index)]
+        distances = np.linalg.norm(pos[antigen] - center, axis=1)
+        antigen = antigen[distances <= self.force_field.cutoff_angstrom]
+        env_pos = pos[antigen]
+        env_sigma = np.full(len(antigen), 3.50, dtype=np.float64)
+        env_epsilon = np.full(len(antigen), 0.06, dtype=np.float64)
+        env_charge = np.asarray(
+            [_NET_CHARGE.get(amino_acids[int(index)], 0.0) for index in antigen],
+            dtype=np.float64,
+        )
+        return env_pos, env_sigma, env_epsilon, env_charge
+
     def _lambda_lower_bound(
         self,
         self_energy: np.ndarray,
@@ -1006,14 +1068,20 @@ class InterfaceQUBOBuilder:
             )
             for node_index in site_nodes
         }
+        antigen_environments = {
+            int(node_index): self._antigen_environment(
+                pos, x, amino_acids, int(node_index)
+            )
+            for node_index in site_nodes
+        }
         rotamers: list[RotamerState] = []
         site_to_variables: Dict[int, Tuple[int, ...]] = {}
         for site_index, (node_index, count) in enumerate(zip(site_nodes, counts)):
             aa = amino_acids[int(node_index)]
-            templates = _ROTAMER_PRIORS[aa][:count]
-            variable_indices = []
+            templates = _ROTAMER_PRIORS[aa]
             best_probability = max(template.prior_probability for template in templates)
-            for rotamer_index, template in enumerate(templates):
+            candidate_states: list[RotamerState] = []
+            for template_index, template in enumerate(templates):
                 state = self._generate_rotamer(
                     site_index,
                     int(node_index),
@@ -1022,10 +1090,18 @@ class InterfaceQUBOBuilder:
                     pos,
                     x,
                     chain_ids,
-                    rotamer_index,
+                    template_index,
                 )
                 state.prior_energy = -self.force_field.thermal_energy_kcal * math.log(
                     template.prior_probability / best_probability
+                )
+                state.antigen_guidance_energy = _nonbonded_energy(
+                    state.positions,
+                    state.sigma,
+                    state.epsilon,
+                    state.charges,
+                    *antigen_environments[int(node_index)],
+                    self.force_field,
                 )
                 state.environment_energy = _nonbonded_energy(
                     state.positions,
@@ -1035,6 +1111,19 @@ class InterfaceQUBOBuilder:
                     *environments[int(node_index)],
                     self.force_field,
                 )
+                candidate_states.append(state)
+
+            candidate_states.sort(
+                key=lambda state: (
+                    state.prior_energy + state.antigen_guidance_energy,
+                    state.prior_energy,
+                    state.rotamer_index,
+                )
+            )
+            selected_states = candidate_states[:count]
+            variable_indices = []
+            for selected_index, state in enumerate(selected_states):
+                state.rotamer_index = selected_index
                 variable_indices.append(len(rotamers))
                 rotamers.append(state)
             site_to_variables[site_index] = tuple(variable_indices)
@@ -1122,6 +1211,9 @@ class InterfaceQUBOBuilder:
             "energy_unit": "approximate kcal/mol",
             "site_node_indices": site_nodes.tolist(),
             "rotamers_per_site": counts,
+            "rotamer_state_policy": "2 states for <=1 chi torsion; 3 states for >=2 chi torsions, subject to global bit budget",
+            "candidate_guidance": "rotamer prior plus antigen-only coarse nonbonded interaction used for candidate retention",
+            "antigen_guidance_energy": [float(state.antigen_guidance_energy) for state in rotamers],
             "variable_count": variable_count,
             "active_residue_count": int(active_mask.sum()),
             "frozen_environment_count": int(frozen_mask.sum()),
