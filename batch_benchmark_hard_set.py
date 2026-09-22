@@ -1491,9 +1491,10 @@ def _ablation_dispatch(tasks: Iterable[tuple], workers: int) -> Iterable[tuple]:
 def fit_energy_calibration_csv(input_csv: Path, output_json: Path, ridge_alpha: float) -> dict:
     """Fit nonnegative coarse-component weights to Amber delta-E using TRAIN complexes only.
 
-    Rows from the same PDB are kept together in deterministic 5-fold
-    cross-validation so conformers from one complex never appear in both a
-    calibration fold's fit and evaluation subsets.
+    Rows from the same family/structure cluster are kept together when the
+    CSV supplies a nonempty family_cluster column; otherwise grouping falls
+    back to PDB. This prevents related complexes from crossing calibration
+    fit/evaluation folds.
     """
     if ridge_alpha < 0 or not math.isfinite(ridge_alpha):
         raise ValueError("ridge_alpha must be finite and nonnegative")
@@ -1519,8 +1520,16 @@ def fit_energy_calibration_csv(input_csv: Path, output_json: Path, ridge_alpha: 
     y=np.asarray([float(row["amber_delta_kcal"]) for row in rows],dtype=float)
     if not np.isfinite(X).all() or not np.isfinite(y).all():
         raise ValueError("Calibration data contain non-finite values")
-    if len(set(pdb_ids)) < 5:
-        raise ValueError("Calibration requires at least five distinct training complexes for grouped 5-fold CV")
+    family_present = "family_cluster" in rows[0]
+    family_ids=[str(row.get("family_cluster","")).strip() for row in rows]
+    if family_present and any(not value for value in family_ids):
+        raise ValueError("family_cluster column must be complete when present")
+    group_ids=family_ids if family_present else pdb_ids
+    grouping_name="family_cluster" if family_present else "pdb_id"
+    if len(set(group_ids)) < 5:
+        raise ValueError(
+            f"Calibration requires at least five distinct {grouping_name} groups for grouped 5-fold CV"
+        )
 
     def fit_coefficients(x: np.ndarray, target: np.ndarray) -> np.ndarray:
         design=np.column_stack([np.ones(len(x)),x])
@@ -1539,18 +1548,20 @@ def fit_energy_calibration_csv(input_csv: Path, output_json: Path, ridge_alpha: 
         return result.x
 
     unique_pdbs=sorted(set(pdb_ids))
+    unique_groups=sorted(set(group_ids))
     # Deterministic hashed ordering followed by round-robin allocation keeps
-    # complexes grouped while guaranteeing five nonempty folds when n>=5.
-    ordered_pdbs=sorted(
-        unique_pdbs,
-        key=lambda pdb:(hashlib.sha256(pdb.encode("utf-8")).hexdigest(),pdb)
+    # entire family/structure groups together and guarantees five nonempty
+    # folds whenever at least five groups are available.
+    ordered_groups=sorted(
+        unique_groups,
+        key=lambda group:(hashlib.sha256(group.encode("utf-8")).hexdigest(),group)
     )
-    fold_of={pdb:index%5 for index,pdb in enumerate(ordered_pdbs)}
+    fold_of={group:index%5 for index,group in enumerate(ordered_groups)}
     cv_rows=[]
     cv_predictions=np.full(len(y),np.nan,dtype=float)
     uncalibrated_predictions=X.sum(axis=1)
     for fold in sorted(set(fold_of.values())):
-        test_mask=np.asarray([fold_of[pdb]==fold for pdb in pdb_ids],dtype=bool)
+        test_mask=np.asarray([fold_of[group]==fold for group in group_ids],dtype=bool)
         train_mask=~test_mask
         if not test_mask.any() or not train_mask.any():
             continue
@@ -1562,6 +1573,8 @@ def fit_energy_calibration_csv(input_csv: Path, output_json: Path, ridge_alpha: 
             fold=int(fold),
             train_complexes=int(len({p for p,m in zip(pdb_ids,train_mask) if m})),
             test_complexes=int(len({p for p,m in zip(pdb_ids,test_mask) if m})),
+            train_groups=int(len({g for g,m in zip(group_ids,train_mask) if m})),
+            test_groups=int(len({g for g,m in zip(group_ids,test_mask) if m})),
             test_rows=int(test_mask.sum()),
             rmse_kcal=float(np.sqrt(np.mean(residual**2))),
             mae_kcal=float(np.mean(np.abs(residual))),
@@ -1607,10 +1620,12 @@ def fit_energy_calibration_csv(input_csv: Path, output_json: Path, ridge_alpha: 
         "coefficient_constraint":"nonnegative component weights; unconstrained intercept",
         "n_train_samples":int(len(y)),
         "n_train_complexes":int(len(unique_pdbs)),
+        "n_train_groups":int(len(unique_groups)),
+        "cv_grouping":grouping_name,
         "train_rmse_kcal":float(np.sqrt(np.mean(residual**2))),
         "train_mae_kcal":float(np.mean(np.abs(residual))),
         "train_r2":(None if ss_tot<=0 else float(1.0-np.sum(residual**2)/ss_tot)),
-        "cv_scheme":"deterministic PDB-grouped SHA256-order round-robin 5-fold",
+        "cv_scheme":f"deterministic {grouping_name}-grouped SHA256-order round-robin 5-fold",
         "cv_folds":cv_rows,
         "cv_fold_count":int(len(cv_rows)),
         "cv_rmse_kcal":(
