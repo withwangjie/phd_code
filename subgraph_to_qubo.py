@@ -830,6 +830,10 @@ class InterfaceQUBOBuilder:
         lambda_value: Optional[float] = None,
         penalty_margin: float = 0.10,
         force_field: Optional[ForceFieldConfig] = None,
+        rotamer_mode: str = "legacy",
+        rotamer_library_path: Optional[Path] = None,
+        rotamer_probability_floor: float = 1e-4,
+        rotamer_sigma_offsets: Sequence[float] = (-1.0, 0.0, 1.0),
     ) -> None:
         if not 2 <= min_variables <= max_variables <= 30:
             raise ValueError("Require 2 <= min_variables <= max_variables <= 30")
@@ -845,6 +849,16 @@ class InterfaceQUBOBuilder:
         self.lambda_value = lambda_value
         self.penalty_margin = penalty_margin
         self.force_field = force_field or ForceFieldConfig()
+        self.rotamer_mode = str(rotamer_mode)
+        if self.rotamer_mode not in ("legacy", "dunbrack2010"):
+            raise ValueError("rotamer_mode must be legacy or dunbrack2010")
+        self.rotamer_library_path = None if rotamer_library_path is None else Path(rotamer_library_path)
+        self.rotamer_probability_floor = float(rotamer_probability_floor)
+        self.rotamer_sigma_offsets = tuple(float(v) for v in rotamer_sigma_offsets)
+        if not 0.0 < self.rotamer_probability_floor < 1.0:
+            raise ValueError("rotamer_probability_floor must lie in (0,1)")
+        if not self.rotamer_sigma_offsets or not all(math.isfinite(v) for v in self.rotamer_sigma_offsets):
+            raise ValueError("rotamer_sigma_offsets must be finite and nonempty")
 
     def _validate_graph(self, data: Data) -> Tuple[np.ndarray, np.ndarray, list[str]]:
         """Move required graph fields to CPU and validate their semantics."""
@@ -1219,11 +1233,35 @@ class InterfaceQUBOBuilder:
             )
             for node_index in site_nodes
         }
+        if self.rotamer_mode == "dunbrack2010":
+            if self.rotamer_library_path is None:
+                raise ValueError("Formal Dunbrack mode requires rotamer_library_path")
+            if not hasattr(data, "backbone_phi") or not hasattr(data, "backbone_psi"):
+                raise ValueError("Dunbrack mode requires backbone_phi/backbone_psi graph metadata")
+            phi_all=data.backbone_phi.detach().cpu().numpy().astype(np.float64)
+            psi_all=data.backbone_psi.detach().cpu().numpy().astype(np.float64)
+            requested=set()
+            for node_index in site_nodes:
+                aa=amino_acids[int(node_index)]
+                if aa in "AG": continue
+                requested.add((_THREE_LETTER[aa], _nearest_dunbrack_bin(phi_all[int(node_index)]), _nearest_dunbrack_bin(psi_all[int(node_index)])))
+            dunbrack_bins=_load_dunbrack_bins(self.rotamer_library_path, requested) if requested else {}
+        else:
+            phi_all=psi_all=None
+            dunbrack_bins={}
+
         rotamers: list[RotamerState] = []
         site_to_variables: Dict[int, Tuple[int, ...]] = {}
         for site_index, (node_index, count) in enumerate(zip(site_nodes, counts)):
             aa = amino_acids[int(node_index)]
-            templates = _expanded_rotamer_templates(aa)
+            if self.rotamer_mode == "dunbrack2010" and aa not in "AG":
+                templates = _dunbrack_templates_for_site(
+                    dunbrack_bins, aa, phi_all[int(node_index)], psi_all[int(node_index)],
+                    probability_floor=self.rotamer_probability_floor,
+                    sigma_offsets=self.rotamer_sigma_offsets,
+                )
+            else:
+                templates = _expanded_rotamer_templates(aa)
             best_probability = max(template.prior_probability for template in templates)
             candidate_states: list[RotamerState] = []
             for template_index, template in enumerate(templates):
@@ -1363,6 +1401,10 @@ class InterfaceQUBOBuilder:
             ],
             "rotamer_state_policy": "6/9/12 raw chi1 sub-rotamers by flexibility; retain 3--6 states/site under <=30 total variables",
             "candidate_guidance": "pre-screen by rotamer prior + VHH-only fixed-environment energy + antigen interaction energy; antigen counted once",
+            "rotamer_model": self.rotamer_mode,
+            "rotamer_library_path": (None if self.rotamer_library_path is None else str(self.rotamer_library_path)),
+            "rotamer_probability_floor": self.rotamer_probability_floor,
+            "rotamer_sigma_offsets": list(self.rotamer_sigma_offsets),
             "antigen_guidance_energy": [float(state.antigen_guidance_energy) for state in rotamers],
             "variable_count": variable_count,
             "active_residue_count": int(active_mask.sum()),
