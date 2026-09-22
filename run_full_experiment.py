@@ -933,26 +933,26 @@ class Orchestrator:
         # recovery_metrics.csv instead, in the "structural benefit" section.
         results_dirs = [self.run_dir / "qc_benchmark"]
         logs, argvs, failures = [], [], []
+        qc_cfg = self.config["qc_benchmark"]
+        primary_outputs = int(cfg.get("primary_outputs", max(qc_cfg.get("outputs", [1000]))))
+        primary_objective = str(cfg.get("primary_objective", "cvar"))
+        primary_restarts = int(cfg.get("primary_restarts", 4))
+        if primary_outputs not in qc_cfg.get("outputs", []):
+            failures.append(
+                f"statistics primary_outputs={primary_outputs} is not present in qc_benchmark.outputs")
+        if primary_objective not in qc_cfg.get("qaoa_objective", []):
+            failures.append(
+                f"statistics primary_objective={primary_objective} is not present in qc_benchmark.qaoa_objective")
+        if primary_restarts not in qc_cfg.get("qaoa_restarts", []):
+            failures.append(
+                f"statistics primary_restarts={primary_restarts} is not present in qc_benchmark.qaoa_restarts")
         for results_dir in results_dirs:
             if not results_dir.is_dir():
+                failures.append(f"statistics input directory is missing: {results_dir}")
+                continue
+            if failures:
                 continue
             for budget_mode in cfg.get("budget_modes", ["outputs", "time"]):
-                qc_cfg = self.config["qc_benchmark"]
-                primary_outputs = int(cfg.get("primary_outputs", max(qc_cfg.get("outputs", [1000]))))
-                primary_objective = str(cfg.get("primary_objective", "cvar"))
-                primary_restarts = int(cfg.get("primary_restarts", 4))
-                if primary_outputs not in qc_cfg.get("outputs", []):
-                    failures.append(
-                        f"statistics primary_outputs={primary_outputs} is not present in qc_benchmark.outputs")
-                    continue
-                if primary_objective not in qc_cfg.get("qaoa_objective", []):
-                    failures.append(
-                        f"statistics primary_objective={primary_objective} is not present in qc_benchmark.qaoa_objective")
-                    continue
-                if primary_restarts not in qc_cfg.get("qaoa_restarts", []):
-                    failures.append(
-                        f"statistics primary_restarts={primary_restarts} is not present in qc_benchmark.qaoa_restarts")
-                    continue
                 argv = [
                     self.venv_python, "batch_benchmark_hard_set.py", "--paired-statistics",
                     "--results-dir", str(results_dir),
@@ -969,11 +969,23 @@ class Orchestrator:
                 returncode, log_path = self._run_subprocess(
                     f"statistics_{results_dir.name}_{budget_mode}", argv)
                 logs.append(str(log_path)); argvs.append(argv)
+                expected = [
+                    results_dir / f"statistics_{budget_mode}.json",
+                    results_dir / f"statistics_{budget_mode}.md",
+                ]
+                artifacts_ok, artifact_detail = self._artifacts_present(expected)
                 if returncode != 0:
                     failures.append(f"{results_dir.name}/{budget_mode} exited {returncode} (see {log_path})")
-        status = "completed_with_failures" if failures else "completed"
-        detail = "; ".join(failures) if failures else "Paired statistics computed for every available results directory/budget mode."
-        return StageResult("statistics", status, started, utc_timestamp(), 0, detail, argvs, ";".join(logs), True)
+                elif not artifacts_ok:
+                    failures.append(
+                        f"{results_dir.name}/{budget_mode} did not produce required statistics artifacts: "
+                        f"{artifact_detail} (see {log_path})")
+        status = "failed" if failures else "completed"
+        detail = "; ".join(failures) if failures else (
+            "Paired statistics completed for every configured budget mode with all required artifacts present.")
+        return StageResult(
+            "statistics", status, started, utc_timestamp(), 1 if failures else 0,
+            detail, argvs, ";".join(logs), not failures)
 
     # ================================================================
     # Stage 8: final report
