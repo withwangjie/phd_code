@@ -31,8 +31,10 @@ cd "$SCRIPT_DIR"
 log() { echo "[run_full_experiment] $*"; }
 fail() { echo "[run_full_experiment] ERROR: $*" >&2; exit 1; }
 
-CONFIG_FILE="full_experiment_config.yaml"
-[ -f "$CONFIG_FILE" ] || fail "Config file not found: ${SCRIPT_DIR}/${CONFIG_FILE}"
+SCIENTIFIC_CONFIG="full_experiment_config.yaml"
+SERVER_CONFIG="${QP_SERVER_CONFIG:-server_config.yaml}"
+[ -f "$SCIENTIFIC_CONFIG" ] || fail "Scientific config file not found: ${SCRIPT_DIR}/${SCIENTIFIC_CONFIG}"
+[ -f "$SERVER_CONFIG" ] || fail "Server config file not found: ${SCRIPT_DIR}/${SERVER_CONFIG}"
 
 # ---------------------------------------------------------------------------
 # 1. Activate the local virtual environment (POSIX or Windows layout).
@@ -48,6 +50,24 @@ else
 fi
 log "Activated virtual environment: $(command -v python)"
 python --version
+
+# ---------------------------------------------------------------------------
+# 1b. Resolve infrastructure/runtime settings for THIS server.
+# Scientific protocol values remain unchanged; only paths, worker counts,
+# DDP ranks/batch split, OpenMM platform/device and external executable paths
+# are resolved here.
+# ---------------------------------------------------------------------------
+RUNTIME_DIR="${SCRIPT_DIR}/.runtime"
+mkdir -p "$RUNTIME_DIR"
+RESOLVED_CONFIG="${RUNTIME_DIR}/resolved_runtime_config.yaml"
+SERVER_REPORT="${RUNTIME_DIR}/server_resolution.json"
+log "Resolving server paths/resources from ${SERVER_CONFIG}..."
+python "${SCRIPT_DIR}/resolve_server_config.py" \
+    --scientific-config "${SCRIPT_DIR}/${SCIENTIFIC_CONFIG}" \
+    --server-config "${SCRIPT_DIR}/${SERVER_CONFIG}" \
+    --out-config "$RESOLVED_CONFIG" \
+    --out-report "$SERVER_REPORT"
+log "Resolved runtime config: $RESOLVED_CONFIG"
 
 # ---------------------------------------------------------------------------
 # 2. Fast fail on a second concurrent launch, BEFORE even importing Python --
@@ -77,7 +97,7 @@ fi
 PREFLIGHT_SCRIPT="${SCRIPT_DIR}/formal_preflight.sh"
 [ -f "$PREFLIGHT_SCRIPT" ] || fail "Formal preflight script missing: $PREFLIGHT_SCRIPT"
 log "Running formal preflight gate..."
-bash "$PREFLIGHT_SCRIPT"
+QP_RESOLVED_CONFIG="$RESOLVED_CONFIG" QP_SERVER_REPORT="$SERVER_REPORT" bash "$PREFLIGHT_SCRIPT"
 log "Formal preflight gate passed."
 
 # ---------------------------------------------------------------------------
@@ -95,7 +115,7 @@ LAUNCH_TIMESTAMP="$(date -u +%Y%m%d_%H%M%S)"
 LAUNCH_LOG="${SCRIPT_DIR}/run_full_experiment_launch_${LAUNCH_TIMESTAMP}.log"
 
 echo $$ > "$LOCK_FILE"
-nohup python -u "${SCRIPT_DIR}/run_full_experiment.py" --config "$CONFIG_FILE" "$@" \
+nohup python -u "${SCRIPT_DIR}/run_full_experiment.py" --config "$RESOLVED_CONFIG" "$@" \
     > "$LAUNCH_LOG" 2>&1 &
 PIPELINE_PID=$!
 disown "$PIPELINE_PID" 2>/dev/null || true
@@ -113,7 +133,10 @@ log "=== Full experiment pipeline launched ==="
 log "PID:              ${PIPELINE_PID}"
 log "Lock file:         ${LOCK_FILE}"
 log "Launch log:        ${LAUNCH_LOG}"
-log "Config used:       ${SCRIPT_DIR}/${CONFIG_FILE}"
+log "Scientific config: ${SCRIPT_DIR}/${SCIENTIFIC_CONFIG}"
+log "Server config:     ${SCRIPT_DIR}/${SERVER_CONFIG}"
+log "Resolved config:   ${RESOLVED_CONFIG}"
+log "Server report:     ${SERVER_REPORT}"
 log ""
 log "run_full_experiment.py creates its own uniquely timestamped run"
 log "directory (experiments_full_run_<UTC timestamp>/) and prints it near"
