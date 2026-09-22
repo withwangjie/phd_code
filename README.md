@@ -24,9 +24,10 @@ prediction.
    - Contact, nearest-distance, CDR and random strategies are explicit ablation baselines.
 
 3. **Adaptive side-chain state construction**
-   - Formal coarse and all-atom protocols use backbone-dependent Dunbrack 2010
-     rotamer probabilities/chi means/sigmas queried from the residue phi/psi
-     context; legacy hand-written chi1 priors are debug/compatibility only.
+   - Formal coarse modeling uses a chi1-oriented pseudo-atom approximation,
+     while formal all-atom validation uses complete backbone-dependent Dunbrack
+     2010 rotamer states (chi1..chiN) queried from residue phi/psi context.
+     Legacy hand-written chi1 priors are debug/compatibility only.
    - Candidate pre-screening uses local environment / antigen-conditioned
      interaction scoring (coarse model) or Amber14 single-candidate energy
      (all-atom validation). Coarse prior/VHH/antigen/pair terms may be linearly
@@ -67,7 +68,10 @@ prediction.
 
 - Coarse antigen interaction scores are not binding free energies.
 - Contact number is a geometry baseline, not an affinity estimator.
-- Current all-atom experiments remain native-backbone-conditioned chi1-centered recovery controls; distal chi2/chi3/chi4 are not yet exhaustively resampled.
+- Current all-atom experiments remain native-backbone-conditioned, but formal
+  recovery now perturbs and reconstructs every defined Active side-chain chi.
+  The coarse energy surrogate remains chi1-oriented and is explicitly
+  calibrated against Amber14 on training complexes only.
 - No quantum advantage claim should be made without matched-budget evidence.
 - Smoke checks and legacy explicit `chi1_angles` overrides are engineering or
   ablation paths and are not the formal main protocol.
@@ -128,15 +132,37 @@ If the frozen JSON is absent but the configured training CSV exists,
 `run_full_experiment.py` fits the JSON before the coarse benchmark. If both
 are absent while `require_calibrated: true`, the run fails closed.
 
-The formal rotamer model is Dunbrack 2010 backbone-dependent **chi1-centered**
-sampling: the code reads the official `ALL.bbdep.rotamers.lib` φ/ψ bins,
-rotamer probabilities, χ means and σ values, expands χ1 by configured
-σ offsets, and then retains 3--6 states/site under the <=30-variable budget.
-The official library file is an external scientific input and is never
-silently replaced by the legacy hand-written table in formal mode. Distal
-χ2/χ3/χ4 statistics are retained as provenance but are not yet exhaustively
-resampled in the current structural reconstruction benchmark.
+The formal rotamer model reads the official Dunbrack 2010
+`ALL.bbdep.rotamers.lib` φ/ψ bins, rotamer probabilities, χ1..χN means and
+σ values. χ1 is expanded by configured σ offsets; distal χ values retain the
+corresponding statistical rotamer means. The all-atom model applies complete
+rotamer χ1..χN states and retains 3--6 states/site under the <=30-variable
+budget. The coarse pseudo-atom model intentionally remains χ1-oriented. The
+official library file is an external scientific input and is never silently
+replaced by the legacy table in formal mode.
 
+
+
+## Independence, external validation, and structural baselines
+
+Formal confirmation requires both layered sequence isolation and a frozen
+PDB-to-family/structure cluster map. The same cluster map is used for
+train/test exclusion, validation-queue eligibility, and cluster-level
+statistics. Missing required cluster metadata fails closed.
+
+The formal pipeline also has an external-validation stage. It requires an
+independently certified graph-v1.5 VHH dataset and runs the frozen EGNN,
+calibrated coarse model, and primary solver protocol without refitting.
+FASPR is supported as a mature biological side-chain packing baseline and
+Phenix clashscore as a standard steric-quality diagnostic. These are
+scientific external dependencies: they are never substituted or fabricated
+when executables/data are unavailable.
+
+The pre-registered primary structural endpoint is post-relaxation,
+symmetry-corrected Active-side-chain heavy-atom RMSD, with QAOA-vs-SA as the
+primary structural contrast. RQ5 additionally reports a within-target/method
+centered Spearman association between discrete energy and final RMSD with
+family-cluster bootstrap confidence intervals.
 
 ## Main entry points
 
