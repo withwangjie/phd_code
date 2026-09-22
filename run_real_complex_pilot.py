@@ -466,6 +466,8 @@ def main(argv=None) -> int:
         ("run_real_complex_pilot.py","batch_benchmark_hard_set.py","subgraph_to_qubo.py","qaoa_interface_sampler.py",
          "structural_quality.py","prediction_contract.py","evaluate_complex_metrics.py")},
         checkpoint_sha256=_ablation_digest(args.checkpoint) if args.pruning=='egnn' else None,
+        pdb_allowlist_sha256=(
+            _ablation_digest(args.pdb_allowlist_file) if args.pdb_allowlist_file else None),
         resolved_target_filter=requested_pdb)
     with FileLock(str(out/".lock"),timeout=0):
         stamp=out/"run_manifest.json"
