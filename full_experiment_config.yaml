@@ -197,7 +197,7 @@ egnn_train:
 # ---------------------------------------------------------------------------
 # Stage 4: quantum-vs-classical coarse-grained benchmark
 # (batch_benchmark_hard_set.py --research-ablation). This is the ablation
-# sweep: four pruning strategies x output-budget curve x QAOA objective x
+# sweep: five pruning strategies x output-budget curve x QAOA objective x
 # single/multi-start, all sharing one perturbed input / candidate set /
 # fixed evaluation region per (pruning, radius, depth, max_evals, seed)
 # case, with every solver's cost fields (solver_seconds, oracle_seconds,
@@ -213,7 +213,7 @@ qc_benchmark:
   checkpoint: "best_egnn_pruning.pt"
   workers: 16  # CPU legal-subspace simulation, not 2^n GPU state vectors
   max_targets: 0  # 0 = every qualifying graph in input_dir, no silent subset
-  pruning: ["egnn", "contact", "cdr", "random"]  # the four strategies requirement #4 asks for
+  pruning: ["egnn", "contact", "distance", "cdr", "random"]  # the four strategies requirement #4 asks for
   radii: [6.0]
   depths: [2]
   max_evals: [90]
