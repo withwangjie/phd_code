@@ -90,6 +90,7 @@ env_check:
 smoke_check:
   ablation_max_targets: 1
   recovery_pilot_targets: 1
+  recovery_pilot_pdb_id: "4s10"  # explicit smoke target; never inferred from targets/eval_shots
   recovery_pilot_sites: 5
   recovery_pilot_seeds: [42]
   recovery_pilot_max_evals: 12
