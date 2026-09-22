@@ -1499,16 +1499,23 @@ def _openmm_context(mm: Any, system: Any, integrator: Any) -> Any:
 
 
 class AllAtomInterfaceQUBOBuilder:
-    """Amber14 fixed-backbone chi1-grid QUBO from a complete protein structure.
+    """Amber14 fixed-backbone adaptive multi-state chi1 QUBO.
 
-    Distal chi angles remain input-conditioned. No native/reference structure is
-    accepted by this builder. Missing heavy atoms, cyclic/crosslinked Active
-    side chains and unsupported templates fail rather than inventing atoms.
-    Vacuum NoCutoff energy is kcal/mol, NOT binding free energy.
+    Formal all-atom validation mirrors the coarse protocol: each Active
+    residue receives a 6/9/12-state chi1 sub-rotamer pool according to
+    side-chain flexibility; single-candidate Amber14 energies pre-screen the
+    pool; 3--6 states/site are retained under a global <=30-variable budget.
+    An explicit chi1_angles sequence remains available only as a legacy
+    controlled-ablation override.
+
+    Distal chi angles remain input-conditioned. No native/reference structure
+    is accepted by this builder. Missing heavy atoms and unsupported templates
+    fail rather than inventing atoms. Vacuum NoCutoff energy is kcal/mol,
+    NOT binding free energy.
     """
 
     def __init__(self, structure_path: Path, active_residues: Sequence[str], *,
-                 chi1_angles: Sequence[float] = (-60., 60., 180.), seed: int = 42,
+                 chi1_angles: Optional[Sequence[float]] = None, seed: int = 42,
                  candidate_relax_iterations: int = 0):
         import openmm as mm
         from openmm import app, unit
@@ -1518,13 +1525,20 @@ class AllAtomInterfaceQUBOBuilder:
         if candidate_relax_iterations < 0:
             raise ValueError("Candidate relaxation iterations must be nonnegative")
         self.candidate_relax_iterations = candidate_relax_iterations
-        if len(chi1_angles) not in (2,3) or not np.isfinite(chi1_angles).all():
-            raise ValueError("Exactly two or three finite chi1 angles required")
-        if len({round(float(a)%360,8) for a in chi1_angles})!=len(chi1_angles):
-            raise ValueError("Duplicate chi1 angles modulo 360")
+        if chi1_angles is not None:
+            chi1_angles=tuple(float(a) for a in chi1_angles)
+            if not 2 <= len(chi1_angles) <= 6 or not np.isfinite(chi1_angles).all():
+                raise ValueError("Legacy chi1_angles override requires 2--6 finite angles")
+            if len({round(float(a)%360,8) for a in chi1_angles})!=len(chi1_angles):
+                raise ValueError("Duplicate chi1 angles modulo 360")
+        self.chi1_angles_override=chi1_angles
         ids=list(active_residues)
-        if not ids or len(set(ids))!=len(ids) or len(ids)*len(chi1_angles)>30:
-            raise ValueError("Unique Active residues and 1..30 total variables required")
+        if not ids or len(set(ids))!=len(ids):
+            raise ValueError("Active residues must be unique and nonempty")
+        if chi1_angles is None and len(ids)*3>30:
+            raise ValueError("Adaptive all-atom mode requires at most 10 Active residues under the 30-variable budget")
+        if chi1_angles is not None and len(ids)*len(chi1_angles)>30:
+            raise ValueError("Legacy chi1 angle override exceeds the 30-variable budget")
         structure_path=Path(structure_path)
         structure=gemmi.read_structure(str(structure_path))
         if len(structure)!=1:
@@ -1569,8 +1583,13 @@ class AllAtomInterfaceQUBOBuilder:
         for a,b in self.topology.bonds():
             bonds[a.index].add(b.index); bonds[b.index].add(a.index)
         self.active_residues=ids; self.candidates=[]; self.site_to_variables={}; self.movable=set()
+        raw_candidates_by_site: dict[int, list[int]] = {}
+        residue_one_letter: dict[int, str] = {}
+        raw_pool_sizes: dict[int, int] = {}
         for site,rid in enumerate(ids):
             residue=residues[rid]; atoms={a.name:a.index for a in residue.atoms()}
+            one_letter=gemmi.find_tabulated_residue(residue.name).one_letter_code
+            residue_one_letter[site]=one_letter
             ca,cb=atoms["CA"],atoms["CB"]
             if cb not in bonds[ca]:
                 raise ValueError(f"Missing CA-CB bond: {rid}")
@@ -1586,8 +1605,13 @@ class AllAtomInterfaceQUBOBuilder:
             axis=self.base_positions[cb]-self.base_positions[ca]; axis/=np.linalg.norm(axis)
             atom_coordinates={name:self.base_positions[index] for name,index in atoms.items()}
             original=_chi1_angle(atom_coordinates,residue.name)
+            if self.chi1_angles_override is None:
+                angles=tuple(t.chi1_degrees for t in _expanded_rotamer_templates(one_letter))
+            else:
+                angles=tuple(self.chi1_angles_override)
+            raw_pool_sizes[site]=len(angles)
             variables=[]
-            for angle in chi1_angles:
+            for angle in angles:
                 delta=np.deg2rad((float(angle)-original+180)%360-180)
                 relative=self.base_positions[indices]-self.base_positions[ca]
                 rotated=relative*np.cos(delta)+np.cross(axis,relative)*np.sin(delta)+np.outer(relative@axis,axis)*(1-np.cos(delta))
@@ -1599,10 +1623,10 @@ class AllAtomInterfaceQUBOBuilder:
                 variables.append(len(self.candidates))
                 self.candidates.append(dict(site=site,residue_id=rid,residue_name=residue.name,
                     angle=float(angle),indices=indices,positions=coordinates))
-            self.site_to_variables[site]=tuple(variables)
+            raw_candidates_by_site[site]=variables
             self.movable.update(moving)
         if candidate_relax_iterations:
-            for group in self.site_to_variables.values():
+            for group in raw_candidates_by_site.values():
                 moving = set(self.candidates[group[0]]["indices"])
                 system = mm.XmlSerializer.deserialize(mm.XmlSerializer.serialize(self.system))
                 for i in range(len(self.base_positions)):
@@ -1620,6 +1644,48 @@ class AllAtomInterfaceQUBOBuilder:
                     candidate = self.candidates[variable]
                     candidate["positions"] = positions[candidate["indices"]].copy()
                 del context, integrator
+
+        # Adaptive retention after optional raw-candidate relaxation.
+        if self.chi1_angles_override is None:
+            helper=InterfaceQUBOBuilder(
+                min_variables=3*len(ids), max_variables=30, max_sites=len(ids)
+            )
+            pseudo_nodes=np.arange(len(ids),dtype=np.int64)
+            pseudo_aas=[residue_one_letter[i] for i in range(len(ids))]
+            counts=helper._allocate_rotamer_counts(
+                pseudo_nodes,pseudo_aas,np.zeros(len(ids),dtype=np.float64)
+            )
+            retained_old_indices=[]; retained_groups={}
+            for site,count in enumerate(counts):
+                ranked=sorted(
+                    raw_candidates_by_site[site],
+                    key=lambda variable: (
+                        self.energy(self.positions_for_variables([variable])),
+                        abs(float(self.candidates[variable]["angle"])),
+                        int(variable),
+                    ),
+                )
+                chosen=ranked[:count]
+                retained_groups[site]=chosen
+                retained_old_indices.extend(chosen)
+            old_candidates=self.candidates
+            old_to_new={old:new for new,old in enumerate(retained_old_indices)}
+            self.candidates=[old_candidates[old] for old in retained_old_indices]
+            self.site_to_variables={
+                site:tuple(old_to_new[old] for old in retained_groups[site])
+                for site in range(len(ids))
+            }
+            self.raw_rotamer_pool_sizes=[raw_pool_sizes[i] for i in range(len(ids))]
+            self.retained_rotamers_per_site=[len(self.site_to_variables[i]) for i in range(len(ids))]
+        else:
+            self.site_to_variables={}
+            cursor=0
+            for site in range(len(ids)):
+                width=len(raw_candidates_by_site[site])
+                self.site_to_variables[site]=tuple(range(cursor,cursor+width))
+                cursor+=width
+            self.raw_rotamer_pool_sizes=[len(self.chi1_angles_override)]*len(ids)
+            self.retained_rotamers_per_site=[len(self.chi1_angles_override)]*len(ids)
 
     def positions_for_variables(self, variables: Sequence[int]) -> np.ndarray:
         """Apply zero or one candidate per site; partial assignments support decomposition."""
@@ -1689,7 +1755,10 @@ class AllAtomInterfaceQUBOBuilder:
                 decomposition_anchor_variables=anchors,ising_equivalence_max_error=ising_error,
                 ising_roundoff_tolerance=roundoff_bound,
                 atom_count=len(self.base_positions),forcefield=["amber14-all.xml","amber14/tip3p.xml"],
-                solvent="vacuum; NoCutoff",candidate_scope="input-conditioned distal chi; uniform chi1 grid, no statistical rotamer prior"))
+                solvent="vacuum; NoCutoff",raw_rotamer_pool_sizes=self.raw_rotamer_pool_sizes,
+                rotamers_per_site=self.retained_rotamers_per_site,
+                rotamer_state_policy=("adaptive 6/9/12 raw chi1 sub-rotamers -> 3--6 retained under <=30 variables" if self.chi1_angles_override is None else "explicit legacy chi1 angle override"),
+                candidate_scope="input-conditioned distal chi; Amber14 single-candidate prescreen, no affinity claim"))
 
     def write_structure(self, positions: np.ndarray, destination: Path) -> None:
         """Write author-ID CIF, with occupancy=1 for generated computational atoms."""
