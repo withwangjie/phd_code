@@ -211,11 +211,18 @@ def make_graph(row, split, pair=None):
     arrays={g:np.concatenate(heavy[g]) for g in [0,1]};rid={g:np.concatenate(owners[g]) for g in [0,1]}
     trees={g:cKDTree(arrays[g]) for g in [0,1]}
     counts=[]
+    interface_nodes=set()
     for g in [0,1]:
         distances=trees[1-g].query(arrays[g],distance_upper_bound=5.0)[0]
-        counts.append(len(np.unique(rid[g][distances<5.0])))
+        contacted=rid[g][distances<5.0]
+        unique_contacted=np.unique(contacted)
+        counts.append(len(unique_contacted))
+        interface_nodes.update(int(index) for index in unique_contacted.tolist())
     interface=sum(counts)
     if interface<15:raise ValueError(f'weak actual partner interface: {interface}')
+    heavy_atom_interface_label=np.zeros(n,dtype=np.float32)
+    if interface_nodes:
+        heavy_atom_interface_label[np.fromiter(sorted(interface_nodes),dtype=np.int64)]=1.0
     del arrays,rid,trees,heavy,owners
     # Use the final float32 positions for edge construction and distance validation.
     pos=np.array([r['pos'] for r in nodes],dtype=np.float32)
@@ -231,6 +238,7 @@ def make_graph(row, split, pair=None):
     x=np.zeros((n,21),dtype=np.float32);x[np.arange(n),[AA_INDEX[r['aa']] for r in nodes]]=1;x[:,20]=groups
     seq=cdr(row)
     graph=Data(pos=torch.from_numpy(pos),x=torch.from_numpy(x),edge_index=torch.from_numpy(edge),
+        interface_label=torch.from_numpy(heavy_atom_interface_label),
         pdb_id=row['pdb_id'].upper(),subset_source=row['subset'],cdr3_seq=seq,cdr3_len=len(seq),num_interface_residues=interface,
         split=split,source_id=row['id'],node_chain_id=torch.tensor(chainidx,dtype=torch.long),chain_ids=[c['name'] for c in chains],
         chain_groups=[c['group'] for c in chains],residue_ids=[r['residue_id'] for r in nodes],
