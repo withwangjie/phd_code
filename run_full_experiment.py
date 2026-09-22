@@ -3098,6 +3098,8 @@ def audit_experiment_results(
         })
         if result.status in ("completed","completed_with_failures") and not ok:
             all_ok=False
+        if result.status=="skipped" and not ok:
+            all_ok=False
         if result.status=="failed":
             all_ok=False
     payload={
