@@ -449,8 +449,9 @@ def main(argv=None) -> int:
             raise ValueError("--cluster-map must contain a nonempty JSON object")
         cluster_map={str(k).lower():str(v) for k,v in raw_clusters.items()}
     streams = derive_streams(args.master_seed)
-    # Explicit requested integration smoke uses 4S10, not the first small graph.
-    requested_pdb=args.pdb_id or ('4s10' if args.eval_shots and args.targets==1 else None)
+    # Target filtering is explicit only. A one-target run must never
+    # silently become the historical 4S10 smoke case merely because eval_shots is set.
+    requested_pdb=args.pdb_id
     if requested_pdb:
         candidates=[r for r in candidates if r['pdb_id'].lower()==requested_pdb.lower()]
         if not candidates: raise ValueError(f'Target {requested_pdb} absent from manifest')
