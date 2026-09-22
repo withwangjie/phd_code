@@ -1400,7 +1400,8 @@ def _ablation_run_case(data: Any, scorer: Any, config: dict, args: Any, artifact
         physical_self=qubo.physical_self.tolist(), physical_pair=qubo.physical_pair.tolist(),
         site_to_variables=qubo.site_to_variables, variable_map=[vars(r) for r in qubo.variable_map],
         ground_energy=truth.energy, total_seconds=time.perf_counter()-begin,
-        scope="coarse-grained fixed-backbone; classical exact subspace simulation; matched outputs only"))
+        scope=("coarse-grained fixed-backbone; classical exact subspace simulation; "
+               "matched-output records plus optional matched-time controls; budget_mode disambiguates")))
     return records
 
 
