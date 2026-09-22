@@ -27,6 +27,23 @@ ANNOTATIONS = {}
 PDB_ANNOTATIONS = collections.defaultdict(list)
 CHAIN_ANNOTATIONS = {}
 BACKBONE = {'N', 'CA', 'C', 'O'}
+SIDECHAIN_HEAVY = {
+    'ALA': {'CB'}, 'CYS': {'CB','SG'}, 'ASP': {'CB','CG','OD1','OD2'},
+    'GLU': {'CB','CG','CD','OE1','OE2'}, 'PHE': {'CB','CG','CD1','CD2','CE1','CE2','CZ'},
+    'GLY': set(), 'HIS': {'CB','CG','ND1','CD2','CE1','NE2'},
+    'ILE': {'CB','CG1','CG2','CD1'}, 'LYS': {'CB','CG','CD','CE','NZ'},
+    'LEU': {'CB','CG','CD1','CD2'}, 'MET': {'CB','CG','SD','CE'},
+    'ASN': {'CB','CG','OD1','ND2'}, 'PRO': {'CB','CG','CD'},
+    'GLN': {'CB','CG','CD','OE1','NE2'}, 'ARG': {'CB','CG','CD','NE','CZ','NH1','NH2'},
+    'SER': {'CB','OG'}, 'THR': {'CB','OG1','CG2'}, 'VAL': {'CB','CG1','CG2'},
+    'TRP': {'CB','CG','CD1','CD2','NE1','CE2','CE3','CZ2','CZ3','CH2'},
+    'TYR': {'CB','CG','CD1','CD2','CE1','CE2','CZ','OH'},
+}
+MAX_RESOLUTION_ANGSTROM = 3.0
+MIN_INTERFACE_OCCUPANCY = 0.90
+ALLOW_INTERFACE_ALTLOC = False
+REQUIRE_RESOLUTION = True
+REQUIRE_COMPLETE_INTERFACE_SIDECHAINS = True
 ZIP_LOCAL = threading.local()
 
 def literal(s, default):
@@ -137,15 +154,16 @@ def chain_data(model):
     chains, missing, total, details = [], 0, 0, []
     for chain in model:
         coords, owners, sequence = [], [], []
+        residue_names=[]; residue_atoms=[]; residue_altloc=[]; residue_min_occ=[]
+        residue_mean_b=[]; residue_missing_sidechain=[]
         for res in chain:
             info = gemmi.find_tabulated_residue(res.name)
             if not info.is_amino_acid() or res.entity_type in (gemmi.EntityType.Water, gemmi.EntityType.NonPolymer):
                 continue
             # Unknown entity type (common in PDB) is accepted for amino acids.
+            observed=[atom for atom in res if atom.occ > 0 and not atom.element.is_hydrogen]
             atoms = {}
-            for atom in res:
-                if atom.occ <= 0 or atom.element.is_hydrogen:
-                    continue
+            for atom in observed:
                 if not all(math.isfinite(v) for v in (atom.pos.x, atom.pos.y, atom.pos.z)):
                     raise ValueError('non-finite coordinate')
                 if atom.name not in atoms or atom.occ > atoms[atom.name].occ:
@@ -154,6 +172,14 @@ def chain_data(model):
                 continue
             rid = len(sequence)
             sequence.append(info.one_letter_code.upper())
+            residue_names.append(res.name.upper())
+            residue_atoms.append(sorted(atoms))
+            residue_altloc.append(any(str(atom.altloc).strip().strip('\x00') for atom in observed))
+            residue_min_occ.append(float(min(atom.occ for atom in atoms.values())))
+            bvalues=[float(atom.b_iso) for atom in atoms.values() if math.isfinite(float(atom.b_iso))]
+            residue_mean_b.append(float(np.mean(bvalues)) if bvalues else math.nan)
+            expected=SIDECHAIN_HEAVY.get(res.name.upper(), set())
+            residue_missing_sidechain.append(sorted(expected-set(atoms)))
             absent = sorted(BACKBONE - atoms.keys())
             total += 1
             if absent:
@@ -164,14 +190,25 @@ def chain_data(model):
                 owners.append(rid)
         if coords:
             xyz = np.array(coords, dtype=np.float64)
-            chains.append(dict(name=chain.name, sequence=''.join(sequence), xyz=xyz, owners=np.array(owners), tree=cKDTree(xyz), low=xyz.min(0), high=xyz.max(0)))
+            chains.append(dict(
+                name=chain.name, sequence=''.join(sequence), xyz=xyz,
+                owners=np.array(owners), tree=cKDTree(xyz), low=xyz.min(0), high=xyz.max(0),
+                residue_names=residue_names, residue_atoms=residue_atoms,
+                residue_altloc=residue_altloc, residue_min_occ=residue_min_occ,
+                residue_mean_b=residue_mean_b,
+                residue_missing_sidechain=residue_missing_sidechain,
+            ))
     return chains, missing, total, details
 
-def contact(a, b):
+def contact_residue_ids(a, b):
     # Nearest-neighbour queries avoid enumerating every atom-atom pair.
     da = b['tree'].query(a['xyz'], distance_upper_bound=5.0)[0]
     db = a['tree'].query(b['xyz'], distance_upper_bound=5.0)[0]
-    return len(np.unique(a['owners'][da < 5.0])), len(np.unique(b['owners'][db < 5.0]))
+    return set(map(int,np.unique(a['owners'][da < 5.0]))), set(map(int,np.unique(b['owners'][db < 5.0])))
+
+def contact(a, b):
+    left,right=contact_residue_ids(a,b)
+    return len(left),len(right)
 
 def interfaces(chains, allowed=None):
     pairs = []
@@ -267,7 +304,13 @@ def nano_features(task, chains, pdbid):
     return result, None
 
 def audit(task):
-    out = dict(task, valid=False, error='', residues=0, missing_residues=0, missing_examples=[], chains=0, interface_status='not_applicable', max_contact_residues=None, weak_pairs=0, pairs=[], models_first_only=False, vhh_status='not_applicable', cdr3_lengths=[])
+    out = dict(task, valid=False, error='', residues=0, missing_residues=0, missing_examples=[], chains=0,
+        interface_status='not_applicable', max_contact_residues=None, weak_pairs=0, pairs=[],
+        models_first_only=False, vhh_status='not_applicable', cdr3_lengths=[],
+        resolution_angstrom=None, structure_quality_status='not_evaluated',
+        structure_quality_reasons=[], interface_missing_sidechain_residues=0,
+        interface_altloc_residues=0, interface_min_occupancy=None,
+        interface_mean_bfactor=None)
     try:
         st, multi = read_structure(task)
         if not len(st):
@@ -278,7 +321,14 @@ def audit(task):
         name = pathlib.Path(task['member'] or task['path']).name
         pdbid = re.search(r'pdb_0000([a-zA-Z0-9]{4})', name)
         pdbid = pdbid.group(1).upper() if pdbid else name[:4].upper()
-        out.update(valid=True, pdb_id=pdbid, chains=len(chains), residues=total, missing_residues=missing, missing_examples=details[:20], models_first_only=multi or len(st)>1, legacy_pdb_tail=task.get('_legacy_pdb_tail',False))
+        resolution=float(getattr(st,'resolution',0.0) or 0.0)
+        if not math.isfinite(resolution) or resolution<=0:
+            resolution=None
+        out.update(valid=True, pdb_id=pdbid, chains=len(chains), residues=total,
+            missing_residues=missing, missing_examples=details[:20],
+            models_first_only=multi or len(st)>1,
+            legacy_pdb_tail=task.get('_legacy_pdb_tail',False),
+            resolution_angstrom=resolution)
         allowed = None
         if task['subset'] in ('sabdab_vhh', 'snac_db') or task['subset'].startswith('extra_snac_'):
             features, allowed = nano_features(task, chains, pdbid)
@@ -291,6 +341,44 @@ def audit(task):
         if pairs:
             maximum = max(p[2]+p[3] for p in pairs)
             out.update(max_contact_residues=maximum, weak_pairs=sum(p[2]+p[3]<15 for p in pairs), interface_status='weak' if maximum < 15 else 'pass')
+            best=max(pairs,key=lambda p:p[2]+p[3])
+            cmap={chain['name']:chain for chain in chains}
+            left,right=cmap[best[0]],cmap[best[1]]
+            left_ids,right_ids=contact_residue_ids(left,right)
+            interface_records=[]
+            for chain,ids in ((left,left_ids),(right,right_ids)):
+                for rid in ids:
+                    interface_records.append(dict(
+                        chain=chain['name'],rid=int(rid),name=chain['residue_names'][rid],
+                        missing_sidechain=chain['residue_missing_sidechain'][rid],
+                        altloc=bool(chain['residue_altloc'][rid]),
+                        min_occupancy=float(chain['residue_min_occ'][rid]),
+                        mean_bfactor=float(chain['residue_mean_b'][rid]),
+                    ))
+            missing_sc=sum(bool(r['missing_sidechain']) for r in interface_records)
+            altloc_sc=sum(bool(r['altloc']) for r in interface_records)
+            min_occ=min((r['min_occupancy'] for r in interface_records),default=None)
+            bvals=[r['mean_bfactor'] for r in interface_records if math.isfinite(r['mean_bfactor'])]
+            reasons=[]
+            if REQUIRE_RESOLUTION and resolution is None:
+                reasons.append('unknown_resolution')
+            if resolution is not None and resolution>MAX_RESOLUTION_ANGSTROM:
+                reasons.append('resolution_above_limit')
+            if REQUIRE_COMPLETE_INTERFACE_SIDECHAINS and missing_sc:
+                reasons.append('incomplete_interface_sidechain')
+            if not ALLOW_INTERFACE_ALTLOC and altloc_sc:
+                reasons.append('interface_altloc')
+            if min_occ is not None and min_occ<MIN_INTERFACE_OCCUPANCY:
+                reasons.append('low_interface_occupancy')
+            out.update(
+                interface_missing_sidechain_residues=missing_sc,
+                interface_altloc_residues=altloc_sc,
+                interface_min_occupancy=min_occ,
+                interface_mean_bfactor=(float(np.mean(bvals)) if bvals else None),
+                interface_quality_records=interface_records,
+                structure_quality_status=('pass' if not reasons else 'fail'),
+                structure_quality_reasons=reasons,
+            )
         return out
     except Exception as exc:
         out.update(valid=False, error=f'{type(exc).__name__}: {exc}')
@@ -375,7 +463,16 @@ def report(root, rows, ignored, archives, pairs, elapsed, destination):
     destination.write_text('\n'.join(lines)+'\n',encoding='utf-8')
 
 def main():
-    parser=argparse.ArgumentParser();parser.add_argument('--data',type=pathlib.Path,default=BASE/'data');parser.add_argument('--workers',type=int,default=4);parser.add_argument('--limit',type=int,default=0);parser.add_argument('--out',type=pathlib.Path,default=BASE);parser.add_argument('--reuse-non-nano',action='store_true',help='Explicitly reuse valid non-nano geometry from this output directory; assumes unchanged files and geometry rules. Nano annotations and failed entries are recomputed.');args=parser.parse_args()
+    global MAX_RESOLUTION_ANGSTROM, MIN_INTERFACE_OCCUPANCY
+    global ALLOW_INTERFACE_ALTLOC, REQUIRE_RESOLUTION, REQUIRE_COMPLETE_INTERFACE_SIDECHAINS
+    parser=argparse.ArgumentParser();parser.add_argument('--data',type=pathlib.Path,default=BASE/'data');parser.add_argument('--workers',type=int,default=4);parser.add_argument('--limit',type=int,default=0);parser.add_argument('--out',type=pathlib.Path,default=BASE);parser.add_argument('--max-resolution',type=float,default=MAX_RESOLUTION_ANGSTROM);parser.add_argument('--min-interface-occupancy',type=float,default=MIN_INTERFACE_OCCUPANCY);parser.add_argument('--allow-interface-altloc',action='store_true');parser.add_argument('--allow-unknown-resolution',action='store_true');parser.add_argument('--allow-incomplete-interface-sidechains',action='store_true');parser.add_argument('--reuse-non-nano',action='store_true',help='Explicitly reuse valid non-nano geometry from this output directory; assumes unchanged files and geometry rules. Nano annotations and failed entries are recomputed.');args=parser.parse_args()
+    if not math.isfinite(args.max_resolution) or args.max_resolution<=0: parser.error('--max-resolution must be positive finite')
+    if not 0 < args.min_interface_occupancy <= 1: parser.error('--min-interface-occupancy must be in (0,1]')
+    MAX_RESOLUTION_ANGSTROM=float(args.max_resolution)
+    MIN_INTERFACE_OCCUPANCY=float(args.min_interface_occupancy)
+    ALLOW_INTERFACE_ALTLOC=bool(args.allow_interface_altloc)
+    REQUIRE_RESOLUTION=not bool(args.allow_unknown_resolution)
+    REQUIRE_COMPLETE_INTERFACE_SIDECHAINS=not bool(args.allow_incomplete_interface_sidechains)
     start=time.time();root=args.data.resolve();args.out.mkdir(parents=True,exist_ok=True);load_annotations(root);tasks,ignored,archives=discover(root)
     if args.limit:tasks=tasks[:args.limit]
     print(f'Found {len(tasks)} structures; ignored {len(ignored)} resource files',flush=True)
@@ -397,11 +494,18 @@ def main():
             rows.append(r);handle.write(json.dumps(r,ensure_ascii=False)+'\n')
             if len(rows)%250==0:handle.flush();print(f'{len(rows)}/{len(tasks)} audited, {time.time()-start:.0f}s',flush=True)
     pairs=db55_pairs(tasks)
-    fields=['subset','id','pdb_id','valid','error','chains','residues','missing_residues','interface_status','max_contact_residues','weak_pairs','vhh_status','vhh_reason','cdr3_lengths','models_first_only','legacy_pdb_tail']
+    fields=['subset','id','pdb_id','valid','error','chains','residues','missing_residues','interface_status','max_contact_residues','weak_pairs','vhh_status','vhh_reason','cdr3_lengths','models_first_only','legacy_pdb_tail','resolution_angstrom','structure_quality_status','structure_quality_reasons','interface_missing_sidechain_residues','interface_altloc_residues','interface_min_occupancy','interface_mean_bfactor']
     with (args.out/'data_audit_details.csv').open('w',encoding='utf-8-sig',newline='') as handle:
         writer=csv.DictWriter(handle,fieldnames=fields,extrasaction='ignore');writer.writeheader();writer.writerows(rows)
     (args.out/'data_audit_db55_pairs.json').write_text(json.dumps(pairs,ensure_ascii=False,indent=2),encoding='utf-8')
-    (args.out/'data_audit_inventory.json').write_text(json.dumps(dict(ignored=ignored,archives=archives,tasks=len(tasks),partial_run=bool(args.limit)),ensure_ascii=False,indent=2),encoding='utf-8')
+    (args.out/'data_audit_inventory.json').write_text(json.dumps(dict(
+        ignored=ignored,archives=archives,tasks=len(tasks),partial_run=bool(args.limit),
+        structure_quality_protocol=dict(max_resolution_angstrom=MAX_RESOLUTION_ANGSTROM,
+            min_interface_occupancy=MIN_INTERFACE_OCCUPANCY,
+            allow_interface_altloc=ALLOW_INTERFACE_ALTLOC,
+            require_resolution=REQUIRE_RESOLUTION,
+            require_complete_interface_sidechains=REQUIRE_COMPLETE_INTERFACE_SIDECHAINS)
+    ),ensure_ascii=False,indent=2),encoding='utf-8')
     report(root,rows,ignored,archives,pairs,time.time()-start,args.out/'data_audit_report.md')
     print(f'Done: {args.out / "data_audit_report.md"}',flush=True)
 
