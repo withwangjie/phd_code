@@ -896,15 +896,16 @@ def section_applicability_boundary(ctx: ReportContext) -> List[str]:
         "confirmatory claim, and only to the extent its own target count and per-target variance support one "
         "-- a small queue (see section 1.3 for its actual selected count) supports stability/sanity checking, "
         "not a general statistical-power guarantee.",
-        f"- Independence checking is PDB-disjoint plus layered sequence isolation: "
+        f"- Independence checking is PDB-disjoint plus layered sequence isolation using published anti-leakage precedents: "
         f"VHH < {100.0 * float((((ctx.frozen_config.get('queue_freeze', {}) or {}).get('homology_isolation', {}) or {}).get('vhh_full_chain_identity', 0.80))):.0f}%, "
         f"CDR-H3 < {100.0 * float((((ctx.frozen_config.get('queue_freeze', {}) or {}).get('homology_isolation', {}) or {}).get('cdr_h3_identity', 0.50))):.0f}%, "
         f"antigen < {100.0 * float((((ctx.frozen_config.get('queue_freeze', {}) or {}).get('homology_isolation', {}) or {}).get('antigen_identity', 0.30))):.0f}% "
         f"with minimum length coverage {100.0 * float((((ctx.frozen_config.get('queue_freeze', {}) or {}).get('homology_isolation', {}) or {}).get('antigen_min_length_coverage', 0.70))):.0f}%. "
         "Formal runs additionally require the frozen family/structure cluster map recorded in section 1; "
         "independence claims are limited to those explicitly encoded sequence and cluster criteria, not arbitrary remote homology.",
-        "- QAOA follows the variational optimization framework of Farhi et al. [R7]; CVaR optimization follows [R8]. "
-        "The primary p=2 and alpha=0.1 values remain preregistered study choices, not literature-optimal constants.",
+        "- QAOA follows the variational optimization framework of Farhi et al. [R7]. CVaR optimization follows [R8]; "
+        "alpha=0.1 is literature-supported as an empirical CVaR setting, while primary p=2 remains a preregistered "
+        "depth choice checked by development-only p=1/2/3 sensitivity.",
         "- Classical simulation of the discrete QAOA circuit in the feasible subspace is exact-subspace "
         "classical simulation, not a quantum-hardware run; nothing in this report should be read as a "
         "hardware or NISQ-noise result.",
