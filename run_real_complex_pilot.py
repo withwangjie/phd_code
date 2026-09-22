@@ -398,7 +398,8 @@ def main(argv=None) -> int:
                 continue
             work=out/"prepared"/pdb;work.mkdir(parents=True,exist_ok=True)
             chain_identity_audit=[];cdr3_identity=None
-            independence_status="independence_not_confirmed"
+            independence_status=("sequence_and_family_structure_isolated" if cluster_map is not None
+                                 else "sequence_isolated_family_structure_unconfirmed")
             development_exposed=pdb in dev_exposed_pdb
             try:
                 if pdb in train_pdb: raise ValueError("Training PDB overlap")
@@ -498,7 +499,7 @@ def main(argv=None) -> int:
                     ),
                     independence_status=independence_status,
                     independence=(
-                        "independence_not_confirmed: PDB-disjoint and below layered homology thresholds "
+                        f"{independence_status}: PDB-disjoint and below layered homology thresholds "
                         f"VHH<{args.vhh_identity_threshold:.2f}, CDR-H3<{args.cdr_h3_identity_threshold:.2f}, "
                         f"antigen<{args.antigen_identity_threshold:.2f} with coverage>={args.antigen_min_length_coverage:.2f}; "
                         f"observed max VHH={max_vhh_identity:.4f}, CDR-H3={cdr3_identity:.4f}, "
