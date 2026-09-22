@@ -18,6 +18,7 @@ the scalar interface-score output).
 from __future__ import annotations
 
 from typing import Any, Optional, Tuple, Union
+import math
 
 import torch
 from torch import Tensor, nn
@@ -306,6 +307,7 @@ def extract_top_interface_subgraph(
     max_active: int = 15,
     environment_radius: float = 6.0,
     antigen_guidance_weight: float = 0.25,
+    antigen_proximity_scale: float = 6.0,
 ) -> Data:
     """Adaptively select active VHH residues and their frozen microenvironment.
 
@@ -333,6 +335,7 @@ def extract_top_interface_subgraph(
         max_active: Maximum active count, truncated by top scores if necessary.
         environment_radius: Inclusive CA cutoff for frozen surroundings.
         antigen_guidance_weight: Weight in [0,1] for nearest-antigen proximity.
+        antigen_proximity_scale: Positive exponential decay length (Angstrom) for antigen proximity.
 
     Returns:
         A node-induced ``Data`` containing disjoint active and frozen masks.
@@ -348,6 +351,8 @@ def extract_top_interface_subgraph(
         raise ValueError("environment_radius must be positive")
     if not 0.0 <= antigen_guidance_weight <= 1.0:
         raise ValueError("antigen_guidance_weight must be in [0, 1]")
+    if not math.isfinite(antigen_proximity_scale) or antigen_proximity_scale <= 0:
+        raise ValueError("antigen_proximity_scale must be positive and finite")
     if not hasattr(data, "x") or not hasattr(data, "pos") or not hasattr(data, "edge_index"):
         raise ValueError("data must contain x, pos, and edge_index")
     if data.x.ndim != 2 or data.x.size(-1) != model.input_dim:
@@ -404,7 +409,7 @@ def extract_top_interface_subgraph(
     nearest_antigen = torch.cdist(
         data.pos[vhh_indices], data.pos[antigen_indices]
     ).min(dim=1).values
-    antigen_proximity = torch.exp(-nearest_antigen / float(environment_radius))
+    antigen_proximity = torch.exp(-nearest_antigen / float(antigen_proximity_scale))
     vhh_scores = (
         (1.0 - antigen_guidance_weight) * vhh_probabilities
         + antigen_guidance_weight * antigen_proximity
@@ -452,6 +457,7 @@ def extract_top_interface_subgraph(
     subgraph.pruning_max_active = int(max_active)
     subgraph.pruning_environment_radius = float(environment_radius)
     subgraph.pruning_antigen_guidance_weight = float(antigen_guidance_weight)
+    subgraph.pruning_antigen_proximity_scale = float(antigen_proximity_scale)
     subgraph.threshold_candidate_count = threshold_count
     subgraph.active_residue_count = int(subgraph.is_active.sum())
     subgraph.frozen_residue_count = int(subgraph.is_frozen_environment.sum())
@@ -499,10 +505,16 @@ def _ablation_cdr_indices(data: Any) -> list[int]:
 
 def select_ablation_active(data: Any, method: str, k: int, seed: int,
                   scorer: EGNNInterfaceScorer | None,
-                  antigen_guidance_weight: float = 0.25) -> torch.Tensor:
+                  antigen_guidance_weight: float = 0.25,
+                  antigen_proximity_scale: float = 6.0,
+                  contact_ca_cutoff: float = 8.0) -> torch.Tensor:
     """Select exactly k VHH sites without using solver outcomes or native labels."""
     if not 0.0 <= antigen_guidance_weight <= 1.0:
         raise ValueError("antigen_guidance_weight must be in [0,1]")
+    if not math.isfinite(antigen_proximity_scale) or antigen_proximity_scale <= 0:
+        raise ValueError("antigen_proximity_scale must be positive finite")
+    if not math.isfinite(contact_ca_cutoff) or contact_ca_cutoff <= 0:
+        raise ValueError("contact_ca_cutoff must be positive finite")
     candidates = torch.where(data.x[:, -1] == 0)[0]
     if len(candidates) < k:
         raise ValueError("Not enough VHH residues for matched site budget.")
@@ -517,7 +529,7 @@ def select_ablation_active(data: Any, method: str, k: int, seed: int,
             raise ValueError("Trained checkpoint required for EGNN ablation.")
         with torch.no_grad():
             model_scores = scorer(data.x, data.pos, data.edge_index).cpu()
-        proximity = torch.exp(-nearest / 6.0)
+        proximity = torch.exp(-nearest / float(antigen_proximity_scale))
         scores[candidates] = (
             (1.0-antigen_guidance_weight)*model_scores[candidates]
             + antigen_guidance_weight*proximity
@@ -526,7 +538,7 @@ def select_ablation_active(data: Any, method: str, k: int, seed: int,
         scores[candidates] = -nearest
     elif method == "contact":
         # Geometry baseline only: CA neighborhood count, never native interface_label.
-        scores[candidates] = (distances < 8.0).sum(1).float()
+        scores[candidates] = (distances < float(contact_ca_cutoff)).sum(1).float()
     elif method == "random":
         ids = np.random.default_rng(seed).choice(candidates.numpy(), k, replace=False)
         return torch.tensor(sorted(ids), dtype=torch.long)
