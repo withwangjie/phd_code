@@ -69,6 +69,8 @@ def main() -> int:
     parser.add_argument("--query-column", type=int, default=0)
     parser.add_argument("--target-column", type=int, default=1)
     parser.add_argument("--score-column", type=int, default=2)
+    parser.add_argument("--score-semantics", default="unspecified",
+        help="Recorded meaning of the numeric similarity score, e.g. TM-score.")
     parser.add_argument("--universe", type=Path,
         help="Optional newline-delimited PDB IDs that must all appear in the output map.")
     args = parser.parse_args()
@@ -146,6 +148,7 @@ def main() -> int:
         query_column=args.query_column,
         target_column=args.target_column,
         score_column=args.score_column,
+        score_semantics=str(args.score_semantics),
         total_rows=total_rows,
         kept_edges=kept_edges,
         skipped_rows=skipped_rows,
