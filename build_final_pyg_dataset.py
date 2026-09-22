@@ -434,7 +434,7 @@ def delivery_report(output,manifest,exclusions,failures,summary,complete):
         f'- 总执行时间：{summary.get("elapsed_seconds",0):.1f}秒；torch {torch.__version__}、PyG {torch_geometric.__version__}、Gemmi {gemmi.__version__}、parasail {parasail.__version__}。','',
         '## 7. 验证与异常清单','',
         f'- 每个.pt保存后重新加载并校验Data类型、张量形状/类型、one-hot、坐标有限性、边索引范围、双向对称、无自环/重复边、同链严格{INTRA_CHAIN_CA_CUTOFF_ANGSTROM:.2f}Å阈值、跨伙伴固定KNN策略及≥{MIN_INTERFACE_RESIDUES}界面准入。',
-        '- 最终检查测试CDR代表两两<{CLUSTER_IDENTITY_THRESHOLD*100:.0f}%、训练/测试PDB互斥、已知训练CDR与挑战CDR<{CLUSTER_IDENTITY_THRESHOLD*100:.0f}%、图文件数量与清单一致，并实测PyG Batch批处理。',
+        f'- 最终检查测试CDR代表两两<{CLUSTER_IDENTITY_THRESHOLD*100:.0f}%、训练/测试PDB互斥、已知训练CDR与挑战CDR<{CLUSTER_IDENTITY_THRESHOLD*100:.0f}%、图文件数量与清单一致，并实测PyG Batch批处理。',
         f'- 解析、编码或内存异常跳过共 {len(failures)} 条；不含正常的审计过滤及泄漏隔离。',
         '', '| 分流 | PDB | 条目 | 类型 | 说明 |','|---|---|---|---|---|']
     for r in failures:lines.append(f'| {r.get("split", "运行")} | {r.get("pdb_id", "")} | {r.get("source_id", "")} | {r["reason"]} | {r["detail"].replace(chr(124),"/").replace(chr(10)," ")} |')
