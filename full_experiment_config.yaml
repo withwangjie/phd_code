@@ -346,6 +346,8 @@ structure_experiment:
 statistics:
   resamples: 10000
   budget_modes: ["outputs", "time"]
+  primary_structural_endpoint: "final_rmsd"
+  primary_structural_contrast: "qaoa_vs_sa"
   max_time_overrun_fraction: 0.10
   # By default the same required family/domain/structure cluster map used for
   # queue isolation is reused here; override only with an equivalently frozen map.
