@@ -331,7 +331,7 @@ def section_pruning_contribution(ctx: ReportContext) -> List[str]:
                   "between compared rows. Downstream search performance (hit fraction, energy gap), not just "
                   "input-graph AUC, is what is compared here.")
     lines.append("")
-    lines.append("| Pruning | Rows | Mean hit fraction | Mean gap | Mean low-energy coverage | Mean solver seconds |")
+    lines.append("| Pruning | Rows | Mean hit fraction | Mean gap | Mean low-energy coverage | Mean recorded solver cost |")
     lines.append("|---|---:|---:|---:|---:|---:|")
     for pruning in prunings:
         group = [r for r in rows if r.get("pruning") == pruning]
@@ -345,7 +345,8 @@ def section_pruning_contribution(ctx: ReportContext) -> List[str]:
     lines.append("")
     lines.append("Candidate sets differ across pruning methods, so gaps compare solver quality within each "
                   "instance's own candidate space, not a biological superiority claim about one pruning method "
-                  "over another purely from this table.")
+                  "over another purely from this table. QAOA solver_seconds is standalone-equivalent "
+                  "(measured optimization + sampling) because optimization is cached across output budgets.")
     lines.append("")
     return lines
 
@@ -738,8 +739,11 @@ def section_cost(ctx: ReportContext) -> List[str]:
                 lines.append(f"| {solver} | {len(values)} | {_fmt(sum(values)/len(values))} |")
             lines.append("")
             lines.append("Only matched-output rows are summarized here; matched-time controls are kept separate. "
-                          "Oracle/exact-landscape preprocessing time is recorded separately "
-                          "(`oracle_seconds`/`build_seconds` in the raw CSV) and excluded from these solver costs.")
+                          "For QAOA, `solver_seconds` is a standalone-equivalent cost: measured optimization time "
+                          "plus the measured sampling time for that output budget. The optimization is physically "
+                          "run once per objective/restart variant and reused across the output curve, so this is not "
+                          "the incremental wall-clock time of each cached row. Oracle/exact-landscape preprocessing "
+                          "(`oracle_seconds`/`build_seconds`) is excluded.")
             lines.append("")
     for label, directory in (("dev queue", ctx.run_dir / "dev_queue"), ("validation queue", ctx.run_dir / "validation_queue")):
         rows = _load_recovery_rows(directory)
