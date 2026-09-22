@@ -41,6 +41,7 @@ import pytest
 import evaluate_complex_metrics as ecm
 import qaoa_interface_sampler as qis
 import subgraph_to_qubo as stq
+import run_full_experiment as rfe
 
 
 # ---------------------------------------------------------------------------
@@ -168,6 +169,70 @@ def test_rigid_environment_excludes_antigen_nodes() -> None:
     )
     assert env_pos.shape == (1, 3)
     np.testing.assert_allclose(env_pos[0], pos[1])
+
+
+# ---------------------------------------------------------------------------
+# Scientific configuration regressions
+# ---------------------------------------------------------------------------
+
+def _minimal_scientific_config() -> Dict[str, Any]:
+    return {
+        "queue_freeze": {
+            "identity_threshold": 0.40,
+            "graph_build": {
+                "interface_label_cutoff_angstrom": 5.0,
+                "intra_chain_ca_cutoff_angstrom": 8.0,
+                "cross_partner_knn_k": 3,
+                "min_interface_residues": 15,
+            },
+            "validation_queue": {"sites": 6},
+        },
+        "egnn_train": {"identity_threshold": 0.40},
+        "qc_benchmark": {
+            "active_sites": 6,
+            "antigen_guidance_weight": 0.25,
+            "antigen_proximity_scale_angstrom": 6.0,
+            "contact_ca_cutoff_angstrom": 8.0,
+            "coarse_force_field": {
+                "cutoff_angstrom": 8.0,
+                "softcore_delta_angstrom": 0.5,
+                "hard_core_fraction": 0.72,
+                "hard_sphere_penalty": 25.0,
+                "lj_repulsion_cap": 50.0,
+                "lj_attraction_cap": 5.0,
+                "coulomb_cap": 20.0,
+                "dielectric_base": 4.0,
+                "dielectric_slope": 2.0,
+                "thermal_energy_kcal": 0.593,
+            },
+        },
+        "structure_experiment": {
+            "antigen_guidance_weight": 0.25,
+            "antigen_proximity_scale_angstrom": 6.0,
+            "contact_ca_cutoff_angstrom": 8.0,
+        },
+    }
+
+
+def test_scientific_config_accepts_consistent_protocol() -> None:
+    rfe._validate_scientific_config(_minimal_scientific_config())
+
+
+def test_scientific_config_rejects_cross_stage_drift() -> None:
+    config = _minimal_scientific_config()
+    config["structure_experiment"]["contact_ca_cutoff_angstrom"] = 9.0
+    with pytest.raises(ValueError, match="Shared site-selection parameter mismatch"):
+        rfe._validate_scientific_config(config)
+
+    config = _minimal_scientific_config()
+    config["egnn_train"]["identity_threshold"] = 0.50
+    with pytest.raises(ValueError, match="Identity threshold must be shared"):
+        rfe._validate_scientific_config(config)
+
+
+def test_adaptive_coarse_builder_rejects_more_than_ten_sites() -> None:
+    with pytest.raises(ValueError, match="between 1 and 10"):
+        stq.InterfaceQUBOBuilder(min_variables=20, max_variables=30, max_sites=11)
 
 # ---------------------------------------------------------------------------
 # Patch 2: honest all-restarts-failed handling (qaoa_interface_sampler.py)
