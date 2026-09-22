@@ -212,6 +212,11 @@ egnn_train:
   patience: 5
   batch_size: 2
   hidden_dim: 32
+  num_layers: 4
+  dropout: 0.10
+  coord_scale: 0.10
+  geometry_baseline_contact_cutoff_angstrom: 8.0
+  geometry_baseline_proximity_scale_angstrom: 6.0
   learning_rate: 1.0e-3
   weight_decay: 1.0e-5
   gradient_clip: 5.0
