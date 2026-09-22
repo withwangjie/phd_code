@@ -140,7 +140,9 @@ def prepare(graph, source: Path, destination: Path, sites: int, *, pruning: str 
     start = sequence.index(cdr)
     cdr_ids = [graph.residue_ids[i] for i in chain_nodes[start:start+len(cdr)]]
     partners = sorted(r for r in residues if groups[r.rsplit(":", 1)[0]] == 1)
-    partner_atoms = np.concatenate([list(residues[r]["atoms"].values()) for r in partners])
+    antigen_nodes = torch.where(graph.x[:, -1] == 1)[0]
+    if len(antigen_nodes) == 0:
+        raise ValueError("Graph contains no antigen/group-1 residues")
     scored = []
     for i in chain_nodes:
         rid=graph.residue_ids[i]
@@ -150,15 +152,17 @@ def prepare(graph, source: Path, destination: Path, sites: int, *, pruning: str 
         # never as an oracle eligibility gate.
         if entry["name"] in ("ALA", "GLY", "PRO", "CYS"):
             continue
-        xyz = np.array(list(entry["atoms"].values()))
-        dist = np.sqrt(np.min(np.sum((xyz[:, None]-partner_atoms)**2, axis=-1)))
-        contact_count=int(np.sum(np.sum((xyz[:,None]-partner_atoms)**2,axis=-1)<25.))
-        scored.append((float(dist), rid, contact_count, i))
+        ca_distances = torch.linalg.norm(graph.pos[antigen_nodes] - graph.pos[i], dim=1)
+        dist = float(ca_distances.min().item())
+        contact_count = int((ca_distances < 8.0).sum().item())
+        scored.append((dist, rid, contact_count, i))
     if len(scored) < sites:
         raise ValueError(f"Only {len(scored)} chemically movable VHH sites")
     model_status=None
     if pruning=='contact':
         ordered=sorted(scored,key=lambda x:(-x[2],x[0],x[1]))
+    elif pruning=='distance':
+        ordered=sorted(scored,key=lambda x:(x[0],x[1]))
     elif pruning=='cdr':
         ordered=sorted(scored,key=lambda x:(x[1] not in cdr_ids,-x[2],x[1]))
     elif pruning=='random':
@@ -171,9 +175,6 @@ def prepare(graph, source: Path, destination: Path, sites: int, *, pruning: str 
             raise ValueError('EGNN ablation requires a valid trained checkpoint')
         with torch.no_grad():
             model_scores=model(graph.x,graph.pos,graph.edge_index).reshape(-1)
-        antigen_nodes=torch.where(graph.x[:,-1]==1)[0]
-        if len(antigen_nodes)==0:
-            raise ValueError('Graph contains no antigen/group-1 nodes')
         candidate_indices=torch.tensor([item[3] for item in scored],dtype=torch.long)
         nearest=torch.cdist(graph.pos[candidate_indices],graph.pos[antigen_nodes]).min(1).values
         proximity=torch.exp(-nearest/6.0)
@@ -189,6 +190,8 @@ def prepare(graph, source: Path, destination: Path, sites: int, *, pruning: str 
         values = np.asarray([item[2] for item in scored], dtype=float)
         denom = max(float(values.max()), 1.0)
         active_site_scores = [float(item[2]) / denom for item in chosen]
+    elif pruning == 'distance':
+        active_site_scores = [float(np.exp(-item[0] / 6.0)) for item in chosen]
     elif pruning == 'cdr':
         active_site_scores = [1.0 if item[1] in cdr_ids else 0.0 for item in chosen]
     else:
@@ -223,7 +226,7 @@ def main(argv=None) -> int:
     parser.add_argument("--prepare-only", action="store_true")
     parser.add_argument("--eval-shots",type=int,choices=(200,500,1000))
     parser.add_argument("--loop-relax-iterations",type=int,default=100)
-    parser.add_argument("--pruning",choices=('egnn','contact','cdr','random'),default='egnn')
+    parser.add_argument("--pruning",choices=('egnn','contact','distance','cdr','random'),default='egnn')
     parser.add_argument("--pdb-id",type=str)
     parser.add_argument("--pdb-allowlist-file",type=Path,default=None,
         help="Optional JSON file (a plain list of PDB IDs, or a list of dicts each with a "
@@ -475,7 +478,7 @@ def main(argv=None) -> int:
             f"Target cap: {args.targets or 'unlimited (all qualifying targets)'}; qualifying candidate pool: {len(candidates)}; "
             f"examined {len(decisions)}; selected {len(selected)} (coverage of examined pool: {coverage_pct:.1f}%); "
             f"structural experiment completed {completed_targets}, failed {sorted(failed)}.",
-            "Input is native backbone/pose plus perturbed Active chi1. Formal EGNN Active-site selection ranks all chemically movable VHH residues with the shared antigen-guided composite score (EGNN probability plus nearest-antigen proximity); native heavy-atom <8A is no longer an oracle eligibility gate. Contact/CDR/random remain explicit ablation baselines. This is a retrospective native-backbone-conditioned recovery task, not blind docking or CDR-H3 backbone prediction.",
+            "Input is native backbone/pose plus perturbed Active chi1. Formal EGNN Active-site selection ranks all chemically movable VHH residues with the shared antigen-guided composite score (EGNN probability plus nearest-antigen proximity); native heavy-atom <8A is no longer an oracle eligibility gate. Contact/distance/CDR/random remain explicit ablation baselines. This is a retrospective native-backbone-conditioned recovery task, not blind docking or CDR-H3 backbone prediction.",
             "Adaptive 6/9/12 raw chi1 sub-rotamer pools are generated by residue flexibility, Amber14 single-candidate energies pre-screen them to 3-6 retained states/site under <=30 variables, and discrete optimization selects among those prepared candidates. Candidate-local and final relaxation may move all atoms downstream of CA-CB; backbone and background remain frozen.",
             "All methods share input/candidates, read budget and relaxation. CPU cost is not equal. Reference structure evaluates accuracy but never selects solver output.",
             "Independence is limited to PDB plus 40% full-chain/annotated-CDR3 global identity screening (per-chain identity/coverage recorded in eligibility.json). Family/local-domain relatedness is NOT checked (no cluster map exists in this project): every non-excluded target's status is independence_not_confirmed, never confirmed-independent. Development exposure (--dev-exposed-pdb) is recorded per target, separately from the identity screen. This is an exploratory pilot, not a fresh confirmatory test.",
