@@ -470,6 +470,7 @@ def main(argv=None) -> int:
                     rotamer_library_path=args.rotamer_library,
                     rotamer_probability_floor=args.rotamer_probability_floor,
                     rotamer_sigma_offsets=args.rotamer_sigma_offsets,
+                    solvent_model=args.solvent_model,
                 )
                 del check
                 config.update(target=pdb,native_structure=str(work/"native.cif"),
@@ -481,6 +482,7 @@ def main(argv=None) -> int:
                     max_antigen_identity=max_antigen_identity,homology_isolation=homology,
                     family_structure_cluster=family_cluster,
                     cluster_map_sha256=(_ablation_digest(args.cluster_map) if args.cluster_map else None),
+                    solvent_model=args.solvent_model,
                     rotamer_model=dict(
                         mode=args.rotamer_mode,
                         library_path=(None if args.rotamer_library is None else str(args.rotamer_library)),
@@ -534,7 +536,8 @@ def main(argv=None) -> int:
                     measurement_seeds=[derive_child_seed(streams["measurement"],"structure",pdb,str(s)) for s in args.seeds]
                     sample_seeds=[derive_child_seed(streams["sample"],"structure",pdb,str(s)) for s in args.seeds]
                     status=_recovery_benchmark_main(["--manifest",str(out/"prepared"/pdb/"recovery_manifest.json"),
-                        "--out-dir",str(destination),"--seeds",*[str(s) for s in args.seeds],
+                        "--out-dir",str(destination),"--solvent-model",args.solvent_model,
+                        "--seeds",*[str(s) for s in args.seeds],
                         "--perturbation-mode",args.perturbation_mode,
                         "--optimize-seeds",*[str(s) for s in optimize_seeds],
                         "--measurement-seeds",*[str(s) for s in measurement_seeds],
@@ -575,7 +578,7 @@ def main(argv=None) -> int:
             f"examined {len(decisions)}; selected {len(selected)} (coverage of examined pool: {coverage_pct:.1f}%); "
             f"structural experiment completed {completed_targets}, failed {sorted(failed)}.",
             f"Input is native backbone/pose plus perturbed Active side chains (mode={args.perturbation_mode}). Formal EGNN Active-site selection ranks all chemically movable VHH residues with the shared antigen-guided composite score (EGNN probability plus nearest-antigen proximity); native heavy-atom <8A is no longer an oracle eligibility gate. Contact/distance/CDR/random remain explicit ablation baselines. This is a retrospective native-backbone-conditioned recovery task, not blind docking or CDR-H3 backbone prediction.",
-            f"Formal rotamer model: {args.rotamer_mode}. In Dunbrack mode, complete backbone-dependent rotamer chi1..chiN states are constructed at each residue's phi/psi bin; chi1 is expanded by configured sigma offsets and Amber14 single-candidate energies pre-screen 3-6 retained states/site under <=30 variables. Formal multi_chi recovery perturbs all defined Active side-chain chis; chi1-only remains an explicit ablation. Backbone and background remain frozen.",
+            f"All-atom energy model: {args.solvent_model}. Formal rotamer model: {args.rotamer_mode}. In Dunbrack mode, complete backbone-dependent rotamer chi1..chiN states are constructed at each residue's phi/psi bin; chi1 is expanded by configured sigma offsets and Amber14 single-candidate energies pre-screen 3-6 retained states/site under <=30 variables. Formal multi_chi recovery perturbs all defined Active side-chain chis; chi1-only remains an explicit ablation. Backbone and background remain frozen.",
             "All methods share input/candidates, read budget and relaxation. CPU cost is not equal. Reference structure evaluates accuracy but never selects solver output.",
             f"Independence uses PDB-disjointness, layered sequence screening (VHH {args.vhh_identity_threshold*100:.0f}%, CDR-H3 {args.cdr_h3_identity_threshold*100:.0f}%, antigen {args.antigen_identity_threshold*100:.0f}% with minimum length coverage {args.antigen_min_length_coverage*100:.0f}%) and the supplied family/structure cluster map when present (details in eligibility.json). Development exposure is recorded separately. This remains a retrospective recovery benchmark.",
             "", "| Method | Targets with results | Mean RMSD gain vs input (A) | Mean gain vs relax-only (A) |", "|---|---:|---:|---:|"]
