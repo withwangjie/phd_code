@@ -626,6 +626,8 @@ class RotamerState:
     sigma: np.ndarray
     epsilon: np.ndarray
     charges: np.ndarray
+    chi_degrees: Tuple[float, ...] = ()
+    chi_sigmas: Tuple[float, ...] = ()
     prior_energy: float = 0.0
     environment_energy: float = 0.0
     antigen_guidance_energy: float = 0.0
@@ -1307,6 +1309,8 @@ class InterfaceQUBOBuilder:
             sigma=sigma,
             epsilon=epsilon,
             charges=np.asarray(charges, dtype=np.float64),
+            chi_degrees=tuple(float(v) for v in (template.chi_degrees or (template.chi1_degrees,))),
+            chi_sigmas=tuple(float(v) for v in template.chi_sigmas),
         )
 
     def _rigid_environment(
@@ -1617,13 +1621,13 @@ class InterfaceQUBOBuilder:
             Q, constant_offset, ising_h, ising_J, ising_offset
         )
         metadata: Dict[str, Any] = {
-            "model": "CA-frame coarse-grained chi1 pseudo-atom force field",
+            "model": "CA-frame coarse-grained pseudo-atom force field with full Dunbrack rotamer-state provenance; pseudo-atom geometry remains chi1-oriented",
             "energy_unit": "approximate kcal/mol",
             "site_node_indices": site_nodes.tolist(),
             "rotamers_per_site": counts,
             "raw_rotamer_pool_sizes": raw_pool_sizes_actual,
             "rotamer_state_policy": (
-                "Dunbrack 2010 backbone-dependent chi1 mean±sigma candidates on eligible acyclic side chains with finite phi/psi; retain 3--6 states/site under <=30 variables"
+                "Dunbrack 2010 backbone-dependent full rotamer states (chi1..chiN); chi1 sigma expansion controls pseudo-atom orientation while distal chi means are retained for exact all-atom reconstruction/calibration; retain 3--6 states/site under <=30 variables"
                 if self.rotamer_mode == "dunbrack2010"
                 else "legacy 6/9/12 raw chi1 sub-rotamers by flexibility; retain 3--6 states/site under <=30 variables"
             ),
@@ -1638,6 +1642,20 @@ class InterfaceQUBOBuilder:
             "raw_antigen_energy": raw_antigen.tolist(),
             "raw_pair_energy_upper": raw_pair.tolist(),
             "antigen_guidance_energy": raw_antigen.tolist(),
+            "rotamer_state_records": [
+                dict(
+                    variable_index=int(index),
+                    residue_id=str(residue_ids[state.node_index]),
+                    site_index=int(state.site_index),
+                    amino_acid=str(state.amino_acid),
+                    rotamer_index=int(state.rotamer_index),
+                    chi1_degrees=float(state.chi1_degrees),
+                    chi_degrees=[float(v) for v in state.chi_degrees],
+                    chi_sigmas=[float(v) for v in state.chi_sigmas],
+                    prior_probability=float(state.prior_probability),
+                )
+                for index,state in enumerate(rotamers)
+            ],
             "variable_count": variable_count,
             "active_residue_count": int(active_mask.sum()),
             "frozen_environment_count": int(frozen_mask.sum()),
