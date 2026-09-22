@@ -204,9 +204,11 @@ def test_egnn_resume_rejects_checkpoint_sha_mismatch(tmp_path: Path) -> None:
     assert "sha256 mismatch" in detail
 
 
-def test_preflight_contains_two_rank_nccl_probe() -> None:
+def test_preflight_contains_config_driven_nccl_probe() -> None:
     source = Path("formal_preflight.sh").read_text(encoding="utf-8")
-    assert "--nproc-per-node=2" in source
+    assert "egnn_train" in source
+    assert "nproc_per_node" in source
+    assert '--nproc-per-node="$DDP_RANKS"' in source
     assert "backend=\"nccl\"" in source
     assert "all_reduce" in source
 
