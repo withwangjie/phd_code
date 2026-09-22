@@ -38,6 +38,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 import numpy as np
 import pennylane as qml
 import torch
+from scipy.optimize import lsq_linear
 from tqdm.auto import tqdm
 
 from model_egnn_pruning import EGNNInterfaceScorer, extract_top_interface_subgraph
