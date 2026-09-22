@@ -34,7 +34,11 @@ AA = 'ACDEFGHIKLMNPQRSTVWY'
 AA_INDEX = {a:i for i,a in enumerate(AA)}
 SEED = 20260917
 CLUSTER_IDENTITY_THRESHOLD = 0.40
-VERSION = '1.2'
+INTERFACE_LABEL_CUTOFF_ANGSTROM = 5.0
+INTRA_CHAIN_CA_CUTOFF_ANGSTROM = 8.0
+CROSS_PARTNER_KNN_K = 3
+MIN_INTERFACE_RESIDUES = 15
+VERSION = '1.3'
 PROCESS = psutil.Process()
 PEAK_RSS = 0
 MEMORY_LOCK = threading.Lock()
@@ -79,7 +83,7 @@ def audit_reasons(row):
     reasons=[]
     if not row['valid']:reasons.append('audit_invalid')
     if row['missing_residues']>0:reasons.append('missing_backbone')
-    if row['interface_status']=='weak' or (row.get('max_contact_residues') is not None and row['max_contact_residues']<15):reasons.append('weak_interface')
+    if row['interface_status']=='weak' or (row.get('max_contact_residues') is not None and row['max_contact_residues']<MIN_INTERFACE_RESIDUES):reasons.append('weak_interface')
     if row['interface_status']!='pass' and 'weak_interface' not in reasons:reasons.append('no_eligible_interface')
     if row['subset'] in ('sabdab_vhh','snac_db') and row['vhh_status']!='pass':reasons.append('not_strict_vhh')
     return reasons
@@ -251,19 +255,19 @@ def make_graph(row, split, pair=None):
     counts=[]
     interface_nodes=set()
     for g in [0,1]:
-        distances=trees[1-g].query(arrays[g],distance_upper_bound=5.0)[0]
-        contacted=rid[g][distances<5.0]
+        distances=trees[1-g].query(arrays[g],distance_upper_bound=INTERFACE_LABEL_CUTOFF_ANGSTROM)[0]
+        contacted=rid[g][distances<INTERFACE_LABEL_CUTOFF_ANGSTROM]
         unique_contacted=np.unique(contacted)
         counts.append(len(unique_contacted))
         interface_nodes.update(int(index) for index in unique_contacted.tolist())
     interface=sum(counts)
-    if interface<15:raise ValueError(f'weak actual partner interface: {interface}')
+    if interface<MIN_INTERFACE_RESIDUES:raise ValueError(f'weak actual partner interface: {interface}')
     heavy_atom_interface_label=np.zeros(n,dtype=np.float32)
     if interface_nodes:
         heavy_atom_interface_label[np.fromiter(sorted(interface_nodes),dtype=np.int64)]=1.0
     del arrays,rid,trees,heavy,owners
     # Leakage control: target labels are defined from cross-partner heavy-atom
-    # contacts (<5 A), so cross-partner edge EXISTENCE must not be defined by a
+    # contacts (configured heavy-atom cutoff), so cross-partner edge EXISTENCE must not be defined by a
     # similar distance threshold.  Keep local same-chain CA-radius edges, then
     # connect every residue to a fixed number of nearest residues on the other
     # partner.  This preserves antigen context without making "has a cross edge"
@@ -275,13 +279,13 @@ def make_graph(row, split, pair=None):
         global_indices=np.flatnonzero(chain_array==chain_index)
         if len(global_indices)<2:continue
         local_pos=pos[global_indices]
-        local_pairs=cKDTree(local_pos).query_pairs(8.0,output_type='ndarray')
+        local_pairs=cKDTree(local_pos).query_pairs(INTRA_CHAIN_CA_CUTOFF_ANGSTROM,output_type='ndarray')
         if len(local_pairs):
             candidate=global_indices[local_pairs]
             delta=pos[candidate[:,0]].astype(np.float64)-pos[candidate[:,1]].astype(np.float64)
-            candidate=candidate[np.einsum('ij,ij->i',delta,delta)<64.0]
+            candidate=candidate[np.einsum('ij,ij->i',delta,delta)<INTRA_CHAIN_CA_CUTOFF_ANGSTROM**2]
             pair_set.update(tuple(sorted(map(int,p))) for p in candidate)
-    cross_partner_knn_k=3
+    cross_partner_knn_k=CROSS_PARTNER_KNN_K
     for g in [0,1]:
         source=np.flatnonzero(group_array==g);partner=np.flatnonzero(group_array==1-g)
         if not len(source) or not len(partner):raise ValueError('both partner groups required for cross-partner KNN')
@@ -308,8 +312,12 @@ def make_graph(row, split, pair=None):
         split=split,source_id=row['id'],node_chain_id=torch.tensor(chainidx,dtype=torch.long),chain_ids=[c['name'] for c in chains],
         chain_groups=[c['group'] for c in chains],residue_ids=[r['residue_id'] for r in nodes],
         chain_sequences=chain_sequences,vhh_sequences=vhh_sequences,antigen_sequences=antigen_sequences,
-        edge_policy='intra_chain_ca_lt8_plus_cross_partner_knn',cross_partner_knn_k=cross_partner_knn_k,
-        label_policy='cross_partner_heavy_atom_lt5',
+        edge_policy='intra_chain_ca_radius_plus_cross_partner_knn',
+        intra_chain_ca_cutoff_angstrom=float(INTRA_CHAIN_CA_CUTOFF_ANGSTROM),
+        cross_partner_knn_k=cross_partner_knn_k,
+        label_policy='cross_partner_heavy_atom_cutoff',
+        interface_label_cutoff_angstrom=float(INTERFACE_LABEL_CUTOFF_ANGSTROM),
+        min_interface_residues=int(MIN_INTERFACE_RESIDUES),
         audit_interface_residues=row.get('max_contact_residues',pair['contact_residues'] if pair else 0),
         audit_vhh_status=row.get('vhh_status','not_applicable'),graph_version=VERSION)
     gnotes={json.dumps(note,sort_keys=True) for chain in chains for note in chain.get('identity_resolutions',[])}
@@ -336,15 +344,19 @@ def validate_graph(g):
     same_chain=chain[first[0]]==chain[first[1]]
     cross_partner=group[first[0]]!=group[first[1]]
     assert np.all(same_chain|cross_partner)
-    assert np.all(d2[same_chain]<64.0)
-    assert getattr(g,'edge_policy','')=='intra_chain_ca_lt8_plus_cross_partner_knn'
-    assert getattr(g,'label_policy','')=='cross_partner_heavy_atom_lt5'
+    ca_cutoff=float(getattr(g,'intra_chain_ca_cutoff_angstrom',0.0))
+    label_cutoff=float(getattr(g,'interface_label_cutoff_angstrom',0.0))
+    min_interface=int(getattr(g,'min_interface_residues',0))
+    assert ca_cutoff>0 and label_cutoff>0 and min_interface>0
+    assert np.all(d2[same_chain]<ca_cutoff**2)
+    assert getattr(g,'edge_policy','')=='intra_chain_ca_radius_plus_cross_partner_knn'
+    assert getattr(g,'label_policy','')=='cross_partner_heavy_atom_cutoff'
     assert int(getattr(g,'cross_partner_knn_k',0))>0
     for node in range(n):
         mask=(first[0]==node)|(first[1]==node)
         assert np.any(mask & cross_partner), f'node {node} lacks threshold-independent cross-partner context'
     assert len(getattr(g,'vhh_sequences',[]))>=1 and len(getattr(g,'antigen_sequences',[]))>=1
-    assert g.num_interface_residues>=15 and len(g.cdr3_seq)==g.cdr3_len
+    assert g.num_interface_residues>=min_interface and len(g.cdr3_seq)==g.cdr3_len
     assert g.validate(raise_on_error=True)
 
 def save_graph(row, split, output, pair=None, cluster_id=''):
@@ -398,10 +410,10 @@ def delivery_report(output,manifest,exclusions,failures,summary,complete):
     lines += ['', '## 4. 清洗、切分与去冗余','', '| 来源 | 审计候选 | 同时通过硬过滤 |','|---|---:|---:|']
     for src,counts in summary.get('admission',{}).items():lines.append(f'| {src} | {counts["input"]} | {counts["eligible"]} |')
     lines += ['',f'- DB5.5目标：248个主链完整且界面通过的bound受体–配体对；实际交付 {sum(r["split"]=="test_db55" for r in manifest)}。',
-        f'- SNAC长CDR-H3：{summary.get("long_eligible",0)}条非DB5.5重叠候选，{summary.get("unique_long_cdr",0)}条唯一序列，40%代表簇 {summary.get("clusters",0)} 个；固定随机种子 {SEED} 选取目标400个，实际 {sum(r["split"]=="test_snac_hard" for r in manifest)}。',
+        f'- SNAC长CDR-H3：{summary.get("long_eligible",0)}条非DB5.5重叠候选，{summary.get("unique_long_cdr",0)}条唯一序列，{CLUSTER_IDENTITY_THRESHOLD*100:.0f}%代表簇 {summary.get("clusters",0)} 个；固定随机种子 {SEED} 选取目标400个，实际 {sum(r["split"]=="test_snac_hard" for r in manifest)}。',
         '- 去冗余口径由用户确认：仅CDR-H3；全局Needleman–Wunsch、BLOSUM62、gap-open=10、gap-extend=1，相同残基数/含gap的比对长度≥0.4归为相似。取正反向比对身份率较大值，避免最优比对并列导致方向差异。',
-        '- 贪心按CDR长度降序、序列字典序选代表，代表间身份率均<0.4；每簇仅一个代表进入挑战集。代表同序列多个结构优先选审计接触数较大的条目。固定种子打乱簇顺序，构图失败时尝试同代表序列的其他结构，再补选其他簇。',
-        '- 用户确认隔离泄漏：训练集排除两组测试的同PDB ID条目；排除CDR-H3与挑战集任一代表身份率≥0.4的条目。RCSB也保守检查本地同PDB的已知VHH CDR标注。被隔离的簇成员不回流训练集。',
+        '- 贪心按CDR长度降序、序列字典序选代表，代表间身份率均<{CLUSTER_IDENTITY_THRESHOLD:.2f}；每簇仅一个代表进入挑战集。代表同序列多个结构优先选审计接触数较大的条目。固定种子打乱簇顺序，构图失败时尝试同代表序列的其他结构，再补选其他簇。',
+        '- 用户确认隔离泄漏：训练集排除两组测试的同PDB ID条目；排除CDR-H3与挑战集任一代表身份率≥{CLUSTER_IDENTITY_THRESHOLD:.2f}的条目。RCSB也保守检查本地同PDB的已知VHH CDR标注。被隔离的簇成员不回流训练集。',
         '- 硬过滤和隔离的数量可能重叠；逐样本多原因记录见 `excluded_samples.csv`。SAbDab 847是身份通过数，叠加物理条件后为708，不按847强行入库。',
         '- 本切分保证已核验的PDB与CDR层面隔离，不声称抗原家族、全长VHH同源性或未知免疫链的完全独立。未标注的RCSB隐含VHH仍需更深入序列注释排查。',
         '', '| 排除原因（可重叠） | 条目数 |','|---|---:|']
@@ -410,8 +422,8 @@ def delivery_report(output,manifest,exclusions,failures,summary,complete):
         f'- `pos`: CA坐标float32[N,3]；`x`: float32[N,21]，氨基酸列顺序 `{AA}`，末列为相互作用组0/1。',
         '- 全部蛋白链和残基保留。通用多链复合物以最强界面链对中的首链为组0、其余蛋白链为组1；VHH为0、其他蛋白链为1；DB5.5受体链集合为0、配体链集合为1。0/1是伙伴组，不冒充多条物理链的唯一编号。',
         '- `chain_ids`、`node_chain_id`、`residue_ids`、`chain_sequences`保留真实链/残基信息；node_chain_id为图内局部链序号，DB5.5用R:/L:前缀防止链ID冲突。',
-        '- `edge_index`: int64[2,2E]；同链边使用CA距离<8.0Å，跨伙伴边固定采用每节点3个最近邻（不设接触距离阈值）。界面标签独立由跨伙伴重原子<5.0Å定义，因此跨链边的“存在/不存在”不再复用标签阈值。',
-        '- `num_interface_residues`重新计算两个伙伴组之间重原子距离<5Å的两侧接触残基并集大小，可能与审计“最强链对”数值不同；原审计值保存在audit_interface_residues。',
+        f'- `edge_index`: int64[2,2E]；同链边使用CA距离<{INTRA_CHAIN_CA_CUTOFF_ANGSTROM:.2f}Å，跨伙伴边固定采用每节点{CROSS_PARTNER_KNN_K}个最近邻（不设接触距离阈值）。界面标签独立由跨伙伴重原子<{INTERFACE_LABEL_CUTOFF_ANGSTROM:.2f}Å定义，因此跨链边的“存在/不存在”不复用标签阈值。',
+        f'- `num_interface_residues`重新计算两个伙伴组之间重原子距离<{INTERFACE_LABEL_CUTOFF_ANGSTROM:.2f}Å的两侧接触残基并集大小；准入下限为{MIN_INTERFACE_RESIDUES}。原审计值保存在audit_interface_residues。',
         '- 属性包括pdb_id、subset_source、cdr3_seq、cdr3_len及num_interface_residues。未标注CDR时使用空字符串与长度0，便于批处理。',
         '- 首模型、正占有率原子、同名原子取最高占有率；完整重读并复查N/CA/C/O，不修补缺失结构。Gemmi可映射到标准字母的修饰残基按标准氨基酸编码；不能映射到20字母的残基导致整条样本跳过，不使用全零伪one-hot。',
         '- DB5.5唯一允许的歧义标注核对：利用官方配套apo文件，要求相同残基编号覆盖≥80%、所有明确残基无冲突，GLX仅可解析为E/Q、ASX仅可解析为D/N且结论唯一。只补充节点类别，不替换坐标/原子。逐图证据见identity_resolution_notes和Data.residue_identity_resolutions。',
@@ -421,8 +433,8 @@ def delivery_report(output,manifest,exclusions,failures,summary,complete):
         '- 单图保护上限：200,000节点、20,000,000条双向边；分配估算超过min(4GiB,当时可用内存25%)则记录跳过。该保护不裁剪图。',
         f'- 总执行时间：{summary.get("elapsed_seconds",0):.1f}秒；torch {torch.__version__}、PyG {torch_geometric.__version__}、Gemmi {gemmi.__version__}、parasail {parasail.__version__}。','',
         '## 7. 验证与异常清单','',
-        '- 每个.pt保存后重新加载并校验Data类型、张量形状/类型、one-hot、坐标有限性、边索引范围、双向对称、无自环/重复边、同链严格8Å阈值、跨伙伴固定KNN策略及≥15界面准入。',
-        '- 最终检查测试CDR代表两两<80%、训练/测试PDB互斥、已知训练CDR与挑战CDR<80%、图文件数量与清单一致，并实测PyG Batch批处理。',
+        f'- 每个.pt保存后重新加载并校验Data类型、张量形状/类型、one-hot、坐标有限性、边索引范围、双向对称、无自环/重复边、同链严格{INTRA_CHAIN_CA_CUTOFF_ANGSTROM:.2f}Å阈值、跨伙伴固定KNN策略及≥{MIN_INTERFACE_RESIDUES}界面准入。',
+        '- 最终检查测试CDR代表两两<{CLUSTER_IDENTITY_THRESHOLD*100:.0f}%、训练/测试PDB互斥、已知训练CDR与挑战CDR<{CLUSTER_IDENTITY_THRESHOLD*100:.0f}%、图文件数量与清单一致，并实测PyG Batch批处理。',
         f'- 解析、编码或内存异常跳过共 {len(failures)} 条；不含正常的审计过滤及泄漏隔离。',
         '', '| 分流 | PDB | 条目 | 类型 | 说明 |','|---|---|---|---|---|']
     for r in failures:lines.append(f'| {r.get("split", "运行")} | {r.get("pdb_id", "")} | {r.get("source_id", "")} | {r["reason"]} | {r["detail"].replace(chr(124),"/").replace(chr(10)," ")} |')
@@ -441,14 +453,33 @@ def delivery_report(output,manifest,exclusions,failures,summary,complete):
     (output/'graph_dataset_delivery_report.md').write_text('\n'.join(lines)+'\n',encoding='utf-8')
 
 def main():
-    global RESUME, PEAK_RSS
-    parser=argparse.ArgumentParser();parser.add_argument('--out',type=pathlib.Path,default=BASE/'dataset_clean_500');parser.add_argument('--workers',type=int,default=2);parser.add_argument('--target-hard',type=int,default=500);parser.add_argument('--no-cap',action='store_true',help='Process every qualifying, deduplicated, isolated CDR-H3 cluster instead of capping at --target-hard.');parser.add_argument('--partition-seed',type=int,default=None,help='Override the module SEED for cluster shuffle order (e.g. an independently-derived partition stream); defaults to SEED when omitted.');parser.add_argument('--audit-dir',type=pathlib.Path,default=BASE);parser.add_argument('--data-root',type=pathlib.Path,default=BASE/'data');parser.add_argument('--resume',action='store_true');args=parser.parse_args();RESUME=args.resume
+    global RESUME, PEAK_RSS, CLUSTER_IDENTITY_THRESHOLD
+    global INTERFACE_LABEL_CUTOFF_ANGSTROM, INTRA_CHAIN_CA_CUTOFF_ANGSTROM
+    global CROSS_PARTNER_KNN_K, MIN_INTERFACE_RESIDUES
+    parser=argparse.ArgumentParser();parser.add_argument('--out',type=pathlib.Path,default=BASE/'dataset_clean_500');parser.add_argument('--workers',type=int,default=2);parser.add_argument('--target-hard',type=int,default=500);parser.add_argument('--no-cap',action='store_true',help='Process every qualifying, deduplicated, isolated CDR-H3 cluster instead of capping at --target-hard.');parser.add_argument('--partition-seed',type=int,default=None,help='Override the module SEED for cluster shuffle order (e.g. an independently-derived partition stream); defaults to SEED when omitted.');parser.add_argument('--audit-dir',type=pathlib.Path,default=BASE);parser.add_argument('--data-root',type=pathlib.Path,default=BASE/'data');parser.add_argument('--identity-threshold',type=float,default=CLUSTER_IDENTITY_THRESHOLD);parser.add_argument('--interface-label-cutoff',type=float,default=INTERFACE_LABEL_CUTOFF_ANGSTROM);parser.add_argument('--intra-chain-ca-cutoff',type=float,default=INTRA_CHAIN_CA_CUTOFF_ANGSTROM);parser.add_argument('--cross-partner-knn-k',type=int,default=CROSS_PARTNER_KNN_K);parser.add_argument('--min-interface-residues',type=int,default=MIN_INTERFACE_RESIDUES);parser.add_argument('--resume',action='store_true');args=parser.parse_args();RESUME=args.resume
+    if not (0.0 < args.identity_threshold < 1.0): parser.error('--identity-threshold must be in (0,1)')
+    if not (math.isfinite(args.interface_label_cutoff) and args.interface_label_cutoff > 0): parser.error('--interface-label-cutoff must be positive finite')
+    if not (math.isfinite(args.intra_chain_ca_cutoff) and args.intra_chain_ca_cutoff > 0): parser.error('--intra-chain-ca-cutoff must be positive finite')
+    if args.cross_partner_knn_k < 1: parser.error('--cross-partner-knn-k must be >=1')
+    if args.min_interface_residues < 1: parser.error('--min-interface-residues must be >=1')
+    CLUSTER_IDENTITY_THRESHOLD=float(args.identity_threshold)
+    INTERFACE_LABEL_CUTOFF_ANGSTROM=float(args.interface_label_cutoff)
+    INTRA_CHAIN_CA_CUTOFF_ANGSTROM=float(args.intra_chain_ca_cutoff)
+    CROSS_PARTNER_KNN_K=int(args.cross_partner_knn_k)
+    MIN_INTERFACE_RESIDUES=int(args.min_interface_residues)
     if not args.no_cap and not 300<=args.target_hard<=500:parser.error('--target-hard must be between 300 and 500 (or pass --no-cap to remove the cap entirely)')
     output=args.out.resolve();output.mkdir(parents=True,exist_ok=True)
     if RESUME:
         prior=json.loads((output/'run_summary.json').read_text(encoding='utf-8'))
         if prior.get('no_cap',False)!=args.no_cap or (not args.no_cap and prior.get('target_hard')!=args.target_hard):
             raise ValueError('Resume target differs or is unknown; choose a fresh output directory')
+        expected_protocol=dict(identity_threshold=CLUSTER_IDENTITY_THRESHOLD,
+            interface_label_cutoff_angstrom=INTERFACE_LABEL_CUTOFF_ANGSTROM,
+            intra_chain_ca_cutoff_angstrom=INTRA_CHAIN_CA_CUTOFF_ANGSTROM,
+            cross_partner_knn_k=CROSS_PARTNER_KNN_K,
+            min_interface_residues=MIN_INTERFACE_RESIDUES,graph_version=VERSION)
+        if prior.get('graph_protocol')!=expected_protocol:
+            raise ValueError('Resume graph protocol differs; choose a fresh output directory')
     if any((output/'graphs').rglob('*.pt')) and not RESUME:raise FileExistsError('Output already contains graphs; choose a fresh --out directory or explicit --resume')
     for split in ['train','test_db55','test_snac_hard']:(output/'graphs'/split).mkdir(parents=True,exist_ok=True)
     torch.set_num_threads(1);start=time.time();manifest=[];exclusions=[];failures=[];summary={};complete=False;previous_elapsed=0
@@ -460,7 +491,7 @@ def main():
             previous_elapsed=previous.get('elapsed_seconds',0)
             PEAK_RSS=max(PEAK_RSS,previous.get('sampled_peak_rss_bytes',0))
         partition_seed=args.partition_seed if args.partition_seed is not None else SEED
-        summary.update(seed=partition_seed,no_cap=args.no_cap,target_hard=(None if args.no_cap else args.target_hard),identity_threshold=CLUSTER_IDENTITY_THRESHOLD,identity_scope='CDR-H3 hard-set isolation; EGNN train/validation uses bilateral full-chain VHH+antigen clustering',input_sha256=input_hashes,script_sha256=sha256(pathlib.Path(__file__)),admission={})
+        summary.update(seed=partition_seed,no_cap=args.no_cap,target_hard=(None if args.no_cap else args.target_hard),identity_threshold=CLUSTER_IDENTITY_THRESHOLD,identity_scope='CDR-H3 hard-set isolation; EGNN train/validation uses bilateral full-chain VHH+antigen clustering',graph_protocol=dict(identity_threshold=CLUSTER_IDENTITY_THRESHOLD,interface_label_cutoff_angstrom=INTERFACE_LABEL_CUTOFF_ANGSTROM,intra_chain_ca_cutoff_angstrom=INTRA_CHAIN_CA_CUTOFF_ANGSTROM,cross_partner_knn_k=CROSS_PARTNER_KNN_K,min_interface_residues=MIN_INTERFACE_RESIDUES,graph_version=VERSION),input_sha256=input_hashes,script_sha256=sha256(pathlib.Path(__file__)),admission={})
         lookup={r['path']:r for r in rows if r['subset']=='test_db55'};eligible=[]
         for source in ['train_rcsb','sabdab_vhh','snac_db']:
             subset=[r for r in rows if r['subset']==source];good=[]
