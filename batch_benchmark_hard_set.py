@@ -125,6 +125,8 @@ class ModelLoadInfo:
 
     status: str
     checkpoint_path: Path
+    graph_protocol: Optional[Dict[str, Any]] = None
+    identity_threshold: Optional[float] = None
     warning: str = ""
 
 
@@ -189,6 +191,42 @@ def _normalize_state_dict_keys(
     return normalized
 
 
+def _graph_protocol_signature(data: Any) -> Dict[str, Any]:
+    """Scientific graph protocol that must match the EGNN training checkpoint."""
+
+    required = (
+        "graph_version", "edge_policy", "label_policy",
+        "intra_chain_ca_cutoff_angstrom", "cross_partner_knn_k",
+        "interface_label_cutoff_angstrom", "min_interface_residues",
+    )
+    missing = [name for name in required if not hasattr(data, name)]
+    if missing:
+        raise ValueError(f"Graph lacks v1.3 protocol metadata: {missing}")
+    return {
+        "graph_version": str(data.graph_version),
+        "edge_policy": str(data.edge_policy),
+        "label_policy": str(data.label_policy),
+        "intra_chain_ca_cutoff_angstrom": float(data.intra_chain_ca_cutoff_angstrom),
+        "cross_partner_knn_k": int(data.cross_partner_knn_k),
+        "interface_label_cutoff_angstrom": float(data.interface_label_cutoff_angstrom),
+        "min_interface_residues": int(data.min_interface_residues),
+    }
+
+
+def assert_checkpoint_graph_compatible(info: ModelLoadInfo, data: Any) -> None:
+    """Fail closed when model weights and graph semantics differ."""
+
+    if info.status != "checkpoint_loaded":
+        raise ValueError("A trained checkpoint is required")
+    current = _graph_protocol_signature(data)
+    if info.graph_protocol is None:
+        raise ValueError("Checkpoint lacks graph_protocol provenance; retrain with current pipeline")
+    if dict(info.graph_protocol) != current:
+        raise ValueError(
+            f"Checkpoint/graph protocol mismatch: checkpoint={info.graph_protocol}, graph={current}"
+        )
+
+
 def load_interface_scorer(
     checkpoint_path: Path,
     *,
@@ -206,7 +244,7 @@ def load_interface_scorer(
         )
         warnings.warn(warning, RuntimeWarning, stacklevel=2)
         scorer.to(torch_device).eval()
-        return scorer, ModelLoadInfo("default_initialization", checkpoint_path, warning)
+        return scorer, ModelLoadInfo("default_initialization", checkpoint_path, warning=warning)
 
     try:
         payload = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
@@ -229,7 +267,15 @@ def load_interface_scorer(
         state_dict = _normalize_state_dict_keys(_extract_state_dict(payload))
         scorer.load_state_dict(state_dict, strict=True)
         scorer.to(torch_device).eval()
-        return scorer, ModelLoadInfo("checkpoint_loaded", checkpoint_path)
+        if not isinstance(payload, Mapping) or not isinstance(payload.get("graph_protocol"), Mapping):
+            raise ValueError("Checkpoint lacks graph_protocol provenance")
+        split_meta = payload.get("split", {}) if isinstance(payload.get("split", {}), Mapping) else {}
+        identity_threshold = split_meta.get("identity_threshold")
+        return scorer, ModelLoadInfo(
+            "checkpoint_loaded", checkpoint_path,
+            graph_protocol=dict(payload["graph_protocol"]),
+            identity_threshold=(None if identity_threshold is None else float(identity_threshold)),
+        )
     except Exception as error:  # checkpoint incompatibility must not stop the batch
         warning = (
             f"Could not load EGNN checkpoint {checkpoint_path}: "
@@ -239,7 +285,7 @@ def load_interface_scorer(
         warnings.warn(warning, RuntimeWarning, stacklevel=2)
         torch.manual_seed(seed)
         scorer = EGNNInterfaceScorer().to(torch_device).eval()
-        return scorer, ModelLoadInfo("checkpoint_load_failed", checkpoint_path, warning)
+        return scorer, ModelLoadInfo("checkpoint_load_failed", checkpoint_path, warning=warning)
 
 
 def _zero_small_gap(value: float, tolerance: float = 1e-9) -> float:
@@ -1340,6 +1386,7 @@ def _ablation_export_results(out: Path) -> None:
 
 
 _ABLATION_SCORER = None
+_ABLATION_MODEL_INFO = None
 
 
 def _ablation_append_results(out: Path, key: str) -> None:
@@ -1364,17 +1411,19 @@ def _ablation_append_results(out: Path, key: str) -> None:
 
 def _ablation_worker(task: tuple) -> tuple:
     """Own one atomic case file; leave aggregate CSV and failure logs to parent."""
-    global _ABLATION_SCORER
+    global _ABLATION_SCORER, _ABLATION_MODEL_INFO
     path, config, args, artifact, key = task
     try:
         torch.set_num_threads(args.omp_threads)
+        data = torch.load(path, map_location="cpu", weights_only=False)
         if config["pruning"] == "egnn" and _ABLATION_SCORER is None:
-            _ABLATION_SCORER, status = load_interface_scorer(
+            _ABLATION_SCORER, _ABLATION_MODEL_INFO = load_interface_scorer(
                 args.checkpoint, torch_device=torch.device("cpu"), seed=42)
-            if status.status != "checkpoint_loaded":
+            if _ABLATION_MODEL_INFO.status != "checkpoint_loaded":
                 raise ValueError("A trained matching checkpoint is mandatory")
             _ABLATION_SCORER.eval()
-        data = torch.load(path, map_location="cpu", weights_only=False)
+        if config["pruning"] == "egnn":
+            assert_checkpoint_graph_compatible(_ABLATION_MODEL_INFO, data)
         config["pdb_id"] = getattr(data, "pdb_id", "")
         _ablation_run_case(data, _ABLATION_SCORER, config, args, artifact)
         return key, config, None
@@ -1511,6 +1560,9 @@ def _ablation_main(argv: Optional[Sequence[str]] = None) -> int:
             scorer, status = load_interface_scorer(args.checkpoint, torch_device=torch.device("cpu"), seed=42)
             if status.status != "checkpoint_loaded":
                 raise ValueError("A trained matching checkpoint is mandatory; no random fallback.")
+            assert_checkpoint_graph_compatible(
+                status, torch.load(files[0], map_location="cpu", weights_only=False)
+            )
             scorer.eval()
         _ablation_export_results(out)
         settings = list(itertools.product(args.pruning,args.radii,args.depths,args.max_evals,args.seeds))
