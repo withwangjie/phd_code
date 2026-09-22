@@ -91,6 +91,7 @@ from seed_streams import derive_streams, derive_child_seed, save_stream_map, ver
 # ---------------------------------------------------------------------------
 ORCHESTRATED_SCRIPTS: List[str] = [
     "run_full_experiment.py",
+    "resolve_server_config.py",
     "seed_streams.py",
     "audit_all_datasets.py",
     "build_final_pyg_dataset.py",
