@@ -150,7 +150,7 @@ queue_freeze:
     # examined qualifying pool), so a capped run is never silently reported
     # as if every qualifying target ran.
     target_count: 0
-    sites: 5
+    sites: 6
     selection_order: "seeded_random"  # never "ascending_size" for this queue
     # The REAL, final validation protocol: formal validation uses the
     # trained EGNN main pipeline, not contact/cdr/random (those are
@@ -255,6 +255,8 @@ structure_experiment:
   max_evals: 90
   relax_iterations: 200
   candidate_relax_iterations: 100
+  antigen_guidance_weight: 0.25
+  # Formal all-atom search mirrors coarse benchmark: 6/9/12 raw chi1 sub-rotamers -> 3-6 retained states/site -> <=30 variables.
   loop_relax_iterations: 100
   eval_shots: 500
   robust_qaoa: true
