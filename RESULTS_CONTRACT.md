@@ -29,6 +29,13 @@ Required dataset outputs:
 - `dataset/excluded_samples.csv`
 - `dataset/processing_failures.csv`
 
+Required run-local independence outputs:
+- `independence/pdb_family_clusters.json`
+- `independence/pdb_family_clusters.provenance.json`
+- `audit/cluster_universe.txt`
+
+The clustering universe contains both internal study PDBs and required external-VHH PDBs. The frozen pair table/source map must cover this complete universe.
+
 Required frozen-validation outputs:
 - `validation_queue/freeze/selected_targets.json`
 - `validation_queue/freeze/eligibility.json`
@@ -36,8 +43,9 @@ Required frozen-validation outputs:
 - `validation_queue/freeze/freeze_manifest.json`
 - one `prepared/<pdb>/recovery_manifest.json` for every frozen target
 
-The freeze manifest hashes selected targets, eligibility, graph manifest and the
-family/structure cluster map when configured.
+The freeze manifest (schema v2) hashes selected targets, eligibility, graph manifest,
+the run-local family/structure cluster map, cluster-map provenance, and the complete
+internal+external clustering universe.
 
 ### egnn_train
 Required:
@@ -96,12 +104,19 @@ Both `dev_queue/` and `validation_queue/` require:
 - `real_complex_metrics.csv`
 - `real_complex_report.md`
 
-Every completed target additionally requires:
-- `results/<pdb>/run_manifest.json`
-- `results/<pdb>/recovery_metrics.csv`
-- `results/<pdb>/recovery_report.md`
+Every completed validation target additionally requires:
+- `validation_queue/results/<pdb>/run_manifest.json`
+- `validation_queue/results/<pdb>/recovery_metrics.csv`
+- `validation_queue/results/<pdb>/recovery_report.md`
 
-Formal validation must close exactly against the frozen target denominator.
+Every completed historical development target additionally requires:
+- `dev_queue/<pdb>/results/<pdb>/run_manifest.json`
+- `dev_queue/<pdb>/results/<pdb>/recovery_metrics.csv`
+- `dev_queue/<pdb>/results/<pdb>/recovery_report.md`
+
+Every configured non-primary solvent sensitivity requires a `dev_queue_solvent_<model>/`
+root summary, aggregate recovery metrics, and report. Formal validation must close
+exactly against frozen target × pre-registered seed × four-method denominators.
 
 ### external_validation
 External VHH coarse benchmark requires:
@@ -126,8 +141,15 @@ Required:
 - `qc_benchmark/statistics_outputs.md`
 - `qc_benchmark/statistics_time.json`
 - `qc_benchmark/statistics_time.md`
+- `statistics/quantum_scaling_statistics.json`
+- `statistics/quantum_scaling_statistics.md`
 - `statistics/structure_statistics.json`
 - `statistics/structure_statistics.md`
+
+The primary coarse solver inference is restricted to the frozen primary pruning path,
+active-site size, output budget, QAOA objective/restarts, and requires the configured
+minimum independent clusters. Scaling inference uses the pre-declared active-site levels
+under fixed primary depth/resources and a cluster-aware within-PDB slope analysis.
 
 ### final_report
 Required:
