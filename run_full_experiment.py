@@ -571,7 +571,10 @@ class Orchestrator:
             "env_check":[self.run_dir/"env_check.json"],
             "smoke_check":[self.run_dir/"smoke_check"],
             "data_audit":[self.run_dir/"audit"],
-            "queue_freeze":[self.dataset_dir(),self.run_dir/"validation_queue"/"freeze"],
+            "queue_freeze":[
+                self.dataset_dir(),self.run_dir/"validation_queue"/"freeze",
+                self.run_dir/"independence",
+            ],
             "egnn_train":[self.checkpoint_dir()],
             "energy_calibration":[self.run_dir/"calibration"],
             "method_sensitivity":[self.run_dir/"method_sensitivity"],
@@ -749,11 +752,15 @@ class Orchestrator:
         if stage=="queue_freeze":
             dataset=self.dataset_dir()
             freeze=self.run_dir/"validation_queue"/"freeze"
+            cluster_path=self.frozen_cluster_map_path()
+            cluster_provenance=cluster_path.with_suffix(".provenance.json")
+            universe=self.run_dir/"audit"/"cluster_universe.txt"
             ok,detail=require([
                 dataset/"graph_manifest.csv",dataset/"graph_manifest.json",
                 dataset/"run_summary.json",dataset/"graph_dataset_delivery_report.md",
                 dataset/"cdr3_clusters.json",dataset/"excluded_samples.csv",
                 dataset/"processing_failures.csv",
+                cluster_path,cluster_provenance,universe,
                 freeze/"selected_targets.json",freeze/"eligibility.json",freeze/"run_manifest.json",
                 freeze/"freeze_manifest.json",
             ])
@@ -798,6 +805,14 @@ class Orchestrator:
                     return False,f"Run-local frozen cluster map missing: {cluster_path}"
                 if expected_cluster!=sha256_of(cluster_path):
                     return False,"Run-local frozen cluster map sha256 mismatch"
+                cluster_provenance=cluster_path.with_suffix(".provenance.json")
+                expected_prov=freeze_manifest.get("cluster_map_provenance_sha256")
+                if not cluster_provenance.is_file() or expected_prov!=sha256_of(cluster_provenance):
+                    return False,"Frozen cluster-map provenance sha256 mismatch"
+                universe=self.run_dir/"audit"/"cluster_universe.txt"
+                expected_universe=freeze_manifest.get("cluster_universe_sha256")
+                if not universe.is_file() or expected_universe!=sha256_of(universe):
+                    return False,"Frozen clustering universe sha256 mismatch"
             return True,"queue-freeze artifacts and frozen-input hashes verified"
         if stage=="egnn_train":
             checkpoint=self.checkpoint_dir()/"best_egnn_pruning.pt"
@@ -1486,12 +1501,17 @@ class Orchestrator:
         selected_path=validation_dir/"selected_targets.json"
         eligibility_path=validation_dir/"eligibility.json"
         freeze_manifest_path=validation_dir/"freeze_manifest.json"
+        cluster_provenance_path=cluster_map_path.with_suffix(".provenance.json")
         freeze_manifest=dict(
-            schema_version=1,
+            schema_version=2,
             selected_targets_sha256=sha256_of(selected_path),
             eligibility_sha256=sha256_of(eligibility_path),
             graph_manifest_sha256=sha256_of(dataset_dir/"graph_manifest.csv"),
-            cluster_map_sha256=(sha256_of(cluster_map_path) if cluster_map_path is not None and cluster_map_path.is_file() else None),
+            cluster_map_sha256=(sha256_of(cluster_map_path) if cluster_map_path.is_file() else None),
+            cluster_map_provenance_sha256=(
+                sha256_of(cluster_provenance_path) if cluster_provenance_path.is_file() else None),
+            cluster_universe_sha256=(
+                sha256_of(universe_path) if universe_path.is_file() else None),
         )
         atomic_write_json(freeze_manifest_path,freeze_manifest)
         selected = json.loads(selected_path.read_text(encoding="utf-8"))
