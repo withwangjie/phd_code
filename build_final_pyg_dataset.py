@@ -686,13 +686,13 @@ def main():
                         violates_vhh=False,violates_cdr_h3=False,violates_antigen=False,
                         vhh_identity=0.0,cdr_h3_identity=0.0,antigen_identity=0.0))
             if violation is None:
-            for other_record,other_graph in zip(kept_hard_records,kept_hard_graphs):
-                homologous,detail=layered_graph_homologous(graph,other_graph)
-                for key in hard_pair_max:
-                    hard_pair_max[key]=max(hard_pair_max[key],float(detail[key]))
-                if homologous:
-                    violation=(other_record,detail)
-                    break
+                for other_record,other_graph in zip(kept_hard_records,kept_hard_graphs):
+                    homologous,detail=layered_graph_homologous(graph,other_graph)
+                    for key in hard_pair_max:
+                        hard_pair_max[key]=max(hard_pair_max[key],float(detail[key]))
+                    if homologous:
+                        violation=(other_record,detail)
+                        break
             if violation is None:
                 kept_hard_records.append(record);kept_hard_graphs.append(graph)
                 if family_cluster is not None:
