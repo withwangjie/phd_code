@@ -4,8 +4,9 @@ The delivered PyG graphs contain one CA coordinate per residue, not complete
 backbone/side-chain atoms. This module therefore implements a deterministic,
 coarse-grained rotamer model rather than claiming atomistic Dunbrack accuracy:
 
-* typical chi1 clusters provide two or three discrete states per selected VHH
-  residue;
+* each selected VHH residue first receives a 6--12-state chi1 sub-rotamer pool;
+* prior, frozen-environment and antigen-guidance energies pre-screen that pool;
+* 3--6 states per residue enter the QUBO under a global <=30-variable budget;
 * a local frame derived from neighbouring CA and ligand directions attaches
   residue-specific side-chain pseudo-atoms;
 * softened, truncated Lennard-Jones and distance-dependent dielectric Coulomb
@@ -579,6 +580,51 @@ _SIDECHAIN_CHI_COUNT: Mapping[str, int] = {
 }
 
 
+# Residue-specific sub-rotamer expansion.  The base three broad chi1 modes are
+# deliberately expanded before any energy-based filtering so that candidate
+# diversity is not artificially limited by the QUBO bit budget.
+_SUBROTAMER_SCHEMES: Mapping[int, Tuple[Tuple[float, ...], Tuple[float, ...]]] = {
+    6: ((-12.0, 12.0), (0.50, 0.50)),
+    9: ((-15.0, 0.0, 15.0), (0.25, 0.50, 0.25)),
+    12: ((-22.0, -7.0, 7.0, 22.0), (0.15, 0.35, 0.35, 0.15)),
+}
+
+
+def _raw_rotamer_pool_size(amino_acid: str) -> int:
+    """Return 6/9/12 raw candidates according to side-chain torsional freedom."""
+
+    chi = _SIDECHAIN_CHI_COUNT.get(amino_acid, 1)
+    if chi <= 1:
+        return 6
+    if chi == 2:
+        return 9
+    return 12
+
+
+def _expanded_rotamer_templates(amino_acid: str) -> Tuple[RotamerTemplate, ...]:
+    """Expand three broad chi1 modes into a normalized 6--12-state pool."""
+
+    pool_size = _raw_rotamer_pool_size(amino_acid)
+    offsets, weights = _SUBROTAMER_SCHEMES[pool_size]
+    expanded = []
+    for base in _ROTAMER_PRIORS[amino_acid]:
+        for offset, weight in zip(offsets, weights):
+            angle = ((base.chi1_degrees + offset + 180.0) % 360.0) - 180.0
+            expanded.append(
+                RotamerTemplate(
+                    chi1_degrees=float(angle),
+                    prior_probability=float(base.prior_probability * weight),
+                )
+            )
+    total = sum(item.prior_probability for item in expanded)
+    if len(expanded) != pool_size or total <= 0:
+        raise RuntimeError(f"Invalid expanded rotamer pool for {amino_acid}")
+    return tuple(
+        RotamerTemplate(item.chi1_degrees, item.prior_probability / total)
+        for item in expanded
+    )
+
+
 def _normalize(vector: np.ndarray, *, tolerance: float = 1e-10) -> np.ndarray:
     """Return a unit vector and fail clearly for an unusable direction."""
 
@@ -698,8 +744,7 @@ class InterfaceQUBOBuilder:
     """Build a NISQ-sized rotamer QUBO from a pruned interface subgraph.
 
     Args:
-        min_variables: Minimum bit count. Adaptive five/six-site fallbacks may
-            set this below the default 20 while retaining 2--3 states per site.
+        min_variables: Minimum bit count after adaptive 3--6-state allocation.
         max_variables: Hard QUBO dimension limit; must not exceed 30.
         max_sites: Maximum optimized VHH sites. Extra marked sites are ranked by
             ``interface_score`` and deterministically truncated.
@@ -781,66 +826,91 @@ class InterfaceQUBOBuilder:
         return np.asarray(order[: self.max_sites], dtype=np.int64)
 
     def _allocate_rotamer_counts(
-        self, site_indices: np.ndarray, amino_acids: Sequence[str]
+        self,
+        site_indices: np.ndarray,
+        amino_acids: Sequence[str],
+        site_scores: Optional[Sequence[float]] = None,
     ) -> list[int]:
-        """Assign residue-type-aware two/three-state local representations.
+        """Allocate 3--6 retained states/site under the global variable budget.
 
-        Residues with at least two side-chain chi torsions prefer three
-        microstates; simpler side chains retain two. If the global bit budget
-        cannot accommodate every preferred third state, the least flexible
-        residues are reduced first.
+        Flexibility supplies the baseline target (3/4/5/6 states for 0--1/2/3/4+
+        chi torsions).  Interface importance breaks ties when the global <=30-bit
+        budget requires contraction or permits expansion.
         """
 
         site_count = len(site_indices)
-        minimum_possible = 2 * site_count
-        maximum_possible = 3 * site_count
+        minimum_possible = 3 * site_count
+        maximum_possible = 6 * site_count
+        if minimum_possible > self.max_variables:
+            raise ValueError(
+                f"{site_count} sites require at least {minimum_possible} variables "
+                f"at 3 states/site; limit is {self.max_variables}"
+            )
         if maximum_possible < self.min_variables:
             raise ValueError(
                 f"{site_count} sites can provide at most {maximum_possible} variables; "
                 f"need at least {self.min_variables}"
             )
-        if minimum_possible > self.max_variables:
-            raise ValueError(
-                f"{site_count} sites require at least {minimum_possible} variables; "
-                f"limit is {self.max_variables}"
-            )
 
-        counts = [
-            3 if _SIDECHAIN_CHI_COUNT.get(amino_acids[int(node)], 1) >= 2 else 2
-            for node in site_indices
-        ]
+        if site_scores is None:
+            importance = np.zeros(site_count, dtype=np.float64)
+        else:
+            importance = np.asarray(site_scores, dtype=np.float64)
+            if importance.shape != (site_count,) or not np.isfinite(importance).all():
+                raise ValueError("site_scores must be finite with one value per selected site")
+
+        def preferred_count(node: int) -> int:
+            chi = _SIDECHAIN_CHI_COUNT.get(amino_acids[int(node)], 1)
+            if chi <= 1:
+                return 3
+            if chi == 2:
+                return 4
+            if chi == 3:
+                return 5
+            return 6
+
+        counts = [preferred_count(int(node)) for node in site_indices]
+
+        # Contract least important / least flexible sites first, never below 3.
         while sum(counts) > self.max_variables:
-            candidates = [site for site, count in enumerate(counts) if count == 3]
+            candidates = [idx for idx, count in enumerate(counts) if count > 3]
             if not candidates:
                 break
-            site = min(
+            chosen = min(
                 candidates,
                 key=lambda idx: (
+                    float(importance[idx]),
                     _SIDECHAIN_CHI_COUNT.get(amino_acids[int(site_indices[idx])], 1),
                     _FLEXIBILITY_RANK.get(amino_acids[int(site_indices[idx])], 0),
                     int(site_indices[idx]),
                 ),
             )
-            counts[site] = 2
+            counts[chosen] -= 1
 
+        # If a caller requests a larger minimum dimension, spend remaining bits
+        # on the most important/flexible sites, never above six.
         while sum(counts) < self.min_variables:
-            candidates = [site for site, count in enumerate(counts) if count == 2]
+            candidates = [idx for idx, count in enumerate(counts) if count < 6]
             if not candidates:
                 break
-            site = max(
+            chosen = max(
                 candidates,
                 key=lambda idx: (
+                    float(importance[idx]),
                     _SIDECHAIN_CHI_COUNT.get(amino_acids[int(site_indices[idx])], 1),
                     _FLEXIBILITY_RANK.get(amino_acids[int(site_indices[idx])], 0),
                     -int(site_indices[idx]),
                 ),
             )
-            counts[site] = 3
+            counts[chosen] += 1
 
         total = sum(counts)
         if not self.min_variables <= total <= self.max_variables:
             raise RuntimeError(f"Internal rotamer allocation error: {total} variables")
+        if any(count < 3 or count > 6 for count in counts):
+            raise AssertionError(f"Invalid per-site state allocation: {counts}")
         return counts
+
 
     def _local_frame(
         self,
@@ -1036,7 +1106,12 @@ class InterfaceQUBOBuilder:
 
         x, pos, amino_acids = self._validate_graph(data)
         site_nodes = self._select_sites(data, x)
-        counts = self._allocate_rotamer_counts(site_nodes, amino_acids)
+        if hasattr(data, "interface_score"):
+            all_site_scores = data.interface_score.detach().cpu().numpy().astype(np.float64)
+            site_scores = all_site_scores[site_nodes]
+        else:
+            site_scores = np.zeros(len(site_nodes), dtype=np.float64)
+        counts = self._allocate_rotamer_counts(site_nodes, amino_acids, site_scores)
         active_mask = np.zeros(len(x), dtype=bool)
         active_mask[site_nodes] = True
         declared_active = (
@@ -1078,7 +1153,7 @@ class InterfaceQUBOBuilder:
         site_to_variables: Dict[int, Tuple[int, ...]] = {}
         for site_index, (node_index, count) in enumerate(zip(site_nodes, counts)):
             aa = amino_acids[int(node_index)]
-            templates = _ROTAMER_PRIORS[aa]
+            templates = _expanded_rotamer_templates(aa)
             best_probability = max(template.prior_probability for template in templates)
             candidate_states: list[RotamerState] = []
             for template_index, template in enumerate(templates):
@@ -1115,8 +1190,10 @@ class InterfaceQUBOBuilder:
 
             candidate_states.sort(
                 key=lambda state: (
+                    state.prior_energy
+                    + state.environment_energy
+                    + state.antigen_guidance_energy,
                     state.prior_energy + state.antigen_guidance_energy,
-                    state.prior_energy,
                     state.rotamer_index,
                 )
             )
@@ -1211,8 +1288,11 @@ class InterfaceQUBOBuilder:
             "energy_unit": "approximate kcal/mol",
             "site_node_indices": site_nodes.tolist(),
             "rotamers_per_site": counts,
-            "rotamer_state_policy": "2 states for <=1 chi torsion; 3 states for >=2 chi torsions, subject to global bit budget",
-            "candidate_guidance": "rotamer prior plus antigen-only coarse nonbonded interaction used for candidate retention",
+            "raw_rotamer_pool_sizes": [
+                _raw_rotamer_pool_size(amino_acids[int(node)]) for node in site_nodes
+            ],
+            "rotamer_state_policy": "6/9/12 raw chi1 sub-rotamers by flexibility; retain 3--6 states/site under <=30 total variables",
+            "candidate_guidance": "pre-screen by rotamer prior + frozen VHH/environment nonbonded energy + antigen-guidance energy",
             "antigen_guidance_energy": [float(state.antigen_guidance_energy) for state in rotamers],
             "variable_count": variable_count,
             "active_residue_count": int(active_mask.sum()),
@@ -1357,7 +1437,7 @@ def validate_qubo_ising_equivalence(
     return maximum_error
 
 
-def _virtual_pruned_graph(site_count: int = 10) -> Data:
+def _virtual_pruned_graph(site_count: int = 6) -> Data:
     """Create a deterministic interface-like PyG graph for executable tests."""
 
     if site_count < 5:
@@ -1751,7 +1831,7 @@ if __name__ == "__main__":
     )
     arguments = parser.parse_args()
     if arguments.graph is None:
-        example = _virtual_pruned_graph(site_count=10)
+        example = _virtual_pruned_graph(site_count=6)
     else:
         # torch.load uses pickle for PyG Data. Only load files generated locally
         # or obtained from a trusted source.
@@ -1764,7 +1844,7 @@ if __name__ == "__main__":
     assert Q.shape[0] >= 20
     assert np.count_nonzero(np.tril(Q, k=-1)) == 0
     assert np.isfinite(Q).all()
-    assert all(2 <= len(indices) <= 3 for indices in result.site_to_variables.values())
+    assert all(3 <= len(indices) <= 6 for indices in result.site_to_variables.values())
     assert result.lambda_value >= result.lambda_lower_bound
     assert result.metadata["lambda_exceeds_max_pair_attraction"]
 
