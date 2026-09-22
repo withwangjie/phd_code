@@ -126,7 +126,7 @@ class ModelLoadInfo:
     status: str
     checkpoint_path: Path
     graph_protocol: Optional[Dict[str, Any]] = None
-    identity_threshold: Optional[float] = None
+    homology_isolation: Optional[Dict[str, float]] = None
     warning: str = ""
 
 
@@ -214,9 +214,9 @@ def _graph_protocol_signature(data: Any) -> Dict[str, Any]:
 
 
 def assert_checkpoint_graph_compatible(
-    info: ModelLoadInfo, data: Any, *, identity_threshold: Optional[float] = None
+    info: ModelLoadInfo, data: Any, *, homology_isolation: Optional[Mapping[str, float]] = None
 ) -> None:
-    """Fail closed when model weights, split threshold, and graph semantics differ."""
+    """Fail closed when model weights, homology protocol, and graph semantics differ."""
 
     if info.status != "checkpoint_loaded":
         raise ValueError("A trained checkpoint is required")
@@ -227,14 +227,14 @@ def assert_checkpoint_graph_compatible(
         raise ValueError(
             f"Checkpoint/graph protocol mismatch: checkpoint={info.graph_protocol}, graph={current}"
         )
-    if identity_threshold is not None:
-        if info.identity_threshold is None or not math.isclose(
-            float(info.identity_threshold), float(identity_threshold),
-            rel_tol=0.0, abs_tol=1e-12
-        ):
+    if homology_isolation is not None:
+        expected = {str(k): float(v) for k, v in homology_isolation.items()}
+        if info.homology_isolation is None:
+            raise ValueError("Checkpoint lacks homology_isolation provenance")
+        saved = {str(k): float(v) for k, v in info.homology_isolation.items()}
+        if saved != expected:
             raise ValueError(
-                f"Checkpoint identity threshold mismatch: checkpoint={info.identity_threshold}, "
-                f"current={identity_threshold}"
+                f"Checkpoint homology protocol mismatch: checkpoint={saved}, current={expected}"
             )
 
 
@@ -281,11 +281,13 @@ def load_interface_scorer(
         if not isinstance(payload, Mapping) or not isinstance(payload.get("graph_protocol"), Mapping):
             raise ValueError("Checkpoint lacks graph_protocol provenance")
         split_meta = payload.get("split", {}) if isinstance(payload.get("split", {}), Mapping) else {}
-        identity_threshold = split_meta.get("identity_threshold")
+        homology = split_meta.get("homology_isolation")
+        if homology is not None and not isinstance(homology, Mapping):
+            raise ValueError("Checkpoint homology_isolation provenance is malformed")
         return scorer, ModelLoadInfo(
             "checkpoint_loaded", checkpoint_path,
             graph_protocol=dict(payload["graph_protocol"]),
-            identity_threshold=(None if identity_threshold is None else float(identity_threshold)),
+            homology_isolation=(None if homology is None else {str(k): float(v) for k, v in homology.items()}),
         )
     except Exception as error:  # checkpoint incompatibility must not stop the batch
         warning = (
@@ -1435,7 +1437,13 @@ def _ablation_worker(task: tuple) -> tuple:
             _ABLATION_SCORER.eval()
         if config["pruning"] == "egnn":
             assert_checkpoint_graph_compatible(
-                _ABLATION_MODEL_INFO, data, identity_threshold=args.identity_threshold
+                _ABLATION_MODEL_INFO, data,
+                homology_isolation={
+                    "vhh_full_chain_identity": args.vhh_identity_threshold,
+                    "cdr_h3_identity": args.cdr_h3_identity_threshold,
+                    "antigen_identity": args.antigen_identity_threshold,
+                    "antigen_min_length_coverage": args.antigen_min_length_coverage,
+                },
             )
         config["pdb_id"] = getattr(data, "pdb_id", "")
         _ablation_run_case(data, _ABLATION_SCORER, config, args, artifact)
@@ -1483,8 +1491,10 @@ def _ablation_main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--depths", type=int, nargs="+", default=[1,2,3])
     parser.add_argument("--max-evals", type=int, nargs="+", default=[90,300])
     parser.add_argument("--active-sites", type=int, default=6)
-    parser.add_argument("--identity-threshold", type=float, default=0.40,
-        help="Expected EGNN bilateral train/validation identity threshold.")
+    parser.add_argument("--vhh-identity-threshold", type=float, default=0.80)
+    parser.add_argument("--cdr-h3-identity-threshold", type=float, default=0.50)
+    parser.add_argument("--antigen-identity-threshold", type=float, default=0.30)
+    parser.add_argument("--antigen-min-length-coverage", type=float, default=0.70)
     parser.add_argument("--antigen-guidance-weight", type=float, default=0.25,
         help="Blend weight for label-free nearest-antigen proximity in EGNN site ranking.")
     parser.add_argument("--antigen-proximity-scale", type=float, default=6.0,
@@ -1525,7 +1535,9 @@ def _ablation_main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--omp-threads", type=int, default=2)
     args = parser.parse_args(argv)
     if (not 5 <= args.active_sites <= 8
-            or not 0.0 < args.identity_threshold < 1.0
+            or any(not 0.0 < value <= 1.0 for value in (
+                args.vhh_identity_threshold, args.cdr_h3_identity_threshold,
+                args.antigen_identity_threshold, args.antigen_min_length_coverage))
             or not 0.0 <= args.antigen_guidance_weight <= 1.0
             or min(*args.outputs, args.sa_passes, args.greedy_passes, *args.max_evals) <= 0
             or min(args.qaoa_restarts) <= 0 or args.eval_shots <= 0):
@@ -1578,7 +1590,12 @@ def _ablation_main(argv: Optional[Sequence[str]] = None) -> int:
                 raise ValueError("A trained matching checkpoint is mandatory; no random fallback.")
             assert_checkpoint_graph_compatible(
                 status, torch.load(files[0], map_location="cpu", weights_only=False),
-                identity_threshold=args.identity_threshold,
+                homology_isolation={
+                    "vhh_full_chain_identity": args.vhh_identity_threshold,
+                    "cdr_h3_identity": args.cdr_h3_identity_threshold,
+                    "antigen_identity": args.antigen_identity_threshold,
+                    "antigen_min_length_coverage": args.antigen_min_length_coverage,
+                },
             )
             scorer.eval()
         _ablation_export_results(out)
