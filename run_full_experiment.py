@@ -305,14 +305,23 @@ class Orchestrator:
         full_env["QP_OPENMM_PRECISION"] = str(hardware.get("openmm_precision", "double"))
         if env:
             full_env.update(env)
+        timeout_seconds = float(self.config.get("control", {}).get("stage_timeout_seconds", 0) or 0)
+        timeout = timeout_seconds if timeout_seconds > 0 else None
         with log_path.open("a", encoding="utf-8") as log_handle:
             log_handle.write(f"\n=== {started} :: {' '.join(argv)} ===\n")
             log_handle.flush()
-            process = subprocess.run(
-                argv, cwd=str(cwd or self.repo_root), env=full_env,
-                stdout=log_handle, stderr=subprocess.STDOUT,
-            )
-        return process.returncode, log_path
+            try:
+                process = subprocess.run(
+                    argv, cwd=str(cwd or self.repo_root), env=full_env,
+                    stdout=log_handle, stderr=subprocess.STDOUT,
+                    timeout=timeout,
+                )
+                return process.returncode, log_path
+            except subprocess.TimeoutExpired:
+                log_handle.write(
+                    f"\n[orchestrator] stage timeout after {timeout_seconds:.3f} seconds; subprocess terminated.\n")
+                log_handle.flush()
+                return 124, log_path
 
     # -- generic stage runner ----------------------------------------------
     def run_stage(self, stage: str, prerequisites: Sequence[str],
@@ -440,7 +449,8 @@ class Orchestrator:
             print("[smoke_check] qc_benchmark input_dir not yet built; skipping that sub-check "
                   "(expected before queue_freeze has run).")
 
-        checks.append(("real_complex_smoke", [
+        smoke_target = smoke_cfg.get("recovery_pilot_pdb_id")
+        smoke_argv = [
             self.venv_python, "run_real_complex_pilot.py",
             "--out-dir", str(smoke_dir / "real_complex"),
             "--targets", str(smoke_cfg.get("recovery_pilot_targets", 1)),
@@ -449,7 +459,10 @@ class Orchestrator:
             "--max-evals", str(smoke_cfg.get("recovery_pilot_max_evals", 12)),
             "--outputs", str(smoke_cfg.get("recovery_pilot_outputs", 20)),
             "--pruning", "contact",  # avoid requiring a trained checkpoint for the smoke check
-        ]))
+        ]
+        if smoke_target:
+            smoke_argv += ["--pdb-id", str(smoke_target)]
+        checks.append(("real_complex_smoke", smoke_argv))
 
         failures = []
         for name, argv in checks:
@@ -867,12 +880,31 @@ class Orchestrator:
             if not results_dir.is_dir():
                 continue
             for budget_mode in cfg.get("budget_modes", ["outputs", "time"]):
+                qc_cfg = self.config["qc_benchmark"]
+                primary_outputs = int(cfg.get("primary_outputs", max(qc_cfg.get("outputs", [1000]))))
+                primary_objective = str(cfg.get("primary_objective", "cvar"))
+                primary_restarts = int(cfg.get("primary_restarts", 4))
+                if primary_outputs not in qc_cfg.get("outputs", []):
+                    failures.append(
+                        f"statistics primary_outputs={primary_outputs} is not present in qc_benchmark.outputs")
+                    continue
+                if primary_objective not in qc_cfg.get("qaoa_objective", []):
+                    failures.append(
+                        f"statistics primary_objective={primary_objective} is not present in qc_benchmark.qaoa_objective")
+                    continue
+                if primary_restarts not in qc_cfg.get("qaoa_restarts", []):
+                    failures.append(
+                        f"statistics primary_restarts={primary_restarts} is not present in qc_benchmark.qaoa_restarts")
+                    continue
                 argv = [
                     self.venv_python, "batch_benchmark_hard_set.py", "--paired-statistics",
                     "--results-dir", str(results_dir),
                     "--resamples", str(cfg.get("resamples", 10000)),
                     "--seed", str(self.config["master_seed"]),
                     "--budget-mode", budget_mode,
+                    "--primary-outputs", str(primary_outputs),
+                    "--primary-objective", primary_objective,
+                    "--primary-restarts", str(primary_restarts),
                     "--max-time-overrun-fraction", str(cfg.get("max_time_overrun_fraction", 0.10)),
                 ]
                 if cfg.get("cluster_map"):
