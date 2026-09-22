@@ -984,6 +984,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                        # "seed": SEED usage below transparently picks up the CLI override.
     if args.max_epochs <= 0 or args.patience <= 0 or args.batch_size <= 0:
         raise ValueError("max-epochs, patience, and batch-size must be positive")
+    if args.hidden_dim <= 0 or not math.isfinite(args.learning_rate) or args.learning_rate <= 0:
+        raise ValueError("hidden-dim and learning-rate must be positive")
+    if not math.isfinite(args.weight_decay) or args.weight_decay < 0:
+        raise ValueError("weight-decay must be finite and nonnegative")
+    if not math.isfinite(args.gradient_clip) or args.gradient_clip <= 0:
+        raise ValueError("gradient-clip must be positive and finite")
     if args.num_workers < 0 or args.threads <= 0:
         raise ValueError("num-workers must be nonnegative and threads must be positive")
     rank, local_rank, world_size, device = _initialize_distributed(args.device)
