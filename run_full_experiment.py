@@ -902,15 +902,11 @@ class Orchestrator:
         # actual `pruning` ("egnn") and the by-then-trained checkpoint.
         vq_cfg = qf_cfg["validation_queue"]
         dev_cfg = qf_cfg["dev_queue"]
+        # Target membership is frozen without any residue-ranking strategy.
+        # --eligibility-only verifies only that enough chemically movable,
+        # Dunbrack/Amber-compatible VHH sites exist. Formal EGNN ranking is
+        # deferred until stage_structure_experiment, after training.
         bootstrap_pruning = vq_cfg.get("eligibility_bootstrap_pruning", "contact")
-        if bootstrap_pruning == "egnn":
-            return StageResult(
-                "queue_freeze", "failed", started, utc_timestamp(), None,
-                "full_experiment_config.yaml queue_freeze.validation_queue.eligibility_bootstrap_pruning "
-                "is 'egnn', but queue_freeze runs before egnn_train (STAGE_ORDER) so no trained checkpoint "
-                "exists yet. The bootstrap eligibility pass must use a checkpoint-free strategy (e.g. "
-                "'contact'); the real 'egnn' protocol in validation_queue.pruning is applied later, "
-                "per-target, in stage_structure_experiment once egnn_train has completed.")
         validation_seed = save_derived_child(streams, "perturb", "validation_queue_selection_order")
         validation_dir = self.run_dir / "validation_queue"
         vq_argv = [
@@ -933,6 +929,7 @@ class Orchestrator:
             "--seeds", str(streams["perturb"]),
             "--master-seed", str(self.config["master_seed"]),
             "--pruning", bootstrap_pruning,
+            "--eligibility-only",
             "--exclude-pdb", *dev_cfg.get("excluded_pdb", []),
             "--dev-exposed-pdb", *dev_cfg.get("excluded_pdb", []),
             "--selection-order", vq_cfg.get("selection_order", "seeded_random"),
