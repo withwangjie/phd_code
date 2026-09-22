@@ -1,5 +1,11 @@
-"""Wait for the current server training run, validate it, then benchmark."""
+"""LEGACY pipeline continuation helper.
+
+This script targets the pre-orchestrator server workflow with fixed historical
+paths/counts. It is intentionally guarded and must never be used accidentally
+for the current formal run_full_experiment.py pipeline.
+"""
 from pathlib import Path
+import argparse
 import csv
 import json
 import os
@@ -9,9 +15,19 @@ import time
 
 ROOT = Path(__file__).resolve().parent
 
-def main():
+def main(argv=None):
+    parser = argparse.ArgumentParser(
+        description="LEGACY pre-orchestrator continuation helper; not for formal runs.")
+    parser.add_argument("--legacy-continue", action="store_true",
+        help="Required acknowledgement that this is the historical pipeline.")
+    parser.add_argument("pid", type=int, help="PID of the historical training process")
+    args = parser.parse_args(argv)
+    if not args.legacy_continue:
+        parser.error(
+            "Refusing to run legacy pipeline without --legacy-continue. "
+            "Use run_full_experiment.py for the current formal workflow.")
     os.chdir(ROOT)
-    pid = int(sys.argv[1])
+    pid = args.pid
     status = ROOT / 'logs/server_pipeline_status.json'
     def record(stage, **details):
         payload = dict(stage=stage, time=time.strftime('%Y-%m-%dT%H:%M:%S%z'), **details)
