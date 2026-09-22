@@ -319,3 +319,28 @@ def test_run_summary_requires_global_results_audit(tmp_path: Path) -> None:
     summary=json.loads((run/"RUN_SUMMARY.json").read_text(encoding="utf-8"))
     assert summary["status"]=="failed"
     assert summary["results_audit_ok"] is False
+
+
+
+def test_results_contract_is_frozen_and_archived() -> None:
+    manifest_source=inspect.getsource(full.build_run_manifest)
+    assert "results_contract_sha256" in manifest_source
+    launcher=Path("run_full_experiment.sh").read_text(encoding="utf-8")
+    assert "provenance/RESULTS_CONTRACT.md" in launcher
+    contract=Path("RESULTS_CONTRACT.md").read_text(encoding="utf-8")
+    for token in (
+        "qc_benchmark/metrics.csv",
+        "sensitivity_summary.csv",
+        "real_complex_metrics.csv",
+        "external_baseline_metrics.csv",
+        "structure_statistics.json",
+        "EXPERIMENT_RESULTS_AUDIT.json",
+    ):
+        assert token in contract
+
+
+def test_structure_contract_requires_per_target_recovery_outputs() -> None:
+    source=inspect.getsource(full.Orchestrator._validate_completed_stage_artifacts)
+    assert 'target/"run_manifest.json"' in source
+    assert 'target/"recovery_metrics.csv"' in source
+    assert 'target/"recovery_report.md"' in source
