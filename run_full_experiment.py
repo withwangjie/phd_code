@@ -340,13 +340,20 @@ def _validate_scientific_config(config: Dict[str, Any]) -> None:
             f"Primary QAOA depth mismatch: qc_benchmark={qc_depths[0]}, "
             f"structure_experiment={structure_depth}"
         )
-    qc_sites = int(qc.get("active_sites", 6))
-    validation_sites = int(validation.get("sites", 6))
-    if not 5 <= qc_sites <= 8:
-        raise ValueError("qc_benchmark.active_sites must be in 5..8")
-    if validation_sites != qc_sites:
+    qc_sites=[int(v) for v in qc.get("active_sites",[6])]
+    if not qc_sites or len(qc_sites)!=len(set(qc_sites)) or any(v<4 or v>10 for v in qc_sites):
+        raise ValueError("qc_benchmark.active_sites must contain unique integers in 4..10")
+    stats_primary_sites=int(stats.get("primary_active_sites",6))
+    if stats_primary_sites not in qc_sites:
         raise ValueError(
-            f"Formal active-site count must match: qc_benchmark={qc_sites}, validation_queue={validation_sites}"
+            f"statistics.primary_active_sites={stats_primary_sites} must be present in "
+            f"qc_benchmark.active_sites={qc_sites}")
+    validation_sites = int(validation.get("sites", 6))
+    if validation_sites != stats_primary_sites:
+        raise ValueError(
+            f"Formal structural active-site count must match the primary confirmatory size: "
+            f"statistics.primary_active_sites={stats_primary_sites}, "
+            f"validation_queue={validation_sites}"
         )
 
     ff = qc.get("coarse_force_field", {}) or {}
@@ -1488,7 +1495,8 @@ class Orchestrator:
                     "--radii",str(qc.get("radii",[6.0])[0]),
                     "--depths",*[str(v) for v in cfg.get("depths",[1,2,3])],
                     "--max-evals",*[str(v) for v in cfg.get("max_evals",[90,180,300])],
-                    "--active-sites",str(qc.get("active_sites",6)),
+                    "--active-sites",str(cfg.get("active_sites",
+                        self.config.get("statistics",{}).get("primary_active_sites",6))),
                     "--vhh-identity-threshold",str(homology.get("vhh_full_chain_identity",0.80)),
                     "--cdr-h3-identity-threshold",str(homology.get("cdr_h3_identity",0.50)),
                     "--antigen-identity-threshold",str(homology.get("antigen_identity",0.30)),
@@ -1579,7 +1587,7 @@ class Orchestrator:
             "--radii", *[str(r) for r in cfg.get("radii", [6.0, 10.0])],
             "--depths", *[str(d) for d in cfg.get("depths", [1, 2, 3])],
             "--max-evals", *[str(m) for m in cfg.get("max_evals", [90, 300])],
-            "--active-sites", str(cfg.get("active_sites", 6)),
+            "--active-sites", *[str(v) for v in cfg.get("active_sites", [6])],
             "--vhh-identity-threshold", str(self.config["queue_freeze"]["homology_isolation"].get("vhh_full_chain_identity", 0.80)),
             "--cdr-h3-identity-threshold", str(self.config["queue_freeze"]["homology_isolation"].get("cdr_h3_identity", 0.50)),
             "--antigen-identity-threshold", str(self.config["queue_freeze"]["homology_isolation"].get("antigen_identity", 0.30)),
@@ -2095,7 +2103,8 @@ class Orchestrator:
                     "--pruning","egnn","--radii",str(qc.get("radii",[6.0])[0]),
                     "--depths",str(qc.get("depths",[2])[0]),
                     "--max-evals",str(qc.get("max_evals",[90])[0]),
-                    "--active-sites",str(qc.get("active_sites",6)),
+                    "--active-sites",str(
+                        self.config.get("statistics",{}).get("primary_active_sites",6)),
                     "--vhh-identity-threshold",str(homology.get("vhh_full_chain_identity",0.80)),
                     "--cdr-h3-identity-threshold",str(homology.get("cdr_h3_identity",0.50)),
                     "--antigen-identity-threshold",str(homology.get("antigen_identity",0.30)),
@@ -2162,6 +2171,8 @@ class Orchestrator:
                                 "--primary-outputs","1000",
                                 "--primary-objective","cvar",
                                 "--primary-restarts","4",
+                                "--primary-active-sites",str(
+                                    self.config.get("statistics",{}).get("primary_active_sites",6)),
                             ]
                             stats_rc,stats_log=self._run_subprocess("external_vhh_statistics",stats_argv)
                             logs.append(str(stats_log));argvs.append(stats_argv)
@@ -2242,6 +2253,11 @@ class Orchestrator:
         primary_outputs = int(cfg.get("primary_outputs", max(qc_cfg.get("outputs", [1000]))))
         primary_objective = str(cfg.get("primary_objective", "cvar"))
         primary_restarts = int(cfg.get("primary_restarts", 4))
+        primary_active_sites = int(cfg.get("primary_active_sites", 6))
+        if primary_active_sites not in [int(v) for v in qc_cfg.get("active_sites",[6])]:
+            failures.append(
+                f"statistics primary_active_sites={primary_active_sites} is not present in "
+                f"qc_benchmark.active_sites")
         if primary_outputs not in qc_cfg.get("outputs", []):
             failures.append(
                 f"statistics primary_outputs={primary_outputs} is not present in qc_benchmark.outputs")
@@ -2267,6 +2283,7 @@ class Orchestrator:
                     "--primary-outputs", str(primary_outputs),
                     "--primary-objective", primary_objective,
                     "--primary-restarts", str(primary_restarts),
+                    "--primary-active-sites", str(primary_active_sites),
                     "--max-time-overrun-fraction", str(cfg.get("max_time_overrun_fraction", 0.10)),
                 ]
                 cluster_setting = cfg.get("cluster_map") or (
