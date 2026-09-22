@@ -481,6 +481,27 @@ def section_search_performance(ctx: ReportContext) -> List[str]:
         "quantum-classical performance changes with QUBO/problem size; they are not pooled into the primary test."
     )
     lines.append("")
+    scaling_stats=_read_json(ctx.run_dir/"statistics"/"quantum_scaling_statistics.json") or {}
+    if scaling_stats:
+        primary_scaling=scaling_stats.get("primary",{}) or {}
+        lines.append(
+            f"Formal scaling inference uses `{scaling_stats.get('primary_predictor')}` as the primary "
+            f"complexity axis and `{scaling_stats.get('primary_response')}` as the response. "
+            f"Independent clusters={primary_scaling.get('n_clusters')}; "
+            f"mean within-PDB/cluster slope={_fmt(primary_scaling.get('mean_slope'))}; "
+            f"95% cluster-bootstrap CI=[{_fmt(primary_scaling.get('ci_low'))}, "
+            f"{_fmt(primary_scaling.get('ci_high'))}]; "
+            f"sign-flip p={_fmt(primary_scaling.get('p_value'))}."
+        )
+        lines.append(
+            "Negative slope means the QAOA-minus-classical energy-gap difference becomes more favorable "
+            "to QAOA as the feasible configuration space grows. This is a fixed-p=2 simulator-level "
+            "algorithmic scaling test, not a hardware quantum-speedup claim."
+        )
+        lines.append("")
+    elif stage_ok(ctx,"statistics"):
+        lines.append("Formal scaling statistics are missing or unreadable despite a completed statistics stage.")
+        lines.append("")
 
     lines.append("### 3.3 QAOA objective/restart ablation at the primary size (mean vs. CVaR, single- vs. multi-start)")
     lines.append("")
@@ -506,7 +527,28 @@ def section_search_performance(ctx: ReportContext) -> List[str]:
                   "reported above as `converged`; the raw `termination_reason` distribution is shown as-is.")
     lines.append("")
 
-    lines.append("### 3.4 Frozen primary paired inference")
+    lines.append("### 3.4 Development-only QAOA hyperparameter sensitivity")
+    lines.append("")
+    sensitivity_rows=_read_csv_rows(ctx.run_dir/"method_sensitivity"/"sensitivity_summary.csv")
+    if sensitivity_rows:
+        lines.append(
+            "This table is development-only and preserves the depth, evaluation-budget, measurement-shot, "
+            "and CVaR-alpha axes separately; validation/test results are not used to choose these settings."
+        )
+        lines.append("")
+        lines.append("| Sites | p | Max evals | Eval shots | CVaR alpha | Rows | Mean hit | Mean gap |")
+        lines.append("|---:|---:|---:|---:|---:|---:|---:|---:|")
+        for row in sensitivity_rows:
+            lines.append(
+                f"| {row.get('active_sites')} | {row.get('depth')} | {row.get('max_evals')} | "
+                f"{row.get('eval_shots')} | {row.get('cvar_alpha')} | {row.get('rows')} | "
+                f"{_fmt(row.get('mean_hit'))} | {_fmt(row.get('mean_gap'))} |"
+            )
+    else:
+        lines.append("No completed development-only sensitivity aggregate was found.")
+    lines.append("")
+
+    lines.append("### 3.5 Frozen primary paired inference")
     lines.append("")
     if not stage_ok(ctx, "statistics"):
         lines.append("Statistics stage did not complete; no formal paired inference is reported.")
