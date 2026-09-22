@@ -464,6 +464,34 @@ def save_graph(row, split, output, pair=None, cluster_id=''):
 def exclusion(row,reasons):
     return dict(source_id=row['id'],pdb_id=row.get('pdb_id',''),subset_source=row['subset'],reasons=';'.join(reasons))
 
+
+def layered_graph_homology(left: Data, right: Data) -> dict:
+    """Return cross-complex similarities under the formal layered protocol."""
+
+    left_vhh=tuple(str(s) for s in getattr(left,'vhh_sequences',[]) if str(s))
+    right_vhh=tuple(str(s) for s in getattr(right,'vhh_sequences',[]) if str(s))
+    left_ag=tuple(str(s) for s in getattr(left,'antigen_sequences',[]) if str(s))
+    right_ag=tuple(str(s) for s in getattr(right,'antigen_sequences',[]) if str(s))
+    left_cdr=str(getattr(left,'cdr3_seq','') or '')
+    right_cdr=str(getattr(right,'cdr3_seq','') or '')
+    vhh=side_identity(left_vhh,right_vhh)
+    cdr_id=global_identity(left_cdr,right_cdr) if left_cdr and right_cdr else 0.0
+    antigen=side_identity(left_ag,right_ag,min_length_coverage=ANTIGEN_MIN_LENGTH_COVERAGE)
+    return dict(
+        vhh_identity=float(vhh),
+        cdr_h3_identity=float(cdr_id),
+        antigen_identity=float(antigen),
+        violates_vhh=bool(vhh>=VHH_IDENTITY_THRESHOLD),
+        violates_cdr_h3=bool(cdr_id>=CDR_H3_IDENTITY_THRESHOLD),
+        violates_antigen=bool(antigen>=ANTIGEN_IDENTITY_THRESHOLD),
+    )
+
+
+def layered_graph_homologous(left: Data, right: Data) -> tuple[bool,dict]:
+    detail=layered_graph_homology(left,right)
+    return bool(detail['violates_vhh'] or detail['violates_cdr_h3'] or detail['violates_antigen']),detail
+
+
 def delivery_report(output,manifest,exclusions,failures,summary,complete):
     totalbytes=sum(r['bytes'] for r in manifest)
     lines=['# PyG 图数据集交付报告','',f'生成时间：{time.strftime("%Y-%m-%d %H:%M:%S")}；状态：'+('完成并通过交付检查。' if complete else '未完成；请查看异常与运行摘要。'),'',
@@ -628,6 +656,46 @@ def main():
         if args.no_cap:
             if not chosen:raise ValueError('No valid independent challenge graphs found in the qualifying pool (--no-cap)')
         elif len(chosen)!=args.target_hard:raise ValueError(f'Only {len(chosen)} valid independent challenge graphs; requested {args.target_hard}')
+
+        # Final graph-level hard-set de-redundancy under the SAME layered
+        # VHH/CDR-H3/antigen protocol later used for train/test isolation.
+        hard_records=[r for r in manifest if r['split']=='test_snac_hard']
+        kept_hard_records=[]; kept_hard_graphs=[]; removed_hard_ids=set()
+        hard_pair_max=dict(vhh_identity=0.0,cdr_h3_identity=0.0,antigen_identity=0.0)
+        for record in hard_records:
+            graph=torch.load(output/record['path'],map_location='cpu',weights_only=False)
+            violation=None
+            for other_record,other_graph in zip(kept_hard_records,kept_hard_graphs):
+                homologous,detail=layered_graph_homologous(graph,other_graph)
+                for key in hard_pair_max:
+                    hard_pair_max[key]=max(hard_pair_max[key],float(detail[key]))
+                if homologous:
+                    violation=(other_record,detail)
+                    break
+            if violation is None:
+                kept_hard_records.append(record);kept_hard_graphs.append(graph)
+            else:
+                other_record,detail=violation
+                (output/record['path']).unlink(missing_ok=True)
+                removed_hard_ids.add(record['source_id'])
+                source=next((row for row in chosen if row['id']==record['source_id']),
+                            dict(id=record['source_id'],pdb_id=record['pdb_id'],subset=record['subset_source']))
+                reasons=[]
+                if detail['violates_vhh']: reasons.append('vhh_full_chain_overlap_snac_hard')
+                if detail['violates_cdr_h3']: reasons.append('cdr3_overlap_snac_hard_threshold')
+                if detail['violates_antigen']: reasons.append('antigen_overlap_snac_hard')
+                exclusions.append(exclusion(source,reasons))
+        if removed_hard_ids:
+            manifest[:]=[r for r in manifest if not (r['split']=='test_snac_hard' and r['source_id'] in removed_hard_ids)]
+            chosen=[row for row in chosen if row['id'] not in removed_hard_ids]
+            used_ids.difference_update(removed_hard_ids)
+        if not chosen:
+            raise ValueError('Layered homology filtering removed every SNAC hard target')
+        if not args.no_cap and len(chosen)!=args.target_hard:
+            raise ValueError(
+                f'Layered VHH/CDR-H3/antigen filtering retained {len(chosen)} hard targets, '
+                f'below requested {args.target_hard}; use --no-cap or rebuild with a new pre-frozen target count'
+            )
         hardseqs=[cdr(r) for r in chosen];hardids={r['pdb_id'].upper() for r in chosen}
         train=[];known_train_cdr={}
         for r in pool:
@@ -646,7 +714,40 @@ def main():
                 if record:manifest.append(record)
                 if error:failures.append(error)
                 if i%200==0:print(f'Train {i}/{len(train)}, elapsed {time.time()-start:.0f}s',flush=True)
+        hard_records=[r for r in manifest if r['split']=='test_snac_hard']
+        hard_graphs=[torch.load(output/r['path'],map_location='cpu',weights_only=False) for r in hard_records]
         train_records=[r for r in manifest if r['split']=='train']
+        retained_train=[]; removed_train=set()
+        cross_max=dict(vhh_identity=0.0,cdr_h3_identity=0.0,antigen_identity=0.0)
+        for record in train_records:
+            graph=torch.load(output/record['path'],map_location='cpu',weights_only=False)
+            violation_details=[]
+            for hard_record,hard_graph in zip(hard_records,hard_graphs):
+                homologous,detail=layered_graph_homologous(graph,hard_graph)
+                for key in cross_max:
+                    cross_max[key]=max(cross_max[key],float(detail[key]))
+                if homologous:
+                    violation_details.append((hard_record,detail))
+            if violation_details:
+                reasons=set()
+                for _,detail in violation_details:
+                    if detail['violates_vhh']: reasons.add('vhh_full_chain_overlap_snac_hard')
+                    if detail['violates_cdr_h3']: reasons.add('cdr3_overlap_snac_hard_threshold')
+                    if detail['violates_antigen']: reasons.add('antigen_overlap_snac_hard')
+                source=next((row for row in train if row['id']==record['source_id']),
+                            dict(id=record['source_id'],pdb_id=record['pdb_id'],subset=record['subset_source']))
+                exclusions.append(exclusion(source,sorted(reasons)))
+                (output/record['path']).unlink(missing_ok=True)
+                removed_train.add(record['source_id'])
+            else:
+                retained_train.append(record)
+        if removed_train:
+            manifest[:]=[r for r in manifest if not (r['split']=='train' and r['source_id'] in removed_train)]
+            for source_id in removed_train:
+                known_train_cdr.pop(source_id,None)
+        train_records=retained_train
+        if not train_records:
+            raise ValueError('Layered train/test homology isolation removed every training graph')
         assert not ({r['pdb_id'] for r in train_records}&(dbids|hardids))
         assert not (dbids&hardids)
         maxhard=max(seqsim(s,t) for s,t in itertools.combinations(hardseqs,2))
@@ -659,7 +760,10 @@ def main():
             sample_rows=[r for r in manifest if r['split']==split][:2]
             sample=[torch.load(output/r['path'],weights_only=False,map_location='cpu') for r in sample_rows]
             batched=Batch.from_data_list(sample);assert batched.num_nodes==sum(g.num_nodes for g in sample)
-        summary.update(validation=dict(all_graphs_read_back=True,db55_count_248=True,pdb_split_overlap=0,hard_max_pair_identity=maxhard,known_train_hard_max_identity=maxtrain,pyg_batch=True),known_train_cdr=known_train_cdr)
+        summary.update(validation=dict(all_graphs_read_back=True,db55_count_248=True,pdb_split_overlap=0,
+            hard_max_pair_identity=maxhard,known_train_hard_max_identity=maxtrain,
+            hard_layered_pair_max=hard_pair_max,train_hard_layered_cross_max=cross_max,
+            layered_train_hard_isolation=True,pyg_batch=True),known_train_cdr=known_train_cdr)
         cluster_output=[dict(cluster_id=cl['cluster_id'],representative=cl['representative'],sequences=cl['sequences'],source_ids=[r['id'] for r in cl['members']],selected=any(r['cluster_id']==cl['cluster_id'] for r in manifest)) for cl in clusters]
         (output/'cdr3_clusters.json').write_text(json.dumps(cluster_output,ensure_ascii=False,indent=2),encoding='utf-8')
         complete=True
