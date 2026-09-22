@@ -1031,11 +1031,25 @@ class Orchestrator:
                 "energy_calibration", "failed", started, utc_timestamp(), None,
                 f"Required Dunbrack library missing: {rotamer_library}",
             )
+        if cal_cfg.get("selection_mode","egnn")=="egnn":
+            checkpoint=self.checkpoint_dir()/qc_cfg.get("checkpoint","best_egnn_pruning.pt")
+            if not checkpoint.is_file():
+                return StageResult(
+                    "energy_calibration","failed",started,utc_timestamp(),None,
+                    f"EGNN-selected calibration requires trained checkpoint: {checkpoint}",
+                )
         argv = [
             self.venv_python, "generate_energy_calibration_dataset.py",
             "--dataset", str(self.dataset_dir()),
             "--data-root", str(resolve_path(self.config, self.config["paths"]["data_root"])),
             "--rotamer-library", str(rotamer_library),
+            "--selection-mode", str(cal_cfg.get("selection_mode","egnn")),
+            "--checkpoint", str(self.checkpoint_dir()/qc_cfg.get("checkpoint","best_egnn_pruning.pt")),
+            "--vhh-identity-threshold", str(self.config["queue_freeze"]["homology_isolation"].get("vhh_full_chain_identity",0.80)),
+            "--cdr-h3-identity-threshold", str(self.config["queue_freeze"]["homology_isolation"].get("cdr_h3_identity",0.50)),
+            "--antigen-identity-threshold", str(self.config["queue_freeze"]["homology_isolation"].get("antigen_identity",0.30)),
+            "--antigen-min-length-coverage", str(self.config["queue_freeze"]["homology_isolation"].get("antigen_min_length_coverage",0.70)),
+            "--antigen-guidance-weight", str(qc_cfg.get("antigen_guidance_weight",0.25)),
             "--out-csv", str(training_csv),
             "--out-provenance", str(provenance),
             "--assignments-per-complex", str(cal_cfg.get("assignments_per_complex", 64)),
@@ -1914,7 +1928,7 @@ class Orchestrator:
         results["queue_freeze"] = self.run_stage("queue_freeze", ["data_audit"], self.stage_queue_freeze)
         results["egnn_train"] = self.run_stage("egnn_train", ["queue_freeze"], self.stage_egnn_train)
         results["energy_calibration"] = self.run_stage(
-            "energy_calibration", ["queue_freeze"], self.stage_energy_calibration)
+            "energy_calibration", ["queue_freeze", "egnn_train"], self.stage_energy_calibration)
         results["method_sensitivity"] = self.run_stage(
             "method_sensitivity", ["egnn_train", "energy_calibration"], self.stage_method_sensitivity)
         results["qc_benchmark"] = self.run_stage(
