@@ -58,6 +58,34 @@ def phenix_clashscore(executable: Path, structure: Path) -> float:
     raise ValueError("Could not parse Phenix clashscore output")
 
 
+def evaluated_row(
+    *, target: str, seed: str, method: str, reference: Path, prediction: Path,
+    active: list[str], alignment: list[str], partners: list[str],
+    phenix_executable: Path | None,
+) -> dict:
+    metrics=evaluate_atomistic_prediction(
+        reference,prediction,
+        active_residues=active,
+        alignment_residues=alignment,
+        partner_residues=partners,
+    )
+    row=dict(
+        target=target,seed=seed,method=method,
+        final_rmsd=metrics["sidechain_rmsd_angstrom"],
+        chi1_recovery=metrics["chi1_recovery_rate"],
+        all_chi_recovery=metrics.get("all_chi_recovery_rate"),
+        chi_recovery_rates=json.dumps(metrics.get("chi_recovery_rates",{}),sort_keys=True),
+        contact_f1=metrics.get("contact_f1"),
+        fnat=metrics["fnat"],irmsd=metrics.get("irmsd"),lrmsd=metrics.get("lrmsd"),
+        num_severe_clashes=metrics["num_severe_clashes"],
+        prediction_sha256=sha256(prediction),
+    )
+    if phenix_executable is not None:
+        row["molprobity_clashscore"]=phenix_clashscore(phenix_executable,prediction)
+        row["phenix_executable_sha256"]=sha256(phenix_executable)
+    return row
+
+
 def main() -> int:
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--validation-dir",type=Path,required=True)
@@ -107,30 +135,34 @@ def main() -> int:
                 )
                 if not prediction_pdb.is_file() or prediction_pdb.stat().st_size==0:
                     raise RuntimeError("FASPR did not produce a nonempty prediction")
-                metrics=evaluate_atomistic_prediction(
-                    native,prediction_pdb,
-                    active_residues=active,
-                    alignment_residues=alignment,
-                    partner_residues=partners,
-                )
-                row=dict(
+                row=evaluated_row(
                     target=target,seed=seed,method="faspr",
-                    final_rmsd=metrics["sidechain_rmsd_angstrom"],
-                    chi1_recovery=metrics["chi1_recovery_rate"],
-                    all_chi_recovery=metrics.get("all_chi_recovery_rate"),
-                    chi_recovery_rates=json.dumps(metrics.get("chi_recovery_rates",{}),sort_keys=True),
-                    contact_f1=metrics.get("contact_f1"),
-                    fnat=metrics["fnat"],irmsd=metrics.get("irmsd"),
-                    lrmsd=metrics.get("lrmsd"),
-                    num_severe_clashes=metrics["num_severe_clashes"],
-                    prediction_sha256=sha256(prediction_pdb),
-                    faspr_executable_sha256=sha256(args.faspr),
+                    reference=native,prediction=prediction_pdb,
+                    active=active,alignment=alignment,partners=partners,
+                    phenix_executable=args.phenix_clashscore,
                 )
-                if args.phenix_clashscore is not None:
-                    row["molprobity_clashscore"]=phenix_clashscore(
-                        args.phenix_clashscore,prediction_pdb)
-                    row["phenix_executable_sha256"]=sha256(args.phenix_clashscore)
+                row["faspr_executable_sha256"]=sha256(args.faspr)
                 rows.append(row)
+
+                # Apply the same evaluator and standard clashscore to the
+                # internal methods' final relaxed structures. These rows are
+                # not a matched-compute baseline; they provide a common
+                # structural-quality scale across all reconstruction methods.
+                experiment_dir=seed_dir/"experiment"
+                for internal_method in ("qaoa","sa","uniform","greedy"):
+                    internal=experiment_dir/f"{internal_method}_relaxed.cif"
+                    if not internal.is_file():
+                        raise RuntimeError(
+                            f"Missing final relaxed structure for {internal_method}: {internal}"
+                        )
+                    internal_pdb=out_case/f"{internal_method}_relaxed.pdb"
+                    cif_to_pdb(internal,internal_pdb)
+                    rows.append(evaluated_row(
+                        target=target,seed=seed,method=internal_method,
+                        reference=native,prediction=internal_pdb,
+                        active=active,alignment=alignment,partners=partners,
+                        phenix_executable=args.phenix_clashscore,
+                    ))
             except Exception as exc:
                 failures.append(dict(target=target,seed=seed,error=f"{type(exc).__name__}: {exc}"))
 
@@ -140,7 +172,7 @@ def main() -> int:
     with (args.out_dir/"external_baseline_metrics.csv").open("w",newline="",encoding="utf-8") as handle:
         writer=csv.DictWriter(handle,fieldnames=fields);writer.writeheader();writer.writerows(rows)
     provenance=dict(
-        scope="frozen validation structural baseline; not matched-compute QAOA comparison",
+        scope="frozen validation structural-quality benchmark: FASPR plus common evaluation/clashscore for internal methods; FASPR is not a matched-compute solver baseline",
         faspr=str(args.faspr),faspr_sha256=sha256(args.faspr),
         phenix_clashscore=(None if args.phenix_clashscore is None else str(args.phenix_clashscore)),
         failures=failures,rows=len(rows),targets=len({r["target"] for r in rows}),
