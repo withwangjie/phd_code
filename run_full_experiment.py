@@ -1801,6 +1801,46 @@ class Orchestrator:
                         failures.append(
                             f"External VHH benchmark has {external_summary.get('failures_total')} failed cases"
                         )
+                    if not failures:
+                        cluster_setting=(
+                            (self.config["queue_freeze"].get("independence_clustering", {}) or {}).get("cluster_map")
+                        )
+                        cluster_path=resolve_path(self.config,cluster_setting) if cluster_setting else None
+                        if cluster_path is None or not cluster_path.is_file():
+                            failures.append("External paired statistics require frozen family/structure cluster map")
+                        else:
+                            stats_argv=[
+                                self.venv_python,"batch_benchmark_hard_set.py","--paired-statistics",
+                                "--results-dir",str(out),
+                                "--resamples",str(self.config.get("statistics",{}).get("resamples",10000)),
+                                "--seed",str(self.config["master_seed"]),
+                                "--cluster-map",str(cluster_path),
+                                "--budget-mode","outputs",
+                                "--primary-outputs","1000",
+                                "--primary-objective","cvar",
+                                "--primary-restarts","4",
+                            ]
+                            stats_rc,stats_log=self._run_subprocess("external_vhh_statistics",stats_argv)
+                            logs.append(str(stats_log));argvs.append(stats_argv)
+                            stats_json=out/"statistics_outputs.json"
+                            if stats_rc!=0 or not stats_json.is_file():
+                                failures.append(
+                                    f"External VHH paired statistics failed (exit={stats_rc}; see {stats_log})"
+                                )
+                            else:
+                                stats_payload=json.loads(stats_json.read_text(encoding="utf-8"))
+                                sa_gap=next(
+                                    (e for e in stats_payload.get("effects",[])
+                                     if e.get("baseline")=="sa" and e.get("metric")=="gap"),
+                                    None,
+                                )
+                                observed_clusters=0 if sa_gap is None else int(sa_gap.get("n_clusters",0) or 0)
+                                required_clusters=int(ext.get("min_clusters",10))
+                                if observed_clusters < required_clusters:
+                                    failures.append(
+                                        f"External VHH QAOA-vs-SA gap contrast has {observed_clusters} "
+                                        f"independent clusters; requires >= {required_clusters}"
+                                    )
 
         structural=cfg.get("structural_baselines", {}) or {}
         if structural.get("required", False):
