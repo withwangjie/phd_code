@@ -2137,7 +2137,7 @@ class AllAtomInterfaceQUBOBuilder:
             residue=residue_lookup[rid]
             atoms={a.name:a.index for a in residue.atoms()}
             target_tuple=tuple(float(v) for v in targets)
-            expected=len(_CHI_DEFINITIONS.get(residue.name, ()))
+            expected=len(_CHI_ATOMS.get(residue.name, ()))
             if expected == 0 or len(target_tuple) != expected:
                 raise ValueError(
                     f"{rid} expects {expected} chi angles, received {len(target_tuple)}"
