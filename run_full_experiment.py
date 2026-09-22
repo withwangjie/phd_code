@@ -345,6 +345,11 @@ def _validate_scientific_config(config: Dict[str, Any]) -> None:
     qc_sites=[int(v) for v in qc.get("active_sites",[6])]
     if not qc_sites or len(qc_sites)!=len(set(qc_sites)) or any(v<4 or v>10 for v in qc_sites):
         raise ValueError("qc_benchmark.active_sites must contain unique integers in 4..10")
+    primary_pruning=str(stats.get("primary_pruning","egnn"))
+    if primary_pruning not in [str(v) for v in qc.get("pruning",["egnn"])]:
+        raise ValueError(
+            f"statistics.primary_pruning={primary_pruning!r} must be present in "
+            f"qc_benchmark.pruning={qc.get('pruning')}")
     stats_primary_sites=int(stats.get("primary_active_sites",6))
     if stats_primary_sites not in qc_sites:
         raise ValueError(
@@ -2522,6 +2527,8 @@ class Orchestrator:
                                 "--seed",str(self.config["master_seed"]),
                                 "--cluster-map",str(cluster_path),
                                 "--budget-mode","outputs",
+                                "--primary-pruning",str(
+                                    self.config.get("statistics",{}).get("primary_pruning","egnn")),
                                 "--primary-outputs","1000",
                                 "--primary-objective","cvar",
                                 "--primary-restarts","4",
@@ -2623,6 +2630,7 @@ class Orchestrator:
         results_dirs = [self.run_dir / "qc_benchmark"]
         logs, argvs, failures = [], [], []
         qc_cfg = self.config["qc_benchmark"]
+        primary_pruning = str(cfg.get("primary_pruning","egnn"))
         primary_outputs = int(cfg.get("primary_outputs", max(qc_cfg.get("outputs", [1000]))))
         primary_objective = str(cfg.get("primary_objective", "cvar"))
         primary_restarts = int(cfg.get("primary_restarts", 4))
@@ -2653,6 +2661,7 @@ class Orchestrator:
                     "--resamples", str(cfg.get("resamples", 10000)),
                     "--seed", str(self.config["master_seed"]),
                     "--budget-mode", budget_mode,
+                    "--primary-pruning", primary_pruning,
                     "--primary-outputs", str(primary_outputs),
                     "--primary-objective", primary_objective,
                     "--primary-restarts", str(primary_restarts),
