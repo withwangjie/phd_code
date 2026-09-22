@@ -1411,19 +1411,21 @@ class InterfaceQUBOBuilder:
         if not self.min_variables <= variable_count <= self.max_variables:
             raise RuntimeError(f"Produced invalid QUBO dimension {variable_count}")
         cal=self.energy_calibration
-        physical_self = np.asarray([
-            cal.prior_weight*state.prior_energy
-            + cal.vhh_environment_weight*state.environment_energy
-            + cal.antigen_weight*state.antigen_guidance_energy
-            for state in rotamers
-        ],dtype=np.float64)
-        physical_pair = np.zeros((variable_count, variable_count), dtype=np.float64)
+        raw_prior = np.asarray([state.prior_energy for state in rotamers],dtype=np.float64)
+        raw_vhh_environment = np.asarray([state.environment_energy for state in rotamers],dtype=np.float64)
+        raw_antigen = np.asarray([state.antigen_guidance_energy for state in rotamers],dtype=np.float64)
+        physical_self = (
+            cal.prior_weight*raw_prior
+            + cal.vhh_environment_weight*raw_vhh_environment
+            + cal.antigen_weight*raw_antigen
+        )
+        raw_pair = np.zeros((variable_count, variable_count), dtype=np.float64)
         for left in range(variable_count):
             for right in range(left + 1, variable_count):
                 if rotamers[left].site_index == rotamers[right].site_index:
                     continue
                 a, b = rotamers[left], rotamers[right]
-                physical_pair[left, right] = cal.pair_weight * _nonbonded_energy(
+                raw_pair[left, right] = _nonbonded_energy(
                     a.positions,
                     a.sigma,
                     a.epsilon,
@@ -1434,6 +1436,7 @@ class InterfaceQUBOBuilder:
                     b.charges,
                     self.force_field,
                 )
+        physical_pair = cal.pair_weight * raw_pair
 
         lambda_lower_bound = self._lambda_lower_bound(
             physical_self, physical_pair, site_to_variables
@@ -1506,7 +1509,11 @@ class InterfaceQUBOBuilder:
             "rotamer_probability_floor": self.rotamer_probability_floor,
             "rotamer_sigma_offsets": list(self.rotamer_sigma_offsets),
             "energy_calibration": asdict(cal),
-            "antigen_guidance_energy": [float(state.antigen_guidance_energy) for state in rotamers],
+            "raw_prior_energy": raw_prior.tolist(),
+            "raw_vhh_environment_energy": raw_vhh_environment.tolist(),
+            "raw_antigen_energy": raw_antigen.tolist(),
+            "raw_pair_energy_upper": raw_pair.tolist(),
+            "antigen_guidance_energy": raw_antigen.tolist(),
             "variable_count": variable_count,
             "active_residue_count": int(active_mask.sum()),
             "frozen_environment_count": int(frozen_mask.sum()),
