@@ -305,12 +305,14 @@ def extract_top_interface_subgraph(
     min_active: int = 5,
     max_active: int = 15,
     environment_radius: float = 6.0,
+    antigen_guidance_weight: float = 0.25,
 ) -> Data:
     """Adaptively select active VHH residues and their frozen microenvironment.
 
-    VHH/group-0 residues with predicted probability at least the threshold are
-    active. Fewer than ``min_active`` candidates triggers a top-score fallback;
-    more than ``max_active`` candidates are truncated by score. Every non-active
+    VHH/group-0 residues are ranked by EGNN probability plus a label-free
+    nearest-antigen proximity prior. Fewer than ``min_active`` candidates triggers
+    a top-score fallback; more than ``max_active`` candidates are truncated by
+    the composite score. Every non-active
     residue whose CA lies within ``environment_radius`` Angstrom (inclusive) of
     an active residue is retained as a frozen environment node.
 
@@ -330,6 +332,7 @@ def extract_top_interface_subgraph(
         min_active: Minimum active count, filled by top scores if necessary.
         max_active: Maximum active count, truncated by top scores if necessary.
         environment_radius: Inclusive CA cutoff for frozen surroundings.
+        antigen_guidance_weight: Weight in [0,1] for nearest-antigen proximity.
 
     Returns:
         A node-induced ``Data`` containing disjoint active and frozen masks.
@@ -343,6 +346,8 @@ def extract_top_interface_subgraph(
         raise ValueError("max_active cannot exceed 15 under the 30-bit budget")
     if environment_radius <= 0:
         raise ValueError("environment_radius must be positive")
+    if not 0.0 <= antigen_guidance_weight <= 1.0:
+        raise ValueError("antigen_guidance_weight must be in [0, 1]")
     if not hasattr(data, "x") or not hasattr(data, "pos") or not hasattr(data, "edge_index"):
         raise ValueError("data must contain x, pos, and edge_index")
     if data.x.ndim != 2 or data.x.size(-1) != model.input_dim:
@@ -383,8 +388,11 @@ def extract_top_interface_subgraph(
         raise ValueError("data.x[:, -1] must contain only binary 0/1 partner labels")
 
     vhh_indices = torch.nonzero(vhh_mask, as_tuple=False).flatten()
+    antigen_indices = torch.nonzero(~vhh_mask, as_tuple=False).flatten()
     if vhh_indices.numel() == 0:
         raise ValueError("graph contains no VHH/group-0 nodes")
+    if antigen_indices.numel() == 0:
+        raise ValueError("graph contains no antigen/group-1 nodes")
     available = int(vhh_indices.numel())
     if available < min_active:
         raise ValueError(
@@ -392,9 +400,17 @@ def extract_top_interface_subgraph(
         )
     required_minimum = min_active
     permitted_maximum = min(max_active, available)
-    vhh_scores = probabilities[vhh_indices]
+    vhh_probabilities = probabilities[vhh_indices]
+    nearest_antigen = torch.cdist(
+        data.pos[vhh_indices], data.pos[antigen_indices]
+    ).min(dim=1).values
+    antigen_proximity = torch.exp(-nearest_antigen / float(environment_radius))
+    vhh_scores = (
+        (1.0 - antigen_guidance_weight) * vhh_probabilities
+        + antigen_guidance_weight * antigen_proximity
+    )
     threshold_local = torch.nonzero(
-        vhh_scores >= probability_threshold, as_tuple=False
+        vhh_probabilities >= probability_threshold, as_tuple=False
     ).flatten()
     threshold_count = int(threshold_local.numel())
     if threshold_count < required_minimum:
@@ -420,7 +436,10 @@ def extract_top_interface_subgraph(
     kept_indices = torch.cat([active_indices, frozen_indices]).unique(sorted=True)
     subgraph = data.subgraph(kept_indices)
     subgraph.original_node_index = kept_indices
-    subgraph.interface_score = probabilities[kept_indices]
+    composite_scores = probabilities.clone()
+    composite_scores[vhh_indices] = vhh_scores
+    subgraph.egnn_probability = probabilities[kept_indices]
+    subgraph.interface_score = composite_scores[kept_indices]
     subgraph.is_active = torch.isin(kept_indices, active_indices)
     subgraph.is_frozen_environment = torch.isin(kept_indices, frozen_indices)
     if torch.any(subgraph.is_active & subgraph.is_frozen_environment):
@@ -432,6 +451,7 @@ def extract_top_interface_subgraph(
     subgraph.pruning_min_active = int(min_active)
     subgraph.pruning_max_active = int(max_active)
     subgraph.pruning_environment_radius = float(environment_radius)
+    subgraph.pruning_antigen_guidance_weight = float(antigen_guidance_weight)
     subgraph.threshold_candidate_count = threshold_count
     subgraph.active_residue_count = int(subgraph.is_active.sum())
     subgraph.frozen_residue_count = int(subgraph.is_frozen_environment.sum())
