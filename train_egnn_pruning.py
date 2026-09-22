@@ -94,7 +94,7 @@ def graph_protocol(data: Data) -> Dict[str, Any]:
     )
     missing = [name for name in required if not hasattr(data, name)]
     if missing:
-        raise ValueError(f"Graph lacks protocol metadata {missing}; rebuild with dataset version >=1.3")
+        raise ValueError(f"Graph lacks protocol metadata {missing}; rebuild with dataset version >=1.6")
     protocol = {
         "graph_version": str(data.graph_version),
         "edge_policy": str(data.edge_policy),
@@ -153,7 +153,7 @@ def interface_labels(data: Data) -> Tensor:
     if not hasattr(data, "interface_label"):
         raise ValueError(
             "Graph is missing interface_label; rebuild graphs with "
-            "build_final_pyg_dataset.py version >= 1.4"
+            "build_final_pyg_dataset.py version >= 1.6"
         )
     labels = data.interface_label.detach().cpu().to(torch.float32)
     if labels.shape != (data.num_nodes,):
@@ -356,6 +356,19 @@ def split_paths(paths: Sequence[Path], seed: int) -> Tuple[List[Path], List[Path
             f"max antigen={max_antigen_cross:.3f}, family_overlap={family_overlap[:10]}"
         )
     return train_paths, validation_paths
+
+def _family_structure_assignment_digest(paths: Sequence[Path]) -> str:
+    """Hash graph-name/PDB/family assignments that govern component splitting."""
+    digest=hashlib.sha256()
+    for path in sorted(paths,key=lambda p:p.name.lower()):
+        data=torch.load(path,map_location="cpu",weights_only=False)
+        family=str(getattr(data,"family_structure_cluster","") or "")
+        pdb=str(getattr(data,"pdb_id","") or "").lower()
+        if not family or not pdb:
+            raise ValueError(f"{path.name} lacks PDB/family cluster metadata")
+        digest.update(f"{path.name}\t{pdb}\t{family}\n".encode("utf-8"))
+    return digest.hexdigest()
+
 
 def _paths_digest(paths: Sequence[Path]) -> str:
     digest = hashlib.sha256()
@@ -758,6 +771,9 @@ def _checkpoint_payload(
             "validation_count": len(validation_paths),
             "train_names_sha256": _paths_digest(train_paths),
             "validation_names_sha256": _paths_digest(validation_paths),
+            "family_structure_assignment_sha256": _family_structure_assignment_digest(
+                [*train_paths,*validation_paths]
+            ),
         },
         "graph_protocol": graph_protocol(torch.load(train_paths[0], map_location="cpu", weights_only=False)),
         "label_definition": "inter-partner heavy-atom cutoff label stored independently during graph construction",
@@ -831,6 +847,11 @@ def restore_training_state(
         "validation_names_sha256"
     ) != expected_validation_hash:
         raise RuntimeError("Resume checkpoint uses a different graph split")
+    current_family_digest=_family_structure_assignment_digest([*train_paths,*validation_paths])
+    if split.get("family_structure_assignment_sha256") != current_family_digest:
+        raise RuntimeError(
+            "Resume checkpoint family/structure assignments differ from the current graphs"
+        )
     saved_homology = split.get("homology_isolation")
     current_homology = {
         "vhh_full_chain_identity": float(VHH_IDENTITY_THRESHOLD),
