@@ -318,8 +318,10 @@ def main(argv=None) -> int:
     if args.selection_order == "seeded_random":
         random.Random(args.selection_seed).shuffle(candidates)
     streams = derive_streams(args.master_seed)
-    # Explicit requested integration smoke uses 4S10, not the first small graph.
-    requested_pdb=args.pdb_id or ('4s10' if args.eval_shots and args.targets==1 else None)
+    # Target filtering is explicit only. A one-target run must never silently
+    # become the historical 4S10 smoke case merely because eval_shots is set.
+    # The orchestrator passes --pdb-id explicitly when a smoke target is desired.
+    requested_pdb=args.pdb_id
     if requested_pdb:
         candidates=[r for r in candidates if r['pdb_id'].lower()==requested_pdb.lower()]
         if not candidates: raise ValueError(f'Target {requested_pdb} absent from manifest')
