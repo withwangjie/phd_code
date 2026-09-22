@@ -1168,8 +1168,8 @@ def _ablation_run_case(data: Any, scorer: Any, config: dict, args: Any, artifact
     )
     sub = build_ablation_subgraph(data, active, config["radius"])
     qubo = InterfaceQUBOBuilder(
-        min_variables=2 * args.active_sites,
-        max_variables=min(30, 3 * args.active_sites),
+        min_variables=3 * args.active_sites,
+        max_variables=30,
         max_sites=args.active_sites,
     ).build(sub)
     # Independent optimize/sample seeds (never the shared perturb/input seed
@@ -1405,7 +1405,7 @@ def _ablation_main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--radii", type=float, nargs="+", default=[6.,10.])
     parser.add_argument("--depths", type=int, nargs="+", default=[1,2,3])
     parser.add_argument("--max-evals", type=int, nargs="+", default=[90,300])
-    parser.add_argument("--active-sites", type=int, default=10)
+    parser.add_argument("--active-sites", type=int, default=6)
     parser.add_argument("--antigen-guidance-weight", type=float, default=0.25,
         help="Blend weight for label-free nearest-antigen proximity in EGNN site ranking.")
     parser.add_argument("--outputs", type=int, nargs="+", default=[1000],
@@ -1431,11 +1431,11 @@ def _ablation_main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--omp-threads", type=int, default=2)
     args = parser.parse_args(argv)
-    if (not 5 <= args.active_sites <= 15
+    if (not 5 <= args.active_sites <= 8
             or not 0.0 <= args.antigen_guidance_weight <= 1.0
             or min(*args.outputs, args.sa_passes, args.greedy_passes, *args.max_evals) <= 0
             or min(args.qaoa_restarts) <= 0 or args.eval_shots <= 0):
-        parser.error("Require 5..15 sites, antigen-guidance-weight in [0,1], and positive budgets.")
+        parser.error("Require 5..8 active sites, antigen-guidance-weight in [0,1], and positive budgets.")
     if any(not math.isfinite(r) or r<=0 for r in args.radii) or any(p not in (1,2,3) for p in args.depths):
         parser.error("Require positive finite radii and depths 1/2/3.")
     if args.max_targets < 0 or args.energy_window < 0 or not math.isfinite(args.energy_window):
