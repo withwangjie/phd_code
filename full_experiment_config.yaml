@@ -142,7 +142,7 @@ queue_freeze:
     cluster_map: "data/independence/pdb_family_clusters.json"
     pair_tsv: "data/independence/foldseek_pairs.tsv"
     # Pair TSV third column must be a symmetric/normalized structure-similarity
-    # score such as TM-score. >=0.50 joins two PDBs into one component.
+    # score such as TM-score. TM-score 0.50 has published fold/topology significance [METHODS_EVIDENCE R27].
     min_score: 0.50
     score_semantics: "TM-score"
     query_column: 0
@@ -151,6 +151,9 @@ queue_freeze:
   # Homology-isolation protocol. Any criterion that fires joins two complexes
   # into the same connected component; a component may never cross a split.
   homology_isolation:
+    # Literature-supported anti-leakage precedents:
+    # VHH/antibody non-redundancy at 0.80 [R24]; CDR-H3 clustering at 0.50 [R23];
+    # protein train/test filtering at 0.30 identity with 0.70 coverage [R25].
     vhh_full_chain_identity: 0.80
     cdr_h3_identity: 0.50
     antigen_identity: 0.30
@@ -161,8 +164,9 @@ queue_freeze:
     # graph v1.6 records these values in every .pt and run_summary.json.
     # 5 A cross-partner atom contact is literature-supported for antibody-antigen/CAPRI-style interfaces [METHODS_EVIDENCE R3,R4].
     interface_label_cutoff_angstrom: 5.0
-    # The following graph-construction values are preregistered study choices for leakage-controlled geometry graphs; they are not claimed as literature-optimal.
+    # 8 A C-alpha residue-graph construction has direct protein-GNN precedent [R22].
     intra_chain_ca_cutoff_angstrom: 8.0
+    # k=3 remains a study-specific leakage-control choice; no claim of literature-optimality.
     cross_partner_knn_k: 3
     min_interface_residues: 15
     # build_final_pyg_dataset.py --no-cap ignores target_hard's 300..500
@@ -319,7 +323,7 @@ qc_benchmark:
   outputs: [10, 30, 100, 300, 1000]  # the output-budget curve
   qaoa_objective: ["mean", "cvar"]  # CVaR variational optimization is literature-supported [R8]
   qaoa_restarts: [1, 4]  # 1 = single-start, 4 = multi-start
-  cvar_alpha: 0.1  # preregistered primary alpha; literature supports CVaR itself [R8], not alpha=0.1 as a universal optimum
+  cvar_alpha: 0.1  # literature-supported empirical setting: R8 evaluates alpha=0.10 and recommends roughly 0.1-0.25; still preregistered/sensitivity-tested here
   eval_shots: 500
   parameter_scale: "max_coefficient"
   time_baselines: true
