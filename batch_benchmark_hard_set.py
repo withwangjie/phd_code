@@ -1284,24 +1284,31 @@ def _ablation_run_case(data: Any, scorer: Any, config: dict, args: Any, artifact
     records, raw = [], {}
     last_optimization = {}
     optimizations = {}
+    qaoa_cache = {}
     for outputs in args.outputs:
         for solver in ("qaoa", "sa", "uniform", "greedy"):
             if solver == "qaoa":
                 for qaoa_objective, qaoa_restarts in itertools.product(args.qaoa_objective, args.qaoa_restarts):
-                    start = time.perf_counter()
-                    opt = sampler.optimize_robust(max_evals=config["max_evals"], restarts=qaoa_restarts,
-                        objective=qaoa_objective, cvar_alpha=args.cvar_alpha,
-                        parameter_scale=args.parameter_scale, eval_shots=args.eval_shots,
-                        optimize_seed=optimize_seed, measurement_seed=measurement_seed)
-                    sampled = sampler.sample(opt, shots=outputs, ground_state=truth, sample_seed=sample_seed)
-                    counts = dict(sampled.counts)
-                    optimization = dict(success=opt.success, message=getattr(opt, "message", None),
-                        evaluations=opt.evaluations, history=list(opt.history),
-                        gammas=opt.gammas.tolist(), betas=opt.betas.tolist(),
-                        termination_reason=getattr(opt, "termination_reason", None))
-                    last_optimization = optimization
-                    # Expectation evaluations are NOT comparable to single-state energy queries.
-                    elapsed = time.perf_counter()-start
+                    cache_key=(qaoa_objective,qaoa_restarts)
+                    if cache_key not in qaoa_cache:
+                        optimize_start=time.perf_counter()
+                        opt=sampler.optimize_robust(max_evals=config["max_evals"], restarts=qaoa_restarts,
+                            objective=qaoa_objective, cvar_alpha=args.cvar_alpha,
+                            parameter_scale=args.parameter_scale, eval_shots=args.eval_shots,
+                            optimize_seed=optimize_seed, measurement_seed=measurement_seed)
+                        optimization_seconds=time.perf_counter()-optimize_start
+                        optimization=dict(success=opt.success, message=getattr(opt,"message",None),
+                            evaluations=opt.evaluations, history=list(opt.history),
+                            gammas=opt.gammas.tolist(), betas=opt.betas.tolist(),
+                            termination_reason=getattr(opt,"termination_reason",None))
+                        qaoa_cache[cache_key]=(opt,optimization,optimization_seconds)
+                    opt,optimization,optimization_seconds=qaoa_cache[cache_key]
+                    sample_start=time.perf_counter()
+                    sampled=sampler.sample(opt,shots=outputs,ground_state=truth,sample_seed=sample_seed)
+                    sampling_seconds=time.perf_counter()-sample_start
+                    counts=dict(sampled.counts)
+                    last_optimization=optimization
+                    elapsed=optimization_seconds+sampling_seconds
                     if sum(counts.values()) != outputs or any(s not in energies for s in counts):
                         raise AssertionError("Sample count or local one-hot constraint violated.")
                     metrics = _ablation_summarize(counts, energies, truth.energy, args.energy_window)
@@ -1310,6 +1317,9 @@ def _ablation_run_case(data: Any, scorer: Any, config: dict, args: Any, artifact
                         qaoa_objective=qaoa_objective, qaoa_restarts=qaoa_restarts, eval_shots=args.eval_shots,
                         **metrics, num_bits=len(qubo.physical_self),
                         configuration_count=truth.configuration_count, solver_seconds=elapsed,
+                        optimization_seconds=optimization_seconds,
+                        sampling_seconds=sampling_seconds,
+                        optimization_reused=(outputs != args.outputs[0]),
                         build_seconds=built-begin, oracle_seconds=oracle_seconds,
                         single_state_energy_queries=None,
                         optimizer_success=optimization.get("success"),
@@ -1321,7 +1331,10 @@ def _ablation_run_case(data: Any, scorer: Any, config: dict, args: Any, artifact
                         total_opt_shots=opt.total_opt_shots))
                     records[-1].update(budget_mode="matched_outputs", budget_seconds=None, budget_overrun_seconds=0.0)
                     key = f"qaoa_obj{qaoa_objective}_restarts{qaoa_restarts}_outputs{outputs}"
-                    optimizations[key] = optimization
+                    optimizations[key] = dict(
+                        optimization,
+                        optimization_seconds=optimization_seconds,
+                        reused_across_output_curve=True)
                     raw[key] = [{"bits":"".join(map(str,s)), "count":c} for s,c in sorted(counts.items())]
             else:
                 start = time.perf_counter()
@@ -1344,6 +1357,7 @@ def _ablation_run_case(data: Any, scorer: Any, config: dict, args: Any, artifact
                     qaoa_objective=None, qaoa_restarts=None, eval_shots=None,
                     **metrics, num_bits=len(qubo.physical_self),
                     configuration_count=truth.configuration_count, solver_seconds=elapsed,
+                    optimization_seconds=None, sampling_seconds=None, optimization_reused=None,
                     build_seconds=built-begin, oracle_seconds=oracle_seconds,
                     single_state_energy_queries=queries,
                     optimizer_success=None, optimizer_evaluations=None, termination_reason=None,
@@ -1351,14 +1365,25 @@ def _ablation_run_case(data: Any, scorer: Any, config: dict, args: Any, artifact
                 records[-1].update(budget_mode="matched_outputs", budget_seconds=None, budget_overrun_seconds=0.0)
                 raw[f"{solver}_outputs{outputs}"] = [{"bits":"".join(map(str,s)), "count":c} for s,c in sorted(counts.items())]
         if args.time_baselines:
-            qaoa_rows_this_output = [r for r in records if r["solver"] == "qaoa" and r["outputs"] == outputs]
-            if qaoa_rows_this_output:
-                budget = qaoa_rows_this_output[0]["solver_seconds"]
+            qaoa_rows_this_output=[
+                r for r in records
+                if r["solver"]=="qaoa" and r["outputs"]==outputs
+                and r.get("qaoa_objective")==args.time_donor_objective
+                and r.get("qaoa_restarts")==args.time_donor_restarts
+            ]
+            if len(qaoa_rows_this_output)!=1:
+                raise ValueError(
+                    f"Expected exactly one matched-time donor for outputs={outputs}, "
+                    f"objective={args.time_donor_objective}, restarts={args.time_donor_restarts}; "
+                    f"found {len(qaoa_rows_this_output)}")
+            donor_row=qaoa_rows_this_output[0]
+            if donor_row.get("termination_reason")!="all_restarts_failed":
+                budget=donor_row["solver_seconds"]
                 for method in ("sa", "uniform", "greedy"):
                     counts, elapsed, queries = _time_budget_counts(sampler, method, budget,
                         sample_seed+10001, args.sa_passes, args.greedy_passes)
                     metrics = _ablation_summarize(counts, energies, truth.energy, args.energy_window)
-                    row = dict(qaoa_rows_this_output[0])
+                    row = dict(donor_row)
                     row.update(metrics, solver=method+"_time", reference_outputs=outputs, solver_seconds=elapsed,
                         single_state_energy_queries=queries, optimizer_success=None,
                         optimizer_evaluations=None, termination_reason=None,
@@ -1712,6 +1737,8 @@ def _ablation_main(argv: Optional[Sequence[str]] = None) -> int:
              "exact analytic expectation) -- the NISQ-realistic finite-shot CVaR/mean estimate.")
     parser.add_argument("--parameter-scale", choices=("max_coefficient","feasible_iqr"), default="max_coefficient")
     parser.add_argument("--time-baselines", action="store_true", help="Add classical restart baselines using QAOA solver wall time; record soft-deadline overrun.")
+    parser.add_argument("--time-donor-objective", choices=("mean","cvar"), default="cvar")
+    parser.add_argument("--time-donor-restarts", type=int, default=4)
     parser.add_argument("--sa-passes", type=int, default=100)
     parser.add_argument("--greedy-passes", type=int, default=50)
     parser.add_argument("--energy-window", type=float, default=2.)
@@ -1747,6 +1774,11 @@ def _ablation_main(argv: Optional[Sequence[str]] = None) -> int:
         parser.error("Scientific distance/energy parameters must be positive and finite.")
     if not math.isfinite(args.dielectric_slope) or args.dielectric_slope < 0:
         parser.error("dielectric-slope must be finite and nonnegative.")
+    if args.time_baselines:
+        if args.time_donor_objective not in args.qaoa_objective:
+            parser.error("--time-donor-objective must be included in --qaoa-objective")
+        if args.time_donor_restarts not in args.qaoa_restarts:
+            parser.error("--time-donor-restarts must be included in --qaoa-restarts")
     if args.rotamer_mode=="dunbrack2010" and (args.rotamer_library is None or not args.rotamer_library.is_file()):
         parser.error("--rotamer-library must point to ALL.bbdep.rotamers.lib in dunbrack2010 mode")
     if not 0.0 < args.rotamer_probability_floor < 1.0 or not args.rotamer_sigma_offsets:
