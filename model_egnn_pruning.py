@@ -498,25 +498,35 @@ def _ablation_cdr_indices(data: Any) -> list[int]:
 
 
 def select_ablation_active(data: Any, method: str, k: int, seed: int,
-                  scorer: EGNNInterfaceScorer | None) -> torch.Tensor:
+                  scorer: EGNNInterfaceScorer | None,
+                  antigen_guidance_weight: float = 0.25) -> torch.Tensor:
     """Select exactly k VHH sites without using solver outcomes or native labels."""
+    if not 0.0 <= antigen_guidance_weight <= 1.0:
+        raise ValueError("antigen_guidance_weight must be in [0,1]")
     candidates = torch.where(data.x[:, -1] == 0)[0]
     if len(candidates) < k:
         raise ValueError("Not enough VHH residues for matched site budget.")
+    partner = torch.where(data.x[:, -1] == 1)[0]
+    if not len(partner):
+        raise ValueError("No antigen/group-1 residues.")
+    distances = torch.cdist(data.pos[candidates], data.pos[partner])
+    nearest = distances.min(1).values
     scores = torch.zeros(data.num_nodes)
-    src, dst = data.edge_index
-    cross = data.x[src, -1] != data.x[dst, -1]
-    scores.index_add_(0, src[cross], torch.ones(int(cross.sum())))
     if method == "egnn":
         if scorer is None:
             raise ValueError("Trained checkpoint required for EGNN ablation.")
         with torch.no_grad():
-            scores = scorer(data.x, data.pos, data.edge_index).cpu()
+            model_scores = scorer(data.x, data.pos, data.edge_index).cpu()
+        proximity = torch.exp(-nearest / 6.0)
+        scores[candidates] = (
+            (1.0-antigen_guidance_weight)*model_scores[candidates]
+            + antigen_guidance_weight*proximity
+        )
     elif method == "distance":
-        partner = torch.where(data.x[:, -1] == 1)[0]
-        if not len(partner):
-            raise ValueError("No antigen/group-1 residues.")
-        scores[candidates] = -torch.cdist(data.pos[candidates], data.pos[partner]).min(1).values
+        scores[candidates] = -nearest
+    elif method == "contact":
+        # Geometry baseline only: CA neighborhood count, never native interface_label.
+        scores[candidates] = (distances < 8.0).sum(1).float()
     elif method == "random":
         ids = np.random.default_rng(seed).choice(candidates.numpy(), k, replace=False)
         return torch.tensor(sorted(ids), dtype=torch.long)
