@@ -1104,6 +1104,7 @@ class Orchestrator:
                 "--outputs", str(cfg.get("outputs", 1000)),
                 "--max-evals", str(cfg.get("max_evals", 90)),
                 "--perturbation-mode", str(cfg.get("perturbation_mode", "multi_chi")),
+                "--solvent-model", str(cfg.get("solvent_model", "vacuum")),
                 "--relax-iterations", str(cfg.get("relax_iterations", 200)),
                 "--candidate-relax-iterations", str(cfg.get("candidate_relax_iterations", 100)),
                 "--antigen-guidance-weight", str(cfg.get("antigen_guidance_weight", 0.25)),
@@ -1220,6 +1221,66 @@ class Orchestrator:
             elif summary.get("structure_experiment_failed_targets"):
                 queue_partial.append(f"{label}: completed with target failures "
                                       f"{summary['structure_experiment_failed_targets']}")
+
+        # Pre-declared solvent sensitivity uses development targets only.
+        # Validation remains on the frozen primary solvent protocol.
+        sensitivity_models=[str(v) for v in cfg.get("solvent_sensitivity", [])]
+        primary_solvent=str(cfg.get("solvent_model","vacuum"))
+        for solvent in sensitivity_models:
+            if solvent==primary_solvent:
+                continue
+            if solvent not in ("vacuum","gbn2"):
+                failures.append(f"Unsupported solvent sensitivity model: {solvent}")
+                continue
+            prepared_root=dev_dir/"prepared"
+            manifests=sorted(prepared_root.glob("*/recovery_manifest.json")) if prepared_root.is_dir() else []
+            if not manifests:
+                failures.append(f"solvent sensitivity {solvent}: no frozen dev recovery manifests")
+                continue
+            for manifest in manifests:
+                target=manifest.parent.name
+                out=self.run_dir/f"dev_queue_solvent_{solvent}"/"results"/target
+                optimize_seeds=[
+                    derive_child_seed(derive_streams(self.config["master_seed"])["optimize"],
+                                      "solvent_sensitivity",solvent,target,str(seed))
+                    for seed in cfg.get("seeds",[42,43,44,45,46])
+                ]
+                measurement_seeds=[
+                    derive_child_seed(derive_streams(self.config["master_seed"])["measurement"],
+                                      "solvent_sensitivity",solvent,target,str(seed))
+                    for seed in cfg.get("seeds",[42,43,44,45,46])
+                ]
+                sample_seeds=[
+                    derive_child_seed(derive_streams(self.config["master_seed"])["sample"],
+                                      "solvent_sensitivity",solvent,target,str(seed))
+                    for seed in cfg.get("seeds",[42,43,44,45,46])
+                ]
+                sensitivity_argv=[
+                    self.venv_python,"batch_benchmark_hard_set.py","--recovery-benchmark",
+                    "--manifest",str(manifest),"--out-dir",str(out),
+                    "--solvent-model",solvent,
+                    "--perturbation-mode",str(cfg.get("perturbation_mode","multi_chi")),
+                    "--min-perturb-degrees",str(cfg.get("min_perturb_degrees",40.0)),
+                    "--max-perturb-degrees",str(cfg.get("max_perturb_degrees",120.0)),
+                    "--outputs",str(cfg.get("outputs",1000)),
+                    "--max-evals",str(cfg.get("max_evals",90)),
+                    "--sa-passes","100",
+                    "--relax-iterations",str(cfg.get("relax_iterations",200)),
+                    "--loop-relax-iterations",str(cfg.get("loop_relax_iterations",100)),
+                    "--seeds",*[str(v) for v in cfg.get("seeds",[42,43,44,45,46])],
+                    "--optimize-seeds",*[str(v) for v in optimize_seeds],
+                    "--measurement-seeds",*[str(v) for v in measurement_seeds],
+                    "--sample-seeds",*[str(v) for v in sample_seeds],
+                    "--robust-qaoa","--qaoa-restarts",str(cfg.get("qaoa_restarts",4)),
+                    "--qaoa-objective",str(cfg.get("qaoa_objective","cvar")),
+                    "--cvar-alpha",str(cfg.get("cvar_alpha",0.1)),
+                    "--parameter-scale",str(cfg.get("parameter_scale","max_coefficient")),
+                    "--eval-shots",str(cfg.get("eval_shots",500)),
+                ]
+                rc,log=self._run_subprocess(f"dev_solvent_{solvent}_{target}",sensitivity_argv)
+                logs.append(str(log));argvs.append(sensitivity_argv)
+                if rc!=0 or not (out/"recovery_metrics.csv").is_file():
+                    failures.append(f"dev solvent sensitivity {solvent}/{target} failed (exit={rc}; see {log})")
 
         status = "failed" if failures else ("completed_with_failures" if queue_partial else "completed")
         detail = "; ".join(failures + queue_partial) if (failures or queue_partial) else \
