@@ -194,19 +194,11 @@ queue_freeze:
     # qc_benchmark.pruning -- never silently substituted for the main
     # validation strategy here).
     pruning: "egnn"
-    # Used ONLY by stage_queue_freeze's --prepare-only bootstrap call, which
-    # runs BEFORE egnn_train in STAGE_ORDER and therefore cannot use a
-    # trained checkpoint yet. Eligibility (PDB overlap / chain identity /
-    # CDR-H3 identity / structural viability -- e.g. enough chemically
-    # movable VHH candidate sites) does not depend on pruning strategy: only
-    # the FINAL residue ranking within an already-eligible target does. So a
-    # cheap, checkpoint-free strategy here decides TRUE eligibility/target
-    # membership (the actual freeze) without needing not-yet-trained
-    # weights; the exact same target set is then reproduced explicitly (via
-    # --pdb-allowlist-file, not mere re-derivation) once egnn_train has
-    # completed, and REAL site selection is performed then, with `pruning`
-    # above ("egnn") and the trained checkpoint -- see
-    # stage_structure_experiment. Never "egnn" here.
+    # Backward-compatible CLI provenance only. Queue freezing now uses
+    # --eligibility-only: NO temporary pruning/ranking selects residues.
+    # Membership requires sequence/family isolation plus >=sites independently
+    # Dunbrack/Amber-compatible movable VHH residues. Formal EGNN ranking occurs
+    # only after egnn_train on the already-frozen PDB allowlist.
     eligibility_bootstrap_pruning: "contact"
 
 # ---------------------------------------------------------------------------
