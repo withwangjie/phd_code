@@ -1398,6 +1398,7 @@ class Orchestrator:
                 "--out-json", str(structure_json),
                 "--out-md", str(structure_md),
                 "--primary-endpoint", str(cfg.get("primary_structural_endpoint", "final_rmsd")),
+                "--primary-contrast", str(cfg.get("primary_structural_contrast", "qaoa_vs_sa")),
                 "--resamples", str(cfg.get("resamples", 10000)),
                 "--seed", str(self.config["master_seed"]),
             ]
