@@ -284,8 +284,7 @@ def section_pruning_contribution(ctx: ReportContext) -> List[str]:
         lines.append("")
         lines.append("| Model | Validation ROC-AUC | Validation PR-AUC |")
         lines.append("|---|---:|---:|")
-        egnn_metrics = ((training_summary.get("best") or {}).get("validation_metrics")
-                        or training_summary.get("validation_metrics") or {})
+        egnn_metrics = training_summary.get("best_validation", {}) or {}
         if egnn_metrics:
             lines.append(
                 f"| EGNN | {_fmt(egnn_metrics.get('roc_auc'))} | {_fmt(egnn_metrics.get('pr_auc'))} |"
