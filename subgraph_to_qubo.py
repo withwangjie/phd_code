@@ -1872,8 +1872,8 @@ class AllAtomInterfaceQUBOBuilder:
     controlled-ablation override.
 
     No native/reference structure is accepted by this builder. Missing heavy atoms and unsupported templates
-    fail rather than inventing atoms. Vacuum NoCutoff energy is kcal/mol,
-    NOT binding free energy.
+    fail rather than inventing atoms. The primary protocol uses vacuum NoCutoff; optional GBN2 is a
+    pre-declared sensitivity model. These energies are packing/reconstruction proxies, NOT binding free energy.
     """
 
     def __init__(self, structure_path: Path, active_residues: Sequence[str], *,
@@ -1883,7 +1883,8 @@ class AllAtomInterfaceQUBOBuilder:
                  rotamer_mode: str = "legacy",
                  rotamer_library_path: Optional[Path] = None,
                  rotamer_probability_floor: float = 1e-4,
-                 rotamer_sigma_offsets: Sequence[float] = (-1.0,0.0,1.0)):
+                 rotamer_sigma_offsets: Sequence[float] = (-1.0,0.0,1.0),
+                 solvent_model: str = "vacuum"):
         import openmm as mm
         from openmm import app, unit
         import random
@@ -1898,6 +1899,9 @@ class AllAtomInterfaceQUBOBuilder:
         self.rotamer_library_path=None if rotamer_library_path is None else Path(rotamer_library_path)
         self.rotamer_probability_floor=float(rotamer_probability_floor)
         self.rotamer_sigma_offsets=tuple(float(v) for v in rotamer_sigma_offsets)
+        self.solvent_model=str(solvent_model).lower()
+        if self.solvent_model not in ("vacuum","gbn2"):
+            raise ValueError("solvent_model must be vacuum or gbn2")
         if chi1_angles is not None:
             chi1_angles=tuple(float(a) for a in chi1_angles)
             if not 2 <= len(chi1_angles) <= 6 or not np.isfinite(chi1_angles).all():
@@ -1952,7 +1956,13 @@ class AllAtomInterfaceQUBOBuilder:
         opener=gzip.open if suffix.endswith(".gz") else open
         with opener(structure_path,"rt") as handle:
             parsed=(app.PDBxFile(handle) if suffix.endswith((".cif",".cif.gz")) else app.PDBFile(handle))
-        self.forcefield=app.ForceField("amber14-all.xml","amber14/tip3p.xml")
+        if self.solvent_model=="vacuum":
+            self.forcefield=app.ForceField("amber14-all.xml")
+        else:
+            # OpenMM's Amber implicit-solvent GBN2 parameters; no explicit
+            # solvent particles are added. This is a sensitivity model, not
+            # the frozen primary structural protocol.
+            self.forcefield=app.ForceField("amber14-all.xml","implicit/gbn2.xml")
         modeller=app.Modeller(parsed.topology,parsed.positions)
         state=random.getstate()
         try:
@@ -1962,8 +1972,10 @@ class AllAtomInterfaceQUBOBuilder:
             random.setstate(state)
         self.topology=modeller.topology
         self.base_positions=np.asarray(modeller.positions.value_in_unit(unit.nanometer),dtype=float)
-        self.system=self.forcefield.createSystem(self.topology,nonbondedMethod=app.NoCutoff,
-            constraints=None,rigidWater=False,removeCMMotion=False)
+        self.system=self.forcefield.createSystem(
+            self.topology,nonbondedMethod=app.NoCutoff,
+            constraints=None,rigidWater=False,removeCMMotion=False
+        )
         self.integrator=mm.VerletIntegrator(.001)
         self.context=_openmm_context(mm, self.system, self.integrator)
         residues={}
@@ -2243,7 +2255,9 @@ class AllAtomInterfaceQUBOBuilder:
                 decomposition_anchor_variables=anchors,ising_equivalence_max_error=ising_error,
                 ising_roundoff_tolerance=roundoff_bound,
                 atom_count=len(self.base_positions),forcefield=["amber14-all.xml","amber14/tip3p.xml"],
-                solvent="vacuum; NoCutoff",raw_rotamer_pool_sizes=self.raw_rotamer_pool_sizes,
+                solvent=("vacuum; NoCutoff" if self.solvent_model=="vacuum" else "implicit GBN2; NoCutoff"),
+                solvent_model=self.solvent_model,
+                raw_rotamer_pool_sizes=self.raw_rotamer_pool_sizes,
                 rotamers_per_site=self.retained_rotamers_per_site,
                 site_scores=self.site_scores.tolist(),
                 candidate_chi_degrees=[list(candidate.get("chi_degrees",(candidate["angle"],))) for candidate in self.candidates],
