@@ -390,6 +390,7 @@ external_validation:
     graph_dir: "data/external_vhh/graphs"
     independence_manifest: "data/external_vhh/independence_manifest.json"
     max_targets: 0
+    repeats: 10
   structural_baselines:
     required: true
     faspr_executable: "/opt/FASPR/FASPR"
