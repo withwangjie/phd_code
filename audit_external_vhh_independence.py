@@ -32,7 +32,7 @@ def identity(a: str, b: str, min_length_coverage: float = 0.0) -> tuple[float,fl
         return 0.0,coverage
     values=[]
     for left,right in ((a,b),(b,a)):
-        result=parasail.nw_stats_striped_16(left,right,10,1,parasail.blosum62)
+        result=parasail.nw_stats_striped_32(left,right,10,1,parasail.blosum62)
         if result.saturated:
             raise ValueError("parasail alignment saturated")
         values.append(result.matches/result.length)
