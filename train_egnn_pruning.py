@@ -164,70 +164,78 @@ def _sequence_identity(a: str, b: str) -> float:
 
 
 def split_paths(paths: Sequence[Path], seed: int) -> Tuple[List[Path], List[Path]]:
-    """Create a deterministic 90/10 split at 40%-identity CDR-H3 cluster level.
-
-    No cluster is allowed to cross train/validation.  This replaces the old
-    graph-level random split, which could place closely related CDR-H3
-    sequences on both sides of the validation boundary.
-    """
+    """Create a deterministic 90/10 split by 40%-identity CDR-H3 components."""
 
     records = []
+    by_sequence: Dict[str, List[Path]] = {}
+    empty_sequence_paths: List[Path] = []
     for path in paths:
         data = torch.load(path, map_location="cpu", weights_only=False)
-        records.append((path, str(getattr(data, "cdr3_seq", "") or "")))
-
-    representatives: List[str] = []
-    clusters: List[List[Path]] = []
-    for path, seq in sorted(records, key=lambda item: (-len(item[1]), item[1], item[0].name)):
-        match = None
+        seq = str(getattr(data, "cdr3_seq", "") or "")
+        records.append((path, seq))
         if seq:
-            match = next(
-                (
-                    index
-                    for index, representative in enumerate(representatives)
-                    if representative and _sequence_identity(seq, representative) >= SPLIT_IDENTITY_THRESHOLD
-                ),
-                None,
-            )
-        if match is None:
-            representatives.append(seq)
-            clusters.append([path])
+            by_sequence.setdefault(seq, []).append(path)
         else:
-            clusters[match].append(path)
+            empty_sequence_paths.append(path)
 
+    sequences = sorted(by_sequence, key=lambda seq: (-len(seq), seq))
+    parent = list(range(len(sequences)))
+
+    def find(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    def union(left: int, right: int) -> None:
+        root_left, root_right = find(left), find(right)
+        if root_left != root_right:
+            parent[root_right] = root_left
+
+    for i, seq_i in enumerate(sequences):
+        for j in range(i):
+            seq_j = sequences[j]
+            if (
+                min(len(seq_i), len(seq_j)) / max(len(seq_i), len(seq_j))
+                < SPLIT_IDENTITY_THRESHOLD
+            ):
+                continue
+            if _sequence_identity(seq_i, seq_j) >= SPLIT_IDENTITY_THRESHOLD:
+                union(i, j)
+
+    components: Dict[int, List[Path]] = {}
+    for index, seq in enumerate(sequences):
+        components.setdefault(find(index), []).extend(by_sequence[seq])
+
+    clusters = list(components.values()) + [[path] for path in empty_sequence_paths]
     rng = random.Random(seed)
-    order = list(range(len(clusters)))
-    rng.shuffle(order)
-    target_validation = max(1, int(round(0.10 * len(paths))))
-    validation_cluster_ids = set()
-    validation_count = 0
-    for cluster_id in order:
-        if validation_count >= target_validation:
-            break
-        validation_cluster_ids.add(cluster_id)
-        validation_count += len(clusters[cluster_id])
+    rng.shuffle(clusters)
 
-    validation_paths = sorted(
-        [path for cluster_id in validation_cluster_ids for path in clusters[cluster_id]],
-        key=lambda path: path.name.lower(),
-    )
+    target_validation = max(1, int(round(0.10 * len(paths))))
+    validation_paths: List[Path] = []
+    for cluster in clusters:
+        if len(validation_paths) >= target_validation:
+            break
+        validation_paths.extend(cluster)
+
+    validation_paths = sorted(validation_paths, key=lambda path: path.name.lower())
     validation_set = set(validation_paths)
     train_paths = [path for path in paths if path not in validation_set]
     if not train_paths or not validation_paths:
         raise RuntimeError("Leakage-controlled cluster split produced an empty partition")
 
-    train_sequences = [
-        seq for path, seq in records if path in set(train_paths) and seq
-    ]
-    validation_sequences = [
-        seq for path, seq in records if path in validation_set and seq
-    ]
+    train_set = set(train_paths)
+    train_sequences = sorted({seq for path, seq in records if path in train_set and seq})
+    validation_sequences = sorted(
+        {seq for path, seq in records if path in validation_set and seq}
+    )
     max_cross_identity = max(
         (
             _sequence_identity(train_seq, validation_seq)
             for train_seq in train_sequences
             for validation_seq in validation_sequences
-            if min(len(train_seq), len(validation_seq)) / max(len(train_seq), len(validation_seq))
+            if min(len(train_seq), len(validation_seq))
+            / max(len(train_seq), len(validation_seq))
             >= SPLIT_IDENTITY_THRESHOLD
         ),
         default=0.0,
