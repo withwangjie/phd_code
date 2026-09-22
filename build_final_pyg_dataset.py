@@ -79,6 +79,11 @@ def seqsim(a,b):
     return similarity(*sorted((a,b)))
 
 
+def max_pair_similarity(sequences):
+    """Maximum pairwise sequence identity; empty/singleton sets have no pair."""
+    return max((seqsim(s,t) for s,t in itertools.combinations(sequences,2)), default=0.0)
+
+
 @functools.lru_cache(maxsize=500000)
 def _global_identity_cached(a: str, b: str) -> float:
     """Symmetric Needleman-Wunsch identity over alignment length."""
@@ -831,7 +836,7 @@ def main():
             raise ValueError('Layered train/test homology isolation removed every training graph')
         assert not ({r['pdb_id'] for r in train_records}&(dbids|hardids))
         assert not (dbids&hardids)
-        maxhard=max(seqsim(s,t) for s,t in itertools.combinations(hardseqs,2))
+        maxhard=max_pair_similarity(hardseqs)
         assert maxhard<CDR_H3_IDENTITY_THRESHOLD
         maxtrain=max((seqsim(s,t) for r in train_records for s in known_train_cdr[r['source_id']] for t in hardseqs),default=0)
         assert maxtrain<CDR_H3_IDENTITY_THRESHOLD
