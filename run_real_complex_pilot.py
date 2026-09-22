@@ -1,4 +1,4 @@
-"""Real VHH chi1 recovery pilot with explicit data separation and exclusions.
+"""Real VHH multi-chi side-chain recovery with explicit data separation and exclusions.
 
 This is retrospective, native-backbone-conditioned recovery, not blind docking.
 The original benchmark driver remains the solver/evaluation implementation.
@@ -93,7 +93,8 @@ def prepare(graph, source: Path, destination: Path, sites: int, *, pruning: str 
             antigen_proximity_scale: float = 6.0,
             contact_ca_cutoff: float = 8.0,
             homology_isolation: dict[str, float] | None = None,
-            eligibility_only: bool = False) -> dict:
+            eligibility_only: bool = False,
+            rotamer_mode: str = "dunbrack2010") -> dict:
     """Resolve structure and select Active sites under the shared main protocol."""
     if not 0.0 <= antigen_guidance_weight <= 1.0:
         raise ValueError("antigen_guidance_weight must be in [0,1]")
@@ -101,6 +102,17 @@ def prepare(graph, source: Path, destination: Path, sites: int, *, pruning: str 
         raise ValueError("antigen_proximity_scale must be positive finite")
     if not np.isfinite(contact_ca_cutoff) or contact_ca_cutoff <= 0:
         raise ValueError("contact_ca_cutoff must be positive finite")
+    if rotamer_mode not in ("legacy","dunbrack2010"):
+        raise ValueError("rotamer_mode must be legacy or dunbrack2010")
+    if rotamer_mode=="dunbrack2010":
+        if not hasattr(graph,"backbone_phi") or not hasattr(graph,"backbone_psi"):
+            raise ValueError("Formal Dunbrack site selection requires backbone phi/psi metadata")
+        phi_values=graph.backbone_phi.detach().cpu().numpy()
+        psi_values=graph.backbone_psi.detach().cpu().numpy()
+        if phi_values.shape!=(len(graph.residue_ids),) or psi_values.shape!=(len(graph.residue_ids),):
+            raise ValueError("backbone phi/psi metadata must align with graph residues")
+    else:
+        phi_values=psi_values=None
     residues = read_atomistic_structure(source)
     st = gemmi.read_structure(str(source))
     if len(st) != 1:
@@ -160,6 +172,10 @@ def prepare(graph, source: Path, destination: Path, sites: int, *, pruning: str 
         # never as an oracle eligibility gate.
         if entry["name"] in ("ALA", "GLY", "PRO", "CYS"):
             continue
+        if rotamer_mode=="dunbrack2010" and (
+            not np.isfinite(phi_values[i]) or not np.isfinite(psi_values[i])
+        ):
+            continue
         ca_distances = torch.linalg.norm(graph.pos[antigen_nodes] - graph.pos[i], dim=1)
         dist = float(ca_distances.min().item())
         contact_count = int((ca_distances < float(contact_ca_cutoff)).sum().item())
@@ -185,6 +201,7 @@ def prepare(graph, source: Path, destination: Path, sites: int, *, pruning: str 
             antigen_guidance_weight=float(antigen_guidance_weight),
             antigen_proximity_scale=float(antigen_proximity_scale),
             contact_ca_cutoff_angstrom=float(contact_ca_cutoff),
+            rotamer_mode=str(rotamer_mode),
             selection_origin=(
                 "eligibility-only queue freeze: no contact/distance/CDR/EGNN ranking; "
                 "formal Active residues are selected only after EGNN training"
@@ -239,6 +256,7 @@ def prepare(graph, source: Path, destination: Path, sites: int, *, pruning: str 
                 antigen_guidance_weight=float(antigen_guidance_weight),
                 antigen_proximity_scale=float(antigen_proximity_scale),
                 contact_ca_cutoff_angstrom=float(contact_ca_cutoff),
+                rotamer_mode=str(rotamer_mode),
                 selection_origin=(f"{pruning} selection across all chemically movable VHH residues; native distance/contact used only as explicit baselines; "
                     f"EGNN path uses shared composite score=(1-w)*EGNN+w*exp(-dAg/{antigen_proximity_scale:.3g}A), w={antigen_guidance_weight:.3f}; "
                     "fixed before perturbation; retrospective control"))
@@ -452,7 +470,8 @@ def main(argv=None) -> int:
                     antigen_proximity_scale=args.antigen_proximity_scale,
                     contact_ca_cutoff=args.contact_ca_cutoff,
                     homology_isolation=homology,
-                    eligibility_only=args.eligibility_only)
+                    eligibility_only=args.eligibility_only,
+                    rotamer_mode=args.rotamer_mode)
                 chain_identity_audit=[]
                 max_vhh_identity=0.0
                 max_antigen_identity=0.0
