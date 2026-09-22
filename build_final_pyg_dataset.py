@@ -686,7 +686,13 @@ def main():
         for index in order:
             cl=clusters[index]
             for row in cl['candidates']:
-                record,error=save_graph(row,'test_snac_hard',output,cluster_id=cl['cluster_id'])
+                pdb_key=str(row['pdb_id']).lower()
+                if cluster_map is None or pdb_key not in cluster_map:
+                    raise ValueError(f'Formal hard-test graph requires family/structure cluster for {pdb_key}')
+                record,error=save_graph(
+                    row,'test_snac_hard',output,cluster_id=cl['cluster_id'],
+                    family_structure_cluster=cluster_map[pdb_key]
+                )
                 if error:failures.append(error)
                 if record:
                     manifest.append(record);chosen.append(row);used_ids.add(row['id']);break
@@ -760,7 +766,14 @@ def main():
             if reasons:exclusions.append(exclusion(r,reasons))
             else:train.append(r);known_train_cdr[r['id']]=sorted(seqs)
         print(f'Building {len(train)} train graphs; hard test {len(chosen)}',flush=True)
-        def worker(row):return save_graph(row,'train',output)
+        def worker(row):
+            pdb_key=str(row['pdb_id']).lower()
+            if cluster_map is None or pdb_key not in cluster_map:
+                raise ValueError(f'Formal training graph requires family/structure cluster for {pdb_key}')
+            return save_graph(
+                row,'train',output,
+                family_structure_cluster=cluster_map[pdb_key]
+            )
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as executor:
             for i,(record,error) in enumerate(executor.map(worker,train),1):
                 if record:manifest.append(record)
