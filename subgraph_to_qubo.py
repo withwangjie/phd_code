@@ -226,6 +226,20 @@ def _chi1_angle(atoms: Mapping[str, np.ndarray], residue_name: str) -> Optional[
     return float(np.degrees(np.arctan2(np.dot(np.cross(axis, v), w), np.dot(v, w))))
 
 
+def _sidechain_chi_angles(
+    atoms: Mapping[str, np.ndarray], residue_name: str
+) -> Tuple[float, ...]:
+    """Return every defined canonical side-chain chi angle."""
+    definitions=_CHI_ATOMS.get(residue_name,())
+    values=[]
+    for definition in definitions:
+        missing=[name for name in definition if name not in atoms]
+        if missing:
+            raise ValueError(f"Missing chi atoms for {residue_name}: {missing}")
+        values.append(_torsion_angle_degrees(*(atoms[name] for name in definition)))
+    return tuple(values)
+
+
 
 def _rotate_about_axis(points: np.ndarray, origin: np.ndarray, axis: np.ndarray, angle_degrees: float) -> np.ndarray:
     axis=np.asarray(axis,dtype=float)
@@ -328,6 +342,8 @@ def evaluate_atomistic_prediction(
     rotation, translation = _rigid_fit(moving, fixed)
     aligned = {r: {n: xyz @ rotation + translation for n, xyz in entry["atoms"].items()} for r, entry in pred.items()}
     details, errors, backbone_errors, recovered = [], [], [], []
+    chi_recovery_by_index: dict[int,list[bool]] = {}
+    all_chi_recovered: list[bool] = []
     for rid in active:
         name, ra, pa = ref[rid]["name"], ref[rid]["atoms"], aligned[rid]
         names = _SIDECHAIN_NAMES[name].split()
@@ -341,14 +357,36 @@ def evaluate_atomistic_prediction(
         error = min(squared)
         errors.extend([error, len(names)])
         backbone_errors.extend(float(np.sum((pa[n]-ra[n])**2)) for n in backbone)
-        chi_ref = _chi1_angle(ra, name)
-        chi_error = None if chi_ref is None else min(abs((_chi1_angle(ca, name)-chi_ref+180) % 360-180) for ca in candidates)
+        ref_chis=_sidechain_chi_angles(ra,name)
+        candidate_chis=[_sidechain_chi_angles(ca,name) for ca in candidates]
+        chi_errors=[]
+        for chi_index,ref_angle in enumerate(ref_chis):
+            values=[
+                abs(((chis[chi_index]-ref_angle+180.0)%360.0)-180.0)
+                for chis in candidate_chis if len(chis)>chi_index
+            ]
+            chi_errors.append(min(values) if values else None)
+        chi_error=chi_errors[0] if chi_errors else None
         if chi_error is not None:
             recovered.append(chi_error <= chi1_tolerance)
-        details.append(dict(residue_id=rid, residue_name=name, sidechain_atoms=len(names),
+        flags=[]
+        for chi_index,value in enumerate(chi_errors,1):
+            if value is None:
+                continue
+            flag=bool(value<=chi1_tolerance)
+            chi_recovery_by_index.setdefault(chi_index,[]).append(flag)
+            flags.append(flag)
+        if flags:
+            all_chi_recovered.append(all(flags))
+        details.append(dict(
+            residue_id=rid,residue_name=name,sidechain_atoms=len(names),
             sidechain_rmsd_angstrom=math.sqrt(error/len(names)) if names else None,
-            chi1_error_degrees=chi_error, chi1_recovered=chi_error <= chi1_tolerance if chi_error is not None else None,
-            reference_altloc=ref[rid]["altloc"], prediction_altloc=pred[rid]["altloc"]))
+            chi1_error_degrees=chi_error,
+            chi1_recovered=chi_error <= chi1_tolerance if chi_error is not None else None,
+            chi_errors_degrees=[None if value is None else float(value) for value in chi_errors],
+            chi_recovered=[None if value is None else bool(value<=chi1_tolerance) for value in chi_errors],
+            all_chi_recovered=(all(flags) if flags else None),
+            reference_altloc=ref[rid]["altloc"],prediction_altloc=pred[rid]["altloc"]))
 
     def interface_metrics(structure: dict) -> tuple[set, int, int]:
         contacts, close_pairs, possible_pairs = set(), 0, 0
@@ -474,6 +512,11 @@ def evaluate_atomistic_prediction(
         sidechain_heavy_atom_count=int(atom_count),
         sidechain_rmsd_angstrom=math.sqrt(sum(errors[::2])/atom_count) if atom_count else None,
         chi1_evaluable_residues=len(recovered), chi1_recovery_rate=float(np.mean(recovered)) if recovered else None,
+        chi_recovery_rates={
+            f"chi{index}": (float(np.mean(flags)) if flags else None)
+            for index,flags in sorted(chi_recovery_by_index.items())
+        },
+        all_chi_recovery_rate=(float(np.mean(all_chi_recovered)) if all_chi_recovered else None),
         reference_contact_count=len(ref_contacts), prediction_contact_count=len(pred_contacts),
         recovered_contact_count=overlap, contact_precision=precision, contact_recall=recall,
         contact_f1=2*overlap/(len(ref_contacts)+len(pred_contacts)) if ref_contacts or pred_contacts else None,
@@ -1881,8 +1924,8 @@ class AllAtomInterfaceQUBOBuilder:
                 requested.add((_THREE_LETTER[aa],_nearest_dunbrack_bin(phi),_nearest_dunbrack_bin(psi)))
             allatom_dunbrack_bins=_load_dunbrack_bins(self.rotamer_library_path,requested) if requested else {}
         for rid in ids:
-            if rid not in protein or protein[rid]["name"] in ("ALA","GLY","PRO"):
-                raise ValueError(f"Active site has no supported acyclic chi1: {rid}")
+            if rid not in protein or protein[rid]["name"] in ("ALA","GLY","PRO","CYS"):
+                raise ValueError(f"Active site has no supported safe acyclic side-chain search: {rid}")
             needed=set(("N","CA","C","O"))|set(_SIDECHAIN_NAMES[protein[rid]["name"]].split())
             if needed-set(protein[rid]["atoms"]):
                 raise ValueError(f"Incomplete Active heavy atoms: {rid}")
