@@ -415,10 +415,13 @@ class ForceFieldConfig:
 
 @dataclass(frozen=True)
 class RotamerTemplate:
-    """One discrete chi1 state and its normalized prior probability."""
+    """One statistically defined rotamer state."""
 
     chi1_degrees: float
     prior_probability: float
+    chi_degrees: Tuple[float, ...] = ()
+    chi_sigmas: Tuple[float, ...] = ()
+    source: str = "legacy"
 
 
 @dataclass
@@ -530,6 +533,70 @@ class QUBOResult:
         )
         return {"matrix": matrix_path, "mapping": manifest_path}
 
+
+_THREE_LETTER = {
+    "A":"ALA","C":"CYS","D":"ASP","E":"GLU","F":"PHE","G":"GLY","H":"HIS",
+    "I":"ILE","K":"LYS","L":"LEU","M":"MET","N":"ASN","P":"PRO","Q":"GLN",
+    "R":"ARG","S":"SER","T":"THR","V":"VAL","W":"TRP","Y":"TYR",
+}
+
+def _nearest_dunbrack_bin(angle: float) -> int:
+    """Nearest 10-degree backbone bin in the Dunbrack 2010 library."""
+    if not math.isfinite(angle):
+        raise ValueError("Dunbrack lookup requires finite backbone phi/psi")
+    value=int(round(float(angle)/10.0)*10)
+    while value>180: value-=360
+    while value<-180: value+=360
+    return value
+
+def _load_dunbrack_bins(library_path: Path, requested_bins: set[tuple[str,int,int]]) -> Dict[tuple[str,int,int], list[RotamerTemplate]]:
+    """Read requested residue/phi/psi bins from ALL.bbdep.rotamers.lib."""
+    path=Path(library_path)
+    if not path.is_file():
+        raise FileNotFoundError(f"Dunbrack 2010 rotamer library not found: {path}")
+    found={key:[] for key in requested_bins}
+    with path.open("r",encoding="utf-8",errors="replace") as handle:
+        for raw in handle:
+            line=raw.strip()
+            if not line or line.startswith("#"): continue
+            fields=line.split()
+            if len(fields)<17: continue
+            try:
+                key=(fields[0].upper(),int(round(float(fields[1]))),int(round(float(fields[2]))))
+            except ValueError:
+                continue
+            if key not in found: continue
+            probability=float(fields[8])
+            chis=tuple(float(v) for v in fields[9:13])
+            sigmas=tuple(float(v) for v in fields[13:17])
+            nz=[i for i,(chi,sigma) in enumerate(zip(chis,sigmas)) if abs(chi)>1e-12 or abs(sigma)>1e-12]
+            n=(max(nz)+1) if nz else 1
+            found[key].append(RotamerTemplate(chis[0],probability,chis[:n],sigmas[:n],"dunbrack2010"))
+    missing=[key for key,rows in found.items() if not rows]
+    if missing:
+        raise ValueError(f"Dunbrack library lacks requested bins: {missing[:8]}")
+    normalized={}
+    for key,rows in found.items():
+        total=sum(max(0.0,row.prior_probability) for row in rows)
+        if total<=0: raise ValueError(f"Dunbrack probabilities sum to zero at {key}")
+        normalized[key]=[RotamerTemplate(r.chi1_degrees,r.prior_probability/total,r.chi_degrees,r.chi_sigmas,r.source) for r in rows]
+    return normalized
+
+def _dunbrack_templates_for_site(library_bins, amino_acid: str, phi: float, psi: float, *, probability_floor: float, sigma_offsets: Sequence[float]) -> Tuple[RotamerTemplate, ...]:
+    """Expand Dunbrack rotamers using their reported chi1 sigma."""
+    key=(_THREE_LETTER[amino_acid],_nearest_dunbrack_bin(phi),_nearest_dunbrack_bin(psi))
+    expanded=[]
+    for row in library_bins[key]:
+        if row.prior_probability<probability_floor: continue
+        sigma1=row.chi_sigmas[0] if row.chi_sigmas else 0.0
+        for z in sigma_offsets:
+            angle=((row.chi1_degrees+float(z)*sigma1+180.0)%360.0)-180.0
+            weight=row.prior_probability*math.exp(-0.5*float(z)**2)
+            expanded.append(RotamerTemplate(angle,weight,row.chi_degrees,row.chi_sigmas,"dunbrack2010"))
+    if not expanded: raise ValueError(f"No Dunbrack candidates survived probability floor for {key}")
+    expanded.sort(key=lambda r:(-r.prior_probability,r.chi1_degrees))
+    total=sum(r.prior_probability for r in expanded)
+    return tuple(RotamerTemplate(r.chi1_degrees,r.prior_probability/total,r.chi_degrees,r.chi_sigmas,r.source) for r in expanded)
 
 # Three broad backbone-independent chi1 modes, ordered by simple residue-class
 # prior. Gly/Ala entries are surrogate microstates because those residues have
