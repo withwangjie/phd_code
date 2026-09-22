@@ -287,6 +287,7 @@ def main(argv=None) -> int:
     parser.add_argument("--max-perturb-degrees",type=float,default=120.0)
     parser.add_argument("--outputs", type=int, default=1000)
     parser.add_argument("--max-evals", type=int, default=90)
+    parser.add_argument("--qaoa-depth", type=int, default=2)
     parser.add_argument("--relax-iterations", type=int, default=200)
     parser.add_argument("--candidate-relax-iterations", type=int, default=100)
     parser.add_argument("--prepare-only", action="store_true")
@@ -348,8 +349,8 @@ def main(argv=None) -> int:
         help="Purely descriptive tag recorded in provenance/eligibility.json/the report, so a validation-queue "
              "output directory can never be silently confused with a development pilot's.")
     args = parser.parse_args(argv)
-    if not 1 <= args.sites <= 10 or args.targets < 0:
-        parser.error("Require 1..10 sites and a nonnegative target count (0 = unlimited)")
+    if not 1 <= args.sites <= 10 or args.targets < 0 or args.qaoa_depth <= 0:
+        parser.error("Require 1..10 sites, positive qaoa-depth, and a nonnegative target count (0 = unlimited)")
     if args.eligibility_only and not args.prepare_only:
         parser.error("--eligibility-only is valid only together with --prepare-only")
     if not 0.0 < args.min_perturb_degrees <= args.max_perturb_degrees <= 180.0:
@@ -667,6 +668,7 @@ def main(argv=None) -> int:
                         "--measurement-seeds",*[str(s) for s in measurement_seeds],
                         "--sample-seeds",*[str(s) for s in sample_seeds],
                         "--outputs",str(args.outputs),"--max-evals",str(args.max_evals),
+                        "--qaoa-depth",str(args.qaoa_depth),
                         "--relax-iterations",str(args.relax_iterations),
                         "--loop-relax-iterations",str(args.loop_relax_iterations),
                         *(["--eval-shots",str(args.eval_shots)] if args.eval_shots else []),
