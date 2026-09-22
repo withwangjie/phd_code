@@ -24,7 +24,7 @@ from subgraph_to_qubo import read_atomistic_structure, _SIDECHAIN_NAMES, AllAtom
 from seed_streams import derive_streams, derive_child_seed, save_stream_map, DEFAULT_MASTER_SEED
 
 
-def identity(a: str, b: str, threshold: float = .8) -> float:
+def identity(a: str, b: str, threshold: float = .4) -> float:
     """Global identity over alignment length; length bound only rejects >=threshold."""
     if min(len(a), len(b)) / max(len(a), len(b)) < threshold:
         return 0.
@@ -41,10 +41,10 @@ def identity_detail(a: str, b: str) -> dict:
     """Like `identity`, but always returns the actual identity value and the
     length-ratio coverage gate -- for an auditable record, never just a
     boolean pass/fail. Uses the same alignment (parasail NW + BLOSUM62) and
-    the same 80% length-ratio coverage gate as `identity`, just without
+    the same 40% length-ratio coverage gate as `identity`, just without
     collapsing the result to a threshold comparison."""
     coverage = min(len(a), len(b)) / max(len(a), len(b))
-    if coverage < .8:
+    if coverage < .4:
         return dict(identity=0., coverage=coverage, length_gated=True)
     values = []
     for x, y in ((a, b), (b, a)):
@@ -221,7 +221,7 @@ def main(argv=None) -> int:
         help="PDB IDs (case-insensitive) known to have been used/inspected during development "
              "(e.g. the historical dev queue). Recorded on every candidate's independence audit as "
              "development_exposed, DISTINCT from --exclude-pdb: exposure is tracked even for "
-             "candidates that are not excluded -- exposure and 80%% identity screening are different, "
+             "candidates that are not excluded -- exposure and 40%% identity screening are different, "
              "both-necessary checks, and neither implies the other.")
     parser.add_argument("--dev-exposed-pdb-file",type=Path,default=None,
         help="Optional file with one PDB ID per line, merged with --dev-exposed-pdb.")
@@ -329,7 +329,7 @@ def main(argv=None) -> int:
                 # sequence), never collapsed to only a pass/fail boolean --
                 # so a reviewer can see near-misses, not only the final
                 # exclude/pass decision. Exclusion threshold is unchanged
-                # (>=80% full-chain global identity).
+                # (>=40% full-chain global identity).
                 groups=dict(zip(graph.chain_ids,graph.chain_groups))
                 pool=list(sequences)+test_seqs
                 max_chain_identity=0.
@@ -352,10 +352,10 @@ def main(argv=None) -> int:
                 # identity/exposure check below is honestly
                 # "independence_not_confirmed", never "confirmed independent";
                 # only exclusion statuses are ever asserted with confidence.
-                if max_chain_identity>=.8:
+                if max_chain_identity>=.4:
                     independence_status="excluded_high_chain_identity"
-                    raise ValueError("Full-chain >=80% global identity overlap with training or selected target")
-                if cdr3_identity>=.8:
+                    raise ValueError("Full-chain >=40% global identity overlap with training or selected target")
+                if cdr3_identity>=.4:
                     independence_status="excluded_high_cdr_identity"
                     raise ValueError("Training annotated CDR-H3 overlap")
                 config["preparation_changes"].extend(complete_terminal_oxygen(work/"native.cif"))
@@ -368,7 +368,7 @@ def main(argv=None) -> int:
                     raw_sha256=_ablation_digest(raw),native_sha256=_ablation_digest(work/"native.cif"),
                     development_exposed=development_exposed,chain_identity_audit=chain_identity_audit,
                     cdr3_identity=cdr3_identity,independence_status=independence_status,
-                    independence=f"independence_not_confirmed: PDB-disjoint and below the 80% full-chain/"
+                    independence=f"independence_not_confirmed: PDB-disjoint and below the 40% full-chain/"
                         f"annotated-CDR3 global identity threshold against training+selected targets "
                         f"(max_chain_identity={max_chain_identity:.4f}, cdr3_identity={cdr3_identity:.4f}); "
                         f"family/local-domain relatedness is NOT checked (no cluster map exists in this "
@@ -447,7 +447,7 @@ def main(argv=None) -> int:
             "Input is native backbone/pose plus perturbed Active chi1. Active selection uses native interface contacts. This is an oracle-conditioned retrospective prediction task, not blind docking or CDR-H3 backbone prediction.",
             "Chi1 grids seed candidates. Candidate-local and final relaxation may move all atoms downstream of CA-CB; backbone and background remain frozen. Discrete optimization selects the prepared candidate combinations.",
             "All methods share input/candidates, read budget and relaxation. CPU cost is not equal. Reference structure evaluates accuracy but never selects solver output.",
-            "Independence is limited to PDB plus 80% full-chain/annotated-CDR3 global identity screening (per-chain identity/coverage recorded in eligibility.json). Family/local-domain relatedness is NOT checked (no cluster map exists in this project): every non-excluded target's status is independence_not_confirmed, never confirmed-independent. Development exposure (--dev-exposed-pdb) is recorded per target, separately from the identity screen. This is an exploratory pilot, not a fresh confirmatory test.",
+            "Independence is limited to PDB plus 40% full-chain/annotated-CDR3 global identity screening (per-chain identity/coverage recorded in eligibility.json). Family/local-domain relatedness is NOT checked (no cluster map exists in this project): every non-excluded target's status is independence_not_confirmed, never confirmed-independent. Development exposure (--dev-exposed-pdb) is recorded per target, separately from the identity screen. This is an exploratory pilot, not a fresh confirmatory test.",
             "", "| Method | Targets with results | Mean RMSD gain vs input (A) | Mean gain vs relax-only (A) |", "|---|---:|---:|---:|"]
         for method in ("qaoa","sa","uniform","greedy"):
             group=[r for r in results if r["method"]==method]
