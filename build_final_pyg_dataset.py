@@ -563,7 +563,7 @@ def main():
     global ANTIGEN_IDENTITY_THRESHOLD, ANTIGEN_MIN_LENGTH_COVERAGE
     global INTERFACE_LABEL_CUTOFF_ANGSTROM, INTRA_CHAIN_CA_CUTOFF_ANGSTROM
     global CROSS_PARTNER_KNN_K, MIN_INTERFACE_RESIDUES
-    parser=argparse.ArgumentParser();parser.add_argument('--out',type=pathlib.Path,default=BASE/'dataset_clean_500');parser.add_argument('--workers',type=int,default=2);parser.add_argument('--target-hard',type=int,default=500);parser.add_argument('--no-cap',action='store_true',help='Process every qualifying, deduplicated, isolated CDR-H3 cluster instead of capping at --target-hard.');parser.add_argument('--partition-seed',type=int,default=None,help='Override the module SEED for cluster shuffle order (e.g. an independently-derived partition stream); defaults to SEED when omitted.');parser.add_argument('--audit-dir',type=pathlib.Path,default=BASE);parser.add_argument('--data-root',type=pathlib.Path,default=BASE/'data');parser.add_argument('--vhh-identity-threshold',type=float,default=VHH_IDENTITY_THRESHOLD);parser.add_argument('--cdr-h3-identity-threshold',type=float,default=CDR_H3_IDENTITY_THRESHOLD);parser.add_argument('--antigen-identity-threshold',type=float,default=ANTIGEN_IDENTITY_THRESHOLD);parser.add_argument('--antigen-min-length-coverage',type=float,default=ANTIGEN_MIN_LENGTH_COVERAGE);parser.add_argument('--interface-label-cutoff',type=float,default=INTERFACE_LABEL_CUTOFF_ANGSTROM);parser.add_argument('--intra-chain-ca-cutoff',type=float,default=INTRA_CHAIN_CA_CUTOFF_ANGSTROM);parser.add_argument('--cross-partner-knn-k',type=int,default=CROSS_PARTNER_KNN_K);parser.add_argument('--min-interface-residues',type=int,default=MIN_INTERFACE_RESIDUES);parser.add_argument('--resume',action='store_true');args=parser.parse_args();RESUME=args.resume
+    parser=argparse.ArgumentParser();parser.add_argument('--out',type=pathlib.Path,default=BASE/'dataset_clean_500');parser.add_argument('--workers',type=int,default=2);parser.add_argument('--target-hard',type=int,default=500);parser.add_argument('--no-cap',action='store_true',help='Process every qualifying, deduplicated, isolated CDR-H3 cluster instead of capping at --target-hard.');parser.add_argument('--partition-seed',type=int,default=None,help='Override the module SEED for cluster shuffle order (e.g. an independently-derived partition stream); defaults to SEED when omitted.');parser.add_argument('--audit-dir',type=pathlib.Path,default=BASE);parser.add_argument('--data-root',type=pathlib.Path,default=BASE/'data');parser.add_argument('--vhh-identity-threshold',type=float,default=VHH_IDENTITY_THRESHOLD);parser.add_argument('--cdr-h3-identity-threshold',type=float,default=CDR_H3_IDENTITY_THRESHOLD);parser.add_argument('--antigen-identity-threshold',type=float,default=ANTIGEN_IDENTITY_THRESHOLD);parser.add_argument('--antigen-min-length-coverage',type=float,default=ANTIGEN_MIN_LENGTH_COVERAGE);parser.add_argument('--interface-label-cutoff',type=float,default=INTERFACE_LABEL_CUTOFF_ANGSTROM);parser.add_argument('--intra-chain-ca-cutoff',type=float,default=INTRA_CHAIN_CA_CUTOFF_ANGSTROM);parser.add_argument('--cross-partner-knn-k',type=int,default=CROSS_PARTNER_KNN_K);parser.add_argument('--min-interface-residues',type=int,default=MIN_INTERFACE_RESIDUES);parser.add_argument('--cluster-map',type=pathlib.Path,default=None,help='Optional required PDB->family/structure cluster JSON used to prevent family/domain overlap across train/hard-test.');parser.add_argument('--resume',action='store_true');args=parser.parse_args();RESUME=args.resume
     if any(not 0.0 < value <= 1.0 for value in (
         args.vhh_identity_threshold,args.cdr_h3_identity_threshold,
         args.antigen_identity_threshold,args.antigen_min_length_coverage)):
@@ -583,6 +583,14 @@ def main():
     MIN_INTERFACE_RESIDUES=int(args.min_interface_residues)
     if not args.no_cap and not 300<=args.target_hard<=500:parser.error('--target-hard must be between 300 and 500 (or pass --no-cap to remove the cap entirely)')
     output=args.out.resolve();output.mkdir(parents=True,exist_ok=True)
+    cluster_map=None
+    if args.cluster_map is not None:
+        raw_clusters=json.loads(args.cluster_map.read_text(encoding='utf-8'))
+        if not isinstance(raw_clusters,dict) or not raw_clusters:
+            raise ValueError('--cluster-map must contain a nonempty JSON object')
+        cluster_map={str(k).lower():str(v) for k,v in raw_clusters.items()}
+        if any(not key or not value for key,value in cluster_map.items()):
+            raise ValueError('--cluster-map contains empty PDB or cluster identifiers')
     if RESUME:
         prior=json.loads((output/'run_summary.json').read_text(encoding='utf-8'))
         if prior.get('no_cap',False)!=args.no_cap or (not args.no_cap and prior.get('target_hard')!=args.target_hard):
@@ -662,11 +670,22 @@ def main():
         # Final graph-level hard-set de-redundancy under the SAME layered
         # VHH/CDR-H3/antigen protocol later used for train/test isolation.
         hard_records=[r for r in manifest if r['split']=='test_snac_hard']
-        kept_hard_records=[]; kept_hard_graphs=[]; removed_hard_ids=set()
+        kept_hard_records=[]; kept_hard_graphs=[]; removed_hard_ids=set(); kept_hard_clusters=set()
         hard_pair_max=dict(vhh_identity=0.0,cdr_h3_identity=0.0,antigen_identity=0.0)
         for record in hard_records:
             graph=torch.load(output/record['path'],map_location='cpu',weights_only=False)
             violation=None
+            pdb_key=str(record['pdb_id']).lower()
+            family_cluster=None
+            if cluster_map is not None:
+                if pdb_key not in cluster_map:
+                    raise ValueError(f'Cluster map missing hard-test PDB {pdb_key}')
+                family_cluster=cluster_map[pdb_key]
+                if family_cluster in kept_hard_clusters:
+                    violation=('family_cluster',dict(
+                        violates_vhh=False,violates_cdr_h3=False,violates_antigen=False,
+                        vhh_identity=0.0,cdr_h3_identity=0.0,antigen_identity=0.0))
+            if violation is None:
             for other_record,other_graph in zip(kept_hard_records,kept_hard_graphs):
                 homologous,detail=layered_graph_homologous(graph,other_graph)
                 for key in hard_pair_max:
@@ -676,6 +695,8 @@ def main():
                     break
             if violation is None:
                 kept_hard_records.append(record);kept_hard_graphs.append(graph)
+                if family_cluster is not None:
+                    kept_hard_clusters.add(family_cluster)
             else:
                 other_record,detail=violation
                 (output/record['path']).unlink(missing_ok=True)
@@ -683,6 +704,7 @@ def main():
                 source=next((row for row in chosen if row['id']==record['source_id']),
                             dict(id=record['source_id'],pdb_id=record['pdb_id'],subset=record['subset_source']))
                 reasons=[]
+                if other_record=='family_cluster': reasons.append('family_cluster_overlap_snac_hard')
                 if detail['violates_vhh']: reasons.append('vhh_full_chain_overlap_snac_hard')
                 if detail['violates_cdr_h3']: reasons.append('cdr3_overlap_snac_hard_threshold')
                 if detail['violates_antigen']: reasons.append('antigen_overlap_snac_hard')
@@ -718,12 +740,27 @@ def main():
                 if i%200==0:print(f'Train {i}/{len(train)}, elapsed {time.time()-start:.0f}s',flush=True)
         hard_records=[r for r in manifest if r['split']=='test_snac_hard']
         hard_graphs=[torch.load(output/r['path'],map_location='cpu',weights_only=False) for r in hard_records]
+        hard_clusters=set()
+        if cluster_map is not None:
+            for record in hard_records:
+                key=str(record['pdb_id']).lower()
+                if key not in cluster_map:
+                    raise ValueError(f'Cluster map missing hard-test PDB {key}')
+                hard_clusters.add(cluster_map[key])
         train_records=[r for r in manifest if r['split']=='train']
         retained_train=[]; removed_train=set()
         cross_max=dict(vhh_identity=0.0,cdr_h3_identity=0.0,antigen_identity=0.0)
         for record in train_records:
             graph=torch.load(output/record['path'],map_location='cpu',weights_only=False)
             violation_details=[]
+            pdb_key=str(record['pdb_id']).lower()
+            if cluster_map is not None:
+                if pdb_key not in cluster_map:
+                    raise ValueError(f'Cluster map missing training PDB {pdb_key}')
+                if cluster_map[pdb_key] in hard_clusters:
+                    violation_details.append(('family_cluster',dict(
+                        violates_vhh=False,violates_cdr_h3=False,violates_antigen=False,
+                        vhh_identity=0.0,cdr_h3_identity=0.0,antigen_identity=0.0)))
             for hard_record,hard_graph in zip(hard_records,hard_graphs):
                 homologous,detail=layered_graph_homologous(graph,hard_graph)
                 for key in cross_max:
@@ -732,7 +769,8 @@ def main():
                     violation_details.append((hard_record,detail))
             if violation_details:
                 reasons=set()
-                for _,detail in violation_details:
+                for source,detail in violation_details:
+                    if source=='family_cluster': reasons.add('family_cluster_overlap_snac_hard')
                     if detail['violates_vhh']: reasons.add('vhh_full_chain_overlap_snac_hard')
                     if detail['violates_cdr_h3']: reasons.add('cdr3_overlap_snac_hard_threshold')
                     if detail['violates_antigen']: reasons.add('antigen_overlap_snac_hard')
@@ -765,7 +803,11 @@ def main():
         summary.update(validation=dict(all_graphs_read_back=True,db55_count_248=True,pdb_split_overlap=0,
             hard_max_pair_identity=maxhard,known_train_hard_max_identity=maxtrain,
             hard_layered_pair_max=hard_pair_max,train_hard_layered_cross_max=cross_max,
-            layered_train_hard_isolation=True,pyg_batch=True),known_train_cdr=known_train_cdr)
+            layered_train_hard_isolation=True,
+            family_cluster_map_used=cluster_map is not None,
+            family_cluster_map_sha256=(sha256(args.cluster_map) if args.cluster_map is not None else None),
+            family_cluster_train_hard_overlap=0 if cluster_map is not None else None,
+            pyg_batch=True),known_train_cdr=known_train_cdr)
         cluster_output=[dict(cluster_id=cl['cluster_id'],representative=cl['representative'],sequences=cl['sequences'],source_ids=[r['id'] for r in cl['members']],selected=any(r['cluster_id']==cl['cluster_id'] for r in manifest)) for cl in clusters]
         (output/'cdr3_clusters.json').write_text(json.dumps(cluster_output,ensure_ascii=False,indent=2),encoding='utf-8')
         complete=True
