@@ -516,16 +516,90 @@ class Orchestrator:
         cfg = self.config.get("env_check", {})
         required = cfg.get("required_python_packages", [])
         versions = package_versions(required)
-        missing = [name for name, version in versions.items() if version is None]
+        missing_packages = [name for name, version in versions.items() if version is None]
+        missing_resources: list[str] = []
+        checks: dict[str, Any] = {}
+
+        # Every orchestrated source file is part of the frozen executable protocol.
+        for name in ORCHESTRATED_SCRIPTS:
+            path=self.repo_root/name
+            checks[f"script:{name}"]=path.is_file()
+            if not path.is_file():
+                missing_resources.append(str(path))
+
+        qc=self.config.get("qc_benchmark", {}) or {}
+        rot=qc.get("rotamer_model", {}) or {}
+        if rot.get("mode","dunbrack2010")=="dunbrack2010":
+            library=resolve_path(self.config,rot.get("library_path","data/rotamer/ALL.bbdep.rotamers.lib"))
+            checks["dunbrack_library"]=library.is_file()
+            if not library.is_file():
+                missing_resources.append(str(library))
+
+        clustering=((self.config.get("queue_freeze", {}) or {}).get("independence_clustering", {}) or {})
+        if clustering.get("required",False):
+            cluster_map=resolve_path(self.config,clustering.get("cluster_map","")) if clustering.get("cluster_map") else None
+            pairs=resolve_path(self.config,clustering.get("pair_tsv","")) if clustering.get("pair_tsv") else None
+            available=bool((cluster_map and cluster_map.is_file()) or (pairs and pairs.is_file()))
+            checks["independence_cluster_input"]=available
+            if not available:
+                missing_resources.append(f"cluster_map_or_pair_tsv:{cluster_map}|{pairs}")
+
+        external=self.config.get("external_validation", {}) or {}
+        if external.get("required",False):
+            ext=external.get("external_vhh", {}) or {}
+            if ext.get("required",False):
+                graph_dir=resolve_path(self.config,ext.get("graph_dir",""))
+                manifest=resolve_path(self.config,ext.get("independence_manifest",""))
+                graph_ok=graph_dir.is_dir() and any(graph_dir.glob("*.pt"))
+                checks["external_vhh_graphs"]=graph_ok
+                checks["external_vhh_independence_manifest"]=manifest.is_file()
+                if not graph_ok:
+                    missing_resources.append(str(graph_dir))
+                if not manifest.is_file():
+                    missing_resources.append(str(manifest))
+            structural=external.get("structural_baselines", {}) or {}
+            if structural.get("required",False):
+                faspr=Path(structural.get("faspr_executable",""))
+                phenix=Path(structural.get("phenix_clashscore_executable",""))
+                checks["faspr_executable"]=faspr.is_file()
+                checks["phenix_clashscore_executable"]=phenix.is_file()
+                if not faspr.is_file():
+                    missing_resources.append(str(faspr))
+                if not phenix.is_file():
+                    missing_resources.append(str(phenix))
+
+        # GBN2 is a declared development-only sensitivity dependency.
+        gbn2_error=None
+        solvent_models=(self.config.get("structure_experiment", {}) or {}).get("solvent_sensitivity",[])
+        if "gbn2" in [str(v).lower() for v in solvent_models] and "openmm" not in missing_packages:
+            try:
+                from openmm import app as _openmm_app
+                _openmm_app.ForceField("amber14-all.xml","implicit/gbn2.xml")
+                checks["openmm_gbn2_parameters"]=True
+            except Exception as exc:
+                checks["openmm_gbn2_parameters"]=False
+                gbn2_error=f"{type(exc).__name__}: {exc}"
+                missing_resources.append("OpenMM implicit/gbn2.xml")
+
+        missing_resources=sorted(set(missing_resources))
         record = dict(
             python=sys.version, platform=platform.platform(),
             git_commit=git_commit_hash(self.repo_root),
-            package_versions=versions, missing_packages=missing,
+            package_versions=versions, missing_packages=missing_packages,
+            resource_checks=checks, missing_resources=missing_resources,
+            gbn2_error=gbn2_error,
         )
         atomic_write_json(self.run_dir / "env_check.json", record)
-        status = "completed" if not missing else "failed"
-        detail = "Environment recorded." if not missing else f"Missing required packages: {missing}"
-        return StageResult("env_check", status, started, utc_timestamp(), 0, detail)
+        failed=bool(missing_packages or missing_resources)
+        status = "failed" if failed else "completed"
+        detail = (
+            f"Missing packages={missing_packages}; missing resources={missing_resources}"
+            if failed else "Python dependencies and all declared formal external resources verified."
+        )
+        return StageResult(
+            "env_check", status, started, utc_timestamp(), 1 if failed else 0,
+            detail, artifacts_ok=not failed
+        )
 
     # ================================================================
     # Stage 1: smoke check -- tiny fast pass through each real entrypoint,
