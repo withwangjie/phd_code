@@ -20,11 +20,11 @@ prediction.
    - SE(3)-equivariant EGNN provides residue-level interface probabilities.
    - Formal EGNN ranking uses
      `(1-w) * EGNN + w * exp(-d_Ag/6A)`, with `w=0.25` by default.
-   - Contact, CDR and random strategies are explicit ablation baselines.
+   - Contact, nearest-distance, CDR and random strategies are explicit ablation baselines.
 
 3. **Adaptive side-chain state construction**
    - Formal coarse and all-atom protocols both use residue-flexibility-aware
-     raw chi1 sub-rotamer pools of 6/9/12 states.
+     raw chi1-centered sub-rotamer pools of 6/9/12 states.
    - Candidate pre-screening uses local environment / antigen-conditioned
      interaction scoring (coarse model) or Amber14 single-candidate energy
      (all-atom validation).
@@ -63,8 +63,7 @@ prediction.
 
 - Coarse antigen interaction scores are not binding free energies.
 - Contact number is a geometry baseline, not an affinity estimator.
-- Current all-atom experiments remain native-backbone-conditioned recovery
-  controls.
+- Current all-atom experiments remain native-backbone-conditioned chi1-centered recovery controls; distal chi2/chi3/chi4 are not yet exhaustively resampled.
 - No quantum advantage claim should be made without matched-budget evidence.
 - Smoke checks and legacy explicit `chi1_angles` overrides are engineering or
   ablation paths and are not the formal main protocol.
