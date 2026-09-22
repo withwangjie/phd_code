@@ -200,5 +200,5 @@ def test_ablation_active_sites_are_a_case_dimension() -> None:
 def test_primary_statistics_filter_active_site_scale() -> None:
     source=inspect.getsource(bbh._paired_statistics_main)
     assert "--primary-active-sites" in source
-    assert 'get("active_sites",-1)' in source
+    assert 'get("active_sites",args.primary_active_sites)' in source
     assert "primary_active_sites=args.primary_active_sites" in source
