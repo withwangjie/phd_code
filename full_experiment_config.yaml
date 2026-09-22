@@ -126,6 +126,12 @@ queue_freeze:
   identity_threshold: 0.40
   graph_build:
     workers: 8
+    # Scientific graph protocol. Changing any value requires a fresh dataset;
+    # graph v1.3 records these values in every .pt and run_summary.json.
+    interface_label_cutoff_angstrom: 5.0
+    intra_chain_ca_cutoff_angstrom: 8.0
+    cross_partner_knn_k: 3
+    min_interface_residues: 15
     # build_final_pyg_dataset.py --no-cap ignores target_hard's 300..500
     # range check entirely; this value is recorded for provenance only and
     # has no selection effect when no_cap is true.
@@ -190,6 +196,8 @@ egnn_train:
   batch_size: 2
   hidden_dim: 32
   learning_rate: 1.0e-3
+  # Bilateral VHH/antigen connected-component split threshold.
+  identity_threshold: 0.40
   device: "cuda"
   threads: 4
   num_workers: 8
@@ -213,12 +221,27 @@ qc_benchmark:
   checkpoint: "best_egnn_pruning.pt"
   workers: 16  # CPU legal-subspace simulation, not 2^n GPU state vectors
   max_targets: 0  # 0 = every qualifying graph in input_dir, no silent subset
-  pruning: ["egnn", "contact", "distance", "cdr", "random"]  # the four strategies requirement #4 asks for
+  pruning: ["egnn", "contact", "distance", "cdr", "random"]
   radii: [6.0]
   depths: [2]
   max_evals: [90]
   active_sites: 6
   antigen_guidance_weight: 0.25  # EGNN probability / label-free nearest-antigen proximity blend
+  antigen_proximity_scale_angstrom: 6.0
+  contact_ca_cutoff_angstrom: 8.0
+  # Coarse-grained non-bonded proxy parameters. These are model parameters,
+  # not binding-affinity constants; all values are recorded in QUBO metadata.
+  coarse_force_field:
+    cutoff_angstrom: 8.0
+    softcore_delta_angstrom: 0.5
+    hard_core_fraction: 0.72
+    hard_sphere_penalty: 25.0
+    lj_repulsion_cap: 50.0
+    lj_attraction_cap: 5.0
+    coulomb_cap: 20.0
+    dielectric_base: 4.0
+    dielectric_slope: 2.0
+    thermal_energy_kcal: 0.593
   # Side-chain search: 6/9/12 raw sub-rotamers -> retain 3-6 states/site -> <=30 total variables
   outputs: [10, 30, 100, 300, 1000]  # the output-budget curve
   qaoa_objective: ["mean", "cvar"]
@@ -258,6 +281,8 @@ structure_experiment:
   relax_iterations: 200
   candidate_relax_iterations: 100
   antigen_guidance_weight: 0.25
+  antigen_proximity_scale_angstrom: 6.0
+  contact_ca_cutoff_angstrom: 8.0
   # Formal all-atom search mirrors coarse benchmark: 6/9/12 raw chi1 sub-rotamers -> 3-6 retained states/site -> <=30 variables.
   loop_relax_iterations: 100
   eval_shots: 500
