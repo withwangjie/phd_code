@@ -360,6 +360,8 @@ structure_experiment:
   cvar_alpha: 0.1
   parameter_scale: "max_coefficient"
   perturbation_mode: "multi_chi"
+  solvent_model: "vacuum"  # frozen primary structural protocol
+  solvent_sensitivity: ["vacuum", "gbn2"]  # development queue only
   min_perturb_degrees: 40.0
   max_perturb_degrees: 120.0
 
