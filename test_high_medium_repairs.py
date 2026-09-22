@@ -281,3 +281,41 @@ def test_one_click_launcher_uses_precreated_run_directory() -> None:
     assert 'PREFLIGHT_LOG="$RUN_DIR/logs/formal_preflight_' in source
     assert 'LAUNCH_LOG="$RUN_DIR/logs/launch_' in source
     assert 'provenance/resolved_runtime_config.yaml' in source
+
+
+
+def test_formal_result_contract_requires_core_experimental_outputs() -> None:
+    source=inspect.getsource(full.Orchestrator._validate_completed_stage_artifacts)
+    for token in (
+        'root/"metrics.csv"',
+        'root/"summary.md"',
+        'sensitivity_summary.csv',
+        'sensitivity_summary.json',
+        'sensitivity_summary.md',
+        'real_complex_metrics.csv',
+        'real_complex_report.md',
+        'external_baseline_metrics.csv',
+        'external_baseline_report.md',
+        'statistics_outputs.json',
+        'structure_statistics.json',
+    ):
+        assert token in source
+
+
+def test_stage_results_manifest_is_written_and_required() -> None:
+    source=inspect.getsource(full.Orchestrator)
+    assert "stage_results_manifest" not in source  # legacy singular name must not appear
+    assert "results_manifests" in source
+    assert "_write_stage_results_manifest" in source
+    assert "Missing stage results manifest" in source
+
+
+def test_run_summary_requires_global_results_audit(tmp_path: Path) -> None:
+    run=tmp_path/"run"; run.mkdir()
+    (run/"EXPERIMENT_RESULTS_AUDIT.json").write_text(
+        json.dumps({"all_required_results_present":False}),encoding="utf-8")
+    results={"env_check":full.StageResult("env_check","completed","a","b",0,"ok")}
+    full.write_run_inventory(run,results)
+    summary=json.loads((run/"RUN_SUMMARY.json").read_text(encoding="utf-8"))
+    assert summary["status"]=="failed"
+    assert summary["results_audit_ok"] is False
