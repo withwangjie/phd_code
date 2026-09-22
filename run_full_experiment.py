@@ -698,9 +698,32 @@ class Orchestrator:
             if not ok:return ok,detail
             payload,error=read_json(calibration)
             if error:return False,error
-            if not payload.get("accepted",True) and "cv_rmse_kcal" not in payload:
-                return False,"Calibration artifact does not contain accepted calibration metrics"
-            return True,"energy calibration artifacts verified"
+            limits=cal.get("acceptance",{}) or {}
+            checks=[
+                ("cv_rmse_kcal","max_cv_rmse_kcal",lambda value,limit:value<=limit),
+                ("cv_mae_kcal","max_cv_mae_kcal",lambda value,limit:value<=limit),
+                ("cv_r2","min_cv_r2",lambda value,limit:value>=limit),
+                ("cv_spearman","min_cv_spearman",lambda value,limit:value>=limit),
+                ("calibration_rmse_improvement_kcal","min_rmse_improvement_kcal",
+                    lambda value,limit:value>=limit),
+            ]
+            for metric,key,predicate in checks:
+                if key not in limits:
+                    continue
+                value=payload.get(metric)
+                limit=float(limits[key])
+                if value is None or not math.isfinite(float(value)) or not predicate(float(value),limit):
+                    return False,f"Calibration resume acceptance failed: {metric}={value}, {key}={limit}"
+            if limits.get("require_family_grouped_cv",False) and payload.get("cv_grouping")!="family_cluster":
+                return False,"Calibration resume requires family_cluster grouped CV"
+            if int(payload.get("n_train_complexes",0) or 0)<int(limits.get("min_train_complexes",0)):
+                return False,"Calibration resume has insufficient training complexes"
+            if int(payload.get("n_train_groups",0) or 0)<int(limits.get("min_train_groups",0)):
+                return False,"Calibration resume has insufficient family groups"
+            observed_folds=int(payload.get("cv_fold_count",len(payload.get("cv_folds",[]) or [])) or 0)
+            if observed_folds<int(limits.get("min_cv_folds",0)):
+                return False,"Calibration resume has insufficient CV folds"
+            return True,"energy calibration artifacts and acceptance thresholds verified"
         if stage=="method_sensitivity":
             qc=self.config.get("qc_benchmark",{}) or {}
             cfg=qc.get("sensitivity",{}) or {}
@@ -758,6 +781,8 @@ class Orchestrator:
                 if error:return False,error
                 if summary.get("closed") is False or summary.get("failures"):
                     return False,f"External validation summary not closed/clean: {path}"
+                if "failures_total" in summary and int(summary.get("failures_total",0) or 0)!=0:
+                    return False,f"External validation summary reports failed cases: {path}"
             return True,"external validation artifacts verified"
         if stage=="statistics":
             root=self.run_dir/"qc_benchmark"
