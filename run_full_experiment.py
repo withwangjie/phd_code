@@ -1912,8 +1912,24 @@ class Orchestrator:
         # energy-to-structure inference.
         results_dirs = [self.run_dir / "qc_benchmark"]
         logs, argvs, failures = [], [], []
+        qc_cfg = self.config["qc_benchmark"]
+        primary_outputs = int(cfg.get("primary_outputs", max(qc_cfg.get("outputs", [1000]))))
+        primary_objective = str(cfg.get("primary_objective", "cvar"))
+        primary_restarts = int(cfg.get("primary_restarts", 4))
+        if primary_outputs not in qc_cfg.get("outputs", []):
+            failures.append(
+                f"statistics primary_outputs={primary_outputs} is not present in qc_benchmark.outputs")
+        if primary_objective not in qc_cfg.get("qaoa_objective", []):
+            failures.append(
+                f"statistics primary_objective={primary_objective} is not present in qc_benchmark.qaoa_objective")
+        if primary_restarts not in qc_cfg.get("qaoa_restarts", []):
+            failures.append(
+                f"statistics primary_restarts={primary_restarts} is not present in qc_benchmark.qaoa_restarts")
         for results_dir in results_dirs:
             if not results_dir.is_dir():
+                failures.append(f"statistics input directory is missing: {results_dir}")
+                continue
+            if failures:
                 continue
             for budget_mode in cfg.get("budget_modes", ["outputs", "time"]):
                 argv = [
@@ -1922,6 +1938,9 @@ class Orchestrator:
                     "--resamples", str(cfg.get("resamples", 10000)),
                     "--seed", str(self.config["master_seed"]),
                     "--budget-mode", budget_mode,
+                    "--primary-outputs", str(primary_outputs),
+                    "--primary-objective", primary_objective,
+                    "--primary-restarts", str(primary_restarts),
                     "--max-time-overrun-fraction", str(cfg.get("max_time_overrun_fraction", 0.10)),
                 ]
                 cluster_setting = cfg.get("cluster_map") or (
@@ -1936,8 +1955,17 @@ class Orchestrator:
                 returncode, log_path = self._run_subprocess(
                     f"statistics_{results_dir.name}_{budget_mode}", argv)
                 logs.append(str(log_path)); argvs.append(argv)
+                expected = [
+                    results_dir / f"statistics_{budget_mode}.json",
+                    results_dir / f"statistics_{budget_mode}.md",
+                ]
+                artifacts_ok, artifact_detail = self._artifacts_present(expected)
                 if returncode != 0:
                     failures.append(f"{results_dir.name}/{budget_mode} exited {returncode} (see {log_path})")
+                elif not artifacts_ok:
+                    failures.append(
+                        f"{results_dir.name}/{budget_mode} did not produce required statistics artifacts: "
+                        f"{artifact_detail} (see {log_path})")
         validation_metrics = self.run_dir / "validation_queue" / "real_complex_metrics.csv"
         cluster_setting = cfg.get("cluster_map") or (
             (self.config["queue_freeze"].get("independence_clustering", {}) or {}).get("cluster_map")
