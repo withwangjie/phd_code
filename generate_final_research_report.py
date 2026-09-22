@@ -381,10 +381,17 @@ def section_search_performance(ctx: ReportContext) -> List[str]:
         return lines
     primary_sites=_primary_active_sites(ctx)
     primary_pruning=_primary_pruning(ctx)
+    stats_cfg=ctx.frozen_config.get("statistics",{}) or {}
+    primary_radius=float(stats_cfg.get("primary_radius",6.0))
+    primary_depth=int(stats_cfg.get("primary_depth",2))
+    primary_max_evals=int(stats_cfg.get("primary_max_evals",90))
     rows=[
         r for r in _filter_qc_rows(all_rows,"matched_outputs")
         if int(float(r.get("active_sites",primary_sites)))==primary_sites
         and str(r.get("pruning",""))==primary_pruning
+        and abs(float(r.get("radius",primary_radius))-primary_radius)<=1e-12
+        and int(float(r.get("depth",primary_depth)))==primary_depth
+        and int(float(r.get("max_evals",primary_max_evals)))==primary_max_evals
     ]
 
     calibration_cfg=((ctx.frozen_config.get("qc_benchmark",{}) or {}).get("energy_calibration",{}) or {})
@@ -436,7 +443,6 @@ def section_search_performance(ctx: ReportContext) -> List[str]:
 
     lines.append("### 3.2 Active-site scaling analysis")
     lines.append("")
-    stats_cfg=ctx.frozen_config.get("statistics",{}) or {}
     primary_outputs=int(stats_cfg.get("primary_outputs",1000))
     primary_objective=str(stats_cfg.get("primary_objective","cvar"))
     primary_restarts=int(stats_cfg.get("primary_restarts",4))
@@ -444,13 +450,17 @@ def section_search_performance(ctx: ReportContext) -> List[str]:
         r for r in _filter_qc_rows(all_rows,"matched_outputs")
         if int(float(r.get("outputs",0) or 0))==primary_outputs
         and str(r.get("pruning",""))==primary_pruning
+        and abs(float(r.get("radius",primary_radius))-primary_radius)<=1e-12
+        and int(float(r.get("depth",primary_depth)))==primary_depth
+        and int(float(r.get("max_evals",primary_max_evals)))==primary_max_evals
     ]
     site_values=sorted({
         int(float(r.get("active_sites")))
         for r in scaling_rows if r.get("active_sites") not in (None,"","None")
     })
     lines.append(
-        f"Descriptive scaling on pruning={primary_pruning} at outputs={primary_outputs}. QAOA uses the frozen primary "
+        f"Descriptive scaling on pruning={primary_pruning}, radius={primary_radius}, p={primary_depth}, "
+        f"max_evals={primary_max_evals}, outputs={primary_outputs}. QAOA uses the frozen primary "
         f"objective={primary_objective}, restarts={primary_restarts}; classical solvers use their matched-output rows."
     )
     lines.append("")
@@ -567,7 +577,9 @@ def section_search_performance(ctx: ReportContext) -> List[str]:
             lines.append("")
             continue
         lines.append(
-            f"Frozen primary contrast: pruning={payload.get('primary_pruning')}, active_sites={payload.get('primary_active_sites')}, "
+            f"Frozen primary contrast: pruning={payload.get('primary_pruning')}, radius={payload.get('primary_radius')}, "
+            f"p={payload.get('primary_depth')}, max_evals={payload.get('primary_max_evals')}, "
+            f"active_sites={payload.get('primary_active_sites')}, "
             f"outputs={payload.get('primary_outputs')}, objective={payload.get('primary_objective')}, "
             f"restarts={payload.get('primary_restarts')}; "
             f"cluster unit: {payload.get('cluster_unit','n/a')}.")
