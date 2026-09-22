@@ -433,12 +433,60 @@ def _target_level_paired_differences(rows: List[Dict[str, str]], metric: str, ba
     return _paired_effect(differences, master_seed, 10000)
 
 
+def _target_level_descriptive_difference(
+    rows: List[Dict[str, str]], metric: str, baseline: str
+) -> Dict[str, Any]:
+    by_target: Dict[str, Dict[str, List[float]]] = {}
+    for row in rows:
+        target=row.get("target","")
+        method=row.get("method","")
+        value=row.get(metric)
+        if value in (None,"","None"):
+            continue
+        by_target.setdefault(target,{}).setdefault(method,[]).append(float(value))
+    differences=[]
+    for target,methods in sorted(by_target.items()):
+        if "qaoa" not in methods or baseline not in methods:
+            continue
+        differences.append(
+            sum(methods["qaoa"])/len(methods["qaoa"])
+            - sum(methods[baseline])/len(methods[baseline])
+        )
+    return dict(
+        n_targets=len(differences),
+        mean_difference=(None if not differences else sum(differences)/len(differences)),
+    )
+
+
 def section_structural_benefit(ctx: ReportContext) -> List[str]:
     lines = ["## 4. Structure reconstruction, relaxation, and the energy-structure relationship "
              "(does a lower-energy conformer mean a more accurate structure?)", ""]
     if not stage_ok(ctx, "structure_experiment"):
         lines += ["structure_experiment stage did not complete; no structural-benefit numbers are reported.", ""]
         return lines
+
+    structure_stats = _read_json(ctx.run_dir / "statistics" / "structure_statistics.json") or {}
+    if structure_stats:
+        primary=structure_stats.get("primary",{}) or {}
+        rq5=structure_stats.get("rq5",{}) or {}
+        lines.append("### 4.0 Pre-registered confirmatory structural analysis")
+        lines.append("")
+        lines.append(
+            f"- Primary endpoint: {primary.get('endpoint')}; contrast: {primary.get('contrast')}; "
+            f"clusters={primary.get('n_clusters')}; mean difference={_fmt(primary.get('mean_difference'))}; "
+            f"95% cluster-bootstrap CI=[{_fmt(primary.get('ci_low'))}, {_fmt(primary.get('ci_high'))}]; "
+            f"sign-flip p={_fmt(primary.get('p_value'))}."
+        )
+        lines.append(
+            f"- RQ5 energy-to-structure transfer: Spearman rho={_fmt(rq5.get('spearman_rho'))}; "
+            f"95% cluster-bootstrap CI=[{_fmt(rq5.get('ci_low'))}, {_fmt(rq5.get('ci_high'))}]; "
+            f"cluster-aware permutation p={_fmt(rq5.get('p_value'))}."
+        )
+        lines.append(
+            "- These are the only inferential structural results. Additional method/metric tables below "
+            "are descriptive and are not separate hypothesis tests."
+        )
+        lines.append("")
 
     dev_rows = _load_recovery_rows(ctx.run_dir / "dev_queue")
     validation_rows = _load_recovery_rows(ctx.run_dir / "validation_queue")
@@ -456,20 +504,19 @@ def section_structural_benefit(ctx: ReportContext) -> List[str]:
         lines.append(f"- Targets with at least one recorded row: {len(targets)}. Total method x seed rows: {len(rows)}.")
         lines.append(f"- Rows where relaxation lowered energy but worsened side-chain RMSD "
                       f"(`relaxation_energy_down_rmsd_up`): {energy_down_rmsd_up}/{len(rows)}.")
-        master_seed = ctx.frozen_config.get("master_seed", 20260917)
         lines.append("")
-        lines.append("Target-level paired QAOA-vs-classical differences (repeats averaged within target first, "
-                      "then targets averaged; positive `improvement_vs_input` favours QAOA):")
+        lines.append("Descriptive target-level QAOA-vs-classical differences "
+                     "(repeats averaged within target first; no additional p values):")
         lines.append("")
-        lines.append("| Baseline | Metric | Targets paired | Mean difference | 95% CI | p |")
-        lines.append("|---|---|---:|---:|---|---|")
+        lines.append("| Baseline | Metric | Targets paired | Mean difference |")
+        lines.append("|---|---|---:|---:|")
         for baseline in ("sa", "uniform", "greedy"):
             for metric in ("improvement_vs_input", "final_rmsd"):
-                effect = _target_level_paired_differences(rows, metric, baseline, int(master_seed))
-                lines.append(f"| {baseline} | {metric} | {effect.get('n_clusters', 0)} | "
-                              f"{_fmt(effect.get('mean_difference'))} | "
-                              f"{_fmt(effect.get('ci_low'))}, {_fmt(effect.get('ci_high'))} | "
-                              f"{_fmt(effect.get('p_value'))} |")
+                effect=_target_level_descriptive_difference(rows,metric,baseline)
+                lines.append(
+                    f"| {baseline} | {metric} | {effect.get('n_targets',0)} | "
+                    f"{_fmt(effect.get('mean_difference'))} |"
+                )
         lines.append("")
 
     # Failure denominators, preserved explicitly rather than dropped.
