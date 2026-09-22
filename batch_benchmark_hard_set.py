@@ -2131,6 +2131,7 @@ def _allatom_experiment_main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--cvar-alpha",type=float,default=.1)
     parser.add_argument("--parameter-scale",choices=("max_coefficient","feasible_iqr"),default="max_coefficient")
     parser.add_argument("--relax-iterations",type=int,default=200)
+    parser.add_argument("--solvent-model",choices=("vacuum","gbn2"),default="vacuum")
     parser.add_argument("--seed",type=int,default=42)
     parser.add_argument("--optimize-seed",type=int,default=None,
         help="Independent optimizer sub-seed (defaults to --seed when omitted, for standalone-"
@@ -2191,7 +2192,8 @@ def _allatom_experiment_main(argv: Optional[Sequence[str]] = None) -> int:
             rotamer_mode=rotamer_cfg.get("mode","legacy"),
             rotamer_library_path=rotamer_cfg.get("library_path"),
             rotamer_probability_floor=float(rotamer_cfg.get("probability_floor",1e-4)),
-            rotamer_sigma_offsets=rotamer_cfg.get("sigma_offsets",[-1.0,0.0,1.0]))
+            rotamer_sigma_offsets=rotamer_cfg.get("sigma_offsets",[-1.0,0.0,1.0]),
+            solvent_model=args.solvent_model)
         builder.write_structure(builder.base_positions,out/"prepared_input.cif")
         # Candidate coordinates make reconstruction independently auditable.
         np.savez_compressed(out/"candidate_coordinates.npz",base_positions_nm=builder.base_positions,
@@ -2347,6 +2349,7 @@ def _recovery_benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
              "(defaults elementwise to --seeds when omitted). Drives optimize_robust's finite-shot "
              "CVaR/mean draws WHILE searching -- distinct from --optimize-seeds and --sample-seeds.")
     parser.add_argument("--perturbation-mode",choices=("multi_chi","chi1"),default="multi_chi")
+    parser.add_argument("--solvent-model",choices=("vacuum","gbn2"),default="vacuum")
     parser.add_argument("--min-perturb-degrees",type=float,default=40.)
     parser.add_argument("--max-perturb-degrees",type=float,default=120.)
     parser.add_argument("--outputs",type=int,default=1000)
@@ -2393,7 +2396,8 @@ def _recovery_benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
             rotamer_mode=rotamer_cfg.get("mode","legacy"),
             rotamer_library_path=rotamer_cfg.get("library_path"),
             rotamer_probability_floor=float(rotamer_cfg.get("probability_floor",1e-4)),
-            rotamer_sigma_offsets=rotamer_cfg.get("sigma_offsets",[-1.0,0.0,1.0]))
+            rotamer_sigma_offsets=rotamer_cfg.get("sigma_offsets",[-1.0,0.0,1.0]),
+            solvent_model=args.solvent_model)
         with (out/"recovery_metrics.csv").open("w",newline="",encoding="utf-8") as handle:
             writer=None
             for idx, seed in enumerate(args.seeds):
