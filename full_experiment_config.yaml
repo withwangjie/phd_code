@@ -122,8 +122,13 @@ data_audit:
 #     which targets were selected or why.
 # ---------------------------------------------------------------------------
 queue_freeze:
-  # Shared sequence-isolation threshold used by the formal protocol and report.
-  identity_threshold: 0.40
+  # Homology-isolation protocol. Any criterion that fires joins two complexes
+  # into the same connected component; a component may never cross a split.
+  homology_isolation:
+    vhh_full_chain_identity: 0.80
+    cdr_h3_identity: 0.50
+    antigen_identity: 0.30
+    antigen_min_length_coverage: 0.70
   graph_build:
     workers: 8
     # Scientific graph protocol. Changing any value requires a fresh dataset;
@@ -200,8 +205,7 @@ egnn_train:
   gradient_clip: 5.0
   amp: true
   pin_memory: true
-  # Bilateral VHH/antigen connected-component split threshold.
-  identity_threshold: 0.40
+  # Uses queue_freeze.homology_isolation exactly; no independent threshold.
   device: "cuda"
   threads: 4
   num_workers: 8
@@ -233,6 +237,20 @@ qc_benchmark:
   antigen_guidance_weight: 0.25  # EGNN probability / label-free nearest-antigen proximity blend
   antigen_proximity_scale_angstrom: 6.0
   contact_ca_cutoff_angstrom: 8.0
+  rotamer_model:
+    mode: "dunbrack2010"
+    # Local path to the licensed/attributed ALL.bbdep.rotamers.lib file.
+    # Formal runs fail closed if this file is missing.
+    library_path: "data/rotamer/ALL.bbdep.rotamers.lib"
+    probability_floor: 1.0e-4
+    sigma_offsets: [-1.0, 0.0, 1.0]
+  energy_calibration:
+    # Coefficients are fit ONLY on training complexes against Amber14
+    # all-atom energy deltas, then frozen for validation/test.
+    mode: "frozen"
+    calibration_file: "calibration/coarse_to_amber.json"
+    require_calibrated: true
+    ridge_alpha: 1.0
   # Coarse-grained non-bonded proxy parameters. These are model parameters,
   # not binding-affinity constants; all values are recorded in QUBO metadata.
   coarse_force_field:
@@ -287,6 +305,11 @@ structure_experiment:
   antigen_guidance_weight: 0.25
   antigen_proximity_scale_angstrom: 6.0
   contact_ca_cutoff_angstrom: 8.0
+  rotamer_model:
+    mode: "dunbrack2010"
+    library_path: "data/rotamer/ALL.bbdep.rotamers.lib"
+    probability_floor: 1.0e-4
+    sigma_offsets: [-1.0, 0.0, 1.0]
   # Formal all-atom search mirrors coarse benchmark: 6/9/12 raw chi1 sub-rotamers -> 3-6 retained states/site -> <=30 variables.
   loop_relax_iterations: 100
   eval_shots: 500
