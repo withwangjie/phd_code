@@ -816,23 +816,70 @@ class Orchestrator:
                 "--queue-role", "dev" if label == "dev_queue" else "validation",
             ] + shared_flags()
             if label == "dev_queue":
-                argv += ["--targets", str(len(explicit_targets) or 3)]
-                for pdb in explicit_targets:
-                    # dev queue is one explicit historical target per invocation;
-                    # run_real_complex_pilot.py accepts a single --pdb-id filter,
-                    # so each historical target gets its own sub-run/out-dir.
-                    pass
+                # Historical dev targets are each run individually. Each
+                # subprocess therefore has a target denominator of exactly 1;
+                # passing the total dev-queue size here previously caused an
+                # internally inconsistent nonzero return despite usable output.
                 # Historical dev targets are each run individually against
                 # their own already-frozen manifest from real_complex_pilot_v3
                 # if present, otherwise freshly (re-)selected+frozen here
                 # under out_dir/<pdb>/, keeping the dev queue fully separate
                 # from the validation queue's own directory.
+                dev_completed = []
+                dev_failed = []
+                dev_summaries = {}
                 for pdb in explicit_targets:
-                    sub_argv = argv + ["--pdb-id", pdb, "--out-dir", str(out_dir / pdb)]
+                    sub_argv = argv + [
+                        "--targets", "1",
+                        "--pdb-id", pdb,
+                        "--out-dir", str(out_dir / pdb),
+                    ]
                     returncode, log_path = self._run_subprocess(f"structure_experiment_dev_{pdb}", sub_argv)
                     logs.append(str(log_path)); argvs.append(sub_argv)
+                    sub_summary_path = out_dir / pdb / "run_summary.json"
+                    if sub_summary_path.is_file():
+                        sub_summary = json.loads(sub_summary_path.read_text(encoding="utf-8"))
+                        dev_summaries[pdb] = sub_summary
+                        sub_failed = bool(sub_summary.get("structure_experiment_failed_targets"))
+                        sub_closed = bool(sub_summary.get("closed"))
+                        if sub_closed and not sub_failed:
+                            dev_completed.append(pdb.lower())
+                        else:
+                            dev_failed.append(pdb.lower())
+                    elif returncode == 0 and (out_dir / pdb / "real_complex_metrics.csv").is_file():
+                        # Backward-compatible acceptance for an older subrun
+                        # artifact, but root closure records the missing summary
+                        # as a failure rather than silently claiming closure.
+                        dev_failed.append(pdb.lower())
+                    else:
+                        dev_failed.append(pdb.lower())
                     if returncode not in (0,) and not (out_dir / pdb / "real_complex_metrics.csv").is_file():
                         failures.append(f"dev target {pdb} exited {returncode} with no usable metrics (see {log_path})")
+                planned_dev = [p.lower() for p in explicit_targets]
+                dev_closed = (
+                    set(dev_completed) | set(dev_failed) == set(planned_dev)
+                    and not (set(dev_completed) & set(dev_failed))
+                )
+                atomic_write_json(out_dir / "run_summary.json", dict(
+                    queue_role="dev",
+                    qualifying_pool_size=len(planned_dev),
+                    target_cap=len(planned_dev),
+                    examined_candidates=len(planned_dev),
+                    selected_targets=len(planned_dev),
+                    planned_target_ids=sorted(planned_dev),
+                    structure_experiment_completed_targets=len(dev_completed),
+                    structure_experiment_completed_target_ids=sorted(dev_completed),
+                    structure_experiment_failed_targets=sorted(dev_failed),
+                    closed=dev_closed,
+                    child_run_summaries=dev_summaries,
+                ))
+                if not dev_closed:
+                    failures.append(
+                        f"dev_queue root accounting not closed: planned={sorted(planned_dev)} "
+                        f"completed={sorted(dev_completed)} failed={sorted(dev_failed)}")
+                elif dev_failed:
+                    queue_partial.append(
+                        f"dev_queue: completed with target failures {sorted(dev_failed)}")
                 continue
             # (requirement #1/#3) Reproduce EXACTLY the target set queue_freeze
             # already froze -- via an explicit allowlist file, never by
