@@ -110,3 +110,33 @@ def test_resume_qc_marker_requires_closed_summary(tmp_path: Path) -> None:
     ok, detail = Orchestrator._validate_completed_stage_artifacts(Dummy(), "qc_benchmark")
     assert ok is False
     assert "not closed" in detail
+
+
+
+def test_completed_prerequisite_with_missing_artifacts_blocks_target_stage() -> None:
+    class Harness:
+        only = None
+        force_restage = set()
+        config = {"stages": {"target": True}}
+
+        def __init__(self):
+            self.saved = []
+
+        def _load_stage_status(self, stage):
+            if stage == "qc_benchmark":
+                return {"status": "completed"}
+            return None
+
+        def _save_stage_status(self, result):
+            self.saved.append(result)
+
+        def _validate_completed_stage_artifacts(self, stage):
+            assert stage == "qc_benchmark"
+            return False, "run_summary.json missing"
+
+    result = Orchestrator.run_stage(
+        Harness(), "target", ["qc_benchmark"],
+        lambda: None,
+    )
+    assert result.status == "failed"
+    assert "failed artifact verification" in result.detail
