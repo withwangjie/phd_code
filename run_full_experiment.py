@@ -581,7 +581,15 @@ class Orchestrator:
             "--workers", str(cfg.get("workers", 4)),
             "--limit", str(cfg.get("limit", 0)),
             "--out", str(self.run_dir / "audit"),
+            "--max-resolution", str(cfg.get("max_resolution_angstrom", 3.0)),
+            "--min-interface-occupancy", str(cfg.get("min_interface_occupancy", 0.90)),
         ]
+        if cfg.get("allow_interface_altloc", False):
+            argv.append("--allow-interface-altloc")
+        if cfg.get("allow_unknown_resolution", False):
+            argv.append("--allow-unknown-resolution")
+        if cfg.get("allow_incomplete_interface_sidechains", False):
+            argv.append("--allow-incomplete-interface-sidechains")
         returncode, log_path = self._run_subprocess("data_audit", argv)
         expected = [self.run_dir / "audit" / name for name in
                     ("data_audit_report.md", "data_audit_details.csv",
