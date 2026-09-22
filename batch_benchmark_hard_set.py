@@ -1545,6 +1545,7 @@ def fit_energy_calibration_csv(input_csv: Path, output_json: Path, ridge_alpha: 
     }
     cv_rows=[]
     cv_predictions=np.full(len(y),np.nan,dtype=float)
+    uncalibrated_predictions=X.sum(axis=1)
     for fold in sorted(set(fold_of.values())):
         test_mask=np.asarray([fold_of[pdb]==fold for pdb in pdb_ids],dtype=bool)
         train_mask=~test_mask
@@ -1581,6 +1582,18 @@ def fit_energy_calibration_csv(input_csv: Path, output_json: Path, ridge_alpha: 
             if math.isfinite(float(rho)):
                 cv_spearman=float(rho)
 
+    baseline_residual=y-uncalibrated_predictions
+    baseline_ss_tot=float(np.sum((y-y.mean())**2))
+    baseline_r2=(
+        None if baseline_ss_tot<=0
+        else float(1.0-np.sum(baseline_residual**2)/baseline_ss_tot)
+    )
+    baseline_spearman=None
+    if len(y)>=3:
+        baseline_rho=spearmanr(y,uncalibrated_predictions).statistic
+        if math.isfinite(float(baseline_rho)):
+            baseline_spearman=float(baseline_rho)
+
     payload={
         "intercept":float(beta[0]),
         "prior_weight":float(beta[1]),
@@ -1606,6 +1619,15 @@ def fit_energy_calibration_csv(input_csv: Path, output_json: Path, ridge_alpha: 
         ),
         "cv_r2":cv_r2,
         "cv_spearman":cv_spearman,
+        "uncalibrated_rmse_kcal":float(np.sqrt(np.mean(baseline_residual**2))),
+        "uncalibrated_mae_kcal":float(np.mean(np.abs(baseline_residual))),
+        "uncalibrated_r2":baseline_r2,
+        "uncalibrated_spearman":baseline_spearman,
+        "calibration_rmse_improvement_kcal":(
+            None if not cv_mask.any()
+            else float(np.sqrt(np.mean(baseline_residual[cv_mask]**2))
+                       - np.sqrt(np.mean((y[cv_mask]-cv_predictions[cv_mask])**2)))
+        ),
         "input_sha256":_ablation_digest(Path(input_csv)),
         "scope":"fit on training complexes only; freeze coefficients before validation/test",
     }
