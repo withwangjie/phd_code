@@ -2492,11 +2492,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                                   f"run directory?): {run_dir}")
             previous = json.loads(manifest_path.read_text(encoding="utf-8"))
             current = build_run_manifest(config, repo_root)
-            if previous.get("code_sha256") != current["code_sha256"] or previous.get("config") != current["config"]:
+            if (previous.get("code_sha256") != current["code_sha256"]
+                    or previous.get("methods_evidence_sha256") != current["methods_evidence_sha256"]
+                    or previous.get("config") != current["config"]):
                 raise SystemExit(
-                    "Refusing to resume: orchestrated code or config differs from the original launch. "
-                    "Start a fresh run directory for changed code/config (this repository's established "
-                    "rule: a changed source hash or configuration always gets a new output directory)."
+                    "Refusing to resume: orchestrated code, methods evidence, or config differs from the original launch. "
+                    "Start a fresh run directory for changed code/evidence/config (this repository's established "
+                    "rule: a changed source hash, literature-evidence hash, or configuration always gets a new output directory)."
                 )
             seed_map_path = run_dir / "seed_streams.json"
             if seed_map_path.is_file() and not verify_stream_map(seed_map_path):
