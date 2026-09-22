@@ -1986,7 +1986,7 @@ def _holm_adjust(pvalues: Sequence[float]) -> list[float]:
 
 def _paired_statistics_main(argv: Optional[Sequence[str]] = None) -> int:
     """Analyse complete within-case pairs; average repeats within PDB/cluster."""
-    parser = argparse.ArgumentParser(description="Exploratory paired cluster statistics")
+    parser = argparse.ArgumentParser(description="Formal pre-registered paired cluster statistics")
     parser.add_argument("--results-dir",type=Path,required=True)
     parser.add_argument("--resamples",type=int,default=10000)
     parser.add_argument("--seed",type=int,default=20260917)
