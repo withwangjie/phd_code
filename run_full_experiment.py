@@ -51,6 +51,7 @@ import math
 import os
 import platform
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -380,6 +381,16 @@ def resolve_path(config: Dict[str, Any], relative: str) -> Path:
     return candidate if candidate.is_absolute() else (root / candidate)
 
 
+def apply_runtime_mode_overrides(config: Dict[str, Any], *, smoke_only: bool) -> Dict[str, Any]:
+    import copy
+    resolved=copy.deepcopy(config)
+    if smoke_only:
+        stages=resolved.setdefault("stages",{})
+        stages["env_check"]=True
+        stages["smoke_check"]=True
+    return resolved
+
+
 # ---------------------------------------------------------------------------
 # Stage bookkeeping
 # ---------------------------------------------------------------------------
@@ -493,14 +504,37 @@ class Orchestrator:
         full_env["QP_OPENMM_PRECISION"] = str(hardware.get("openmm_precision", "double"))
         if env:
             full_env.update(env)
+        timeout_seconds=float(self.config.get("control",{}).get("stage_timeout_seconds",0) or 0)
+        timeout=timeout_seconds if timeout_seconds>0 else None
         with log_path.open("a", encoding="utf-8") as log_handle:
             log_handle.write(f"\n=== {started} :: {' '.join(argv)} ===\n")
             log_handle.flush()
-            process = subprocess.run(
-                argv, cwd=str(cwd or self.repo_root), env=full_env,
-                stdout=log_handle, stderr=subprocess.STDOUT,
+            use_process_group=os.name=="posix"
+            process=subprocess.Popen(
+                argv,cwd=str(cwd or self.repo_root),env=full_env,
+                stdout=log_handle,stderr=subprocess.STDOUT,
+                start_new_session=use_process_group,
             )
-        return process.returncode, log_path
+            try:
+                return process.wait(timeout=timeout),log_path
+            except subprocess.TimeoutExpired:
+                if use_process_group:
+                    os.killpg(process.pid,signal.SIGTERM)
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        os.killpg(process.pid,signal.SIGKILL); process.wait()
+                else:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill(); process.wait()
+                log_handle.write(
+                    f"\n[orchestrator] stage timeout after {timeout_seconds:.3f} seconds; "
+                    "subprocess process group terminated.\n")
+                log_handle.flush()
+                return 124,log_path
 
     # -- generic stage runner ----------------------------------------------
     def run_stage(self, stage: str, prerequisites: Sequence[str],
@@ -537,23 +571,40 @@ class Orchestrator:
         for prereq in prerequisites:
             record = self._load_stage_status(prereq)
             optional_skip = bool(
-                record and record["status"] == "skipped"
-                and not self.config.get("stages", {}).get(prereq, True)
+                prereq=="smoke_check" and record and record["status"]=="skipped"
             )
             if not record or (record["status"] not in ("completed", "completed_with_failures") and not optional_skip):
                 result = StageResult(stage, "failed", utc_timestamp(), utc_timestamp(), None,
                                       f"Prerequisite stage '{prereq}' has not completed; refusing to start.")
                 self._save_stage_status(result)
                 return result
+            if not optional_skip:
+                prereq_ok,prereq_detail=self._validate_completed_stage_artifacts(prereq)
+                if not prereq_ok:
+                    result=StageResult(
+                        stage,"failed",utc_timestamp(),utc_timestamp(),1,
+                        f"Prerequisite stage '{prereq}' has a completed marker but failed artifact "
+                        f"verification: {prereq_detail}")
+                    self._save_stage_status(result)
+                    return result
         existing = self._load_stage_status(stage)
         if existing and stage not in self.force_restage:
             if existing["status"] in ("completed", "completed_with_failures"):
-                print(f"[{stage}] Already {existing['status']}; skipping (use --force-restage {stage} to redo).")
+                resume_ok,resume_detail=self._validate_completed_stage_artifacts(stage)
+                if not resume_ok:
+                    result=StageResult(
+                        stage,"failed",existing["started_utc"],utc_timestamp(),1,
+                        "Resume integrity check failed: "+resume_detail+
+                        f" Use --force-restage {stage} after investigating.",
+                        existing.get("argv",[]),existing.get("log_path"),False)
+                    self._save_stage_status(result)
+                    return result
+                print(f"[{stage}] Already {existing['status']}; verified artifacts and skipping "
+                      f"(use --force-restage {stage} to redo).")
                 return StageResult(stage, existing["status"], existing["started_utc"],
                                     existing["finished_utc"], existing["returncode"],
-                                    "Resumed: previously " + existing["status"] + ".",
-                                    existing.get("argv", []), existing.get("log_path"),
-                                    existing.get("artifacts_ok", True))
+                                    "Resumed with artifact verification: "+resume_detail,
+                                    existing.get("argv", []), existing.get("log_path"), True)
             if existing["status"] == "failed":
                 print(f"[{stage}] Previously FAILED systemically: {existing['detail']}")
                 print(f"[{stage}] Not auto-retrying. Pass --force-restage {stage} to retry after investigating.")
