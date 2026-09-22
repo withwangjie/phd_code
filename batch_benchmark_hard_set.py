@@ -1899,9 +1899,11 @@ def _allatom_experiment_main(argv: Optional[Sequence[str]] = None) -> int:
                 print(f"Verified completed experiment: {out}");return 0
             raise ValueError("Completed artifacts changed or missing")
         print("Preparing complete atoms and Amber14 parameters",flush=True)
-        builder=AllAtomInterfaceQUBOBuilder(source,case["active_residues"],seed=args.seed,
-                                           chi1_angles=case.get("chi1_angles",[-60.,60.,180.]),
-                                           candidate_relax_iterations=int(case.get("candidate_relax_iterations",0)))
+        builder=AllAtomInterfaceQUBOBuilder(
+            source,case["active_residues"],seed=args.seed,
+            chi1_angles=case.get("chi1_angles"),
+            site_scores=case.get("active_site_scores"),
+            candidate_relax_iterations=int(case.get("candidate_relax_iterations",0)))
         builder.write_structure(builder.base_positions,out/"prepared_input.cif")
         # Candidate coordinates make reconstruction independently auditable.
         np.savez_compressed(out/"candidate_coordinates.npz",base_positions_nm=builder.base_positions,
@@ -2095,7 +2097,8 @@ def _recovery_benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
         if record.exists() and json.loads(record.read_text())!=provenance:
             raise ValueError("Recovery provenance changed; use a new output directory")
         _ablation_atomic_json(record,provenance)
-        generator=AllAtomInterfaceQUBOBuilder(native,case["active_residues"],seed=42)
+        generator=AllAtomInterfaceQUBOBuilder(native,case["active_residues"],
+            site_scores=case.get("active_site_scores"),seed=42)
         with (out/"recovery_metrics.csv").open("w",newline="",encoding="utf-8") as handle:
             writer=None
             for idx, seed in enumerate(args.seeds):
@@ -2117,7 +2120,9 @@ def _recovery_benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
                     child_case=dict(input_structure=str(perturbed),reference_structure=str(native),
                         cdr3_residues=case.get('cdr3_residues',[]),pruning=case.get('pruning'),
                         candidate_relax_iterations=int(case.get("candidate_relax_iterations",0)),
-                        active_residues=case["active_residues"],alignment_residues=case["alignment_residues"],
+                        active_residues=case["active_residues"],
+                        active_site_scores=case.get("active_site_scores"),
+                        alignment_residues=case["alignment_residues"],
                         partner_residues=case["partner_residues"],protocol="validation_control",
                         selection_origin=case["selection_origin"]+"; retrospective fixed-backbone perturbation-recovery")
                     child_manifest=directory/"experiment.json"
