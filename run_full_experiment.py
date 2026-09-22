@@ -793,11 +793,11 @@ class Orchestrator:
             cluster_setting=((self.config.get("queue_freeze",{}) or {}).get("independence_clustering",{}) or {}).get("cluster_map")
             expected_cluster=freeze_manifest.get("cluster_map_sha256")
             if cluster_setting:
-                cluster_path=resolve_path(self.config,cluster_setting)
+                cluster_path=self.frozen_cluster_map_path()
                 if not cluster_path.is_file():
-                    return False,f"Frozen cluster map missing: {cluster_path}"
+                    return False,f"Run-local frozen cluster map missing: {cluster_path}"
                 if expected_cluster!=sha256_of(cluster_path):
-                    return False,"Frozen cluster map sha256 mismatch"
+                    return False,"Run-local frozen cluster map sha256 mismatch"
             return True,"queue-freeze artifacts and frozen-input hashes verified"
         if stage=="egnn_train":
             checkpoint=self.checkpoint_dir()/"best_egnn_pruning.pt"
