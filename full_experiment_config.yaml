@@ -426,6 +426,9 @@ statistics:
   min_rq5_clusters: 10
   budget_modes: ["outputs", "time"]
   primary_pruning: "egnn"  # confirmatory solver/scaling inference uses the main EGNN-pruned problem only
+  primary_radius: 6.0
+  primary_depth: 2
+  primary_max_evals: 90
   primary_outputs: 1000
   primary_objective: "cvar"
   primary_restarts: 4
