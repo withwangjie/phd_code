@@ -314,7 +314,8 @@ def section_pruning_contribution(ctx: ReportContext) -> List[str]:
         )
         lines.append("")
         lines.append(
-            "The geometry logistic baseline is fitted only on training graphs from simple residue/geometry "
+            "The EGNN backbone follows the E(n)-equivariant formulation [R1]. "
+        "The geometry logistic baseline is fitted only on training graphs from simple residue/geometry "
             "features and evaluated on the same homology-isolated validation fold. Its purpose is to test "
             "whether EGNN performance exceeds a low-capacity geometry shortcut rather than merely distance."
         )
@@ -399,7 +400,8 @@ def section_search_performance(ctx: ReportContext) -> List[str]:
             f"RMSE improvement={_fmt(calibration.get('calibration_rmse_improvement_kcal'))} kcal/mol."
         )
         lines.append(
-            "- Calibration uses training complexes only, PDB-grouped cross-validation, nonnegative component "
+            "- Side-chain state construction follows the backbone-dependent Dunbrack rotamer framework [R2]. "
+            "Calibration uses training complexes only, PDB-grouped cross-validation, nonnegative component "
             "weights, and must satisfy the frozen acceptance thresholds before the formal benchmark can run."
         )
     else:
@@ -467,6 +469,7 @@ def section_search_performance(ctx: ReportContext) -> List[str]:
     lines.append("")
     lines.append(
         f"The {primary_sites}-site condition is the pre-registered confirmatory size. "
+        "The use of scaling analysis is motivated by the combinatorial nature of fixed-backbone rotamer search [R10-R12]. "
         "The other site counts are pre-declared scaling conditions used to assess how relative "
         "quantum-classical performance changes with QUBO/problem size; they are not pooled into the primary test."
     )
@@ -900,6 +903,8 @@ def section_applicability_boundary(ctx: ReportContext) -> List[str]:
         f"with minimum length coverage {100.0 * float((((ctx.frozen_config.get('queue_freeze', {}) or {}).get('homology_isolation', {}) or {}).get('antigen_min_length_coverage', 0.70))):.0f}%. "
         "Formal runs additionally require the frozen family/structure cluster map recorded in section 1; "
         "independence claims are limited to those explicitly encoded sequence and cluster criteria, not arbitrary remote homology.",
+        "- QAOA follows the variational optimization framework of Farhi et al. [R7]; CVaR optimization follows [R8]. "
+        "The primary p=2 and alpha=0.1 values remain preregistered study choices, not literature-optimal constants.",
         "- Classical simulation of the discrete QAOA circuit in the feasible subspace is exact-subspace "
         "classical simulation, not a quantum-hardware run; nothing in this report should be read as a "
         "hardware or NISQ-noise result.",
@@ -924,6 +929,28 @@ def section_applicability_boundary(ctx: ReportContext) -> List[str]:
         "QAOA relative performance advantage or size-dependent quantum-classical trend only when directly supported "
         "by the recorded matched-output/matched-time data; such evidence is algorithmic and does not establish "
         "hardware quantum advantage.",
+        "",
+    ]
+    return lines
+
+
+def section_literature_basis() -> List[str]:
+    evidence_path=Path(__file__).resolve().with_name("METHODS_EVIDENCE.md")
+    lines=["## 9. Methodological literature basis",""]
+    if not evidence_path.is_file():
+        lines += ["`METHODS_EVIDENCE.md` is missing; formal literature traceability is unavailable.",""]
+        return lines
+    text=evidence_path.read_text(encoding="utf-8")
+    marker="## References"
+    if marker not in text:
+        lines += ["Reference section missing from `METHODS_EVIDENCE.md`.",""]
+        return lines
+    refs=text.split(marker,1)[1].strip()
+    lines += [
+        "The formal protocol follows the evidence classes recorded in `METHODS_EVIDENCE.md`: direct literature basis, literature-informed preregistration, and study-specific preregistration.",
+        "Exact numerical values are described as literature-based only when the cited paper directly supports that definition/value in a comparable setting.",
+        "",
+        refs,
         "",
     ]
     return lines
@@ -956,6 +983,7 @@ def compile_report(run_dir: Path) -> str:
     lines += section_cost(ctx)
     lines += section_failures_and_incomplete(ctx)
     lines += section_applicability_boundary(ctx)
+    lines += section_literature_basis()
     return "\n".join(lines)
 
 
