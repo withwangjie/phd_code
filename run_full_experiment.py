@@ -763,10 +763,10 @@ class Orchestrator:
             # "pruning", default "egnn" -- the formal main protocol), never
             # silently hardcoded: a user who explicitly wants the formal
             # structural experiment run under a different single strategy
-            # (or, for a full four-way ALL-ATOM ablation, one
+            # (or, for a full five-way ALL-ATOM ablation, one
             # structure_experiment invocation per strategy, each with its
             # own --out-dir) sets it here, explicitly, per requirement #3 --
-            # this orchestrator never substitutes contact/cdr/random for the
+            # this orchestrator never substitutes contact/distance/cdr/random for the
             # main strategy on its own.
             queue_pruning = queue_cfg.get("pruning", "egnn")
             argv = [
