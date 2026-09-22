@@ -28,6 +28,7 @@ fi
 log "Running formal regression suite..."
 python -m pytest -q \
   test_formal_blockers.py \
+  test_high_medium_repairs.py \
   test_audit_remediation.py \
   test_robust_qaoa.py \
   test_evaluate_complex_metrics.py
