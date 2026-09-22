@@ -42,7 +42,7 @@ from tqdm.auto import tqdm
 
 from model_egnn_pruning import EGNNInterfaceScorer, extract_top_interface_subgraph
 from qaoa_interface_sampler import XYMixerQAOASampler
-from subgraph_to_qubo import InterfaceQUBOBuilder
+from subgraph_to_qubo import InterfaceQUBOBuilder, ForceFieldConfig
 
 
 CSV_FILENAME = "snac_hard_qaoa_vs_sa_metrics.csv"
@@ -1165,12 +1165,27 @@ def _ablation_run_case(data: Any, scorer: Any, config: dict, args: Any, artifact
     active = select_ablation_active(
         data, config["pruning"], args.active_sites, config["seed"], scorer,
         antigen_guidance_weight=args.antigen_guidance_weight,
+        antigen_proximity_scale=args.antigen_proximity_scale,
+        contact_ca_cutoff=args.contact_ca_cutoff,
     )
     sub = build_ablation_subgraph(data, active, config["radius"])
+    force_field = ForceFieldConfig(
+        cutoff_angstrom=args.nonbonded_cutoff,
+        softcore_delta_angstrom=args.softcore_delta,
+        hard_core_fraction=args.hard_core_fraction,
+        hard_sphere_penalty=args.hard_sphere_penalty,
+        lj_repulsion_cap=args.lj_repulsion_cap,
+        lj_attraction_cap=args.lj_attraction_cap,
+        coulomb_cap=args.coulomb_cap,
+        dielectric_base=args.dielectric_base,
+        dielectric_slope=args.dielectric_slope,
+        thermal_energy_kcal=args.thermal_energy_kcal,
+    )
     qubo = InterfaceQUBOBuilder(
         min_variables=3 * args.active_sites,
         max_variables=30,
         max_sites=args.active_sites,
+        force_field=force_field,
     ).build(sub)
     # Independent optimize/sample seeds (never the shared perturb/input seed
     # config["seed"] above, and never each other): derived per-case, before
@@ -1408,6 +1423,20 @@ def _ablation_main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--active-sites", type=int, default=6)
     parser.add_argument("--antigen-guidance-weight", type=float, default=0.25,
         help="Blend weight for label-free nearest-antigen proximity in EGNN site ranking.")
+    parser.add_argument("--antigen-proximity-scale", type=float, default=6.0,
+        help="Exponential decay length in Angstrom for nearest-antigen proximity.")
+    parser.add_argument("--contact-ca-cutoff", type=float, default=8.0,
+        help="C-alpha distance cutoff in Angstrom for the contact-count baseline.")
+    parser.add_argument("--nonbonded-cutoff", type=float, default=8.0)
+    parser.add_argument("--softcore-delta", type=float, default=0.5)
+    parser.add_argument("--hard-core-fraction", type=float, default=0.72)
+    parser.add_argument("--hard-sphere-penalty", type=float, default=25.0)
+    parser.add_argument("--lj-repulsion-cap", type=float, default=50.0)
+    parser.add_argument("--lj-attraction-cap", type=float, default=5.0)
+    parser.add_argument("--coulomb-cap", type=float, default=20.0)
+    parser.add_argument("--dielectric-base", type=float, default=4.0)
+    parser.add_argument("--dielectric-slope", type=float, default=2.0)
+    parser.add_argument("--thermal-energy-kcal", type=float, default=0.593)
     parser.add_argument("--outputs", type=int, nargs="+", default=[1000],
         help="Output-budget curve (e.g. 10 30 100 300 1000): each value is a fully matched-output "
              "comparison across all four solvers, so equal-output at one budget is never conflated "
@@ -1436,6 +1465,16 @@ def _ablation_main(argv: Optional[Sequence[str]] = None) -> int:
             or min(*args.outputs, args.sa_passes, args.greedy_passes, *args.max_evals) <= 0
             or min(args.qaoa_restarts) <= 0 or args.eval_shots <= 0):
         parser.error("Require 5..8 active sites, antigen-guidance-weight in [0,1], and positive budgets.")
+    positive_scientific = (
+        args.antigen_proximity_scale, args.contact_ca_cutoff, args.nonbonded_cutoff,
+        args.softcore_delta, args.hard_core_fraction, args.hard_sphere_penalty,
+        args.lj_repulsion_cap, args.lj_attraction_cap, args.coulomb_cap,
+        args.dielectric_base, args.thermal_energy_kcal,
+    )
+    if any((not math.isfinite(v)) or v <= 0 for v in positive_scientific):
+        parser.error("Scientific distance/energy parameters must be positive and finite.")
+    if not math.isfinite(args.dielectric_slope) or args.dielectric_slope < 0:
+        parser.error("dielectric-slope must be finite and nonnegative.")
     if any(not math.isfinite(r) or r<=0 for r in args.radii) or any(p not in (1,2,3) for p in args.depths):
         parser.error("Require positive finite radii and depths 1/2/3.")
     if args.max_targets < 0 or args.energy_window < 0 or not math.isfinite(args.energy_window):
