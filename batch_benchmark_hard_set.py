@@ -1166,7 +1166,7 @@ def _ablation_run_case(data: Any, scorer: Any, config: dict, args: Any, artifact
     sub = build_ablation_subgraph(data, active, config["radius"])
     qubo = InterfaceQUBOBuilder(
         min_variables=2 * args.active_sites,
-        max_variables=3 * args.active_sites,
+        max_variables=min(30, 3 * args.active_sites),
         max_sites=args.active_sites,
     ).build(sub)
     # Independent optimize/sample seeds (never the shared perturb/input seed
