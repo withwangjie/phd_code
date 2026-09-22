@@ -1260,14 +1260,29 @@ def _ablation_run_case(data: Any, scorer: Any, config: dict, args: Any, artifact
                 records[-1].update(budget_mode="matched_outputs", budget_seconds=None, budget_overrun_seconds=0.0)
                 raw[f"{solver}_outputs{outputs}"] = [{"bits":"".join(map(str,s)), "count":c} for s,c in sorted(counts.items())]
         if args.time_baselines:
-            qaoa_rows_this_output = [r for r in records if r["solver"] == "qaoa" and r["outputs"] == outputs]
-            if qaoa_rows_this_output:
-                budget = qaoa_rows_this_output[0]["solver_seconds"]
-                for method in ("sa", "uniform", "greedy"):
+            qaoa_rows_this_output = [
+                r for r in records
+                if r["solver"] == "qaoa"
+                and r["outputs"] == outputs
+                and r.get("qaoa_objective") == args.time_donor_objective
+                and r.get("qaoa_restarts") == args.time_donor_restarts
+            ]
+            if len(qaoa_rows_this_output) != 1:
+                raise ValueError(
+                    f"Expected exactly one matched-time donor for outputs={outputs}, "
+                    f"objective={args.time_donor_objective}, restarts={args.time_donor_restarts}; "
+                    f"found {len(qaoa_rows_this_output)}")
+            donor_row = qaoa_rows_this_output[0]
+            if donor_row.get("termination_reason") == "all_restarts_failed":
+                # No meaningful QAOA timing budget exists for a complete
+                # optimization collapse; omit time baselines for this output.
+                continue
+            budget = donor_row["solver_seconds"]
+            for method in ("sa", "uniform", "greedy"):
                     counts, elapsed, queries = _time_budget_counts(sampler, method, budget,
                         sample_seed+10001, args.sa_passes, args.greedy_passes)
                     metrics = _ablation_summarize(counts, energies, truth.energy, args.energy_window)
-                    row = dict(qaoa_rows_this_output[0])
+                    row = dict(donor_row)
                     row.update(metrics, solver=method+"_time", reference_outputs=outputs, solver_seconds=elapsed,
                         single_state_energy_queries=queries, optimizer_success=None,
                         optimizer_evaluations=None, termination_reason=None,
@@ -1416,6 +1431,10 @@ def _ablation_main(argv: Optional[Sequence[str]] = None) -> int:
              "exact analytic expectation) -- the NISQ-realistic finite-shot CVaR/mean estimate.")
     parser.add_argument("--parameter-scale", choices=("max_coefficient","feasible_iqr"), default="max_coefficient")
     parser.add_argument("--time-baselines", action="store_true", help="Add classical restart baselines using QAOA solver wall time; record soft-deadline overrun.")
+    parser.add_argument("--time-donor-objective", choices=("mean","cvar"), default="cvar",
+        help="QAOA objective whose wall time defines matched-time classical budgets.")
+    parser.add_argument("--time-donor-restarts", type=int, default=4,
+        help="QAOA restart count whose wall time defines matched-time classical budgets.")
     parser.add_argument("--sa-passes", type=int, default=100)
     parser.add_argument("--greedy-passes", type=int, default=50)
     parser.add_argument("--energy-window", type=float, default=2.)
@@ -1431,6 +1450,11 @@ def _ablation_main(argv: Optional[Sequence[str]] = None) -> int:
         parser.error("Require positive finite radii and depths 1/2/3.")
     if args.max_targets < 0 or args.energy_window < 0 or not math.isfinite(args.energy_window):
         parser.error("Invalid target limit or energy window.")
+    if args.time_baselines:
+        if args.time_donor_objective not in args.qaoa_objective:
+            parser.error("--time-donor-objective must be included in --qaoa-objective")
+        if args.time_donor_restarts not in args.qaoa_restarts:
+            parser.error("--time-donor-restarts must be included in --qaoa-restarts")
     if args.workers < 1 or args.omp_threads < 1:
         parser.error("workers and omp-threads must be positive")
     for variable in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
@@ -1634,20 +1658,15 @@ def _paired_statistics_main(argv: Optional[Sequence[str]] = None) -> int:
                      else r.get("outputs")) == args.primary_outputs]
         rows = {r["solver"]: r for r in selected if r["solver"] != "qaoa"}
         qrows = [r for r in selected if r["solver"] == "qaoa"]
-        if args.budget_mode == "outputs":
-            qrows = [r for r in qrows if r.get("qaoa_objective") == args.primary_objective
-                     and r.get("qaoa_restarts") == args.primary_restarts]
-        else:
-            # Time controls explicitly inherit the first QAOA variant's
-            # objective/restarts. Match that actual budget donor, not the last.
-            donor = rows.get("sa_time", {})
-            qrows = [r for r in qrows if
-                     r.get("qaoa_objective") == donor.get("qaoa_objective") and
-                     r.get("qaoa_restarts") == donor.get("qaoa_restarts")]
+        qrows = [r for r in qrows if r.get("qaoa_objective") == args.primary_objective
+                 and r.get("qaoa_restarts") == args.primary_restarts]
         if len(qrows) != 1:
             skipped["missing_or_ambiguous_primary_contrast"] += 1
             continue
         rows["qaoa"] = qrows[0]
+        if rows["qaoa"].get("termination_reason") == "all_restarts_failed":
+            skipped["qaoa:all_restarts_failed"] += 1
+            continue
         pdb=str(case["config"].get("pdb_id","")).strip().lower()
         if not pdb:
             raise ValueError(f"Missing PDB identity: {path}")
@@ -1699,7 +1718,7 @@ def _paired_statistics_main(argv: Optional[Sequence[str]] = None) -> int:
         max_time_overrun_fraction=args.max_time_overrun_fraction,
         analysis_code_sha256=_ablation_digest(Path(__file__)))
     lines=["# Exploratory paired statistics", "", "Differences = QAOA - classical; negative gap favours QAOA, positive hit favours QAOA.",
-        f"Output-mode primary contrast: outputs={args.primary_outputs}, objective={args.primary_objective}, restarts={args.primary_restarts}. Time-mode uses the explicitly recorded budget donor at the same output budget; other curves remain in raw records.",
+        f"Primary contrast for both output- and time-budget analyses: outputs={args.primary_outputs}, objective={args.primary_objective}, restarts={args.primary_restarts}. Time baselines are generated from that same QAOA variant; complete all-restarts-failed collapses are excluded and counted explicitly.",
         "Repeats averaged within PDB, then PDBs within supplied families. Equal cluster weighting.",
         "95% percentile bootstrap intervals are marginal, not simultaneous. Two-sided sign-flip p values assume exchangeability/symmetry; Holm correction covers every tested contrast in this report.",
         "PDB clusters do not remove homologous-family dependence. Small cluster counts give unreliable intervals. One cluster: no CI or p value.",
