@@ -121,7 +121,20 @@ if [ "$FRESH_RUN" -eq 1 ]; then
     [ -f "${SCRIPT_DIR}/RESULTS_CONTRACT.md" ] && cp "${SCRIPT_DIR}/RESULTS_CONTRACT.md" "$RUN_DIR/provenance/RESULTS_CONTRACT.md"
     git rev-parse HEAD > "$RUN_DIR/provenance/git_head.txt" 2>/dev/null || true
     python -m pip freeze > "$RUN_DIR/provenance/pip_freeze.txt" 2>/dev/null || true
-    env | sort > "$RUN_DIR/provenance/environment.txt"
+    {
+        echo "PATH=${PATH:-}"
+        echo "PYTHONPATH=${PYTHONPATH:-}"
+        echo "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-}"
+        echo "OMP_NUM_THREADS=${OMP_NUM_THREADS:-}"
+        echo "MKL_NUM_THREADS=${MKL_NUM_THREADS:-}"
+        echo "OPENBLAS_NUM_THREADS=${OPENBLAS_NUM_THREADS:-}"
+        echo "NUMEXPR_NUM_THREADS=${NUMEXPR_NUM_THREADS:-}"
+        echo "QP_VENV=${QP_VENV:-}"
+        echo "QP_DATA_ROOT=${QP_DATA_ROOT:-}"
+        echo "QP_RUN_ROOT=${QP_RUN_ROOT:-}"
+        echo "QP_FASPR=${QP_FASPR:-}"
+        echo "QP_PHENIX_CLASHSCORE=${QP_PHENIX_CLASHSCORE:-}"
+    } > "$RUN_DIR/provenance/environment.txt"
 fi
 
 # ---------------------------------------------------------------------------
