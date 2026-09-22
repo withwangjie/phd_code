@@ -2600,9 +2600,10 @@ class Orchestrator:
                 argv=[
                     self.venv_python,"batch_benchmark_hard_set.py","--research-ablation",
                     "--input-dir",str(graph_dir),"--checkpoint",str(checkpoint),"--out-dir",str(out),
-                    "--pruning","egnn","--radii",str(qc.get("radii",[6.0])[0]),
-                    "--depths",str(qc.get("depths",[2])[0]),
-                    "--max-evals",str(qc.get("max_evals",[90])[0]),
+                    "--pruning",str(self.config.get("statistics",{}).get("primary_pruning","egnn")),
+                    "--radii",str(self.config.get("statistics",{}).get("primary_radius",6.0)),
+                    "--depths",str(self.config.get("statistics",{}).get("primary_depth",2)),
+                    "--max-evals",str(self.config.get("statistics",{}).get("primary_max_evals",90)),
                     "--active-sites",str(
                         self.config.get("statistics",{}).get("primary_active_sites",6)),
                     "--vhh-identity-threshold",str(homology.get("vhh_full_chain_identity",0.80)),
@@ -2627,7 +2628,9 @@ class Orchestrator:
                     "--rotamer-probability-floor",str(rot.get("probability_floor",1e-4)),
                     "--rotamer-sigma-offsets",*[str(v) for v in rot.get("sigma_offsets",[-1,0,1])],
                     "--energy-calibration-file",str(calibration),"--require-calibrated-energy",
-                    "--outputs","1000","--qaoa-objective","cvar","--qaoa-restarts","4",
+                    "--outputs",str(self.config.get("statistics",{}).get("primary_outputs",1000)),
+                    "--qaoa-objective",str(self.config.get("statistics",{}).get("primary_objective","cvar")),
+                    "--qaoa-restarts",str(self.config.get("statistics",{}).get("primary_restarts",4)),
                     "--cvar-alpha",str(qc.get("cvar_alpha",0.1)),
                     "--eval-shots",str(qc.get("eval_shots",500)),
                     "--parameter-scale",str(qc.get("parameter_scale","max_coefficient")),
@@ -2673,9 +2676,12 @@ class Orchestrator:
                                     self.config.get("statistics",{}).get("primary_depth",2)),
                                 "--primary-max-evals",str(
                                     self.config.get("statistics",{}).get("primary_max_evals",90)),
-                                "--primary-outputs","1000",
-                                "--primary-objective","cvar",
-                                "--primary-restarts","4",
+                                "--primary-outputs",str(
+                                    self.config.get("statistics",{}).get("primary_outputs",1000)),
+                                "--primary-objective",str(
+                                    self.config.get("statistics",{}).get("primary_objective","cvar")),
+                                "--primary-restarts",str(
+                                    self.config.get("statistics",{}).get("primary_restarts",4)),
                                 "--primary-active-sites",str(
                                     self.config.get("statistics",{}).get("primary_active_sites",6)),
                             ]
