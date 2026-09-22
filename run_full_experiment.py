@@ -719,6 +719,8 @@ class Orchestrator:
             "--queue-role", "validation",
             "--prepare-only",
         ]
+        if cluster_map_path is not None and cluster_map_path.is_file():
+            vq_argv += ["--cluster-map", str(cluster_map_path)]
         returncode, vq_log = self._run_subprocess("queue_freeze_validation_queue", vq_argv)
         vq_expected = [validation_dir / name for name in ("eligibility.json", "selected_targets.json")]
         vq_ok, vq_detail = self._artifacts_present(vq_expected)
@@ -1015,6 +1017,12 @@ class Orchestrator:
                 # optimize/sample streams -- never passed as flat --seeds values.
                 "--master-seed", str(self.config["master_seed"]),
             ]
+            cluster_setting=(qf_cfg.get("independence_clustering", {}) or {}).get("cluster_map")
+            if cluster_setting:
+                cluster_path=resolve_path(self.config, cluster_setting)
+                if not cluster_path.is_file():
+                    raise FileNotFoundError(f"Required family/structure cluster map missing: {cluster_path}")
+                flags += ["--cluster-map", str(cluster_path)]
             if cfg.get("robust_qaoa", True):
                 flags += ["--robust-qaoa", "--qaoa-restarts", str(cfg.get("qaoa_restarts", 4)),
                           "--qaoa-objective", cfg.get("qaoa_objective", "cvar"),
