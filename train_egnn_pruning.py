@@ -708,6 +708,22 @@ def restore_training_state(
         "validation_names_sha256"
     ) != expected_validation_hash:
         raise RuntimeError("Resume checkpoint uses a different graph split")
+    saved_threshold = split.get("identity_threshold")
+    if saved_threshold is None or not math.isclose(
+        float(saved_threshold), float(SPLIT_IDENTITY_THRESHOLD), rel_tol=0.0, abs_tol=1e-12
+    ):
+        raise RuntimeError(
+            f"Resume checkpoint identity threshold mismatch: saved={saved_threshold}, "
+            f"current={SPLIT_IDENTITY_THRESHOLD}"
+        )
+    current_protocol = graph_protocol(
+        torch.load(train_paths[0], map_location="cpu", weights_only=False)
+    )
+    if payload.get("graph_protocol") != current_protocol:
+        raise RuntimeError(
+            f"Resume checkpoint graph protocol mismatch: saved={payload.get('graph_protocol')}, "
+            f"current={current_protocol}"
+        )
     model.load_state_dict(payload["model_state_dict"], strict=True)
     optimizer.load_state_dict(payload["optimizer_state_dict"])
     if payload.get("grad_scaler_state_dict"):
@@ -1041,7 +1057,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     }
     training_config = {
         "seed": SEED,
-        "split": "bilateral full-chain VHH+antigen connected components at 40% identity; deterministic 5-fold hash, validation fold 0; no random 90/10",
+        "split": (
+            f"bilateral full-chain VHH+antigen connected components at "
+            f"{SPLIT_IDENTITY_THRESHOLD:.3f} identity; deterministic 5-fold hash, "
+            "validation fold 0; no random 90/10"
+        ),
+        "identity_threshold": float(SPLIT_IDENTITY_THRESHOLD),
+        "graph_protocol": graph_protocol(train_data[0]),
         "max_epochs": args.max_epochs,
         "patience": args.patience,
         "batch_size": args.batch_size,
