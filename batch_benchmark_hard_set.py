@@ -313,7 +313,7 @@ def evaluate_single_target(
             scorer,
             probability_threshold=0.5,
             min_active=5,
-            max_active=15,
+            max_active=10,
             environment_radius=6.0,
         )
         row["pruning_seconds"] = time.perf_counter() - start
@@ -333,7 +333,7 @@ def evaluate_single_target(
         builder = InterfaceQUBOBuilder(
             min_variables=min(20, 3 * active_count),
             max_variables=30,
-            max_sites=15,
+            max_sites=10,
         )
         qubo_res = builder.build(subgraph)
         row["qubo_seconds"] = time.perf_counter() - start
