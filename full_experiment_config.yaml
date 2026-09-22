@@ -122,6 +122,8 @@ data_audit:
 #     which targets were selected or why.
 # ---------------------------------------------------------------------------
 queue_freeze:
+  # Shared sequence-isolation threshold used by the formal protocol and report.
+  identity_threshold: 0.40
   graph_build:
     workers: 8
     # build_final_pyg_dataset.py --no-cap ignores target_hard's 300..500
@@ -161,8 +163,8 @@ queue_freeze:
     # Used ONLY by stage_queue_freeze's --prepare-only bootstrap call, which
     # runs BEFORE egnn_train in STAGE_ORDER and therefore cannot use a
     # trained checkpoint yet. Eligibility (PDB overlap / chain identity /
-    # CDR-H3 identity / structural viability -- e.g. enough interface-
-    # neighborhood candidate sites) does not depend on pruning strategy: only
+    # CDR-H3 identity / structural viability -- e.g. enough chemically
+    # movable VHH candidate sites) does not depend on pruning strategy: only
     # the FINAL residue ranking within an already-eligible target does. So a
     # cheap, checkpoint-free strategy here decides TRUE eligibility/target
     # membership (the actual freeze) without needing not-yet-trained
