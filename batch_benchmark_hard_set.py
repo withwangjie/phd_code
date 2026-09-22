@@ -42,7 +42,7 @@ from tqdm.auto import tqdm
 
 from model_egnn_pruning import EGNNInterfaceScorer, extract_top_interface_subgraph
 from qaoa_interface_sampler import XYMixerQAOASampler
-from subgraph_to_qubo import InterfaceQUBOBuilder, ForceFieldConfig
+from subgraph_to_qubo import InterfaceQUBOBuilder, ForceFieldConfig, EnergyCalibration
 
 
 CSV_FILENAME = "snac_hard_qaoa_vs_sa_metrics.csv"
@@ -1240,11 +1240,20 @@ def _ablation_run_case(data: Any, scorer: Any, config: dict, args: Any, artifact
         dielectric_slope=args.dielectric_slope,
         thermal_energy_kcal=args.thermal_energy_kcal,
     )
+    calibration = (
+        EnergyCalibration.from_json(args.energy_calibration_file)
+        if args.energy_calibration_file is not None else EnergyCalibration()
+    )
     qubo = InterfaceQUBOBuilder(
         min_variables=3 * args.active_sites,
         max_variables=30,
         max_sites=args.active_sites,
         force_field=force_field,
+        rotamer_mode=args.rotamer_mode,
+        rotamer_library_path=args.rotamer_library,
+        rotamer_probability_floor=args.rotamer_probability_floor,
+        rotamer_sigma_offsets=args.rotamer_sigma_offsets,
+        energy_calibration=calibration,
     ).build(sub)
     # Independent optimize/sample seeds (never the shared perturb/input seed
     # config["seed"] above, and never each other): derived per-case, before
@@ -1511,6 +1520,12 @@ def _ablation_main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--dielectric-base", type=float, default=4.0)
     parser.add_argument("--dielectric-slope", type=float, default=2.0)
     parser.add_argument("--thermal-energy-kcal", type=float, default=0.593)
+    parser.add_argument("--rotamer-mode", choices=("legacy","dunbrack2010"), default="dunbrack2010")
+    parser.add_argument("--rotamer-library", type=Path)
+    parser.add_argument("--rotamer-probability-floor", type=float, default=1e-4)
+    parser.add_argument("--rotamer-sigma-offsets", type=float, nargs="+", default=[-1.0,0.0,1.0])
+    parser.add_argument("--energy-calibration-file", type=Path)
+    parser.add_argument("--require-calibrated-energy", action="store_true")
     parser.add_argument("--outputs", type=int, nargs="+", default=[1000],
         help="Output-budget curve (e.g. 10 30 100 300 1000): each value is a fully matched-output "
              "comparison across all four solvers, so equal-output at one budget is never conflated "
@@ -1552,6 +1567,12 @@ def _ablation_main(argv: Optional[Sequence[str]] = None) -> int:
         parser.error("Scientific distance/energy parameters must be positive and finite.")
     if not math.isfinite(args.dielectric_slope) or args.dielectric_slope < 0:
         parser.error("dielectric-slope must be finite and nonnegative.")
+    if args.rotamer_mode=="dunbrack2010" and (args.rotamer_library is None or not args.rotamer_library.is_file()):
+        parser.error("--rotamer-library must point to ALL.bbdep.rotamers.lib in dunbrack2010 mode")
+    if not 0.0 < args.rotamer_probability_floor < 1.0 or not args.rotamer_sigma_offsets:
+        parser.error("Invalid rotamer probability floor or sigma offsets")
+    if args.require_calibrated_energy and (args.energy_calibration_file is None or not args.energy_calibration_file.is_file()):
+        parser.error("--require-calibrated-energy requires an existing --energy-calibration-file")
     if any(not math.isfinite(r) or r<=0 for r in args.radii) or any(p not in (1,2,3) for p in args.depths):
         parser.error("Require positive finite radii and depths 1/2/3.")
     if args.max_targets < 0 or args.energy_window < 0 or not math.isfinite(args.energy_window):
