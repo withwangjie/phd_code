@@ -60,13 +60,8 @@ def grouped_primary(
     rows: list[dict], cluster_map: dict[str,str], endpoint: str, contrast: str,
     resamples: int, seed: int,
 ) -> dict:
-    by_target=defaultdict(lambda:defaultdict(list))
-    for row in rows:
-        method=row.get("method","")
-        target=row.get("target","").lower()
-        value=row.get(endpoint)
-        if method and target and value not in (None,"","None"):
-            by_target[target][method].append(float(value))
+    """Strict paired-seed primary contrast, then target and cluster averaging."""
+
     baseline_map={
         "qaoa_vs_sa":"sa",
         "qaoa_vs_greedy":"greedy",
@@ -75,26 +70,76 @@ def grouped_primary(
     if contrast not in baseline_map:
         raise ValueError(f"Unsupported primary contrast: {contrast}")
     baseline=baseline_map[contrast]
+
+    # One value per target x seed x method. Duplicate rows are an error rather
+    # than silently averaged because the formal recovery protocol should emit
+    # exactly one row for each solver at each frozen perturbation seed.
+    values={}
+    duplicate_keys=[]
+    for row in rows:
+        method=str(row.get("method",""))
+        target=str(row.get("target","")).lower()
+        seed_value=str(row.get("seed",""))
+        value=row.get(endpoint)
+        if method not in ("qaoa",baseline) or not target or seed_value=="" or value in (None,"","None"):
+            continue
+        key=(target,seed_value,method)
+        if key in values:
+            duplicate_keys.append(key)
+        else:
+            values[key]=float(value)
+    if duplicate_keys:
+        raise ValueError(f"Duplicate structural primary rows: {duplicate_keys[:10]}")
+
+    target_seed_sets=defaultdict(set)
+    for target,seed_value,method in values:
+        target_seed_sets[target].add(seed_value)
+
     by_cluster=defaultdict(list)
-    excluded=[]
-    for target,methods in sorted(by_target.items()):
-        if "qaoa" not in methods or baseline not in methods:
-            excluded.append(target);continue
+    excluded_targets=[]
+    paired_seed_count=0
+    incomplete_seed_count=0
+    target_details=[]
+    for target,seeds in sorted(target_seed_sets.items()):
         if target not in cluster_map:
             raise ValueError(f"Missing cluster mapping for structural target {target}")
-        difference=float(np.mean(methods["qaoa"])-np.mean(methods[baseline]))
-        by_cluster[cluster_map[target]].append(difference)
+        differences=[]
+        missing=[]
+        for seed_value in sorted(seeds):
+            qkey=(target,seed_value,"qaoa")
+            bkey=(target,seed_value,baseline)
+            if qkey in values and bkey in values:
+                differences.append(values[qkey]-values[bkey])
+                paired_seed_count+=1
+            else:
+                missing.append(seed_value)
+                incomplete_seed_count+=1
+        if not differences:
+            excluded_targets.append(target)
+            continue
+        target_difference=float(np.mean(differences))
+        by_cluster[cluster_map[target]].append(target_difference)
+        target_details.append(dict(
+            target=target,cluster=cluster_map[target],
+            paired_seeds=len(differences),missing_or_unpaired_seeds=missing,
+            mean_difference=target_difference,
+        ))
+
     cluster_values=[float(np.mean(values)) for _,values in sorted(by_cluster.items())]
     rng=np.random.default_rng(seed)
     low,high=percentile_ci(cluster_values,rng,resamples)
     return dict(
         endpoint=endpoint,
         contrast=f"QAOA-{baseline}; sign interpretation depends on endpoint direction",
+        pairing_unit="same target and perturbation seed",
         n_targets=sum(len(v) for v in by_cluster.values()),
         n_clusters=len(cluster_values),
+        paired_seed_count=int(paired_seed_count),
+        incomplete_seed_count=int(incomplete_seed_count),
         mean_difference=(None if not cluster_values else float(np.mean(cluster_values))),
         ci_low=low,ci_high=high,p_value=sign_flip_p(cluster_values,seed),
-        excluded_targets=excluded,
+        excluded_targets=excluded_targets,
+        target_details=target_details,
     )
 
 
