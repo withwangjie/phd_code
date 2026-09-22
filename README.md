@@ -13,8 +13,9 @@ prediction.
 1. **Leakage-controlled data construction**
    - Interface labels: cross-partner heavy-atom contact < 5 A.
    - Graph edges: intra-chain CA radius < 8 A plus fixed cross-partner KNN.
-   - EGNN train/validation split: bilateral full-chain VHH + antigen
-     40%-identity connected components; no random 90/10 split.
+   - EGNN train/validation split: layered connected components. Complexes are
+     joined if VHH full-chain identity >=80%, CDR-H3 identity >=50%, or
+     antigen identity >=30% with >=70% minimum length coverage; no random 90/10 split.
 
 2. **Antigen-conditioned Active-site selection**
    - SE(3)-equivariant EGNN provides residue-level interface probabilities.
@@ -23,11 +24,14 @@ prediction.
    - Contact, nearest-distance, CDR and random strategies are explicit ablation baselines.
 
 3. **Adaptive side-chain state construction**
-   - Formal coarse and all-atom protocols both use residue-flexibility-aware
-     raw chi1-centered sub-rotamer pools of 6/9/12 states.
+   - Formal coarse and all-atom protocols use backbone-dependent Dunbrack 2010
+     rotamer probabilities/chi means/sigmas queried from the residue phi/psi
+     context; legacy hand-written chi1 priors are debug/compatibility only.
    - Candidate pre-screening uses local environment / antigen-conditioned
      interaction scoring (coarse model) or Amber14 single-candidate energy
-     (all-atom validation).
+     (all-atom validation). Coarse prior/VHH/antigen/pair terms may be linearly
+     calibrated to Amber delta-E using training complexes only, with frozen
+     coefficients for validation/test.
    - 3--6 states per Active residue are retained under a global <=30-variable
      budget.
    - Formal benchmark default: 6 Active residues; supported range 5--8.
