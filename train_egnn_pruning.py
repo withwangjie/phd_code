@@ -232,7 +232,7 @@ VALIDATION_FOLD = 0
 
 
 def split_paths(paths: Sequence[Path], seed: int) -> Tuple[List[Path], List[Path]]:
-    """Layered VHH/CDR-H3/antigen component split; no random 90/10 partition."""
+    """Layered sequence + family/structure component split; no random 90/10 partition."""
     del seed
     records = []
     for path in paths:
@@ -245,7 +245,13 @@ def split_paths(paths: Sequence[Path], seed: int) -> Tuple[List[Path], List[Path
                 "rebuild graphs with build_final_pyg_dataset.py >= 1.2"
             )
         cdr3 = str(getattr(data, "cdr3_seq", "") or "")
-        records.append((path, vhh, antigen, cdr3))
+        family_cluster = str(getattr(data, "family_structure_cluster", "") or "")
+        if not family_cluster:
+            raise ValueError(
+                f"{path.name} lacks family_structure_cluster; rebuild formal graphs with "
+                "build_final_pyg_dataset.py graph version >=1.6"
+            )
+        records.append((path, vhh, antigen, cdr3, family_cluster))
 
     parent = list(range(len(records)))
 
@@ -261,9 +267,9 @@ def split_paths(paths: Sequence[Path], seed: int) -> Tuple[List[Path], List[Path
             parent[b] = a
 
     for i in range(len(records)):
-        _, vhh_i, antigen_i, cdr_i = records[i]
+        _, vhh_i, antigen_i, cdr_i, family_i = records[i]
         for j in range(i):
-            _, vhh_j, antigen_j, cdr_j = records[j]
+            _, vhh_j, antigen_j, cdr_j, family_j = records[j]
             same_vhh = _side_identity(vhh_i, vhh_j) >= VHH_IDENTITY_THRESHOLD
             same_cdr = (
                 bool(cdr_i and cdr_j)
@@ -275,14 +281,15 @@ def split_paths(paths: Sequence[Path], seed: int) -> Tuple[List[Path], List[Path
                     min_length_coverage=ANTIGEN_MIN_LENGTH_COVERAGE,
                 ) >= ANTIGEN_IDENTITY_THRESHOLD
             )
-            if same_vhh or same_cdr or same_antigen:
+            same_family_structure = family_i == family_j
+            if same_vhh or same_cdr or same_antigen or same_family_structure:
                 union(i, j)
 
     components: Dict[int, List[int]] = {}
     for index in range(len(records)):
         components.setdefault(find(index), []).append(index)
     if len(components) < 2:
-        raise RuntimeError("Layered VHH/CDR-H3/antigen clustering produced fewer than two components")
+        raise RuntimeError("Layered VHH/CDR-H3/antigen/family clustering produced fewer than two components")
 
     train_paths: List[Path] = []
     validation_paths: List[Path] = []
@@ -315,10 +322,18 @@ def split_paths(paths: Sequence[Path], seed: int) -> Tuple[List[Path], List[Path
     max_vhh_cross = 0.0
     max_cdr_cross = 0.0
     max_antigen_cross = 0.0
-    for train_path, train_vhh, train_antigen, train_cdr in records:
+    train_families=set()
+    validation_families=set()
+    for path,_,_,_,family in records:
+        if path in train_set:
+            train_families.add(family)
+        if path in validation_set:
+            validation_families.add(family)
+    family_overlap=sorted(train_families & validation_families)
+    for train_path, train_vhh, train_antigen, train_cdr, _train_family in records:
         if train_path not in train_set:
             continue
-        for val_path, val_vhh, val_antigen, val_cdr in records:
+        for val_path, val_vhh, val_antigen, val_cdr, _val_family in records:
             if val_path not in validation_set:
                 continue
             max_vhh_cross = max(max_vhh_cross, _side_identity(train_vhh, val_vhh))
@@ -333,11 +348,12 @@ def split_paths(paths: Sequence[Path], seed: int) -> Tuple[List[Path], List[Path
             )
     if (max_vhh_cross >= VHH_IDENTITY_THRESHOLD
             or max_cdr_cross >= CDR_H3_IDENTITY_THRESHOLD
-            or max_antigen_cross >= ANTIGEN_IDENTITY_THRESHOLD):
+            or max_antigen_cross >= ANTIGEN_IDENTITY_THRESHOLD
+            or family_overlap):
         raise AssertionError(
-            "Layered sequence leakage across train/validation: "
+            "Layered sequence/family leakage across train/validation: "
             f"max VHH={max_vhh_cross:.3f}, max CDR-H3={max_cdr_cross:.3f}, "
-            f"max antigen={max_antigen_cross:.3f}"
+            f"max antigen={max_antigen_cross:.3f}, family_overlap={family_overlap[:10]}"
         )
     return train_paths, validation_paths
 
@@ -729,7 +745,7 @@ def _checkpoint_payload(
         "validation_metrics": asdict(metrics),
         "training_config": dict(training_config),
         "split": {
-            "partition_method": "layered_vhh_cdrh3_antigen_components_sha256_5fold",
+            "partition_method": "layered_vhh_cdrh3_antigen_family_components_sha256_5fold",
             "homology_isolation": {
                 "vhh_full_chain_identity": float(VHH_IDENTITY_THRESHOLD),
                 "cdr_h3_identity": float(CDR_H3_IDENTITY_THRESHOLD),
@@ -902,7 +918,7 @@ def write_summary_json(
             },
         },
         "split": {
-            "partition_method": "layered_vhh_cdrh3_antigen_components_sha256_5fold",
+            "partition_method": "layered_vhh_cdrh3_antigen_family_components_sha256_5fold",
             "partition_seed": None,
             "training_seed": SEED,
             "train_graphs": train_count,
@@ -913,7 +929,7 @@ def write_summary_json(
             "task_scope": "known-pose heavy-atom interface classification from residue-level geometry",
             "recoverable_from_input_edges": False,
             "unknown_interface_prediction_validated": False,
-            "validation_scope": "known-pose, layered VHH/CDR-H3/antigen homology-isolated components",
+            "validation_scope": "known-pose, layered VHH/CDR-H3/antigen plus family/structure-isolated components",
             "deterministic_baseline": (
                 "cross-edge existence cannot reconstruct labels; fixed-KNN cross edges and "
                 "heavy-atom cutoff labels are stored as separate graph-protocol fields"
@@ -1213,7 +1229,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     training_config = {
         "seed": SEED,
         "split": (
-            f"layered VHH/CDR-H3/antigen connected components "
+            f"layered VHH/CDR-H3/antigen/family connected components "
             f"(VHH {VHH_IDENTITY_THRESHOLD:.2f}, CDR-H3 {CDR_H3_IDENTITY_THRESHOLD:.2f}, "
             f"antigen {ANTIGEN_IDENTITY_THRESHOLD:.2f} with coverage {ANTIGEN_MIN_LENGTH_COVERAGE:.2f}); "
             "validation fold 0; no random 90/10"
