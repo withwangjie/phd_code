@@ -1684,9 +1684,9 @@ class Orchestrator:
                     ext_failures.append(
                         "External independence manifest does not certify zero training-family overlap"
                     )
-                if manifest.get("graph_version")!="1.5":
+                if manifest.get("graph_version")!="1.6":
                     ext_failures.append(
-                        f"External VHH graph version must be 1.5, got {manifest.get('graph_version')}"
+                        f"External VHH graph version must be 1.6, got {manifest.get('graph_version')}"
                     )
                 if manifest.get("training_cluster_map_sha256") != current_cluster_sha:
                     ext_failures.append(
