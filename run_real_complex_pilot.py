@@ -94,7 +94,8 @@ def prepare(graph, source: Path, destination: Path, sites: int, *, pruning: str 
             contact_ca_cutoff: float = 8.0,
             homology_isolation: dict[str, float] | None = None,
             eligibility_only: bool = False,
-            rotamer_mode: str = "dunbrack2010") -> dict:
+            rotamer_mode: str = "dunbrack2010",
+            allowed_residues: set[str] | None = None) -> dict:
     """Resolve structure and select Active sites under the shared main protocol."""
     if not 0.0 <= antigen_guidance_weight <= 1.0:
         raise ValueError("antigen_guidance_weight must be in [0,1]")
@@ -171,6 +172,8 @@ def prepare(graph, source: Path, destination: Path, sites: int, *, pruning: str 
         # Native interface distance is retained only as a baseline feature,
         # never as an oracle eligibility gate.
         if entry["name"] in ("ALA", "GLY", "PRO", "CYS"):
+            continue
+        if allowed_residues is not None and rid not in allowed_residues:
             continue
         if rotamer_mode=="dunbrack2010" and (
             not np.isfinite(phi_values[i]) or not np.isfinite(psi_values[i])
@@ -366,11 +369,32 @@ def main(argv=None) -> int:
     rows = list(csv.DictReader(manifest.open(encoding="utf-8-sig")))
     training = [r for r in rows if r["split"] == "train"]
     candidates = sorted([r for r in rows if r["split"] == "test_snac_hard"], key=lambda r: (int(r["nodes"]),r["pdb_id"],r["path"]))
+    frozen_target_metadata={}
     if args.pdb_allowlist_file:
         raw_allowlist = json.loads(args.pdb_allowlist_file.read_text(encoding="utf-8"))
-        allowlist = {(entry if isinstance(entry, str) else entry.get("target") or entry.get("pdb_id")).lower()
-                     for entry in raw_allowlist}
+        allowlist=set()
+        for entry in raw_allowlist:
+            if isinstance(entry,str):
+                pdb=entry.lower()
+                frozen_target_metadata[pdb]={}
+            elif isinstance(entry,dict):
+                pdb=str(entry.get("target") or entry.get("pdb_id") or "").lower()
+                if not pdb:
+                    raise ValueError("Allowlist dict entry lacks target/pdb_id")
+                frozen_target_metadata[pdb]=entry
+            else:
+                raise ValueError("Allowlist entries must be PDB strings or dicts")
+            allowlist.add(pdb)
         candidates = [r for r in candidates if r["pdb_id"].lower() in allowlist]
+        if args.queue_role=="validation" and not args.prepare_only:
+            missing_pool=[
+                pdb for pdb in sorted(allowlist)
+                if not frozen_target_metadata.get(pdb,{}).get("eligibility_compatible_residues")
+            ]
+            if missing_pool:
+                raise ValueError(
+                    f"Frozen validation allowlist lacks compatible-residue pools: {missing_pool[:10]}"
+                )
     excluded_pdb = {x.lower() for x in args.exclude_pdb}
     if args.exclude_pdb_file:
         excluded_pdb |= {line.strip().lower() for line in args.exclude_pdb_file.read_text(encoding="utf-8").splitlines() if line.strip()}
@@ -464,6 +488,10 @@ def main(argv=None) -> int:
                 if _ablation_digest(path)!=row["sha256"]: raise ValueError("Test graph hash mismatch")
                 graph=torch.load(path,map_location="cpu",weights_only=False)
                 raw=extract_source(graph.source_id,args.data_root,work/"raw.pdb")
+                frozen_pool=(
+                    set(frozen_target_metadata.get(pdb,{}).get("eligibility_compatible_residues",[]))
+                    if args.pdb_allowlist_file and not args.prepare_only else None
+                )
                 config=prepare(graph,raw,work/"native.cif",args.sites,pruning=args.pruning,
                     seed=args.seeds[0],checkpoint=args.checkpoint,
                     antigen_guidance_weight=args.antigen_guidance_weight,
@@ -471,7 +499,8 @@ def main(argv=None) -> int:
                     contact_ca_cutoff=args.contact_ca_cutoff,
                     homology_isolation=homology,
                     eligibility_only=args.eligibility_only,
-                    rotamer_mode=args.rotamer_mode)
+                    rotamer_mode=args.rotamer_mode,
+                    allowed_residues=frozen_pool)
                 chain_identity_audit=[]
                 max_vhh_identity=0.0
                 max_antigen_identity=0.0
@@ -536,8 +565,6 @@ def main(argv=None) -> int:
                             )
                             del check
                             compatible.append(rid)
-                            if len(compatible) >= args.sites:
-                                break
                         except Exception as site_exc:
                             compatibility_failures.append(dict(
                                 residue_id=rid,
@@ -572,6 +599,9 @@ def main(argv=None) -> int:
                     cdr3_identity=cdr3_identity,max_vhh_identity=max_vhh_identity,
                     max_antigen_identity=max_antigen_identity,homology_isolation=homology,
                     family_structure_cluster=family_cluster,
+                    frozen_compatible_residue_pool=(
+                        sorted(frozen_pool) if frozen_pool is not None else None
+                    ),
                     cluster_map_sha256=(_ablation_digest(args.cluster_map) if args.cluster_map else None),
                     solvent_model=args.solvent_model,
                     rotamer_model=dict(
