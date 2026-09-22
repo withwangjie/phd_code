@@ -1800,18 +1800,17 @@ def _openmm_context(mm: Any, system: Any, integrator: Any) -> Any:
 
 
 class AllAtomInterfaceQUBOBuilder:
-    """Amber14 fixed-backbone adaptive multi-state chi1 QUBO.
+    """Amber14 fixed-backbone adaptive multi-state side-chain QUBO.
 
-    Formal all-atom validation mirrors the coarse protocol: in Dunbrack mode
-    each Active residue receives backbone-dependent chi1 candidates from the
-    2010 rotamer library (including mean±sigma expansion); single-candidate
-    Amber14 energies pre-screen the pool; 3--6 states/site are retained under
-    a global <=30-variable budget.
+    Formal all-atom validation uses complete Dunbrack 2010 side-chain rotamer
+    states (chi1..chiN) at the residue's backbone phi/psi bin. Chi1 is expanded
+    by the configured Dunbrack sigma offsets while distal chi values follow the
+    rotamer's statistical means. Amber14 single-candidate energies pre-screen
+    the pool; 3--6 states/site are retained under a global <=30-variable budget.
     An explicit chi1_angles sequence remains available only as a legacy
     controlled-ablation override.
 
-    Distal chi angles remain input-conditioned. No native/reference structure
-    is accepted by this builder. Missing heavy atoms and unsupported templates
+    No native/reference structure is accepted by this builder. Missing heavy atoms and unsupported templates
     fail rather than inventing atoms. Vacuum NoCutoff energy is kcal/mol,
     NOT binding free energy.
     """
@@ -2163,6 +2162,53 @@ class AllAtomInterfaceQUBOBuilder:
             raise ValueError("Assignment violates site one-hot constraints")
         positions=self.positions_for_variables(np.flatnonzero(x))
         return self.relax_positions(positions,destination,minimize_iterations=minimize_iterations)
+
+    def perturb_sidechain_chis(
+        self, seed: int, min_degrees: float = 40., max_degrees: float = 120.
+    ) -> tuple[np.ndarray, list[dict[str, Any]]]:
+        """Perturb every defined side-chain chi angle without reference-based rejection."""
+        if not 0 < min_degrees <= max_degrees <= 180:
+            raise ValueError("Require 0 < min_degrees <= max_degrees <= 180")
+        rng=np.random.default_rng(seed)
+        positions=self.base_positions.copy()
+        residue_lookup={}
+        bond_graph={i:set() for i in range(self.topology.getNumAtoms())}
+        for a,b in self.topology.bonds():
+            bond_graph[a.index].add(b.index);bond_graph[b.index].add(a.index)
+        for residue in self.topology.residues():
+            rid=f"{residue.chain.id}:{residue.id}{residue.insertionCode.strip()}"
+            residue_lookup[rid]=residue
+        records=[]
+        for rid in self.active_residues:
+            residue=residue_lookup[rid]
+            definitions=_CHI_ATOMS.get(residue.name,())
+            if not definitions:
+                raise ValueError(f"No supported chi definitions for Active residue {rid}")
+            atoms={a.name:a.index for a in residue.atoms()}
+            before=[]
+            targets=[]
+            deltas=[]
+            # Read current torsions from the progressively unchanged input,
+            # then set all target chis in one sequential internal-coordinate pass.
+            for definition in definitions:
+                a,b,c,d=(atoms[name] for name in definition)
+                current=_torsion_angle_degrees(positions[a],positions[b],positions[c],positions[d])
+                delta=float(rng.uniform(min_degrees,max_degrees)*rng.choice([-1,1]))
+                before.append(current);deltas.append(delta)
+                targets.append(((current+delta+180.0)%360.0)-180.0)
+            positions=_apply_sidechain_chis(positions,atoms,bond_graph,residue.name,targets)
+            after=[]
+            for definition in definitions:
+                a,b,c,d=(atoms[name] for name in definition)
+                after.append(_torsion_angle_degrees(
+                    positions[a],positions[b],positions[c],positions[d]))
+            records.append(dict(
+                residue_id=rid,seed=seed,residue_name=residue.name,
+                chi_before=[float(v) for v in before],
+                chi_after=[float(v) for v in after],
+                delta_degrees=[float(v) for v in deltas],
+            ))
+        return positions,records
 
     def perturb_chi1(self, seed: int, min_degrees: float = 40.,
                      max_degrees: float = 120.) -> tuple[np.ndarray, list[dict[str, Any]]]:
