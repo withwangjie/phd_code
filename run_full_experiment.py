@@ -1034,6 +1034,8 @@ class Orchestrator:
                 ("cv_mae_kcal","max_cv_mae_kcal",lambda value,limit:value<=limit),
                 ("cv_r2","min_cv_r2",lambda value,limit:value>=limit),
                 ("cv_spearman","min_cv_spearman",lambda value,limit:value>=limit),
+                ("calibration_rmse_improvement_kcal","min_rmse_improvement_kcal",
+                    lambda value,limit:value>=limit),
             ]
             failed_checks=[]
             for metric,key,predicate in checks:
