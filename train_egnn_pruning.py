@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
+import parasail
 import torch
 import torch.distributed as dist
 import torch.nn.functional as F
@@ -138,14 +139,100 @@ def seed_loader_worker(worker_id: int) -> None:
     np.random.seed(worker_seed)
 
 
-def split_paths(paths: Sequence[Path], seed: int) -> Tuple[List[Path], List[Path]]:
-    """Create the requested deterministic 90/10 graph-level split."""
+SPLIT_IDENTITY_THRESHOLD = 0.40
 
-    generator = torch.Generator().manual_seed(seed)
-    order = torch.randperm(len(paths), generator=generator).tolist()
-    train_count = int(0.9 * len(paths))
-    train_paths = [paths[index] for index in order[:train_count]]
-    validation_paths = [paths[index] for index in order[train_count:]]
+
+def _sequence_identity(a: str, b: str) -> float:
+    """Global sequence identity used only for leakage-controlled partitioning."""
+    a, b = str(a or ""), str(b or "")
+    if not a or not b:
+        return 0.0
+    if a == b:
+        return 1.0
+    if min(len(a), len(b)) / max(len(a), len(b)) < SPLIT_IDENTITY_THRESHOLD:
+        return 0.0
+    values = []
+    for left, right in ((a, b), (b, a)):
+        result = parasail.nw_stats_striped_16(left, right, 10, 1, parasail.blosum62)
+        if result.saturated:
+            raise ValueError("alignment score saturation while building the split")
+        values.append(result.matches / result.length)
+    return max(values)
+
+
+def split_paths(paths: Sequence[Path], seed: int) -> Tuple[List[Path], List[Path]]:
+    """Create a deterministic 90/10 split at 40%-identity CDR-H3 cluster level.
+
+    No cluster is allowed to cross train/validation.  This replaces the old
+    graph-level random split, which could place closely related CDR-H3
+    sequences on both sides of the validation boundary.
+    """
+
+    records = []
+    for path in paths:
+        data = torch.load(path, map_location="cpu", weights_only=False)
+        records.append((path, str(getattr(data, "cdr3_seq", "") or "")))
+
+    representatives: List[str] = []
+    clusters: List[List[Path]] = []
+    for path, seq in sorted(records, key=lambda item: (-len(item[1]), item[1], item[0].name)):
+        match = None
+        if seq:
+            match = next(
+                (
+                    index
+                    for index, representative in enumerate(representatives)
+                    if representative and _sequence_identity(seq, representative) >= SPLIT_IDENTITY_THRESHOLD
+                ),
+                None,
+            )
+        if match is None:
+            representatives.append(seq)
+            clusters.append([path])
+        else:
+            clusters[match].append(path)
+
+    rng = random.Random(seed)
+    order = list(range(len(clusters)))
+    rng.shuffle(order)
+    target_validation = max(1, int(round(0.10 * len(paths))))
+    validation_cluster_ids = set()
+    validation_count = 0
+    for cluster_id in order:
+        if validation_count >= target_validation:
+            break
+        validation_cluster_ids.add(cluster_id)
+        validation_count += len(clusters[cluster_id])
+
+    validation_paths = sorted(
+        [path for cluster_id in validation_cluster_ids for path in clusters[cluster_id]],
+        key=lambda path: path.name.lower(),
+    )
+    validation_set = set(validation_paths)
+    train_paths = [path for path in paths if path not in validation_set]
+    if not train_paths or not validation_paths:
+        raise RuntimeError("Leakage-controlled cluster split produced an empty partition")
+
+    train_sequences = [
+        seq for path, seq in records if path in set(train_paths) and seq
+    ]
+    validation_sequences = [
+        seq for path, seq in records if path in validation_set and seq
+    ]
+    max_cross_identity = max(
+        (
+            _sequence_identity(train_seq, validation_seq)
+            for train_seq in train_sequences
+            for validation_seq in validation_sequences
+            if min(len(train_seq), len(validation_seq)) / max(len(train_seq), len(validation_seq))
+            >= SPLIT_IDENTITY_THRESHOLD
+        ),
+        default=0.0,
+    )
+    if max_cross_identity >= SPLIT_IDENTITY_THRESHOLD:
+        raise AssertionError(
+            f"Sequence leakage across train/validation: max identity={max_cross_identity:.3f}"
+        )
     return train_paths, validation_paths
 
 
@@ -866,7 +953,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     }
     training_config = {
         "seed": SEED,
-        "split": "90/10 graph-level",
+        "split": "90/10 CDR-H3 cluster-level at 40% identity",
         "max_epochs": args.max_epochs,
         "patience": args.patience,
         "batch_size": args.batch_size,
