@@ -113,6 +113,7 @@ STAGE_ORDER: List[str] = [
     "queue_freeze",
     "egnn_train",
     "energy_calibration",
+    "method_sensitivity",
     "qc_benchmark",
     "structure_experiment",
     "external_validation",
@@ -890,7 +891,83 @@ class Orchestrator:
         )
 
     # ================================================================
-    # Stage 6: quantum-vs-classical ablation benchmark
+    # Stage 6: development-only method sensitivity (never hard/validation data)
+    # ================================================================
+    def stage_method_sensitivity(self) -> StageResult:
+        started=utc_timestamp()
+        qc=self.config["qc_benchmark"]
+        cfg=qc.get("sensitivity", {}) or {}
+        homology=self.config["queue_freeze"]["homology_isolation"]
+        rot=qc.get("rotamer_model", {}) or {}
+        ff=qc.get("coarse_force_field", {}) or {}
+        calibration=self.run_dir/(qc.get("energy_calibration", {}) or {}).get(
+            "calibration_file","calibration/coarse_to_amber.json")
+        out=self.run_dir/"method_sensitivity"
+        repeats=[derive_child_seed(
+            derive_streams(self.config["master_seed"])["perturb"],"sensitivity_repeat",str(i))
+            for i in range(int(cfg.get("repeats",3)))]
+        # eval_shots and CVaR alpha are separate axes; batch driver accepts one
+        # of each per invocation, so run a frozen Cartesian set of sub-runs.
+        failures=[];logs=[];argvs=[]
+        for shots in cfg.get("eval_shots",[200,500,1000]):
+            for alpha in cfg.get("cvar_alpha",[0.05,0.1,0.25,0.5,1.0]):
+                sub=out/f"shots_{shots}_alpha_{str(alpha).replace('.','p')}"
+                argv=[
+                    self.venv_python,"batch_benchmark_hard_set.py","--research-ablation",
+                    "--input-dir",str(self.dataset_dir()/cfg.get("input_dir","graphs/train")),
+                    "--checkpoint",str(self.checkpoint_dir()/qc.get("checkpoint","best_egnn_pruning.pt")),
+                    "--out-dir",str(sub),"--pruning","egnn",
+                    "--radii",str(qc.get("radii",[6.0])[0]),
+                    "--depths",*[str(v) for v in cfg.get("depths",[1,2,3])],
+                    "--max-evals",*[str(v) for v in cfg.get("max_evals",[90,180,300])],
+                    "--active-sites",str(qc.get("active_sites",6)),
+                    "--vhh-identity-threshold",str(homology.get("vhh_full_chain_identity",0.80)),
+                    "--cdr-h3-identity-threshold",str(homology.get("cdr_h3_identity",0.50)),
+                    "--antigen-identity-threshold",str(homology.get("antigen_identity",0.30)),
+                    "--antigen-min-length-coverage",str(homology.get("antigen_min_length_coverage",0.70)),
+                    "--antigen-guidance-weight",str(qc.get("antigen_guidance_weight",0.25)),
+                    "--antigen-proximity-scale",str(qc.get("antigen_proximity_scale_angstrom",6.0)),
+                    "--contact-ca-cutoff",str(qc.get("contact_ca_cutoff_angstrom",8.0)),
+                    "--nonbonded-cutoff",str(ff.get("cutoff_angstrom",8.0)),
+                    "--softcore-delta",str(ff.get("softcore_delta_angstrom",0.5)),
+                    "--hard-core-fraction",str(ff.get("hard_core_fraction",0.72)),
+                    "--hard-sphere-penalty",str(ff.get("hard_sphere_penalty",25.0)),
+                    "--lj-repulsion-cap",str(ff.get("lj_repulsion_cap",50.0)),
+                    "--lj-attraction-cap",str(ff.get("lj_attraction_cap",5.0)),
+                    "--coulomb-cap",str(ff.get("coulomb_cap",20.0)),
+                    "--dielectric-base",str(ff.get("dielectric_base",4.0)),
+                    "--dielectric-slope",str(ff.get("dielectric_slope",2.0)),
+                    "--thermal-energy-kcal",str(ff.get("thermal_energy_kcal",0.593)),
+                    "--rotamer-mode",str(rot.get("mode","dunbrack2010")),
+                    "--rotamer-library",str(resolve_path(self.config,rot.get("library_path","data/rotamer/ALL.bbdep.rotamers.lib"))),
+                    "--rotamer-probability-floor",str(rot.get("probability_floor",1e-4)),
+                    "--rotamer-sigma-offsets",*[str(v) for v in rot.get("sigma_offsets",[-1,0,1])],
+                    "--energy-calibration-file",str(calibration),"--require-calibrated-energy",
+                    "--outputs",str(cfg.get("outputs",300)),"--qaoa-objective","cvar",
+                    "--qaoa-restarts","4","--cvar-alpha",str(alpha),"--eval-shots",str(shots),
+                    "--parameter-scale",str(qc.get("parameter_scale","max_coefficient")),
+                    "--sa-passes",str(qc.get("sa_passes",100)),
+                    "--greedy-passes",str(qc.get("greedy_passes",50)),
+                    "--energy-window",str(qc.get("energy_window",2.0)),
+                    "--max-targets",str(cfg.get("max_targets",20)),"--workers",str(qc.get("workers",1)),
+                    "--omp-threads",str(self.config.get("hardware",{}).get("cpu_threads_per_process",2)),
+                    "--seeds",*[str(v) for v in repeats],"--master-seed",str(self.config["master_seed"]),
+                ]
+                rc,log=self._run_subprocess(
+                    f"sensitivity_shots_{shots}_alpha_{str(alpha).replace('.','p')}",argv)
+                logs.append(str(log));argvs.append(argv)
+                if rc not in (0,1) or not (sub/"run_summary.json").is_file():
+                    failures.append(f"shots={shots}, alpha={alpha}, exit={rc}")
+        return StageResult(
+            "method_sensitivity","completed" if not failures else "failed",
+            started,utc_timestamp(),0 if not failures else 1,
+            "Development sensitivity completed; primary validation settings unchanged."
+            if not failures else "; ".join(failures),
+            argvs[-1] if argvs else [],";".join(logs),not failures,
+        )
+
+    # ================================================================
+    # Stage 7: quantum-vs-classical ablation benchmark
     # ================================================================
     def stage_qc_benchmark(self) -> StageResult:
         started = utc_timestamp()
@@ -1361,8 +1438,10 @@ class Orchestrator:
         results["egnn_train"] = self.run_stage("egnn_train", ["queue_freeze"], self.stage_egnn_train)
         results["energy_calibration"] = self.run_stage(
             "energy_calibration", ["queue_freeze"], self.stage_energy_calibration)
+        results["method_sensitivity"] = self.run_stage(
+            "method_sensitivity", ["egnn_train", "energy_calibration"], self.stage_method_sensitivity)
         results["qc_benchmark"] = self.run_stage(
-            "qc_benchmark", ["egnn_train", "energy_calibration"], self.stage_qc_benchmark)
+            "qc_benchmark", ["egnn_train", "energy_calibration", "method_sensitivity"], self.stage_qc_benchmark)
         results["structure_experiment"] = self.run_stage(
             "structure_experiment", ["queue_freeze", "egnn_train"], self.stage_structure_experiment)
         results["external_validation"] = self.run_stage(
