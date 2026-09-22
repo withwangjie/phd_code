@@ -83,7 +83,7 @@ def test_preflight_contains_gpu_ddp_openmm_and_resource_gates() -> None:
         'backend="nccl"',
         "all_reduce",
         "OpenMM",
-        "CudaPrecision",
+        "Precision",
         "FORMAL_MIN_FREE_DISK_GB",
         "FORMAL_MIN_AVAILABLE_RAM_GB",
     ):
