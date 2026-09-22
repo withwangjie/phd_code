@@ -92,7 +92,7 @@ def prepare(graph, source: Path, destination: Path, sites: int, *, pruning: str 
             antigen_guidance_weight: float = 0.25,
             antigen_proximity_scale: float = 6.0,
             contact_ca_cutoff: float = 8.0,
-            identity_threshold: float = 0.40) -> dict:
+            homology_isolation: dict[str, float] | None = None) -> dict:
     """Resolve structure and select Active sites under the shared main protocol."""
     if not 0.0 <= antigen_guidance_weight <= 1.0:
         raise ValueError("antigen_guidance_weight must be in [0,1]")
@@ -181,7 +181,7 @@ def prepare(graph, source: Path, destination: Path, sites: int, *, pruning: str 
         if model_status!='checkpoint_loaded':
             raise ValueError('EGNN ablation requires a valid trained checkpoint')
         assert_checkpoint_graph_compatible(
-            info, graph, identity_threshold=identity_threshold
+            info, graph, homology_isolation=homology_isolation
         )
         with torch.no_grad():
             model_scores=model(graph.x,graph.pos,graph.edge_index).reshape(-1)
@@ -230,7 +230,10 @@ def main(argv=None) -> int:
              "before the run starts (never adjusted after inspecting results). The actual coverage "
              "(selected vs. examined qualifying pool) is always stated in real_complex_report.md.")
     parser.add_argument("--sites", type=int, default=6)
-    parser.add_argument("--identity-threshold", type=float, default=0.40)
+    parser.add_argument("--vhh-identity-threshold", type=float, default=0.80)
+    parser.add_argument("--cdr-h3-identity-threshold", type=float, default=0.50)
+    parser.add_argument("--antigen-identity-threshold", type=float, default=0.30)
+    parser.add_argument("--antigen-min-length-coverage", type=float, default=0.70)
     parser.add_argument("--seeds", type=int, nargs="+", default=[42,43,44])
     parser.add_argument("--outputs", type=int, default=1000)
     parser.add_argument("--max-evals", type=int, default=90)
@@ -288,8 +291,14 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     if not 1 <= args.sites <= 10 or args.targets < 0:
         parser.error("Require 1..10 sites and a nonnegative target count (0 = unlimited)")
-    if not 0.0 < args.identity_threshold < 1.0:
-        parser.error("--identity-threshold must be in (0,1)")
+    homology = {
+        "vhh_full_chain_identity": float(args.vhh_identity_threshold),
+        "cdr_h3_identity": float(args.cdr_h3_identity_threshold),
+        "antigen_identity": float(args.antigen_identity_threshold),
+        "antigen_min_length_coverage": float(args.antigen_min_length_coverage),
+    }
+    if any(not 0.0 < value <= 1.0 for value in homology.values()):
+        parser.error("homology thresholds/coverage must lie in (0,1]")
     from batch_benchmark_hard_set import _ablation_atomic_json, _ablation_digest, _recovery_benchmark_main
     from filelock import FileLock
     out = args.out_dir.resolve(); out.mkdir(parents=True, exist_ok=True)
@@ -336,20 +345,22 @@ def main(argv=None) -> int:
         save_stream_map(out/"seed_streams.json", args.master_seed, streams)
         cache=out/"training_sequences.json"
         if cache.exists():
-            sequences=json.loads(cache.read_text())
+            sequence_inventory=json.loads(cache.read_text())
         else:
-            sequences={}
+            sequence_inventory={"vhh": {}, "antigen": {}}
             for row in tqdm(training,desc="Training sequence inventory"):
                 path=args.dataset/Path(row["path"].replace("\\","/"))
                 if _ablation_digest(path)!=row["sha256"]:
                     raise ValueError(f"Training graph hash mismatch {path}")
                 data=torch.load(path,map_location="cpu",weights_only=False)
-                for seq in data.chain_sequences:
-                    sequences.setdefault(seq,[]).append(row["pdb_id"])
-            _ablation_atomic_json(cache,sequences)
+                for seq in getattr(data,"vhh_sequences",[]):
+                    sequence_inventory["vhh"].setdefault(seq,[]).append(row["pdb_id"])
+                for seq in getattr(data,"antigen_sequences",[]):
+                    sequence_inventory["antigen"].setdefault(seq,[]).append(row["pdb_id"])
+            _ablation_atomic_json(cache,sequence_inventory)
         train_pdb={r["pdb_id"].lower() for r in training}
         train_cdr=sorted({r["cdr3_seq"] for r in training if r["cdr3_seq"]})
-        selected=[]; decisions=[]; test_seqs=[]; seen=set()
+        selected=[]; decisions=[]; selected_vhh=[]; selected_antigen=[]; selected_cdr=[]; seen=set()
         for row in tqdm(candidates,desc="Real complex eligibility"):
             if args.targets and len(selected)>=args.targets: break
             pdb=row["pdb_id"].lower()
@@ -376,41 +387,54 @@ def main(argv=None) -> int:
                     antigen_guidance_weight=args.antigen_guidance_weight,
                     antigen_proximity_scale=args.antigen_proximity_scale,
                     contact_ca_cutoff=args.contact_ca_cutoff,
-                    identity_threshold=args.identity_threshold)
-                # Every chain is audited and RECORDED (role + actual best
-                # identity/coverage against every training/already-selected
-                # sequence), never collapsed to only a pass/fail boolean --
-                # so a reviewer can see near-misses, not only the final
-                # exclude/pass decision. The revised leakage-control threshold
-                # is >=40% full-chain global identity.
-                groups=dict(zip(graph.chain_ids,graph.chain_groups))
-                pool=list(sequences)+test_seqs
-                max_chain_identity=0.
+                    homology_isolation=homology)
+                chain_identity_audit=[]
+                max_vhh_identity=0.0
+                max_antigen_identity=0.0
                 for chain_id,seq in zip(graph.chain_ids,graph.chain_sequences):
-                    role="vhh" if groups.get(chain_id)==0 else "partner_or_antigen"
-                    best=dict(identity=0.,coverage=0.,length_gated=True)
+                    role="vhh" if dict(zip(graph.chain_ids,graph.chain_groups)).get(chain_id)==0 else "antigen"
+                    if role=="vhh":
+                        pool=list(sequence_inventory["vhh"])+selected_vhh
+                        threshold=args.vhh_identity_threshold
+                        coverage_gate=0.0
+                    else:
+                        pool=list(sequence_inventory["antigen"])+selected_antigen
+                        threshold=args.antigen_identity_threshold
+                        coverage_gate=args.antigen_min_length_coverage
+                    best=dict(identity=0.,coverage=0.,length_gated=False)
                     for other in pool:
-                        detail=identity_detail(seq,other,args.identity_threshold)
+                        detail=identity_detail(seq,other,coverage_gate)
                         if detail["identity"]>best["identity"]:
                             best=detail
-                    chain_identity_audit.append(dict(chain_id=chain_id,role=role,length=len(seq),
-                        best_identity=best["identity"],best_coverage=best["coverage"]))
-                    max_chain_identity=max(max_chain_identity,best["identity"])
-                cdr3_identity=max((identity_detail(graph.cdr3_seq,c,args.identity_threshold)["identity"] for c in train_cdr),default=0.)
-                # Family/local-domain-level relatedness (beyond raw sequence
-                # identity) is NOT checked anywhere in this project -- no
-                # PDB-family/cluster map exists (see batch_benchmark_hard_set.py
-                # --paired-statistics --cluster-map, an unfilled optional
-                # input there). So the ceiling for a target that clears every
-                # identity/exposure check below is honestly
-                # "independence_not_confirmed", never "confirmed independent";
-                # only exclusion statuses are ever asserted with confidence.
-                if max_chain_identity>=args.identity_threshold:
-                    independence_status="excluded_high_chain_identity"
-                    raise ValueError(f"Full-chain >={args.identity_threshold:.2f} global identity overlap with training or selected target")
-                if cdr3_identity>=args.identity_threshold:
-                    independence_status="excluded_high_cdr_identity"
-                    raise ValueError("Training annotated CDR-H3 overlap")
+                    chain_identity_audit.append(dict(
+                        chain_id=chain_id,role=role,length=len(seq),
+                        best_identity=best["identity"],best_coverage=best["coverage"],
+                        threshold=float(threshold),min_length_coverage=float(coverage_gate)))
+                    if role=="vhh":
+                        max_vhh_identity=max(max_vhh_identity,best["identity"])
+                    else:
+                        max_antigen_identity=max(max_antigen_identity,best["identity"])
+
+                cdr3_identity=max(
+                    (identity_detail(graph.cdr3_seq,c,0.0)["identity"] for c in (train_cdr+selected_cdr)),
+                    default=0.0,
+                )
+                if max_vhh_identity>=args.vhh_identity_threshold:
+                    independence_status="excluded_high_vhh_identity"
+                    raise ValueError(
+                        f"VHH full-chain identity {max_vhh_identity:.3f} >= {args.vhh_identity_threshold:.2f}"
+                    )
+                if cdr3_identity>=args.cdr_h3_identity_threshold:
+                    independence_status="excluded_high_cdr_h3_identity"
+                    raise ValueError(
+                        f"CDR-H3 identity {cdr3_identity:.3f} >= {args.cdr_h3_identity_threshold:.2f}"
+                    )
+                if max_antigen_identity>=args.antigen_identity_threshold:
+                    independence_status="excluded_high_antigen_identity"
+                    raise ValueError(
+                        f"Antigen identity {max_antigen_identity:.3f} >= {args.antigen_identity_threshold:.2f} "
+                        f"with minimum length coverage {args.antigen_min_length_coverage:.2f}"
+                    )
                 config["preparation_changes"].extend(complete_terminal_oxygen(work/"native.cif"))
                 # Confirm full Amber template compatibility before freezing membership.
                 check=AllAtomInterfaceQUBOBuilder(work/"native.cif",config["active_residues"],
@@ -421,19 +445,28 @@ def main(argv=None) -> int:
                     protocol="validation_control",graph_sha256=row["sha256"],source_id=graph.source_id,
                     raw_sha256=_ablation_digest(raw),native_sha256=_ablation_digest(work/"native.cif"),
                     development_exposed=development_exposed,chain_identity_audit=chain_identity_audit,
-                    cdr3_identity=cdr3_identity,identity_threshold=float(args.identity_threshold),
+                    cdr3_identity=cdr3_identity,max_vhh_identity=max_vhh_identity,
+                    max_antigen_identity=max_antigen_identity,homology_isolation=homology,
                     independence_status=independence_status,
-                    independence=f"independence_not_confirmed: PDB-disjoint and below the {args.identity_threshold:.2f} full-chain/"
-                        f"annotated-CDR3 global identity threshold against training+selected targets "
-                        f"(max_chain_identity={max_chain_identity:.4f}, cdr3_identity={cdr3_identity:.4f}); "
+                    independence=(
+                        "independence_not_confirmed: PDB-disjoint and below layered homology thresholds "
+                        f"VHH<{args.vhh_identity_threshold:.2f}, CDR-H3<{args.cdr_h3_identity_threshold:.2f}, "
+                        f"antigen<{args.antigen_identity_threshold:.2f} with coverage>={args.antigen_min_length_coverage:.2f}; "
+                        f"observed max VHH={max_vhh_identity:.4f}, CDR-H3={cdr3_identity:.4f}, "
+                        f"antigen={max_antigen_identity:.4f}; "
                         f"family/local-domain relatedness is NOT checked (no cluster map exists in this "
                         f"project) and must not be read as confirmed independence; "
-                        f"development_exposed={development_exposed}.")
+                        f"development_exposed={development_exposed}.") )
                 _ablation_atomic_json(work/"recovery_manifest.json",config)
-                selected.append(config);test_seqs.extend(graph.chain_sequences)
+                selected.append(config)
+                selected_vhh.extend(getattr(graph,"vhh_sequences",[]))
+                selected_antigen.extend(getattr(graph,"antigen_sequences",[]))
+                if getattr(graph,"cdr3_seq",""):
+                    selected_cdr.append(graph.cdr3_seq)
                 decisions.append(dict(pdb_id=pdb,status="selected",reason="",
                     development_exposed=development_exposed,independence_status=independence_status,
-                    max_chain_identity=max_chain_identity,cdr3_identity=cdr3_identity,
+                    max_vhh_identity=max_vhh_identity,max_antigen_identity=max_antigen_identity,
+                    cdr3_identity=cdr3_identity,homology_isolation=homology,
                     chain_identity_audit=chain_identity_audit))
             except Exception as exc:
                 decisions.append(dict(pdb_id=pdb,status="excluded",reason=str(exc),
@@ -502,7 +535,7 @@ def main(argv=None) -> int:
             "Input is native backbone/pose plus perturbed Active chi1. Formal EGNN Active-site selection ranks all chemically movable VHH residues with the shared antigen-guided composite score (EGNN probability plus nearest-antigen proximity); native heavy-atom <8A is no longer an oracle eligibility gate. Contact/distance/CDR/random remain explicit ablation baselines. This is a retrospective native-backbone-conditioned recovery task, not blind docking or CDR-H3 backbone prediction.",
             "Adaptive 6/9/12 raw chi1 sub-rotamer pools are generated by residue flexibility, Amber14 single-candidate energies pre-screen them to 3-6 retained states/site under <=30 variables, and discrete optimization selects among those prepared candidates. Candidate-local and final relaxation may move all atoms downstream of CA-CB; backbone and background remain frozen.",
             "All methods share input/candidates, read budget and relaxation. CPU cost is not equal. Reference structure evaluates accuracy but never selects solver output.",
-            f"Independence is limited to PDB plus {args.identity_threshold*100:.0f}% full-chain/annotated-CDR3 global identity screening (per-chain identity/coverage recorded in eligibility.json). Family/local-domain relatedness is NOT checked (no cluster map exists in this project): every non-excluded target's status is independence_not_confirmed, never confirmed-independent. Development exposure (--dev-exposed-pdb) is recorded per target, separately from the identity screen. This is an exploratory pilot, not a fresh confirmatory test.",
+            f"Independence is limited to PDB plus layered sequence screening: VHH {args.vhh_identity_threshold*100:.0f}%, CDR-H3 {args.cdr_h3_identity_threshold*100:.0f}%, antigen {args.antigen_identity_threshold*100:.0f}% with minimum length coverage {args.antigen_min_length_coverage*100:.0f}% (details in eligibility.json). Family/local-domain relatedness is NOT checked (no cluster map exists in this project): every non-excluded target's status is independence_not_confirmed, never confirmed-independent. Development exposure (--dev-exposed-pdb) is recorded per target, separately from the identity screen. This is an exploratory pilot, not a fresh confirmatory test.",
             "", "| Method | Targets with results | Mean RMSD gain vs input (A) | Mean gain vs relax-only (A) |", "|---|---:|---:|---:|"]
         for method in ("qaoa","sa","uniform","greedy"):
             group=[r for r in results if r["method"]==method]
