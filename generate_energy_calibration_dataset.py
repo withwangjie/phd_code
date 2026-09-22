@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import itertools
 import json
 import math
 import tempfile
@@ -76,6 +77,55 @@ def chi_assignment(qubo, selected: list[int]) -> dict[str,tuple[float,...]]:
 
 def legal_assignment(groups: dict[int,tuple[int,...]], rng: np.random.Generator) -> list[int]:
     return [int(rng.choice(group)) for _,group in sorted(groups.items())]
+
+
+def coarse_physical_energy(qubo, selected: list[int]) -> float:
+    x=np.zeros(len(qubo.physical_self),dtype=float)
+    x[selected]=1.0
+    return float(qubo.physical_self@x + x@qubo.physical_pair@x)
+
+
+def calibration_assignments(qubo, count: int, rng: np.random.Generator) -> list[list[int]]:
+    """Mix exact low-energy feasible states with uniform legal states.
+
+    The feasible space is at most 6^8 for the supported generic builder, but
+    formal calibration uses six sites. To keep this stage bounded, exact
+    enumeration is required only when <=100,000 configurations; otherwise the
+    stage fails rather than silently changing its sampling protocol.
+    """
+    groups=[tuple(group) for _,group in sorted(qubo.site_to_variables.items())]
+    total=1
+    for group in groups:
+        total*=len(group)
+    if total>100000:
+        raise ValueError(
+            f"Calibration feasible space {total} exceeds frozen exact-enumeration cap 100000"
+        )
+    scored=[]
+    for state in itertools.product(*groups):
+        selected=[int(v) for v in state]
+        scored.append((coarse_physical_energy(qubo,selected),tuple(selected)))
+    scored.sort(key=lambda item:(item[0],item[1]))
+    if not scored:
+        raise ValueError("No feasible calibration assignments")
+
+    wanted=min(int(count),len(scored))
+    low_count=max(1,wanted//2)
+    chosen=[list(state) for _,state in scored[:low_count]]
+    seen={tuple(x) for x in chosen}
+    attempts=0
+    while len(chosen)<wanted and attempts<max(1000,wanted*100):
+        proposal=legal_assignment(qubo.site_to_variables,rng)
+        key=tuple(proposal);attempts+=1
+        if key not in seen:
+            seen.add(key);chosen.append(proposal)
+    if len(chosen)<wanted:
+        for _,state in scored[low_count:]:
+            if state not in seen:
+                seen.add(state);chosen.append(list(state))
+                if len(chosen)>=wanted:
+                    break
+    return chosen
 
 
 def main() -> int:
@@ -197,24 +247,13 @@ def main() -> int:
                         rotamer_sigma_offsets=args.rotamer_sigma_offsets,
                     )
 
-                    anchor=[
-                        min(group,key=lambda index:coarse.physical_self[index])
-                        for _,group in sorted(coarse.site_to_variables.items())
-                    ]
+                    assignments=calibration_assignments(
+                        coarse,args.assignments_per_complex,rng
+                    )
+                    anchor=assignments[0]
                     anchor_components=np.asarray(assignment_components(coarse,anchor),dtype=float)
                     anchor_angles=chi_assignment(coarse,anchor)
                     anchor_amber=atomistic.energy_for_chi_assignment(anchor_angles)
-
-                    seen={tuple(anchor)}
-                    assignments=[anchor]
-                    max_attempts=max(100,args.assignments_per_complex*20)
-                    for _ in range(max_attempts):
-                        if len(assignments)>=args.assignments_per_complex:
-                            break
-                        proposal=legal_assignment(coarse.site_to_variables,rng)
-                        key=tuple(proposal)
-                        if key not in seen:
-                            seen.add(key);assignments.append(proposal)
 
                     for index,selected in enumerate(assignments):
                         components=np.asarray(assignment_components(coarse,selected),dtype=float)-anchor_components
@@ -245,6 +284,10 @@ def main() -> int:
         rotamer_library=str(args.rotamer_library),
         rotamer_library_sha256=sha256(args.rotamer_library),
         active_site_selection="distance baseline; no EGNN/test outcome dependence",
+        assignment_sampling=(
+            "exact feasible-space ranking; lowest-energy half plus unique uniform legal samples; "
+            "anchor is exact coarse physical ground state"
+        ),
         active_sites=args.active_sites,radius=args.radius,
         assignments_per_complex=args.assignments_per_complex,
         rows_written=written,complexes_attempted=len(train),
