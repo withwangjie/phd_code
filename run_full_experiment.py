@@ -1059,6 +1059,7 @@ class Orchestrator:
             "--thermal-energy-kcal", str(ff.get("thermal_energy_kcal", 0.593)),
             "--rotamer-probability-floor", str(rot_cfg.get("probability_floor", 1e-4)),
             "--rotamer-sigma-offsets", *[str(v) for v in rot_cfg.get("sigma_offsets", [-1.0,0.0,1.0])],
+            "--solvent-model", str((self.config.get("structure_experiment",{}) or {}).get("solvent_model","vacuum")),
         ]
         cluster_setting=(
             (self.config["queue_freeze"].get("independence_clustering", {}) or {}).get("cluster_map")
@@ -1123,16 +1124,22 @@ class Orchestrator:
             ]
             failed_checks=[]
             min_train_complexes=int(limits.get("min_train_complexes",0))
+            min_train_groups=int(limits.get("min_train_groups",0))
             min_cv_folds=int(limits.get("min_cv_folds",0))
             if limits.get("require_family_grouped_cv",False) and payload.get("cv_grouping")!="family_cluster":
                 failed_checks.append(
                     f"cv_grouping={payload.get('cv_grouping')} but family_cluster grouping is required"
                 )
             observed_complexes=int(payload.get("n_train_complexes",0) or 0)
+            observed_groups=int(payload.get("n_train_groups",0) or 0)
             observed_folds=int(payload.get("cv_fold_count",len(payload.get("cv_folds",[]) or [])) or 0)
             if observed_complexes < min_train_complexes:
                 failed_checks.append(
                     f"n_train_complexes={observed_complexes} violates min_train_complexes={min_train_complexes}"
+                )
+            if observed_groups < min_train_groups:
+                failed_checks.append(
+                    f"n_train_groups={observed_groups} violates min_train_groups={min_train_groups}"
                 )
             if observed_folds < min_cv_folds:
                 failed_checks.append(
