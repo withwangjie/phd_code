@@ -2417,12 +2417,14 @@ def save_derived_child(streams: Dict[str, int], stream_name: str, *labels: str) 
 # ---------------------------------------------------------------------------
 
 def build_run_manifest(config: Dict[str, Any], repo_root: Path) -> Dict[str, Any]:
+    evidence_path=repo_root/"METHODS_EVIDENCE.md"
     return dict(
         generated_utc=utc_timestamp(),
         git_commit=git_commit_hash(repo_root),
         master_seed=config["master_seed"],
         code_sha256={name: sha256_of(repo_root / name) for name in ORCHESTRATED_SCRIPTS
                      if (repo_root / name).is_file()},
+        methods_evidence_sha256=sha256_of(evidence_path) if evidence_path.is_file() else None,
         config=config,
     )
 
