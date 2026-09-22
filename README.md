@@ -105,24 +105,38 @@ changed as a new method/version, not casually swept as run-time hyperparameters.
 
 ## Energy calibration input
 
-The coarse-to-Amber calibration is fitted only from training complexes. The
-calibration CSV must contain these numeric columns:
+The coarse-to-Amber calibration is **training-only** and frozen before any
+validation/test benchmark. The input CSV must contain:
 
+- `pdb_id`
+- `split` (every row must be exactly `train`)
 - `prior_energy`
 - `vhh_environment_energy`
 - `antigen_energy`
 - `pair_energy`
 - `amber_delta_kcal`
 
-If a `split` column is present, every row must be exactly `train`; validation
-or test rows are rejected. The fitter uses an unpenalized intercept and ridge
-regularization on the four component weights, then writes a frozen JSON with
-coefficients, training RMSE/R2, sample count, ridge alpha, and source SHA256.
-Formal benchmark runs can require this JSON with `require_calibrated: true`.
+Rows from one PDB are kept together. The fitter uses deterministic
+PDB-grouped SHA256 5-fold cross-validation and a ridge-regularized linear
+model with an unconstrained intercept and **nonnegative component weights**.
+The frozen JSON records train/CV RMSE and MAE, train R2, PDB/sample counts,
+coefficient constraints, ridge alpha, and source SHA256. Validation/test rows
+are rejected at fit time, and the JSON loader rejects files that do not state
+training-only provenance.
 
-The Dunbrack 2010 `ALL.bbdep.rotamers.lib` file is an explicit external
-scientific input. It is not silently replaced by the legacy hand-written
-rotamer table when `mode: dunbrack2010`; missing files fail closed.
+If the frozen JSON is absent but the configured training CSV exists,
+`run_full_experiment.py` fits the JSON before the coarse benchmark. If both
+are absent while `require_calibrated: true`, the run fails closed.
+
+The formal rotamer model is Dunbrack 2010 backbone-dependent **chi1-centered**
+sampling: the code reads the official `ALL.bbdep.rotamers.lib` φ/ψ bins,
+rotamer probabilities, χ means and σ values, expands χ1 by configured
+σ offsets, and then retains 3--6 states/site under the <=30-variable budget.
+The official library file is an external scientific input and is never
+silently replaced by the legacy hand-written table in formal mode. Distal
+χ2/χ3/χ4 statistics are retained as provenance but are not yet exhaustively
+resampled in the current structural reconstruction benchmark.
+
 
 ## Main entry points
 
