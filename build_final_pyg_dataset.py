@@ -411,7 +411,7 @@ def delivery_report(output,manifest,exclusions,failures,summary,complete):
     for src,counts in summary.get('admission',{}).items():lines.append(f'| {src} | {counts["input"]} | {counts["eligible"]} |')
     lines += ['',f'- DB5.5目标：248个主链完整且界面通过的bound受体–配体对；实际交付 {sum(r["split"]=="test_db55" for r in manifest)}。',
         f'- SNAC长CDR-H3：{summary.get("long_eligible",0)}条非DB5.5重叠候选，{summary.get("unique_long_cdr",0)}条唯一序列，{CLUSTER_IDENTITY_THRESHOLD*100:.0f}%代表簇 {summary.get("clusters",0)} 个；固定随机种子 {SEED} 选取目标400个，实际 {sum(r["split"]=="test_snac_hard" for r in manifest)}。',
-        '- 去冗余口径由用户确认：仅CDR-H3；全局Needleman–Wunsch、BLOSUM62、gap-open=10、gap-extend=1，相同残基数/含gap的比对长度≥0.4归为相似。取正反向比对身份率较大值，避免最优比对并列导致方向差异。',
+        '- 去冗余口径由用户确认：仅CDR-H3；全局Needleman–Wunsch、BLOSUM62、gap-open=10、gap-extend=1，相同残基数/含gap的比对长度达到配置的identity阈值时才进入精确相似性判定。取正反向比对身份率较大值，避免最优比对并列导致方向差异。',
         f'- 贪心按CDR长度降序、序列字典序选代表，代表间身份率均<{CLUSTER_IDENTITY_THRESHOLD:.2f}；每簇仅一个代表进入挑战集。代表同序列多个结构优先选审计接触数较大的条目。固定种子打乱簇顺序，构图失败时尝试同代表序列的其他结构，再补选其他簇。',
         f'- 用户确认隔离泄漏：训练集排除两组测试的同PDB ID条目；排除CDR-H3与挑战集任一代表身份率≥{CLUSTER_IDENTITY_THRESHOLD:.2f}的条目。RCSB也保守检查本地同PDB的已知VHH CDR标注。被隔离的簇成员不回流训练集。',
         '- 硬过滤和隔离的数量可能重叠；逐样本多原因记录见 `excluded_samples.csv`。SAbDab 847是身份通过数，叠加物理条件后为708，不按847强行入库。',
