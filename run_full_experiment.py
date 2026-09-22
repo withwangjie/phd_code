@@ -2453,6 +2453,49 @@ def resolve_resume_dir(config: Dict[str, Any], resume: str) -> Path:
     return candidate
 
 
+def write_run_inventory(run_dir: Path, results: Dict[str, StageResult]) -> None:
+    """Write one run-scoped artifact index and terminal summary.
+
+    The inventory itself is excluded while scanning to avoid self-reference.
+    Large binary result files are indexed by path/size; files <=64 MiB also
+    receive SHA256 for convenient integrity checks without re-hashing very
+    large datasets/checkpoints at shutdown.
+    """
+    inventory_path=run_dir/"artifact_inventory.json"
+    summary_path=run_dir/"RUN_SUMMARY.json"
+    entries=[]
+    for path in sorted(p for p in run_dir.rglob("*") if p.is_file()):
+        if path in (inventory_path,summary_path):
+            continue
+        rel=str(path.relative_to(run_dir))
+        size=path.stat().st_size
+        item={"path":rel,"size_bytes":size}
+        if size <= 64*1024*1024:
+            try:
+                item["sha256"]=sha256_of(path)
+            except OSError:
+                item["sha256"]=None
+        entries.append(item)
+    atomic_write_json(inventory_path,{
+        "generated_utc":utc_timestamp(),
+        "run_dir":str(run_dir),
+        "file_count":len(entries),
+        "total_size_bytes":sum(int(x["size_bytes"]) for x in entries),
+        "artifacts":entries,
+    })
+    stage_status={name: result.status for name,result in results.items()}
+    failed=sorted(name for name,status in stage_status.items() if status=="failed")
+    atomic_write_json(summary_path,{
+        "generated_utc":utc_timestamp(),
+        "run_dir":str(run_dir),
+        "status":"completed" if not failed else "failed",
+        "failed_stages":failed,
+        "stages":stage_status,
+        "artifact_inventory":"artifact_inventory.json",
+        "final_report":"FINAL_RESEARCH_REPORT.md" if (run_dir/"FINAL_RESEARCH_REPORT.md").is_file() else None,
+    })
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", type=Path, default=Path("full_experiment_config.yaml"))
@@ -2551,7 +2594,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print(f"  {stage:24s} {result.status}")
             if result.status == "failed":
                 overall_ok = False
+        write_run_inventory(run_dir,results)
         print(f"\nRun directory: {run_dir}")
+        print(f"Artifact inventory: {run_dir/'artifact_inventory.json'}")
+        print(f"Run summary: {run_dir/'RUN_SUMMARY.json'}")
         return 0 if overall_ok else 1
     finally:
         lock.release()
