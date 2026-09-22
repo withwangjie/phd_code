@@ -603,19 +603,24 @@ def section_external_and_robustness(ctx: ReportContext) -> List[str]:
         rows=_read_csv_rows(baseline_path)
         lines.append("### 5.2 FASPR / standard clashscore baseline")
         lines.append("")
-        rmsd=[float(r["final_rmsd"]) for r in rows if r.get("final_rmsd") not in (None,"","None")]
-        clash=[float(r["molprobity_clashscore"]) for r in rows
-               if r.get("molprobity_clashscore") not in (None,"","None")]
-        chi1=[float(r["chi1_recovery"]) for r in rows if r.get("chi1_recovery") not in (None,"","None")]
+        lines.append("| Method | Rows | Targets | Mean RMSD | Mean χ1 recovery | Mean all-χ recovery | Mean contact F1 | Mean Phenix clashscore |")
+        lines.append("|---|---:|---:|---:|---:|---:|---:|---:|")
+        for method in sorted({r.get("method","") for r in rows if r.get("method")}):
+            group=[r for r in rows if r.get("method")==method]
+            def _mean(field):
+                values=[float(r[field]) for r in group if r.get(field) not in (None,"","None")]
+                return None if not values else sum(values)/len(values)
+            lines.append(
+                f"| {method} | {len(group)} | {len({r.get('target','') for r in group})} | "
+                f"{_fmt(_mean('final_rmsd'))} | {_fmt(_mean('chi1_recovery'))} | "
+                f"{_fmt(_mean('all_chi_recovery'))} | {_fmt(_mean('contact_f1'))} | "
+                f"{_fmt(_mean('molprobity_clashscore'))} |"
+            )
+        lines.append("")
         lines.append(
-            f"- FASPR rows={len(rows)}; targets={len({r.get('target','') for r in rows})}; "
-            f"mean side-chain RMSD={_fmt(sum(rmsd)/len(rmsd) if rmsd else None)} Å; "
-            f"mean chi1 recovery={_fmt(sum(chi1)/len(chi1) if chi1 else None)}; "
-            f"mean Phenix clashscore={_fmt(sum(clash)/len(clash) if clash else None)}."
-        )
-        lines.append(
-            "- FASPR is a mature biological packing baseline, not a matched-compute solver baseline; "
-            "it is reported separately from QAOA-vs-SA inference."
+            "- FASPR is a mature biological packing baseline, not a matched-compute solver baseline. "
+            "Phenix clashscore and the common structural evaluator are applied to FASPR and to the final "
+            "QAOA/SA/uniform/greedy structures on the same target/seed inputs; solver inference remains separate."
         )
         lines.append("")
     else:
