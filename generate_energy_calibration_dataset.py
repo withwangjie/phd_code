@@ -13,7 +13,6 @@ import csv
 import hashlib
 import json
 import math
-import shutil
 import tempfile
 from pathlib import Path
 
@@ -164,9 +163,14 @@ def main() -> int:
                 with tempfile.TemporaryDirectory(prefix=f"cal_{pdb}_") as temp:
                     temp=Path(temp)
                     extracted=extract_source(data.source_id,args.data_root,temp/"raw_structure")
-                    local=temp/("native"+extracted.suffix)
-                    if extracted.resolve()!=local.resolve():
-                        shutil.copy2(extracted,local)
+                    import gemmi
+                    structure=gemmi.read_structure(str(extracted))
+                    if not len(structure):
+                        raise ValueError("Source structure has no coordinate model")
+                    while len(structure)>1:
+                        del structure[1]
+                    local=temp/"native.cif"
+                    structure.make_mmcif_document().write_file(str(local))
                     complete_terminal_oxygen(local)
                     atomistic=AllAtomInterfaceQUBOBuilder(
                         local,active_residues,site_scores=[1.0]*len(active_residues),
