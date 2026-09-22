@@ -103,6 +103,27 @@ constant, one-hot register semantics, amino-acid chemistry tables, and the
 current 3--6-state / <=30-variable formal representation. Those should only be
 changed as a new method/version, not casually swept as run-time hyperparameters.
 
+## Energy calibration input
+
+The coarse-to-Amber calibration is fitted only from training complexes. The
+calibration CSV must contain these numeric columns:
+
+- `prior_energy`
+- `vhh_environment_energy`
+- `antigen_energy`
+- `pair_energy`
+- `amber_delta_kcal`
+
+If a `split` column is present, every row must be exactly `train`; validation
+or test rows are rejected. The fitter uses an unpenalized intercept and ridge
+regularization on the four component weights, then writes a frozen JSON with
+coefficients, training RMSE/R2, sample count, ridge alpha, and source SHA256.
+Formal benchmark runs can require this JSON with `require_calibrated: true`.
+
+The Dunbrack 2010 `ALL.bbdep.rotamers.lib` file is an explicit external
+scientific input. It is not silently replaced by the legacy hand-written
+rotamer table when `mode: dunbrack2010`; missing files fail closed.
+
 ## Main entry points
 
 - `run_full_experiment.py`: end-to-end orchestrator.
