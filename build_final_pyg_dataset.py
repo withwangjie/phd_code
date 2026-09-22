@@ -70,6 +70,10 @@ def similarity(a,b):
 def seqsim(a,b):
     return similarity(*sorted((a,b)))
 
+def max_pair_similarity(sequences):
+    """Maximum pairwise sequence identity; singleton/empty sets have no pair."""
+    return max((seqsim(s,t) for s,t in itertools.combinations(sequences,2)), default=0.0)
+
 def cdr(row):
     seqs=row.get('cdr3_sequences',[])
     return seqs[0] if len(seqs)==1 else ''
@@ -437,10 +441,9 @@ def main():
         assert not ({r['pdb_id'] for r in train_records}&(dbids|hardids))
         assert not (dbids&hardids)
         # A one-target hard set has no pairwise comparison. Treat its
-        # within-hard-set maximum identity as 0 rather than calling max() on
-        # an empty iterator; cross-split train-vs-hard isolation is still
-        # checked independently below.
-        maxhard=max((seqsim(s,t) for s,t in itertools.combinations(hardseqs,2)), default=0.0)
+        # within-hard-set maximum identity as 0; cross-split train-vs-hard
+        # isolation is still checked independently below.
+        maxhard=max_pair_similarity(hardseqs)
         assert maxhard<.8
         maxtrain=max((seqsim(s,t) for r in train_records for s in known_train_cdr[r['source_id']] for t in hardseqs),default=0)
         assert maxtrain<.8
