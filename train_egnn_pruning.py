@@ -1,11 +1,11 @@
 """Supervised training for the EGNN residue-interface pruning scorer.
 
-Labels are stored during graph construction from inter-partner heavy-atom
-contacts within 5 A. Cross-partner graph connectivity is fixed-KNN rather than
-contact-threshold connectivity, so edge existence does not reconstruct the
-target rule. Training and validation are separated by joint connected
-components: two complexes are joined whenever either their full VHH sequences
-or their antigen sequences reach 40% global identity.
+Labels are stored during graph construction from a versioned inter-partner
+heavy-atom cutoff recorded in each graph. Cross-partner graph connectivity is
+fixed-KNN rather than contact-threshold connectivity, so edge existence does
+not reconstruct the target rule. Training and validation are separated by
+joint connected components using the configured bilateral full-chain VHH /
+antigen identity threshold.
 
 Linux dual-T4 launch example::
 
