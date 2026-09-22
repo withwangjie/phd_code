@@ -88,6 +88,10 @@ def _primary_active_sites(ctx: "ReportContext") -> int:
     return int(((ctx.frozen_config.get("statistics",{}) or {}).get("primary_active_sites",6)))
 
 
+def _primary_pruning(ctx: "ReportContext") -> str:
+    return str(((ctx.frozen_config.get("statistics",{}) or {}).get("primary_pruning","egnn")))
+
+
 def _fmt(value: Any, digits: int = 4) -> str:
     if value is None:
         return "n/a"
@@ -373,9 +377,11 @@ def section_search_performance(ctx: ReportContext) -> List[str]:
         lines += ["`qc_benchmark/metrics.csv` is empty or missing.", ""]
         return lines
     primary_sites=_primary_active_sites(ctx)
+    primary_pruning=_primary_pruning(ctx)
     rows=[
         r for r in _filter_qc_rows(all_rows,"matched_outputs")
         if int(float(r.get("active_sites",primary_sites)))==primary_sites
+        and str(r.get("pruning",""))==primary_pruning
     ]
 
     calibration_cfg=((ctx.frozen_config.get("qc_benchmark",{}) or {}).get("energy_calibration",{}) or {})
@@ -434,13 +440,14 @@ def section_search_performance(ctx: ReportContext) -> List[str]:
     scaling_rows=[
         r for r in _filter_qc_rows(all_rows,"matched_outputs")
         if int(float(r.get("outputs",0) or 0))==primary_outputs
+        and str(r.get("pruning",""))==primary_pruning
     ]
     site_values=sorted({
         int(float(r.get("active_sites")))
         for r in scaling_rows if r.get("active_sites") not in (None,"","None")
     })
     lines.append(
-        f"Descriptive scaling at outputs={primary_outputs}. QAOA uses the frozen primary "
+        f"Descriptive scaling on pruning={primary_pruning} at outputs={primary_outputs}. QAOA uses the frozen primary "
         f"objective={primary_objective}, restarts={primary_restarts}; classical solvers use their matched-output rows."
     )
     lines.append("")
@@ -515,7 +522,7 @@ def section_search_performance(ctx: ReportContext) -> List[str]:
             lines.append("")
             continue
         lines.append(
-            f"Frozen primary contrast: active_sites={payload.get('primary_active_sites')}, "
+            f"Frozen primary contrast: pruning={payload.get('primary_pruning')}, active_sites={payload.get('primary_active_sites')}, "
             f"outputs={payload.get('primary_outputs')}, objective={payload.get('primary_objective')}, "
             f"restarts={payload.get('primary_restarts')}; "
             f"cluster unit: {payload.get('cluster_unit','n/a')}.")
