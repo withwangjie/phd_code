@@ -591,7 +591,9 @@ def _checkpoint_payload(
         "validation_metrics": asdict(metrics),
         "training_config": dict(training_config),
         "split": {
-            "seed": SEED,
+            "partition_method": "bilateral_vhh_antigen_40pct_components_sha256_5fold",
+            "partition_seed": None,
+            "training_seed": SEED,
             "train_count": len(train_paths),
             "validation_count": len(validation_paths),
             "train_names_sha256": _paths_digest(train_paths),
@@ -735,7 +737,9 @@ def write_summary_json(
             },
         },
         "split": {
-            "seed": SEED,
+            "partition_method": "bilateral_vhh_antigen_40pct_components_sha256_5fold",
+            "partition_seed": None,
+            "training_seed": SEED,
             "train_graphs": train_count,
             "validation_graphs": validation_count,
         },
