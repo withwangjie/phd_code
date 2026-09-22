@@ -129,6 +129,11 @@ data_audit:
 #     which targets were selected or why.
 # ---------------------------------------------------------------------------
 queue_freeze:
+  # External family/domain/structure clustering. The JSON maps lower/upper-case
+  # PDB IDs to a cluster identifier (e.g. Foldseek antigen/domain cluster).
+  independence_clustering:
+    required: true
+    cluster_map: "data/independence/pdb_family_clusters.json"
   # Homology-isolation protocol. Any criterion that fires joins two complexes
   # into the same connected component; a component may never cross a split.
   homology_isolation:
@@ -342,8 +347,9 @@ statistics:
   resamples: 10000
   budget_modes: ["outputs", "time"]
   max_time_overrun_fraction: 0.10
-  cluster_map: null  # path to a PDB->family JSON if/when one exists; without
-                      # it, PDB itself is the cluster (documented limitation).
+  # By default the same required family/domain/structure cluster map used for
+  # queue isolation is reused here; override only with an equivalently frozen map.
+  cluster_map: "data/independence/pdb_family_clusters.json"
 
 # ---------------------------------------------------------------------------
 # Stage 7: final report (generate_final_research_report.py)
