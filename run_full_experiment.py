@@ -774,6 +774,10 @@ class Orchestrator:
             "--dielectric-base", str(cfg.get("coarse_force_field", {}).get("dielectric_base", 4.0)),
             "--dielectric-slope", str(cfg.get("coarse_force_field", {}).get("dielectric_slope", 2.0)),
             "--thermal-energy-kcal", str(cfg.get("coarse_force_field", {}).get("thermal_energy_kcal", 0.593)),
+            "--rotamer-mode", str(cfg.get("rotamer_model", {}).get("mode", "dunbrack2010")),
+            "--rotamer-library", str(resolve_path(self.config, cfg.get("rotamer_model", {}).get("library_path", "data/rotamer/ALL.bbdep.rotamers.lib"))),
+            "--rotamer-probability-floor", str(cfg.get("rotamer_model", {}).get("probability_floor", 1e-4)),
+            "--rotamer-sigma-offsets", *[str(v) for v in cfg.get("rotamer_model", {}).get("sigma_offsets", [-1.0,0.0,1.0])],
             "--outputs", *[str(o) for o in cfg.get("outputs", [10, 30, 100, 300, 1000])],
             "--qaoa-objective", *cfg.get("qaoa_objective", ["mean", "cvar"]),
             "--qaoa-restarts", *[str(r) for r in cfg.get("qaoa_restarts", [1, 4])],
@@ -787,6 +791,15 @@ class Orchestrator:
             "--workers", str(cfg.get("workers", 1)),
             "--omp-threads", str(self.config.get("hardware", {}).get("cpu_threads_per_process", 2)),
         ]
+        calibration_cfg = cfg.get("energy_calibration", {}) or {}
+        calibration_file = resolve_path(self.config, calibration_cfg.get("calibration_file", "calibration/coarse_to_amber.json"))
+        if calibration_cfg.get("require_calibrated", False):
+            argv.append("--require-calibrated-energy")
+        if calibration_file.is_file():
+            argv += ["--energy-calibration-file", str(calibration_file)]
+        elif calibration_cfg.get("require_calibrated", False):
+            return StageResult("qc_benchmark", "failed", started, utc_timestamp(), None,
+                f"Required frozen energy calibration is missing: {calibration_file}")
         if cfg.get("time_baselines", True):
             argv.append("--time-baselines")
         returncode, log_path = self._run_subprocess("qc_benchmark", argv)
