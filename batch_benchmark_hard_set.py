@@ -1279,19 +1279,22 @@ def _ablation_run_case(data: Any, scorer: Any, config: dict, args: Any, artifact
                 continue
             budget = donor_row["solver_seconds"]
             for method in ("sa", "uniform", "greedy"):
-                    counts, elapsed, queries = _time_budget_counts(sampler, method, budget,
-                        sample_seed+10001, args.sa_passes, args.greedy_passes)
-                    metrics = _ablation_summarize(counts, energies, truth.energy, args.energy_window)
-                    row = dict(donor_row)
-                    row.update(metrics, solver=method+"_time", reference_outputs=outputs, solver_seconds=elapsed,
-                        single_state_energy_queries=queries, optimizer_success=None,
-                        optimizer_evaluations=None, termination_reason=None,
-                        optimization_energy_start=None, optimization_energy_end=None,
-                        diagnostic_mean_energy_end=None, total_opt_shots=0,
-                        budget_mode="matched_time_soft_deadline",
-                        budget_seconds=budget, budget_overrun_seconds=max(0., elapsed-budget))
-                    records.append(row)
-                    raw[f"{method}_time_outputs{outputs}"] = [{"bits":"".join(map(str,b)), "count":c} for b,c in sorted(counts.items())]
+                counts, elapsed, queries = _time_budget_counts(
+                    sampler, method, budget, sample_seed+10001,
+                    args.sa_passes, args.greedy_passes)
+                metrics = _ablation_summarize(counts, energies, truth.energy, args.energy_window)
+                row = dict(donor_row)
+                row.update(metrics, solver=method+"_time", reference_outputs=outputs, solver_seconds=elapsed,
+                    single_state_energy_queries=queries, optimizer_success=None,
+                    optimizer_evaluations=None, termination_reason=None,
+                    optimization_energy_start=None, optimization_energy_end=None,
+                    diagnostic_mean_energy_end=None, total_opt_shots=0,
+                    budget_mode="matched_time_soft_deadline",
+                    budget_seconds=budget, budget_overrun_seconds=max(0., elapsed-budget))
+                records.append(row)
+                raw[f"{method}_time_outputs{outputs}"] = [
+                    {"bits":"".join(map(str,b)), "count":count}
+                    for b,count in sorted(counts.items())]
     _ablation_atomic_json(artifact, dict(config=config, metrics=records, counts=raw,
         optimization=last_optimization, optimizations=optimizations,
         active_residue_ids=[data.residue_ids[i] for i in active.tolist()],
