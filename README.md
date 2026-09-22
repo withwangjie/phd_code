@@ -68,6 +68,37 @@ prediction.
 - Smoke checks and legacy explicit `chi1_angles` overrides are engineering or
   ablation paths and are not the formal main protocol.
 
+
+## Scientific configuration
+
+The formal pipeline separates **configurable experimental parameters** from
+**fixed model-definition constants**.
+
+Configurable in `full_experiment_config.yaml`:
+
+- Dataset/graph protocol: sequence identity threshold, heavy-atom interface
+  label cutoff, intra-chain CA radius, cross-partner KNN degree, and minimum
+  interface-residue count.
+- Site-selection protocol: Active-site count, antigen-guidance weight,
+  antigen-proximity decay length, contact-baseline CA cutoff, and environment
+  radius.
+- Coarse interaction model: non-bonded cutoff, soft-core delta, hard-core
+  fraction/penalty, LJ caps, Coulomb cap, dielectric model parameters, and kT.
+- Solver budgets: QAOA depth, objectives, restarts, finite shots, evaluation
+  budgets, SA/greedy passes, output budgets, and low-energy window.
+- Structural experiment budgets: perturbation range, local/final relaxation
+  iterations, output shots, and optimization budget.
+
+Every graph records its graph protocol; every EGNN checkpoint records the
+identity split threshold and graph protocol; every QUBO records its force-field
+parameters; run manifests record CLI arguments/config hashes. Resume is
+fail-closed when these protocol-defining values differ.
+
+Deliberately fixed model-definition constants include the Coulomb conversion
+constant, one-hot register semantics, amino-acid chemistry tables, and the
+current 3--6-state / <=30-variable formal representation. Those should only be
+changed as a new method/version, not casually swept as run-time hyperparameters.
+
 ## Main entry points
 
 - `run_full_experiment.py`: end-to-end orchestrator.
