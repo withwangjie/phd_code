@@ -172,6 +172,8 @@ def section_data_reliability(ctx: ReportContext) -> List[str]:
 
     dataset_dir = ctx.resolve_run((ctx.frozen_config.get("paths", {}) or {}).get("dataset_dir", "dataset"))
     run_summary = _read_json(dataset_dir / "run_summary.json") or {}
+    identity_threshold = float(run_summary.get("identity_threshold", 0.40))
+    identity_pct = 100.0 * identity_threshold
     lines.append("### 1.2 Deduplication, isolation, and split (build_final_pyg_dataset.py --no-cap)")
     lines.append("")
     lines.append(f"- Cap removed (requirement #1): `no_cap` semantics used; "
@@ -179,7 +181,7 @@ def section_data_reliability(ctx: ReportContext) -> List[str]:
     lines.append(f"- Admission by source: {json.dumps(run_summary.get('admission', {}))}")
     lines.append(f"- CDR-H3 >=16aa eligible pool: {run_summary.get('long_eligible', 'n/a')}; "
                   f"unique CDR sequences: {run_summary.get('unique_long_cdr', 'n/a')}; "
-                  f"80%-identity clusters: {run_summary.get('clusters', 'n/a')}.")
+                  f"{identity_pct:.0f}%-identity clusters: {run_summary.get('clusters', 'n/a')}.")
     graphs = run_summary.get("graphs", "n/a")
     complete = run_summary.get("complete", None)
     lines.append(f"- Total graphs written this run: {graphs}. Pipeline-level `complete` flag: {complete}.")
@@ -240,7 +242,7 @@ def section_data_reliability(ctx: ReportContext) -> List[str]:
                           f"ranges {min(max_identities):.3f}-{max(max_identities):.3f} "
                           f"(mean {sum(max_identities)/len(max_identities):.3f}); CDR-H3 identity ranges "
                           f"{min(cdr_identities):.3f}-{max(cdr_identities):.3f} "
-                          f"(mean {sum(cdr_identities)/len(cdr_identities):.3f}) -- both below the 0.80 "
+                          f"(mean {sum(cdr_identities)/len(cdr_identities):.3f}) -- both below the {identity_threshold:.2f} "
                           f"exclusion threshold by construction, recorded here rather than only in the boolean gate.")
     lines.append("")
     return lines
@@ -543,7 +545,7 @@ def section_applicability_boundary(ctx: ReportContext) -> List[str]:
         "confirmatory claim, and only to the extent its own target count and per-target variance support one "
         "-- a small queue (see section 1.3 for its actual selected count) supports stability/sanity checking, "
         "not a general statistical-power guarantee.",
-        "- Independence checking is PDB-disjoint plus 80% global chain identity and annotated CDR-H3 identity "
+        f"- Independence checking is PDB-disjoint plus {100.0 * float(((ctx.frozen_config.get('queue_freeze', {}) or {}).get('identity_threshold', 0.40))):.0f}% global chain identity and annotated CDR-H3 identity "
         "against training; this does NOT establish remote-homology or antigen-family independence beyond that "
         "threshold.",
         "- Classical simulation of the discrete QAOA circuit in the feasible subspace is exact-subspace "
@@ -561,11 +563,10 @@ def section_applicability_boundary(ctx: ReportContext) -> List[str]:
         "Section 0 and this section state, per stage, which of these three applies; CHANGES.md states the "
         "same distinction for the orchestrator code itself. A claim never advances from (a)/(b) to (c) "
         "without an actual run producing the artifact that backs it.",
-        "- `dockq_score`/`dockq_backbone_score`/`dockq_category` in this project's CSVs come from this "
-        "repository's own evaluator (`evaluate_complex_metrics.py`/`structural_quality.py`), not the "
-        "official DockQ reference implementation; `dockq_definition` on every row records exactly which "
-        "variant produced that row's score. Treat these as this project's own structural-quality metric, "
-        "not as an official DockQ number, when comparing to literature.",
+        "- DockQ-like fields in this project's CSVs come from this repository's own evaluator "
+        "(`evaluate_complex_metrics.py`/`structural_quality.py`), not the official DockQ reference implementation; "
+        "`dockq_definition` on every row records the exact variant. Treat them as project-specific structural-quality "
+        "metrics rather than official DockQ values when comparing with literature.",
         "- No quantum-advantage or quantum-speedup claim is made anywhere in this report. Every QAOA result "
         "here is an exact-subspace *classical simulation* of a finite-shot circuit (see section 3 and the "
         "hardware/NISQ-noise disclaimer above); this report states only what the recorded data directly "
