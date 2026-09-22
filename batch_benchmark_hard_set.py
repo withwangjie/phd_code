@@ -1519,8 +1519,8 @@ def fit_energy_calibration_csv(input_csv: Path, output_json: Path, ridge_alpha: 
     y=np.asarray([float(row["amber_delta_kcal"]) for row in rows],dtype=float)
     if not np.isfinite(X).all() or not np.isfinite(y).all():
         raise ValueError("Calibration data contain non-finite values")
-    if len(set(pdb_ids)) < 2:
-        raise ValueError("Calibration requires at least two distinct training complexes")
+    if len(set(pdb_ids)) < 5:
+        raise ValueError("Calibration requires at least five distinct training complexes for grouped 5-fold CV")
 
     def fit_coefficients(x: np.ndarray, target: np.ndarray) -> np.ndarray:
         design=np.column_stack([np.ones(len(x)),x])
@@ -1539,10 +1539,13 @@ def fit_energy_calibration_csv(input_csv: Path, output_json: Path, ridge_alpha: 
         return result.x
 
     unique_pdbs=sorted(set(pdb_ids))
-    fold_of={
-        pdb:int.from_bytes(hashlib.sha256(pdb.encode("utf-8")).digest()[:8],"big")%5
-        for pdb in unique_pdbs
-    }
+    # Deterministic hashed ordering followed by round-robin allocation keeps
+    # complexes grouped while guaranteeing five nonempty folds when n>=5.
+    ordered_pdbs=sorted(
+        unique_pdbs,
+        key=lambda pdb:(hashlib.sha256(pdb.encode("utf-8")).hexdigest(),pdb)
+    )
+    fold_of={pdb:index%5 for index,pdb in enumerate(ordered_pdbs)}
     cv_rows=[]
     cv_predictions=np.full(len(y),np.nan,dtype=float)
     uncalibrated_predictions=X.sum(axis=1)
@@ -1607,7 +1610,7 @@ def fit_energy_calibration_csv(input_csv: Path, output_json: Path, ridge_alpha: 
         "train_rmse_kcal":float(np.sqrt(np.mean(residual**2))),
         "train_mae_kcal":float(np.mean(np.abs(residual))),
         "train_r2":(None if ss_tot<=0 else float(1.0-np.sum(residual**2)/ss_tot)),
-        "cv_scheme":"deterministic PDB-grouped SHA256 5-fold",
+        "cv_scheme":"deterministic PDB-grouped SHA256-order round-robin 5-fold",
         "cv_folds":cv_rows,
         "cv_rmse_kcal":(
             None if not cv_mask.any()
