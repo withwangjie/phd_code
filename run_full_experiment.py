@@ -2544,6 +2544,14 @@ class Orchestrator:
                                 )
                             else:
                                 stats_payload=json.loads(stats_json.read_text(encoding="utf-8"))
+                                ext_exclusions=stats_payload.get("exclusions",{}) or {}
+                                if int(ext_exclusions.get("qaoa:all_restarts_failed",0) or 0):
+                                    failures.append(
+                                        "External VHH primary QAOA contains all-restarts-failed cases; "
+                                        "refusing denominator shrinkage")
+                                if int(ext_exclusions.get("missing_or_ambiguous_primary_contrast",0) or 0):
+                                    failures.append(
+                                        "External VHH statistics lack an unambiguous primary QAOA contrast")
                                 sa_gap=next(
                                     (e for e in stats_payload.get("effects",[])
                                      if e.get("baseline")=="sa" and e.get("metric")=="gap"),
@@ -2691,6 +2699,27 @@ class Orchestrator:
                     failures.append(
                         f"{results_dir.name}/{budget_mode} did not produce required statistics artifacts: "
                         f"{artifact_detail} (see {log_path})")
+                else:
+                    stats_payload=json.loads(expected[0].read_text(encoding="utf-8"))
+                    exclusions=stats_payload.get("exclusions",{}) or {}
+                    primary_failures=int(exclusions.get("qaoa:all_restarts_failed",0) or 0)
+                    ambiguous=int(exclusions.get("missing_or_ambiguous_primary_contrast",0) or 0)
+                    missing_pairs=sum(
+                        int(v or 0) for k,v in exclusions.items()
+                        if str(k).endswith(":missing_pair")
+                    )
+                    if primary_failures:
+                        failures.append(
+                            f"{results_dir.name}/{budget_mode}: {primary_failures} primary QAOA cases "
+                            "had all restarts fail; confirmatory denominator must not shrink")
+                    if ambiguous:
+                        failures.append(
+                            f"{results_dir.name}/{budget_mode}: {ambiguous} cases lack an unambiguous "
+                            "frozen primary QAOA contrast")
+                    if missing_pairs:
+                        failures.append(
+                            f"{results_dir.name}/{budget_mode}: {missing_pairs} primary matched solver "
+                            "pairs are missing")
         validation_metrics = self.run_dir / "validation_queue" / "real_complex_metrics.csv"
         cluster_setting = cfg.get("cluster_map") or (
             (self.config["queue_freeze"].get("independence_clustering", {}) or {}).get("cluster_map")
@@ -2710,6 +2739,12 @@ class Orchestrator:
                 "--primary-contrast", str(cfg.get("primary_structural_contrast", "qaoa_vs_sa")),
                 "--resamples", str(cfg.get("resamples", 10000)),
                 "--seed", str(self.config["master_seed"]),
+                "--expected-targets-file", str(
+                    self.run_dir/"validation_queue"/"freeze"/"selected_targets.json"),
+                "--expected-seeds", *[
+                    str(v) for v in self.config.get("structure_experiment",{}).get(
+                        "seeds",[42,43,44,45,46])
+                ],
             ]
             returncode, log_path = self._run_subprocess("structure_statistics", structure_argv)
             if returncode != 0 or not structure_json.is_file():
