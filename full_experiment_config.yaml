@@ -421,6 +421,7 @@ statistics:
   primary_qc_baseline: "sa"
   primary_qc_metric: "gap"
   min_qc_clusters: 10  # adequacy gate for the frozen coarse QAOA-vs-classical primary contrast
+  min_scaling_clusters: 10  # independent family/structure clusters for the fixed-p=2 scaling slope
   min_primary_clusters: 10  # adequacy gate, not a formal power guarantee
   min_rq5_clusters: 10
   budget_modes: ["outputs", "time"]
