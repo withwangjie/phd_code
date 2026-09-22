@@ -220,6 +220,31 @@ def _validate_scientific_config(config: Dict[str, Any]) -> None:
         ("antigen_proximity_scale_angstrom", 6.0),
         ("contact_ca_cutoff_angstrom", 8.0),
     )
+    qc_rot = qc.get("rotamer_model", {}) or {}
+    st_rot = structure.get("rotamer_model", {}) or {}
+    rotamer_keys = ("mode", "library_path", "probability_floor", "sigma_offsets")
+    for key in rotamer_keys:
+        if qc_rot.get(key) != st_rot.get(key):
+            raise ValueError(
+                f"Rotamer protocol mismatch for {key}: "
+                f"qc_benchmark={qc_rot.get(key)!r}, structure_experiment={st_rot.get(key)!r}"
+            )
+    if qc_rot.get("mode", "dunbrack2010") == "dunbrack2010":
+        floor = float(qc_rot.get("probability_floor", 1e-4))
+        offsets = qc_rot.get("sigma_offsets", [-1.0, 0.0, 1.0])
+        if not 0.0 < floor < 1.0 or not offsets:
+            raise ValueError("Invalid Dunbrack probability floor or sigma offsets")
+        if any(not math.isfinite(float(v)) for v in offsets):
+            raise ValueError("Dunbrack sigma offsets must be finite")
+
+    calibration_cfg = qc.get("energy_calibration", {}) or {}
+    mode = str(calibration_cfg.get("mode", "frozen"))
+    if mode not in ("frozen", "off"):
+        raise ValueError("energy_calibration.mode must be frozen or off")
+    ridge_alpha = float(calibration_cfg.get("ridge_alpha", 1.0))
+    if not math.isfinite(ridge_alpha) or ridge_alpha < 0:
+        raise ValueError("energy_calibration.ridge_alpha must be finite and nonnegative")
+
     for key, default in shared_pairs:
         left = float(qc.get(key, default))
         right = float(structure.get(key, default))
