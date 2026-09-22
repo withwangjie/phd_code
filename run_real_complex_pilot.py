@@ -91,7 +91,8 @@ def prepare(graph, source: Path, destination: Path, sites: int, *, pruning: str 
             seed: int = 42, checkpoint: Path | None = None,
             antigen_guidance_weight: float = 0.25,
             antigen_proximity_scale: float = 6.0,
-            contact_ca_cutoff: float = 8.0) -> dict:
+            contact_ca_cutoff: float = 8.0,
+            identity_threshold: float = 0.40) -> dict:
     """Resolve structure and select Active sites under the shared main protocol."""
     if not 0.0 <= antigen_guidance_weight <= 1.0:
         raise ValueError("antigen_guidance_weight must be in [0,1]")
@@ -179,7 +180,9 @@ def prepare(graph, source: Path, destination: Path, sites: int, *, pruning: str 
         model_status=info.status
         if model_status!='checkpoint_loaded':
             raise ValueError('EGNN ablation requires a valid trained checkpoint')
-        assert_checkpoint_graph_compatible(info, graph)
+        assert_checkpoint_graph_compatible(
+            info, graph, identity_threshold=identity_threshold
+        )
         with torch.no_grad():
             model_scores=model(graph.x,graph.pos,graph.edge_index).reshape(-1)
         candidate_indices=torch.tensor([item[3] for item in scored],dtype=torch.long)
@@ -372,7 +375,8 @@ def main(argv=None) -> int:
                     seed=args.seeds[0],checkpoint=args.checkpoint,
                     antigen_guidance_weight=args.antigen_guidance_weight,
                     antigen_proximity_scale=args.antigen_proximity_scale,
-                    contact_ca_cutoff=args.contact_ca_cutoff)
+                    contact_ca_cutoff=args.contact_ca_cutoff,
+                    identity_threshold=args.identity_threshold)
                 # Every chain is audited and RECORDED (role + actual best
                 # identity/coverage against every training/already-selected
                 # sequence), never collapsed to only a pass/fail boolean --
