@@ -257,6 +257,10 @@ def main(argv=None) -> int:
     parser.add_argument("--antigen-guidance-weight",type=float,default=0.25)
     parser.add_argument("--antigen-proximity-scale",type=float,default=6.0)
     parser.add_argument("--contact-ca-cutoff",type=float,default=8.0)
+    parser.add_argument("--rotamer-mode",choices=("legacy","dunbrack2010"),default="dunbrack2010")
+    parser.add_argument("--rotamer-library",type=Path)
+    parser.add_argument("--rotamer-probability-floor",type=float,default=1e-4)
+    parser.add_argument("--rotamer-sigma-offsets",type=float,nargs="+",default=[-1.0,0.0,1.0])
     parser.add_argument("--robust-qaoa", action="store_true")
     parser.add_argument("--qaoa-restarts",type=int,default=4)
     parser.add_argument("--qaoa-objective",choices=("mean","cvar"),default="cvar")
@@ -437,8 +441,14 @@ def main(argv=None) -> int:
                     )
                 config["preparation_changes"].extend(complete_terminal_oxygen(work/"native.cif"))
                 # Confirm full Amber template compatibility before freezing membership.
-                check=AllAtomInterfaceQUBOBuilder(work/"native.cif",config["active_residues"],
-                    site_scores=config.get("active_site_scores"))
+                check=AllAtomInterfaceQUBOBuilder(
+                    work/"native.cif",config["active_residues"],
+                    site_scores=config.get("active_site_scores"),
+                    rotamer_mode=args.rotamer_mode,
+                    rotamer_library_path=args.rotamer_library,
+                    rotamer_probability_floor=args.rotamer_probability_floor,
+                    rotamer_sigma_offsets=args.rotamer_sigma_offsets,
+                )
                 del check
                 config.update(target=pdb,native_structure=str(work/"native.cif"),
                     candidate_relax_iterations=args.candidate_relax_iterations,
@@ -447,6 +457,12 @@ def main(argv=None) -> int:
                     development_exposed=development_exposed,chain_identity_audit=chain_identity_audit,
                     cdr3_identity=cdr3_identity,max_vhh_identity=max_vhh_identity,
                     max_antigen_identity=max_antigen_identity,homology_isolation=homology,
+                    rotamer_model=dict(
+                        mode=args.rotamer_mode,
+                        library_path=(None if args.rotamer_library is None else str(args.rotamer_library)),
+                        probability_floor=float(args.rotamer_probability_floor),
+                        sigma_offsets=[float(v) for v in args.rotamer_sigma_offsets],
+                    ),
                     independence_status=independence_status,
                     independence=(
                         "independence_not_confirmed: PDB-disjoint and below layered homology thresholds "
