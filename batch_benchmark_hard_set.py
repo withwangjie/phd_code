@@ -1716,6 +1716,8 @@ def _ablation_main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--greedy-passes", type=int, default=50)
     parser.add_argument("--energy-window", type=float, default=2.)
     parser.add_argument("--max-targets", type=int, default=0)
+    parser.add_argument("--target-selection-seed", type=int, default=None,
+        help="When --max-targets is positive, deterministically shuffle the sorted input graphs before truncation.")
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--omp-threads", type=int, default=2)
     args = parser.parse_args(argv)
@@ -1762,7 +1764,12 @@ def _ablation_main(argv: Optional[Sequence[str]] = None) -> int:
     torch.set_num_threads(args.omp_threads)
     files = sorted(args.input_dir.glob("*.pt"))
     if args.max_targets:
-        files = files[:args.max_targets]
+        if args.target_selection_seed is not None:
+            rng=np.random.default_rng(args.target_selection_seed)
+            order=rng.permutation(len(files))
+            files=[files[int(i)] for i in order[:args.max_targets]]
+        else:
+            files = files[:args.max_targets]
     if not files:
         parser.error("No input graphs.")
     out = args.out_dir.resolve()
