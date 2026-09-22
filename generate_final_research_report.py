@@ -286,7 +286,7 @@ def section_pruning_contribution(ctx: ReportContext) -> List[str]:
                   "between compared rows. Downstream search performance (hit fraction, energy gap), not just "
                   "input-graph AUC, is what is compared here.")
     lines.append("")
-    lines.append("| Pruning | Rows | Mean hit fraction | Mean gap | Mean low-energy coverage | Mean solver seconds |")
+    lines.append("| Pruning | Rows | Mean hit fraction | Mean gap | Mean low-energy coverage | Mean recorded solver cost |")
     lines.append("|---|---:|---:|---:|---:|---:|")
     for pruning in prunings:
         group = [r for r in rows if r.get("pruning") == pruning]
@@ -300,7 +300,8 @@ def section_pruning_contribution(ctx: ReportContext) -> List[str]:
     lines.append("")
     lines.append("Candidate sets differ across pruning methods, so gaps compare solver quality within each "
                   "instance's own candidate space, not a biological superiority claim about one pruning method "
-                  "over another purely from this table.")
+                  "over another purely from this table. For QAOA, recorded solver cost is standalone-equivalent "
+                  "(measured optimization + sampling), because optimization is cached across the output curve.")
     lines.append("")
     return lines
 
@@ -337,9 +338,16 @@ def section_search_performance(ctx: ReportContext) -> List[str]:
                           f"{_fmt(mean('single_state_energy_queries'))} |")
     lines.append("")
 
-    lines.append("### 3.2 QAOA objective/restart ablation (mean vs. CVaR, single- vs. multi-start)")
+    primary_outputs = str(
+        ((ctx.frozen_config.get("statistics", {}) or {}).get("primary_outputs", 1000)))
+    lines.append(
+        "### 3.2 QAOA objective/restart ablation at the frozen primary output "
+        f"budget ({primary_outputs} outputs)")
     lines.append("")
-    qaoa_rows = [r for r in rows if r.get("solver") == "qaoa"]
+    qaoa_rows = [
+        r for r in rows
+        if r.get("solver") == "qaoa" and str(r.get("outputs")) == primary_outputs
+    ]
     combos = sorted({(r.get("qaoa_objective", ""), r.get("qaoa_restarts", "")) for r in qaoa_rows})
     lines.append("| Objective | Restarts | Rows | Mean hit fraction | Mean gap | Termination reasons |")
     lines.append("|---|---:|---:|---:|---:|---|")
