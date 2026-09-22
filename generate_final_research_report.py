@@ -274,6 +274,34 @@ def section_data_reliability(ctx: ReportContext) -> List[str]:
 
 def section_pruning_contribution(ctx: ReportContext) -> List[str]:
     lines = ["## 2. EGNN pruning contribution", ""]
+    checkpoint_dir = ctx.run_dir / str((ctx.frozen_config.get("paths", {}) or {}).get("checkpoint_dir", "checkpoints"))
+    geometry_path = checkpoint_dir / "geometry_baseline.json"
+    training_summary = _read_json(checkpoint_dir / "training_summary.json") or {}
+    geometry = _read_json(geometry_path) or {}
+    if geometry:
+        lines.append("### 2.1 Leakage-controlled node-classification validation")
+        lines.append("")
+        lines.append("| Model | Validation ROC-AUC | Validation PR-AUC |")
+        lines.append("|---|---:|---:|")
+        egnn_metrics = ((training_summary.get("best") or {}).get("validation_metrics")
+                        or training_summary.get("validation_metrics") or {})
+        if egnn_metrics:
+            lines.append(
+                f"| EGNN | {_fmt(egnn_metrics.get('roc_auc'))} | {_fmt(egnn_metrics.get('pr_auc'))} |"
+            )
+        lines.append(
+            f"| Train-only geometry logistic | {_fmt(geometry.get('validation_roc_auc'))} | "
+            f"{_fmt(geometry.get('validation_pr_auc'))} |"
+        )
+        lines.append("")
+        lines.append(
+            "The geometry logistic baseline is fitted only on training graphs from simple residue/geometry "
+            "features and evaluated on the same homology-isolated validation fold. Its purpose is to test "
+            "whether EGNN performance exceeds a low-capacity geometry shortcut rather than merely distance."
+        )
+        lines.append("")
+    lines.append("### 2.2 Downstream pruning ablation")
+    lines.append("")
     if not stage_ok(ctx, "qc_benchmark"):
         lines += ["qc_benchmark stage did not complete; no pruning-ablation numbers are reported.", ""]
         return lines
