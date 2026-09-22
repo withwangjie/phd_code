@@ -1315,6 +1315,8 @@ class Orchestrator:
                 "--max-evals", str(cfg.get("max_evals", 90)),
                 "--perturbation-mode", str(cfg.get("perturbation_mode", "multi_chi")),
                 "--solvent-model", str(cfg.get("solvent_model", "vacuum")),
+                "--min-perturb-degrees", str(cfg.get("min_perturb_degrees", 40.0)),
+                "--max-perturb-degrees", str(cfg.get("max_perturb_degrees", 120.0)),
                 "--relax-iterations", str(cfg.get("relax_iterations", 200)),
                 "--candidate-relax-iterations", str(cfg.get("candidate_relax_iterations", 100)),
                 "--antigen-guidance-weight", str(cfg.get("antigen_guidance_weight", 0.25)),
