@@ -1849,7 +1849,8 @@ def _ablation_main(argv: Optional[Sequence[str]] = None) -> int:
         failed = 0
         tasks = []
         for path, setting in itertools.product(files, settings):
-            config = dict(target=path.stem, pruning=setting[0], radius=setting[1],
+            config = dict(target=path.stem, pdb_id=path.stem,
+                          pruning=setting[0], radius=setting[1],
                           depth=setting[2], max_evals=setting[3],
                           active_sites=setting[4], seed=setting[5])
             labels = ("ablation", config["target"], config["pruning"], str(config["radius"]),
@@ -2031,7 +2032,9 @@ def _paired_statistics_main(argv: Optional[Sequence[str]] = None) -> int:
         if rows["qaoa"].get("termination_reason") == "all_restarts_failed":
             skipped["qaoa:all_restarts_failed"] += 1
             continue
-        pdb=str(case["config"].get("pdb_id","")).strip().lower()
+        pdb=str(
+            case["config"].get("pdb_id") or case["config"].get("target") or ""
+        ).strip().lower()
         if not pdb:
             raise ValueError(f"Missing PDB identity: {path}")
         if cluster_map is not None and pdb not in cluster_map:
