@@ -106,7 +106,7 @@ def test_queue_freeze_resume_rejects_tampered_selected_targets(tmp_path: Path) -
     class Dummy:
         run_dir=tmp_path
         config={
-            "queue_freeze":{"independence_clustering":{"cluster_map":None}},
+            "queue_freeze":{"independence_clustering":{"cluster_map":"source.json"}},
             "statistics":{},
             "final_report":{},
         }
@@ -117,6 +117,9 @@ def test_queue_freeze_resume_rejects_tampered_selected_targets(tmp_path: Path) -
         def checkpoint_dir(self):
             return tmp_path/"checkpoints"
 
+        def frozen_cluster_map_path(self):
+            return tmp_path/"independence"/"pdb_family_clusters.json"
+
         _artifacts_present=staticmethod(Orchestrator._artifacts_present)
 
     dataset=tmp_path/"dataset"
@@ -125,10 +128,23 @@ def test_queue_freeze_resume_rejects_tampered_selected_targets(tmp_path: Path) -
         "graph_manifest.csv":"header\n",
         "graph_manifest.json":"{}",
         "graph_dataset_delivery_report.md":"ok",
+        "cdr3_clusters.json":"{}",
+        "excluded_samples.csv":"header\n",
+        "processing_failures.csv":"header\n",
     }.items():
         (dataset/name).write_text(content,encoding="utf-8")
     (dataset/"run_summary.json").write_text(
         json.dumps({"complete":True}),encoding="utf-8")
+
+    audit=tmp_path/"audit"; audit.mkdir()
+    universe=audit/"cluster_universe.txt"
+    universe.write_text("1abc\n",encoding="utf-8")
+
+    independence=tmp_path/"independence"; independence.mkdir()
+    cluster=independence/"pdb_family_clusters.json"
+    cluster.write_text(json.dumps({"1abc":"cluster_1"}),encoding="utf-8")
+    cluster_prov=independence/"pdb_family_clusters.provenance.json"
+    cluster_prov.write_text(json.dumps({"status":"frozen"}),encoding="utf-8")
 
     freeze=tmp_path/"validation_queue"/"freeze"
     freeze.mkdir(parents=True)
@@ -140,26 +156,32 @@ def test_queue_freeze_resume_rejects_tampered_selected_targets(tmp_path: Path) -
     }]),encoding="utf-8")
     eligibility.write_text("[]",encoding="utf-8")
     (freeze/"run_manifest.json").write_text("{}",encoding="utf-8")
+    prepared=freeze/"prepared"/"1abc";prepared.mkdir(parents=True)
+    (prepared/"recovery_manifest.json").write_text("{}",encoding="utf-8")
 
     import hashlib
     def digest(path: Path) -> str:
         return hashlib.sha256(path.read_bytes()).hexdigest()
 
     (freeze/"freeze_manifest.json").write_text(json.dumps({
-        "schema_version":1,
+        "schema_version":2,
         "selected_targets_sha256":digest(selected),
         "eligibility_sha256":digest(eligibility),
         "graph_manifest_sha256":digest(dataset/"graph_manifest.csv"),
-        "cluster_map_sha256":None,
+        "cluster_map_sha256":digest(cluster),
+        "cluster_map_provenance_sha256":digest(cluster_prov),
+        "cluster_universe_sha256":digest(universe),
     }),encoding="utf-8")
 
-    ok,detail=Orchestrator._validate_completed_stage_artifacts(Dummy(),"queue_freeze")
+    ok,detail=Orchestrator._validate_completed_stage_artifacts(
+        Dummy(),"queue_freeze",require_results_manifest=False)
     assert ok is True,detail
 
     selected.write_text(json.dumps([{
         "target":"9xyz","source_id":"changed","graph_path":"changed.pt","graph_sha256":"b"*64,
         "eligibility_compatible_residues":["A:2"],
     }]),encoding="utf-8")
-    ok,detail=Orchestrator._validate_completed_stage_artifacts(Dummy(),"queue_freeze")
+    ok,detail=Orchestrator._validate_completed_stage_artifacts(
+        Dummy(),"queue_freeze",require_results_manifest=False)
     assert ok is False
     assert "provenance mismatch" in detail
