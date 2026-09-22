@@ -441,9 +441,9 @@ class RotamerState:
 
     @property
     def self_energy(self) -> float:
-        """Return internal prior plus fixed-environment non-bonded energy."""
+        """Return prior + VHH-fixed environment + antigen interaction once."""
 
-        return self.prior_energy + self.environment_energy
+        return self.prior_energy + self.environment_energy + self.antigen_guidance_energy
 
 
 @dataclass(frozen=True)
@@ -1018,13 +1018,15 @@ class InterfaceQUBOBuilder:
         amino_acids: Sequence[str],
         frozen_mask: np.ndarray,
         active_mask: np.ndarray,
+        vhh_mask: np.ndarray,
         excluded_node: int,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """Represent frozen residues and other active backbones as fixed CA atoms."""
+        """Represent VHH-only fixed background; antigen is scored separately."""
 
-        if frozen_mask.shape != (len(pos),) or active_mask.shape != (len(pos),):
-            raise ValueError("active/frozen masks must have shape [N]")
-        keep = frozen_mask | active_mask
+        if (frozen_mask.shape != (len(pos),) or active_mask.shape != (len(pos),)
+                or vhh_mask.shape != (len(pos),)):
+            raise ValueError("active/frozen/vhh masks must have shape [N]")
+        keep = (frozen_mask | active_mask) & vhh_mask
         keep[excluded_node] = False
         environment_indices = np.flatnonzero(keep)
         env_pos = pos[environment_indices]
@@ -1137,9 +1139,10 @@ class InterfaceQUBOBuilder:
         else:
             chain_ids = np.where(np.isclose(x[:, -1], 0.0), 0, 1)
 
+        vhh_mask = np.isclose(x[:, -1], 0.0)
         environments = {
             int(node_index): self._rigid_environment(
-                pos, amino_acids, frozen_mask, active_mask, int(node_index)
+                pos, amino_acids, frozen_mask, active_mask, vhh_mask, int(node_index)
             )
             for node_index in site_nodes
         }
@@ -1292,7 +1295,7 @@ class InterfaceQUBOBuilder:
                 _raw_rotamer_pool_size(amino_acids[int(node)]) for node in site_nodes
             ],
             "rotamer_state_policy": "6/9/12 raw chi1 sub-rotamers by flexibility; retain 3--6 states/site under <=30 total variables",
-            "candidate_guidance": "pre-screen by rotamer prior + frozen VHH/environment nonbonded energy + antigen-guidance energy",
+            "candidate_guidance": "pre-screen by rotamer prior + VHH-only fixed-environment energy + antigen interaction energy; antigen counted once",
             "antigen_guidance_energy": [float(state.antigen_guidance_energy) for state in rotamers],
             "variable_count": variable_count,
             "active_residue_count": int(active_mask.sum()),
@@ -1515,7 +1518,8 @@ class AllAtomInterfaceQUBOBuilder:
     """
 
     def __init__(self, structure_path: Path, active_residues: Sequence[str], *,
-                 chi1_angles: Optional[Sequence[float]] = None, seed: int = 42,
+                 chi1_angles: Optional[Sequence[float]] = None,
+                 site_scores: Optional[Sequence[float]] = None, seed: int = 42,
                  candidate_relax_iterations: int = 0):
         import openmm as mm
         from openmm import app, unit
@@ -1535,6 +1539,12 @@ class AllAtomInterfaceQUBOBuilder:
         ids=list(active_residues)
         if not ids or len(set(ids))!=len(ids):
             raise ValueError("Active residues must be unique and nonempty")
+        if site_scores is None:
+            self.site_scores=np.zeros(len(ids),dtype=np.float64)
+        else:
+            self.site_scores=np.asarray(site_scores,dtype=np.float64)
+            if self.site_scores.shape!=(len(ids),) or not np.isfinite(self.site_scores).all():
+                raise ValueError("site_scores must be finite and aligned with active_residues")
         if chi1_angles is None and len(ids)*3>30:
             raise ValueError("Adaptive all-atom mode requires at most 10 Active residues under the 30-variable budget")
         if chi1_angles is not None and len(ids)*len(chi1_angles)>30:
@@ -1653,7 +1663,7 @@ class AllAtomInterfaceQUBOBuilder:
             pseudo_nodes=np.arange(len(ids),dtype=np.int64)
             pseudo_aas=[residue_one_letter[i] for i in range(len(ids))]
             counts=helper._allocate_rotamer_counts(
-                pseudo_nodes,pseudo_aas,np.zeros(len(ids),dtype=np.float64)
+                pseudo_nodes,pseudo_aas,self.site_scores
             )
             retained_old_indices=[]; retained_groups={}
             for site,count in enumerate(counts):
@@ -1757,6 +1767,7 @@ class AllAtomInterfaceQUBOBuilder:
                 atom_count=len(self.base_positions),forcefield=["amber14-all.xml","amber14/tip3p.xml"],
                 solvent="vacuum; NoCutoff",raw_rotamer_pool_sizes=self.raw_rotamer_pool_sizes,
                 rotamers_per_site=self.retained_rotamers_per_site,
+                site_scores=self.site_scores.tolist(),
                 rotamer_state_policy=("adaptive 6/9/12 raw chi1 sub-rotamers -> 3--6 retained under <=30 variables" if self.chi1_angles_override is None else "explicit legacy chi1 angle override"),
                 candidate_scope="input-conditioned distal chi; Amber14 single-candidate prescreen, no affinity claim"))
 
