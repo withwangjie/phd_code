@@ -172,9 +172,12 @@ def test_statistics_resume_checks_statistics_subdirectory(tmp_path: Path) -> Non
         (qc/f"statistics_{mode}.md").write_text("ok",encoding="utf-8")
     stats=tmp_path/"statistics"
     stats.mkdir()
+    (stats/"quantum_scaling_statistics.json").write_text("{}",encoding="utf-8")
+    (stats/"quantum_scaling_statistics.md").write_text("ok",encoding="utf-8")
     (stats/"structure_statistics.json").write_text("{}",encoding="utf-8")
     (stats/"structure_statistics.md").write_text("ok",encoding="utf-8")
-    ok,detail=Orchestrator._validate_completed_stage_artifacts(Dummy(),"statistics")
+    ok,detail=Orchestrator._validate_completed_stage_artifacts(
+        Dummy(),"statistics",require_results_manifest=False)
     assert ok is True, detail
 
 
