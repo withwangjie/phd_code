@@ -97,6 +97,7 @@ ORCHESTRATED_SCRIPTS: List[str] = [
     "batch_benchmark_hard_set.py",
     "run_real_complex_pilot.py",
     "run_external_structure_baselines.py",
+    "audit_external_vhh_independence.py",
     "generate_final_research_report.py",
     "analyze_structure_recovery.py",
     "model_egnn_pruning.py",
@@ -1417,6 +1418,35 @@ class Orchestrator:
             ext_failures=[]
             if not graph_dir.is_dir() or not any(graph_dir.glob("*.pt")):
                 ext_failures.append(f"Required external VHH graph set missing/empty: {graph_dir}")
+            if not independence.is_file() and graph_dir.is_dir() and any(graph_dir.glob("*.pt")):
+                cluster_setting=(
+                    (self.config["queue_freeze"].get("independence_clustering", {}) or {}).get("cluster_map")
+                )
+                cluster_path=resolve_path(self.config,cluster_setting) if cluster_setting else None
+                if cluster_path is None or not cluster_path.is_file():
+                    ext_failures.append(
+                        "Cannot generate external independence manifest without frozen cluster map"
+                    )
+                else:
+                    independence.parent.mkdir(parents=True,exist_ok=True)
+                    audit_argv=[
+                        self.venv_python,"audit_external_vhh_independence.py",
+                        "--training-dataset",str(self.dataset_dir()),
+                        "--external-graph-dir",str(graph_dir),
+                        "--cluster-map",str(cluster_path),
+                        "--out",str(independence),
+                        "--vhh-threshold",str(homology.get("vhh_full_chain_identity",0.80)),
+                        "--cdr-h3-threshold",str(homology.get("cdr_h3_identity",0.50)),
+                        "--antigen-threshold",str(homology.get("antigen_identity",0.30)),
+                        "--antigen-min-length-coverage",
+                            str(homology.get("antigen_min_length_coverage",0.70)),
+                    ]
+                    audit_rc,audit_log=self._run_subprocess("audit_external_vhh_independence",audit_argv)
+                    logs.append(str(audit_log));argvs.append(audit_argv)
+                    if audit_rc!=0 or not independence.is_file():
+                        ext_failures.append(
+                            f"External VHH independence audit failed (exit={audit_rc}; see {audit_log})"
+                        )
             if not independence.is_file():
                 ext_failures.append(f"Required external independence manifest missing: {independence}")
             else:
