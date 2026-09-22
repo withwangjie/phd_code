@@ -141,3 +141,37 @@ def test_effective_runtime_config_is_frozen() -> None:
 def test_singleton_hard_set_pair_similarity_is_zero() -> None:
     assert dataset_builder.max_pair_similarity([])==0.0
     assert dataset_builder.max_pair_similarity(["CARDRST"])==0.0
+
+
+
+def test_method_sensitivity_requires_zero_failures(tmp_path: Path) -> None:
+    source=inspect.getsource(Orchestrator.stage_method_sensitivity)
+    assert "if rc!=0 or not summary_path.is_file()" in source
+    assert "failures_total" in source
+    assert "sensitivity sub-run not closed" in source
+
+
+def test_statistics_resume_checks_statistics_subdirectory(tmp_path: Path) -> None:
+    class Dummy:
+        run_dir=tmp_path
+        config={"statistics":{"budget_modes":["outputs","time"]},"final_report":{}}
+
+        def dataset_dir(self):
+            return tmp_path/"dataset"
+
+        def checkpoint_dir(self):
+            return tmp_path/"checkpoints"
+
+        _artifacts_present=staticmethod(Orchestrator._artifacts_present)
+
+    qc=tmp_path/"qc_benchmark"
+    qc.mkdir()
+    for mode in ("outputs","time"):
+        (qc/f"statistics_{mode}.json").write_text("{}",encoding="utf-8")
+        (qc/f"statistics_{mode}.md").write_text("ok",encoding="utf-8")
+    stats=tmp_path/"statistics"
+    stats.mkdir()
+    (stats/"structure_statistics.json").write_text("{}",encoding="utf-8")
+    (stats/"structure_statistics.md").write_text("ok",encoding="utf-8")
+    ok,detail=Orchestrator._validate_completed_stage_artifacts(Dummy(),"statistics")
+    assert ok is True, detail
