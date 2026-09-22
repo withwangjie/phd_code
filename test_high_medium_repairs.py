@@ -259,3 +259,25 @@ def test_server_config_is_infrastructure_only() -> None:
     forbidden=("homology_isolation","active_sites","cvar_alpha","qaoa_objective","interface_label_cutoff_angstrom")
     rendered=json.dumps(server,sort_keys=True)
     assert all(key not in rendered for key in forbidden)
+
+
+
+def test_unified_run_directory_inventory_and_summary(tmp_path: Path) -> None:
+    run=tmp_path/"run"; run.mkdir()
+    (run/"logs").mkdir()
+    (run/"logs"/"x.log").write_text("ok",encoding="utf-8")
+    results={"env_check": full.StageResult("env_check","completed","a","b",0,"ok")}
+    full.write_run_inventory(run,results)
+    inventory=json.loads((run/"artifact_inventory.json").read_text(encoding="utf-8"))
+    summary=json.loads((run/"RUN_SUMMARY.json").read_text(encoding="utf-8"))
+    assert any(x["path"]=="logs/x.log" for x in inventory["artifacts"])
+    assert summary["status"]=="completed"
+    assert summary["artifact_inventory"]=="artifact_inventory.json"
+
+
+def test_one_click_launcher_uses_precreated_run_directory() -> None:
+    source=Path("run_full_experiment.sh").read_text(encoding="utf-8")
+    assert '--run-dir "$RUN_DIR"' in source
+    assert 'PREFLIGHT_LOG="$RUN_DIR/logs/formal_preflight_' in source
+    assert 'LAUNCH_LOG="$RUN_DIR/logs/launch_' in source
+    assert 'provenance/resolved_runtime_config.yaml' in source
