@@ -161,6 +161,9 @@ def section_data_reliability(ctx: ReportContext) -> List[str]:
     if inventory:
         lines.append(f"Audit inventory recorded (see `data_audit_report.md` for full per-reason breakdown, "
                       f"and `data_audit_details.csv`/`.jsonl` for the per-structure ledger this run consumed).")
+        quality_protocol=inventory.get("structure_quality_protocol", {}) or {}
+        if quality_protocol:
+            lines.append(f"- High-confidence structure-quality protocol: {json.dumps(quality_protocol, sort_keys=True)}")
     else:
         lines.append("`data_audit_inventory.json` was not found or not parseable in this run's audit directory.")
     lines.append("")
@@ -241,10 +244,14 @@ def section_data_reliability(ctx: ReportContext) -> List[str]:
     lines.append(f"- Independence status distribution over all {len(eligibility)} examined candidates: "
                   f"{dict(sorted(status_counts.items()))}. Development-exposed (per --dev-exposed-pdb): "
                   f"{exposed_count}/{len(eligibility)}.")
-    lines.append("- `independence_status` is capped at `independence_not_confirmed` for every candidate that "
-                  "clears identity/exposure screening -- this project has no PDB-family/local-domain cluster "
-                  "map, so family- or domain-level relatedness is never checked and a candidate is never "
-                  "reported as confirmed-independent. Only `excluded_*` statuses are asserted with confidence.")
+    cluster_cfg=((ctx.frozen_config.get("queue_freeze", {}) or {}).get("independence_clustering", {}) or {})
+    validation_meta=run_summary.get("validation", {}) or {}
+    lines.append(
+        f"- Family/structure clustering required={cluster_cfg.get('required', False)}; "
+        f"map={cluster_cfg.get('cluster_map')}; dataset builder recorded map use="
+        f"{validation_meta.get('family_cluster_map_used')} and train-hard cluster overlap="
+        f"{validation_meta.get('family_cluster_train_hard_overlap')}."
+    )
     if selected:
         vhh_ids = [float(d.get("max_vhh_identity", 0.0)) for d in selected]
         antigen_ids = [float(d.get("max_antigen_identity", 0.0)) for d in selected]
