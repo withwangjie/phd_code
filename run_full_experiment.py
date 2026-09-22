@@ -893,7 +893,20 @@ class Orchestrator:
                 return False,"dev_queue run_summary.json is not closed"
             if not val_summary.get("closed") or val_summary.get("frozen_set_accounting_ok") is not True:
                 return False,"validation execution is not closed against frozen denominator"
-            return True,"structural queue closure verified"
+            for root,summary,label in (
+                (dev_root,dev_summary,"dev_queue"),
+                (val_root,val_summary,"validation_queue"),
+            ):
+                for pdb in summary.get("structure_experiment_completed_target_ids",[]) or []:
+                    target=root/"results"/str(pdb)
+                    ok,detail=require([
+                        target/"run_manifest.json",
+                        target/"recovery_metrics.csv",
+                        target/"recovery_report.md",
+                    ])
+                    if not ok:
+                        return False,f"{label}/{pdb} missing completed-target results: {detail}"
+            return True,"structural aggregate and per-target result contracts verified"
         if stage=="external_validation":
             cfg=self.config.get("external_validation",{}) or {}
             paths=[]
