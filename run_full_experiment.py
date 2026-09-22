@@ -2672,6 +2672,7 @@ def save_derived_child(streams: Dict[str, int], stream_name: str, *labels: str) 
 
 def build_run_manifest(config: Dict[str, Any], repo_root: Path) -> Dict[str, Any]:
     evidence_path=repo_root/"METHODS_EVIDENCE.md"
+    results_contract_path=repo_root/"RESULTS_CONTRACT.md"
     return dict(
         generated_utc=utc_timestamp(),
         git_commit=git_commit_hash(repo_root),
@@ -2679,6 +2680,9 @@ def build_run_manifest(config: Dict[str, Any], repo_root: Path) -> Dict[str, Any
         code_sha256={name: sha256_of(repo_root / name) for name in ORCHESTRATED_SCRIPTS
                      if (repo_root / name).is_file()},
         methods_evidence_sha256=sha256_of(evidence_path) if evidence_path.is_file() else None,
+        results_contract_sha256=(
+            sha256_of(results_contract_path) if results_contract_path.is_file() else None
+        ),
         config=config,
     )
 
@@ -2853,9 +2857,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             current = build_run_manifest(config, repo_root)
             if (previous.get("code_sha256") != current["code_sha256"]
                     or previous.get("methods_evidence_sha256") != current["methods_evidence_sha256"]
+                    or previous.get("results_contract_sha256") != current["results_contract_sha256"]
                     or previous.get("config") != current["config"]):
                 raise SystemExit(
-                    "Refusing to resume: orchestrated code, methods evidence, or config differs from the original launch. "
+                    "Refusing to resume: orchestrated code, methods evidence, results contract, or config differs from the original launch. "
                     "Start a fresh run directory for changed code/evidence/config (this repository's established "
                     "rule: a changed source hash, literature-evidence hash, or configuration always gets a new output directory)."
                 )
