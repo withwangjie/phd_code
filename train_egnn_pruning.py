@@ -1008,6 +1008,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--patience", type=int, default=5)
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument("--hidden-dim", type=int, default=32)
+    parser.add_argument("--num-layers", type=int, default=4)
+    parser.add_argument("--dropout", type=float, default=0.1)
+    parser.add_argument("--coord-scale", type=float, default=0.1)
     parser.add_argument("--learning-rate", type=float, default=1e-3)
     parser.add_argument("--geometry-baseline-contact-cutoff", type=float, default=8.0)
     parser.add_argument("--geometry-baseline-proximity-scale", type=float, default=6.0)
@@ -1110,8 +1113,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                        # "seed": SEED usage below transparently picks up the CLI override.
     if args.max_epochs <= 0 or args.patience <= 0 or args.batch_size <= 0:
         raise ValueError("max-epochs, patience, and batch-size must be positive")
-    if args.hidden_dim <= 0 or not math.isfinite(args.learning_rate) or args.learning_rate <= 0:
-        raise ValueError("hidden-dim and learning-rate must be positive")
+    if args.hidden_dim <= 0 or args.num_layers <= 0 or not math.isfinite(args.learning_rate) or args.learning_rate <= 0:
+        raise ValueError("hidden-dim, num-layers and learning-rate must be positive")
+    if not 0.0 <= args.dropout < 1.0:
+        raise ValueError("dropout must be in [0,1)")
+    if not math.isfinite(args.coord_scale) or args.coord_scale <= 0:
+        raise ValueError("coord-scale must be positive finite")
     if (not math.isfinite(args.geometry_baseline_contact_cutoff)
             or args.geometry_baseline_contact_cutoff <= 0
             or not math.isfinite(args.geometry_baseline_proximity_scale)
@@ -1198,10 +1205,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     model_config = {
         "input_dim": 21,
         "hidden_dim": args.hidden_dim,
-        "num_layers": 4,
+        "num_layers": args.num_layers,
         "edge_attr_dim": 0,
-        "dropout": 0.1,
-        "coord_scale": 0.1,
+        "dropout": args.dropout,
+        "coord_scale": args.coord_scale,
     }
     training_config = {
         "seed": SEED,
