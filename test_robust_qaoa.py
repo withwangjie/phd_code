@@ -146,6 +146,23 @@ class RobustQAOATests(unittest.TestCase):
         with self.assertRaises(ValueError):
             sampler.sample(np.zeros(4),shots=10,energy_window=-1.0)
 
+    def test_mixed_two_three_state_registers(self):
+        physical_self=np.array([0.,1., 0.,2.,4., 0.,3.])
+        pair=np.zeros((7,7))
+        groups={0:[0,1],1:[2,3,4],2:[5,6]}
+        sampler=XYMixerQAOASampler(
+            physical_self,pair,groups,p=2,simulation_mode='subspace',seed=23)
+        self.assertEqual(sampler.num_variables,7)
+        self.assertEqual(sampler.feasible_configuration_count,12)
+        ground=sampler.enumerate_ground_states()
+        self.assertEqual(ground.configuration_count,12)
+        self.assertTrue(all(sampler.is_legal(state) for state in ground.states))
+        sampled=sampler.sample(np.zeros(4),shots=300,ground_state=ground,sample_seed=29)
+        self.assertEqual(sampled.legal_rate,1.0)
+        self.assertTrue(all(sampler.is_legal(state) for state in sampled.counts))
+        annealed=sampler.simulated_annealing(num_reads=40,site_passes=5,seed=31,ground_state=ground)
+        self.assertTrue(sampler.is_legal(annealed.best_state))
+        self.assertTrue(all(sampler.is_legal(state) for state in annealed.counts))
     def test_invalid_arguments_rejected(self):
         sampler=XYMixerQAOASampler([0.,2.,0.,5.],np.zeros((4,4)),{0:[0,1],1:[2,3]},
             p=2,simulation_mode='subspace',seed=1)
