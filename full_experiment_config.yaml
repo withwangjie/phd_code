@@ -418,6 +418,9 @@ external_validation:
 # ---------------------------------------------------------------------------
 statistics:
   resamples: 10000
+  primary_qc_baseline: "sa"
+  primary_qc_metric: "gap"
+  min_qc_clusters: 10  # adequacy gate for the frozen coarse QAOA-vs-classical primary contrast
   min_primary_clusters: 10  # adequacy gate, not a formal power guarantee
   min_rq5_clusters: 10
   budget_modes: ["outputs", "time"]
