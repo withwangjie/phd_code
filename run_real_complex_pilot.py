@@ -174,11 +174,12 @@ def prepare(graph, source: Path, destination: Path, sites: int, *, pruning: str 
     elif pruning=='random':
         ordered=[scored[i] for i in np.random.default_rng(seed).permutation(len(scored))]
     elif pruning=='egnn':
-        from batch_benchmark_hard_set import load_interface_scorer
+        from batch_benchmark_hard_set import load_interface_scorer, assert_checkpoint_graph_compatible
         model,info=load_interface_scorer(checkpoint,torch_device=torch.device('cpu'),seed=seed)
         model_status=info.status
         if model_status!='checkpoint_loaded':
             raise ValueError('EGNN ablation requires a valid trained checkpoint')
+        assert_checkpoint_graph_compatible(info, graph)
         with torch.no_grad():
             model_scores=model(graph.x,graph.pos,graph.edge_index).reshape(-1)
         candidate_indices=torch.tensor([item[3] for item in scored],dtype=torch.long)
