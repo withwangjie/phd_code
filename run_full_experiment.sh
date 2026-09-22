@@ -118,6 +118,7 @@ if [ "$FRESH_RUN" -eq 1 ]; then
     cp "$RESOLVED_CONFIG" "$RUN_DIR/provenance/resolved_runtime_config.yaml"
     cp "$SERVER_REPORT" "$RUN_DIR/provenance/server_resolution.json"
     [ -f "${SCRIPT_DIR}/METHODS_EVIDENCE.md" ] && cp "${SCRIPT_DIR}/METHODS_EVIDENCE.md" "$RUN_DIR/provenance/METHODS_EVIDENCE.md"
+    [ -f "${SCRIPT_DIR}/RESULTS_CONTRACT.md" ] && cp "${SCRIPT_DIR}/RESULTS_CONTRACT.md" "$RUN_DIR/provenance/RESULTS_CONTRACT.md"
     git rev-parse HEAD > "$RUN_DIR/provenance/git_head.txt" 2>/dev/null || true
     python -m pip freeze > "$RUN_DIR/provenance/pip_freeze.txt" 2>/dev/null || true
     env | sort > "$RUN_DIR/provenance/environment.txt"
