@@ -257,6 +257,7 @@ qc_benchmark:
   checkpoint: "best_egnn_pruning.pt"
   workers: 16  # CPU legal-subspace simulation, not 2^n GPU state vectors
   max_targets: 0  # 0 = every qualifying graph in input_dir, no silent subset
+  max_failure_fraction: 0.0  # formal benchmark is fail-closed by default
   pruning: ["egnn", "contact", "distance", "cdr", "random"]
   radii: [6.0]
   depths: [2]
