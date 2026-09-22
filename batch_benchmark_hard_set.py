@@ -39,6 +39,7 @@ import numpy as np
 import pennylane as qml
 import torch
 from scipy.optimize import lsq_linear
+from scipy.stats import spearmanr
 from tqdm.auto import tqdm
 
 from model_egnn_pruning import EGNNInterfaceScorer, extract_top_interface_subgraph
@@ -1568,6 +1569,18 @@ def fit_energy_calibration_csv(input_csv: Path, output_json: Path, ridge_alpha: 
     residual=y-pred
     ss_tot=float(np.sum((y-y.mean())**2))
     cv_mask=np.isfinite(cv_predictions)
+    cv_r2=None
+    cv_spearman=None
+    if cv_mask.any():
+        cv_target=y[cv_mask];cv_pred=cv_predictions[cv_mask]
+        cv_ss_tot=float(np.sum((cv_target-cv_target.mean())**2))
+        if cv_ss_tot>0:
+            cv_r2=float(1.0-np.sum((cv_target-cv_pred)**2)/cv_ss_tot)
+        if len(cv_target)>=3:
+            rho=spearmanr(cv_target,cv_pred).statistic
+            if math.isfinite(float(rho)):
+                cv_spearman=float(rho)
+
     payload={
         "intercept":float(beta[0]),
         "prior_weight":float(beta[1]),
@@ -1591,6 +1604,8 @@ def fit_energy_calibration_csv(input_csv: Path, output_json: Path, ridge_alpha: 
             None if not cv_mask.any()
             else float(np.mean(np.abs(y[cv_mask]-cv_predictions[cv_mask])))
         ),
+        "cv_r2":cv_r2,
+        "cv_spearman":cv_spearman,
         "input_sha256":_ablation_digest(Path(input_csv)),
         "scope":"fit on training complexes only; freeze coefficients before validation/test",
     }
