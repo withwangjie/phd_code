@@ -436,7 +436,11 @@ def main():
         train_records=[r for r in manifest if r['split']=='train']
         assert not ({r['pdb_id'] for r in train_records}&(dbids|hardids))
         assert not (dbids&hardids)
-        maxhard=max(seqsim(s,t) for s,t in itertools.combinations(hardseqs,2))
+        # A one-target hard set has no pairwise comparison. Treat its
+        # within-hard-set maximum identity as 0 rather than calling max() on
+        # an empty iterator; cross-split train-vs-hard isolation is still
+        # checked independently below.
+        maxhard=max((seqsim(s,t) for s,t in itertools.combinations(hardseqs,2)), default=0.0)
         assert maxhard<.8
         maxtrain=max((seqsim(s,t) for r in train_records for s in known_train_cdr[r['source_id']] for t in hardseqs),default=0)
         assert maxtrain<.8
