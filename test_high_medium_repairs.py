@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 import batch_benchmark_hard_set as bbh
+import build_final_pyg_dataset as dataset_builder
 import run_real_complex_pilot as pilot
 import run_full_experiment as full
 from run_full_experiment import Orchestrator, StageResult, apply_runtime_mode_overrides
@@ -134,3 +135,9 @@ def test_effective_runtime_config_is_frozen() -> None:
     source=inspect.getsource(full.main)
     assert "yaml.safe_dump(config" in source
     assert "shutil.copy2(args.config, frozen_config_path)" not in source
+
+
+
+def test_singleton_hard_set_pair_similarity_is_zero() -> None:
+    assert dataset_builder.max_pair_similarity([])==0.0
+    assert dataset_builder.max_pair_similarity(["CARDRST"])==0.0
