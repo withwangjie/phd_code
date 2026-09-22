@@ -361,6 +361,15 @@ def _validate_scientific_config(config: Dict[str, Any]) -> None:
         raise ValueError(
             f"statistics.primary_pruning={primary_pruning!r} must be present in "
             f"qc_benchmark.pruning={qc.get('pruning')}")
+    primary_radius=float(stats.get("primary_radius",6.0))
+    if primary_radius not in [float(v) for v in qc.get("radii",[6.0])]:
+        raise ValueError("statistics.primary_radius must be present in qc_benchmark.radii")
+    primary_depth=int(stats.get("primary_depth",2))
+    if primary_depth not in [int(v) for v in qc.get("depths",[2])]:
+        raise ValueError("statistics.primary_depth must be present in qc_benchmark.depths")
+    primary_max_evals=int(stats.get("primary_max_evals",90))
+    if primary_max_evals not in [int(v) for v in qc.get("max_evals",[90])]:
+        raise ValueError("statistics.primary_max_evals must be present in qc_benchmark.max_evals")
     stats_primary_sites=int(stats.get("primary_active_sites",6))
     if stats_primary_sites not in qc_sites:
         raise ValueError(
@@ -2658,6 +2667,12 @@ class Orchestrator:
                                 "--budget-mode","outputs",
                                 "--primary-pruning",str(
                                     self.config.get("statistics",{}).get("primary_pruning","egnn")),
+                                "--primary-radius",str(
+                                    self.config.get("statistics",{}).get("primary_radius",6.0)),
+                                "--primary-depth",str(
+                                    self.config.get("statistics",{}).get("primary_depth",2)),
+                                "--primary-max-evals",str(
+                                    self.config.get("statistics",{}).get("primary_max_evals",90)),
                                 "--primary-outputs","1000",
                                 "--primary-objective","cvar",
                                 "--primary-restarts","4",
@@ -2768,6 +2783,9 @@ class Orchestrator:
         logs, argvs, failures = [], [], []
         qc_cfg = self.config["qc_benchmark"]
         primary_pruning = str(cfg.get("primary_pruning","egnn"))
+        primary_radius = float(cfg.get("primary_radius",qc_cfg.get("radii",[6.0])[0]))
+        primary_depth = int(cfg.get("primary_depth",qc_cfg.get("depths",[2])[0]))
+        primary_max_evals = int(cfg.get("primary_max_evals",qc_cfg.get("max_evals",[90])[0]))
         primary_outputs = int(cfg.get("primary_outputs", max(qc_cfg.get("outputs", [1000]))))
         primary_objective = str(cfg.get("primary_objective", "cvar"))
         primary_restarts = int(cfg.get("primary_restarts", 4))
@@ -2799,6 +2817,9 @@ class Orchestrator:
                     "--seed", str(self.config["master_seed"]),
                     "--budget-mode", budget_mode,
                     "--primary-pruning", primary_pruning,
+                    "--primary-radius", str(primary_radius),
+                    "--primary-depth", str(primary_depth),
+                    "--primary-max-evals", str(primary_max_evals),
                     "--primary-outputs", str(primary_outputs),
                     "--primary-objective", primary_objective,
                     "--primary-restarts", str(primary_restarts),
@@ -2874,9 +2895,9 @@ class Orchestrator:
                 "--primary-outputs",str(primary_outputs),
                 "--primary-objective",primary_objective,
                 "--primary-restarts",str(primary_restarts),
-                "--primary-depth",str(qc_cfg.get("depths",[2])[0]),
-                "--primary-max-evals",str(qc_cfg.get("max_evals",[90])[0]),
-                "--primary-radius",str(qc_cfg.get("radii",[6.0])[0]),
+                "--primary-depth",str(primary_depth),
+                "--primary-max-evals",str(primary_max_evals),
+                "--primary-radius",str(primary_radius),
                 "--baseline",str(cfg.get("primary_qc_baseline","sa")),
                 "--active-sites",*[str(v) for v in qc_cfg.get("active_sites",[4,6,8,10])],
                 "--resamples",str(cfg.get("resamples",10000)),
