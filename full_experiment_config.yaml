@@ -54,6 +54,7 @@ stages:
   energy_calibration: true    # train-only coarse component -> Amber14 calibration
   qc_benchmark: true          # --research-ablation: pruning x budget x objective sweep
   structure_experiment: true  # dev queue + validation queue recovery-benchmark
+  external_validation: true    # external VHH graphs + FASPR/Phenix structural baselines
   statistics: true            # --paired-statistics
   final_report: true
 
@@ -356,6 +357,25 @@ structure_experiment:
   perturbation_mode: "multi_chi"
   min_perturb_degrees: 40.0
   max_perturb_degrees: 120.0
+
+# ---------------------------------------------------------------------------
+# External validation / mature structural baselines.
+# These are real external dependencies; formal runs fail closed when required
+# inputs are absent. External VHH graphs must have been built with graph v1.5
+# and independently certified against the training family/structure cluster map.
+# ---------------------------------------------------------------------------
+external_validation:
+  required: true
+  external_vhh:
+    required: true
+    graph_dir: "data/external_vhh/graphs"
+    independence_manifest: "data/external_vhh/independence_manifest.json"
+    max_targets: 0
+  structural_baselines:
+    required: true
+    faspr_executable: "/opt/FASPR/FASPR"
+    phenix_clashscore_executable: "/opt/phenix/phenix.clashscore"
+    timeout_seconds: 1800
 
 # ---------------------------------------------------------------------------
 # Stage 6: paired statistics (batch_benchmark_hard_set.py --paired-statistics)
