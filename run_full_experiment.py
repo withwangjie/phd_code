@@ -1347,11 +1347,60 @@ class Orchestrator:
                 ext_failures.append(f"Required external independence manifest missing: {independence}")
             else:
                 manifest=json.loads(independence.read_text(encoding="utf-8"))
+                current_cluster_setting=(
+                    (self.config["queue_freeze"].get("independence_clustering", {}) or {}).get("cluster_map")
+                )
+                current_cluster_path=resolve_path(self.config,current_cluster_setting) if current_cluster_setting else None
+                current_cluster_sha=(
+                    sha256_of(current_cluster_path)
+                    if current_cluster_path is not None and current_cluster_path.is_file()
+                    else None
+                )
                 if not manifest.get("training_family_overlap_zero",False):
-                    ext_failures.append("External independence manifest does not certify zero training-family overlap")
+                    ext_failures.append(
+                        "External independence manifest does not certify zero training-family overlap"
+                    )
                 if manifest.get("graph_version")!="1.5":
                     ext_failures.append(
-                        f"External VHH graph version must be 1.5, got {manifest.get('graph_version')}")
+                        f"External VHH graph version must be 1.5, got {manifest.get('graph_version')}"
+                    )
+                if manifest.get("training_cluster_map_sha256") != current_cluster_sha:
+                    ext_failures.append(
+                        "External independence manifest is not bound to the current training cluster map"
+                    )
+                expected_homology={
+                    "vhh_full_chain_identity":float(homology.get("vhh_full_chain_identity",0.80)),
+                    "cdr_h3_identity":float(homology.get("cdr_h3_identity",0.50)),
+                    "antigen_identity":float(homology.get("antigen_identity",0.30)),
+                    "antigen_min_length_coverage":float(homology.get("antigen_min_length_coverage",0.70)),
+                }
+                observed_homology=manifest.get("homology_isolation")
+                if observed_homology != expected_homology:
+                    ext_failures.append(
+                        f"External homology protocol mismatch: expected={expected_homology}, "
+                        f"observed={observed_homology}"
+                    )
+                audits=manifest.get("targets")
+                if not isinstance(audits,list) or not audits:
+                    ext_failures.append("External independence manifest requires nonempty per-target audits")
+                else:
+                    for audit in audits:
+                        try:
+                            pdb=str(audit["pdb_id"]).lower()
+                            if float(audit["max_vhh_identity"]) >= expected_homology["vhh_full_chain_identity"]:
+                                ext_failures.append(f"{pdb}: VHH identity overlap")
+                            if float(audit["max_cdr_h3_identity"]) >= expected_homology["cdr_h3_identity"]:
+                                ext_failures.append(f"{pdb}: CDR-H3 identity overlap")
+                            if (
+                                float(audit["max_antigen_identity"]) >= expected_homology["antigen_identity"]
+                                and float(audit.get("antigen_length_coverage",1.0))
+                                    >= expected_homology["antigen_min_length_coverage"]
+                            ):
+                                ext_failures.append(f"{pdb}: antigen identity overlap")
+                            if bool(audit.get("family_cluster_overlap",True)):
+                                ext_failures.append(f"{pdb}: family/structure cluster overlap or unverified")
+                        except (KeyError,TypeError,ValueError) as exc:
+                            ext_failures.append(f"Malformed external target audit: {audit!r} ({exc})")
             failures.extend(ext_failures)
             if not ext_failures:
                 out=self.run_dir/"external_validation"/"vhh_coarse"
