@@ -507,7 +507,7 @@ def main():
         prior=json.loads((output/'run_summary.json').read_text(encoding='utf-8'))
         if prior.get('no_cap',False)!=args.no_cap or (not args.no_cap and prior.get('target_hard')!=args.target_hard):
             raise ValueError('Resume target differs or is unknown; choose a fresh output directory')
-        expected_protocol=dict(cdr_h3_cdr_h3_identity_threshold=CDR_H3_IDENTITY_THRESHOLD,
+        expected_protocol=dict(cdr_h3_identity_threshold=CDR_H3_IDENTITY_THRESHOLD,
             interface_label_cutoff_angstrom=INTERFACE_LABEL_CUTOFF_ANGSTROM,
             intra_chain_ca_cutoff_angstrom=INTRA_CHAIN_CA_CUTOFF_ANGSTROM,
             cross_partner_knn_k=CROSS_PARTNER_KNN_K,
@@ -525,7 +525,7 @@ def main():
             previous_elapsed=previous.get('elapsed_seconds',0)
             PEAK_RSS=max(PEAK_RSS,previous.get('sampled_peak_rss_bytes',0))
         partition_seed=args.partition_seed if args.partition_seed is not None else SEED
-        summary.update(seed=partition_seed,no_cap=args.no_cap,target_hard=(None if args.no_cap else args.target_hard),cdr_h3_identity_threshold=CDR_H3_IDENTITY_THRESHOLD,identity_scope='CDR-H3 hard-set isolation; EGNN train/validation uses layered VHH/CDR-H3/antigen clustering',graph_protocol=dict(identity_threshold=CDR_H3_IDENTITY_THRESHOLD,interface_label_cutoff_angstrom=INTERFACE_LABEL_CUTOFF_ANGSTROM,intra_chain_ca_cutoff_angstrom=INTRA_CHAIN_CA_CUTOFF_ANGSTROM,cross_partner_knn_k=CROSS_PARTNER_KNN_K,min_interface_residues=MIN_INTERFACE_RESIDUES,graph_version=VERSION),input_sha256=input_hashes,script_sha256=sha256(pathlib.Path(__file__)),admission={})
+        summary.update(seed=partition_seed,no_cap=args.no_cap,target_hard=(None if args.no_cap else args.target_hard),cdr_h3_identity_threshold=CDR_H3_IDENTITY_THRESHOLD,identity_scope='CDR-H3 hard-set isolation; EGNN train/validation uses layered VHH/CDR-H3/antigen clustering',graph_protocol=dict(cdr_h3_identity_threshold=CDR_H3_IDENTITY_THRESHOLD,interface_label_cutoff_angstrom=INTERFACE_LABEL_CUTOFF_ANGSTROM,intra_chain_ca_cutoff_angstrom=INTRA_CHAIN_CA_CUTOFF_ANGSTROM,cross_partner_knn_k=CROSS_PARTNER_KNN_K,min_interface_residues=MIN_INTERFACE_RESIDUES,graph_version=VERSION),input_sha256=input_hashes,script_sha256=sha256(pathlib.Path(__file__)),admission={})
         lookup={r['path']:r for r in rows if r['subset']=='test_db55'};eligible=[]
         for source in ['train_rcsb','sabdab_vhh','snac_db']:
             subset=[r for r in rows if r['subset']==source];good=[]
