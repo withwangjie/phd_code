@@ -234,3 +234,10 @@ def test_final_report_embeds_methods_references() -> None:
     assert "alpha=0.1 is literature-supported as an empirical CVaR setting" in source
     manifest_source=inspect.getsource(full.build_run_manifest)
     assert "methods_evidence_sha256" in manifest_source
+
+
+
+def test_resume_rejects_methods_evidence_changes() -> None:
+    source=inspect.getsource(full.main)
+    assert 'previous.get("methods_evidence_sha256") != current["methods_evidence_sha256"]' in source
+    assert "literature-evidence hash" in source
