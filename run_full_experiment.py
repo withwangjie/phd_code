@@ -2459,6 +2459,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--resume", type=str, default=None,
                          help="Continue a specific previous run directory (name or path) instead of "
                               "starting a fresh one.")
+    parser.add_argument("--run-dir", type=Path, default=None,
+                         help="Use this pre-created directory for a NEW run. Intended for the one-click "
+                              "launcher so preflight/orchestrator logs and every artifact share one run directory.")
     parser.add_argument("--only", type=str, default=None, choices=STAGE_ORDER,
                          help="Run only this stage (its prerequisites must already be completed).")
     parser.add_argument("--force-restage", type=str, nargs="+", default=[],
@@ -2469,6 +2472,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parser.parse_args(list(argv) if argv is not None else None)
     if args.smoke_only and args.resume:
         parser.error("--smoke-only creates a separate disposable preflight run and cannot be combined with --resume")
+    if args.resume and args.run_dir is not None:
+        parser.error("--resume and --run-dir are mutually exclusive")
 
     config = apply_runtime_mode_overrides(load_config(args.config), smoke_only=args.smoke_only)
     repo_root = Path(config["paths"]["repo_root"]).resolve()
@@ -2507,7 +2512,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                                   "derivation (seed_streams.py itself changed?).")
             print(f"Resuming run: {run_dir}")
         else:
-            run_dir = new_run_dir(config)
+            if args.run_dir is not None:
+                run_dir=args.run_dir.expanduser().resolve()
+                configured_root=resolve_path(config,config["paths"]["run_root"]).resolve()
+                try:
+                    run_dir.relative_to(configured_root)
+                except ValueError:
+                    raise SystemExit(
+                        f"--run-dir must be inside configured run_root {configured_root}: {run_dir}")
+                run_dir.mkdir(parents=True,exist_ok=True)
+                if (run_dir/"run_manifest.json").exists():
+                    raise SystemExit(
+                        f"Refusing fresh launch into an existing formal run with run_manifest.json: {run_dir}")
+            else:
+                run_dir = new_run_dir(config)
             manifest = build_run_manifest(config, repo_root)
             atomic_write_json(run_dir / "run_manifest.json", manifest)
             frozen_config_path = run_dir / "frozen_config.yaml"
