@@ -2230,7 +2230,7 @@ def _allatom_experiment_main(argv: Optional[Sequence[str]] = None) -> int:
             chi1_angles=case.get("chi1_angles"),
             site_scores=case.get("active_site_scores"),
             candidate_relax_iterations=int(case.get("candidate_relax_iterations",0)),
-            rotamer_mode=rotamer_cfg.get("mode","legacy"),
+            rotamer_mode=rotamer_cfg.get("mode","dunbrack2010"),
             rotamer_library_path=rotamer_cfg.get("library_path"),
             rotamer_probability_floor=float(rotamer_cfg.get("probability_floor",1e-4)),
             rotamer_sigma_offsets=rotamer_cfg.get("sigma_offsets",[-1.0,0.0,1.0]),
@@ -2434,7 +2434,7 @@ def _recovery_benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
         generator=AllAtomInterfaceQUBOBuilder(
             native,case["active_residues"],
             site_scores=case.get("active_site_scores"),seed=42,
-            rotamer_mode=rotamer_cfg.get("mode","legacy"),
+            rotamer_mode=rotamer_cfg.get("mode","dunbrack2010"),
             rotamer_library_path=rotamer_cfg.get("library_path"),
             rotamer_probability_floor=float(rotamer_cfg.get("probability_floor",1e-4)),
             rotamer_sigma_offsets=rotamer_cfg.get("sigma_offsets",[-1.0,0.0,1.0]),
