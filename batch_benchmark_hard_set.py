@@ -2006,20 +2006,16 @@ def _paired_statistics_main(argv: Optional[Sequence[str]] = None) -> int:
                      else r.get("outputs")) == args.primary_outputs]
         rows = {r["solver"]: r for r in selected if r["solver"] != "qaoa"}
         qrows = [r for r in selected if r["solver"] == "qaoa"]
-        if args.budget_mode == "outputs":
-            qrows = [r for r in qrows if r.get("qaoa_objective") == args.primary_objective
-                     and r.get("qaoa_restarts") == args.primary_restarts]
-        else:
-            # Time controls explicitly inherit the first QAOA variant's
-            # objective/restarts. Match that actual budget donor, not the last.
-            donor = rows.get("sa_time", {})
-            qrows = [r for r in qrows if
-                     r.get("qaoa_objective") == donor.get("qaoa_objective") and
-                     r.get("qaoa_restarts") == donor.get("qaoa_restarts")]
+        qrows = [r for r in qrows if
+                 r.get("qaoa_objective") == args.primary_objective and
+                 r.get("qaoa_restarts") == args.primary_restarts]
         if len(qrows) != 1:
             skipped["missing_or_ambiguous_primary_contrast"] += 1
             continue
         rows["qaoa"] = qrows[0]
+        if rows["qaoa"].get("termination_reason") == "all_restarts_failed":
+            skipped["qaoa:all_restarts_failed"] += 1
+            continue
         pdb=str(case["config"].get("pdb_id","")).strip().lower()
         if not pdb:
             raise ValueError(f"Missing PDB identity: {path}")
