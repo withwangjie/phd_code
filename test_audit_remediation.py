@@ -45,6 +45,8 @@ import qaoa_interface_sampler as qis
 import subgraph_to_qubo as stq
 import run_full_experiment as rfe
 import batch_benchmark_hard_set as bbh
+import analyze_structure_recovery as asr
+import build_independence_cluster_map as bicm
 import train_egnn_pruning as tep
 
 
@@ -244,6 +246,44 @@ def test_adaptive_coarse_builder_rejects_more_than_ten_sites() -> None:
         stq.InterfaceQUBOBuilder(min_variables=20, max_variables=30, max_sites=11)
 
 
+def test_scientific_config_rejects_invalid_solvent_and_primary_contrast() -> None:
+    config=_minimal_scientific_config()
+    config["structure_experiment"]["solvent_model"]="explicit_magic"
+    with pytest.raises(ValueError,match="solvent_model"):
+        rfe._validate_scientific_config(config)
+
+    config=_minimal_scientific_config()
+    config["statistics"]={"primary_structural_contrast":"qaoa_vs_unknown"}
+    with pytest.raises(ValueError,match="primary_structural_contrast"):
+        rfe._validate_scientific_config(config)
+
+
+def test_primary_structural_contrast_is_configurable() -> None:
+    rows=[
+        {"target":"1aaa","method":"qaoa","final_rmsd":"1.0"},
+        {"target":"1aaa","method":"greedy","final_rmsd":"2.0"},
+        {"target":"2bbb","method":"qaoa","final_rmsd":"3.0"},
+        {"target":"2bbb","method":"greedy","final_rmsd":"2.5"},
+    ]
+    result=asr.grouped_primary(
+        rows,{"1aaa":"c1","2bbb":"c2"},"final_rmsd","qaoa_vs_greedy",1000,7
+    )
+    assert result["contrast"].startswith("QAOA-greedy")
+    assert result["n_clusters"]==2
+
+
+def test_cluster_union_find_keeps_singletons_and_components() -> None:
+    dsu=bicm.DSU()
+    for pdb in ("1aaa","2bbb","3ccc"):
+        dsu.add(pdb)
+    dsu.union("1aaa","2bbb")
+    assert dsu.find("1aaa")==dsu.find("2bbb")
+    assert dsu.find("3ccc")!=dsu.find("1aaa")
+    assert bicm.norm_id("1AAA.cif")=="1aaa"
+
+
+
+
 def test_checkpoint_graph_protocol_gate_rejects_semantic_mismatch() -> None:
     protocol = {
         "graph_version": "1.5",
@@ -410,6 +450,8 @@ def test_calibration_reports_grouped_cv_statistics(tmp_path: Path) -> None:
     assert result["cv_scheme"].startswith("deterministic PDB-grouped")
     assert "cv_r2" in result and "cv_spearman" in result
     assert result["n_train_complexes"]==5
+    assert "uncalibrated_rmse_kcal" in result
+    assert "calibration_rmse_improvement_kcal" in result
 
 
 def test_disabled_stage_skip_is_valid_prerequisite(tmp_path: Path) -> None:
