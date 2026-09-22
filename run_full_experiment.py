@@ -653,6 +653,7 @@ class Orchestrator:
             "--depths", *[str(d) for d in cfg.get("depths", [1, 2, 3])],
             "--max-evals", *[str(m) for m in cfg.get("max_evals", [90, 300])],
             "--active-sites", str(cfg.get("active_sites", 10)),
+            "--antigen-guidance-weight", str(cfg.get("antigen_guidance_weight", 0.25)),
             "--outputs", *[str(o) for o in cfg.get("outputs", [10, 30, 100, 300, 1000])],
             "--qaoa-objective", *cfg.get("qaoa_objective", ["mean", "cvar"]),
             "--qaoa-restarts", *[str(r) for r in cfg.get("qaoa_restarts", [1, 4])],
