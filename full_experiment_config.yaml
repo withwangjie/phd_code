@@ -342,6 +342,7 @@ structure_experiment:
   qaoa_objective: "cvar"
   cvar_alpha: 0.1
   parameter_scale: "max_coefficient"
+  perturbation_mode: "multi_chi"
   min_perturb_degrees: 40.0
   max_perturb_degrees: 120.0
 
