@@ -1,0 +1,48 @@
+# Server/runtime configuration.
+# This file contains infrastructure settings only. Scientific protocol choices
+# stay in full_experiment_config.yaml and are never auto-tuned from hardware.
+
+version: 1
+
+# "auto" searches QP_VENV, an existing repo .venv, then common deployment paths.
+# An absolute path may be supplied on a new server.
+venv: "auto"
+
+paths:
+  # "auto" first honors QP_DATA_ROOT / QP_RUN_ROOT. For data_root it then
+  # searches common local/server locations; run_root defaults beside data_root.
+  data_root: "auto"
+  run_root: "auto"
+
+tools:
+  # "auto" honors QP_FASPR / QP_PHENIX_CLASHSCORE and then searches PATH/common paths.
+  faspr_executable: "auto"
+  phenix_clashscore_executable: "auto"
+
+resources:
+  mode: "auto"
+  require_cuda: true
+
+  # Training keeps this global batch invariant when DDP rank count changes.
+  # The resolver chooses the largest available GPU rank count <= max_ddp_gpus
+  # that exactly divides target_global_batch_size.
+  target_global_batch_size: 4
+  max_ddp_gpus: 4
+
+  # CPU concurrency policy. Auto worker counts never exceed max_workers and
+  # reserve at least cpu_reserve_cores for the OS/orchestrator.
+  cpu_reserve_cores: 2
+  max_workers: 16
+  cpu_threads_per_process: 2
+  max_egnn_loader_workers: 8
+  openmm_cpu_threads: 8
+
+  # OpenMM uses CUDA automatically when available. Device 0 is used because
+  # structural targets are intentionally sequential in the formal protocol.
+  openmm_platform: "auto"
+  openmm_device: "0"
+  openmm_precision: "double"
+
+  # Preflight operational resource gates (not scientific parameters).
+  min_free_disk_gb: 50
+  min_available_ram_gb: 16
