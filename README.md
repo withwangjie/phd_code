@@ -232,3 +232,51 @@ export QP_PHENIX_CLASHSCORE=/path/to/phenix.clashscore
 ```
 
 In auto mode the resolver chooses DDP ranks from available GPUs while preserving the configured target global batch size, derives CPU worker counts from available physical cores, selects the OpenMM platform from available hardware, and records every resolved value in the run configuration/provenance. Scientific thresholds, QAOA protocol values, data-split rules, endpoints, and statistical choices are never hardware-auto-tuned.
+
+
+## One-click formal experiment
+
+A formal experiment is launched with one command:
+
+```bash
+./deploy_launch.sh
+```
+
+The launcher resolves the current server, creates exactly one timestamped run directory before preflight, and stores the complete experiment archive under that directory. A fresh run contains:
+
+```text
+<run_root>/experiments_full_run_<UTC>/
+├── provenance/
+│   ├── scientific_config.source.yaml
+│   ├── server_config.source.yaml
+│   ├── resolved_runtime_config.yaml
+│   ├── server_resolution.json
+│   ├── METHODS_EVIDENCE.md
+│   ├── git_head.txt
+│   ├── pip_freeze.txt
+│   └── environment.txt
+├── logs/
+│   ├── formal_preflight_<UTC>.log
+│   ├── launch_<UTC>.log
+│   └── <stage>.log
+├── frozen_config.yaml
+├── run_manifest.json
+├── seed_streams.json
+├── progress.json
+├── dataset/
+├── checkpoints/
+├── calibration/
+├── method_sensitivity/
+├── qc_benchmark/
+├── dev_queue/
+├── validation_queue/
+├── external_validation/
+├── statistics/
+├── FINAL_RESEARCH_REPORT.md
+├── artifact_inventory.json
+└── RUN_SUMMARY.json
+```
+
+If preflight fails, the same run directory is retained with its provenance and preflight log. If a run is resumed, new timestamped preflight/launch logs are appended as new files inside the same original run directory rather than creating a second result tree.
+
+The formal manuscript/analysis should treat one run directory as the atomic reproducibility unit.
