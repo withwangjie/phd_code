@@ -295,6 +295,14 @@ def _validate_scientific_config(config: Dict[str, Any]) -> None:
         raise ValueError("Invalid statistics.primary_structural_contrast")
     if int(stats.get("resamples",10000)) < 1000:
         raise ValueError("statistics.resamples must be >=1000")
+    if int(stats.get("min_qc_clusters",10)) < 2:
+        raise ValueError("statistics.min_qc_clusters must be >=2")
+    if str(stats.get("primary_qc_baseline","sa")) not in ("sa","uniform","greedy"):
+        raise ValueError("statistics.primary_qc_baseline must be sa, uniform, or greedy")
+    if str(stats.get("primary_qc_metric","gap")) not in (
+        "gap","hit","ground_probability","low_energy_mass","low_energy_coverage","entropy"
+    ):
+        raise ValueError("Invalid statistics.primary_qc_metric")
     if int(stats.get("min_primary_clusters",10)) < 2:
         raise ValueError("statistics.min_primary_clusters must be >=2")
     if int(stats.get("min_rq5_clusters",10)) < 2:
@@ -2731,6 +2739,20 @@ class Orchestrator:
                         failures.append(
                             f"{results_dir.name}/{budget_mode}: {missing_pairs} primary matched solver "
                             "pairs are missing")
+                    primary_effect=next(
+                        (e for e in stats_payload.get("effects",[])
+                         if e.get("baseline")==str(cfg.get("primary_qc_baseline","sa"))
+                         and e.get("metric")==str(cfg.get("primary_qc_metric","gap"))),
+                        None,
+                    )
+                    observed_clusters=0 if primary_effect is None else int(
+                        primary_effect.get("n_clusters",0) or 0)
+                    min_qc_clusters=int(cfg.get("min_qc_clusters",10))
+                    if observed_clusters < min_qc_clusters:
+                        failures.append(
+                            f"{results_dir.name}/{budget_mode}: primary coarse contrast "
+                            f"{cfg.get('primary_qc_baseline','sa')}/{cfg.get('primary_qc_metric','gap')} "
+                            f"has {observed_clusters} independent clusters; requires >= {min_qc_clusters}")
         validation_metrics = self.run_dir / "validation_queue" / "real_complex_metrics.csv"
         cluster_setting = cfg.get("cluster_map") or (
             (self.config["queue_freeze"].get("independence_clustering", {}) or {}).get("cluster_map")
