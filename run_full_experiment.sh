@@ -150,7 +150,8 @@ fi
 # CUDA/DDP/NCCL/OpenMM/resource failure aborts the formal launch.
 PREFLIGHT_SCRIPT="${SCRIPT_DIR}/formal_preflight.sh"
 [ -f "$PREFLIGHT_SCRIPT" ] || fail "Formal preflight script missing: $PREFLIGHT_SCRIPT"
-PREFLIGHT_LOG="$RUN_DIR/logs/formal_preflight.log"
+SESSION_STAMP="$(date -u +%Y%m%d_%H%M%S)"
+PREFLIGHT_LOG="$RUN_DIR/logs/formal_preflight_${SESSION_STAMP}.log"
 log "Running formal preflight gate..."
 if ! QP_RESOLVED_CONFIG="$RESOLVED_CONFIG" QP_SERVER_REPORT="$SERVER_REPORT" \
     bash "$PREFLIGHT_SCRIPT" 2>&1 | tee "$PREFLIGHT_LOG"; then
@@ -171,7 +172,7 @@ log "Formal preflight gate passed."
 #    it can be reported below regardless of which/how many run directories
 #    the Python orchestrator itself creates or resumes.
 # ---------------------------------------------------------------------------
-LAUNCH_LOG="$RUN_DIR/logs/launch.log"
+LAUNCH_LOG="$RUN_DIR/logs/launch_${SESSION_STAMP}.log"
 
 echo $ > "$LOCK_FILE"
 if [ "$FRESH_RUN" -eq 1 ]; then
