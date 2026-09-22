@@ -708,7 +708,8 @@ class Orchestrator:
             print("[smoke_check] qc_benchmark input_dir not yet built; skipping that sub-check "
                   "(expected before queue_freeze has run).")
 
-        checks.append(("real_complex_smoke", [
+        smoke_target = smoke_cfg.get("recovery_pilot_pdb_id")
+        smoke_argv = [
             self.venv_python, "run_real_complex_pilot.py",
             "--out-dir", str(smoke_dir / "real_complex"),
             "--targets", str(smoke_cfg.get("recovery_pilot_targets", 1)),
@@ -717,7 +718,10 @@ class Orchestrator:
             "--max-evals", str(smoke_cfg.get("recovery_pilot_max_evals", 12)),
             "--outputs", str(smoke_cfg.get("recovery_pilot_outputs", 20)),
             "--pruning", "contact",  # avoid requiring a trained checkpoint for the smoke check
-        ]))
+        ]
+        if smoke_target:
+            smoke_argv += ["--pdb-id", str(smoke_target)]
+        checks.append(("real_complex_smoke", smoke_argv))
 
         failures = []
         for name, argv in checks:
@@ -1507,23 +1511,55 @@ class Orchestrator:
                 "--queue-role", "dev" if label == "dev_queue" else "validation",
             ] + shared_flags()
             if label == "dev_queue":
-                argv += ["--targets", str(len(explicit_targets) or 3)]
-                for pdb in explicit_targets:
-                    # dev queue is one explicit historical target per invocation;
-                    # run_real_complex_pilot.py accepts a single --pdb-id filter,
-                    # so each historical target gets its own sub-run/out-dir.
-                    pass
+                # Historical dev targets are run individually. Each subprocess
+                # therefore has an exact denominator of one target.
                 # Historical dev targets are each run individually against
                 # their own already-frozen manifest from real_complex_pilot_v3
                 # if present, otherwise freshly (re-)selected+frozen here
                 # under out_dir/<pdb>/, keeping the dev queue fully separate
                 # from the validation queue's own directory.
+                dev_completed=[]; dev_failed=[]; dev_summaries={}
                 for pdb in explicit_targets:
-                    sub_argv = argv + ["--pdb-id", pdb, "--out-dir", str(out_dir / pdb)]
+                    sub_argv = argv + [
+                        "--targets", "1",
+                        "--pdb-id", pdb,
+                        "--out-dir", str(out_dir / pdb),
+                    ]
                     returncode, log_path = self._run_subprocess(f"structure_experiment_dev_{pdb}", sub_argv)
                     logs.append(str(log_path)); argvs.append(sub_argv)
+                    summary_path = out_dir / pdb / "run_summary.json"
+                    if summary_path.is_file():
+                        summary=json.loads(summary_path.read_text(encoding="utf-8"))
+                        dev_summaries[pdb]=summary
+                        if summary.get("closed") and not summary.get("structure_experiment_failed_targets"):
+                            dev_completed.append(pdb.lower())
+                        else:
+                            dev_failed.append(pdb.lower())
+                    else:
+                        dev_failed.append(pdb.lower())
                     if returncode not in (0,) and not (out_dir / pdb / "real_complex_metrics.csv").is_file():
                         failures.append(f"dev target {pdb} exited {returncode} with no usable metrics (see {log_path})")
+                planned=[p.lower() for p in explicit_targets]
+                dev_closed=(
+                    set(dev_completed)|set(dev_failed)==set(planned)
+                    and not (set(dev_completed)&set(dev_failed))
+                )
+                atomic_write_json(out_dir/"run_summary.json",dict(
+                    queue_role="dev",
+                    planned_target_ids=sorted(planned),
+                    structure_experiment_completed_targets=len(dev_completed),
+                    structure_experiment_completed_target_ids=sorted(dev_completed),
+                    structure_experiment_failed_targets=sorted(dev_failed),
+                    closed=dev_closed,
+                    child_run_summaries=dev_summaries,
+                ))
+                if not dev_closed:
+                    failures.append(
+                        f"dev_queue root accounting not closed: planned={sorted(planned)} "
+                        f"completed={sorted(dev_completed)} failed={sorted(dev_failed)}")
+                elif dev_failed:
+                    queue_partial.append(
+                        f"dev_queue: completed with target failures {sorted(dev_failed)}")
                 continue
             # (requirement #1/#3) Reproduce EXACTLY the target set queue_freeze
             # already froze -- via an explicit allowlist file, never by
