@@ -532,11 +532,105 @@ def section_structural_benefit(ctx: ReportContext) -> List[str]:
 
 
 # ---------------------------------------------------------------------------
-# Section 5: cost
+# Section 5: external validation and development-only robustness
+# ---------------------------------------------------------------------------
+
+def section_external_and_robustness(ctx: ReportContext) -> List[str]:
+    lines=["## 5. External validation and robustness", ""]
+
+    # External VHH coarse benchmark.
+    ext_metrics=ctx.run_dir/"external_validation"/"vhh_coarse"/"metrics.csv"
+    if ext_metrics.is_file():
+        rows=_read_csv_rows(ext_metrics)
+        lines.append("### 5.1 External VHH benchmark")
+        lines.append("")
+        lines.append(
+            f"- External graph rows recorded: {len(rows)}; target set is required to pass the frozen "
+            "sequence + family/structure independence manifest before this stage runs."
+        )
+        by_solver={}
+        for row in rows:
+            solver=row.get("solver","")
+            if solver:
+                by_solver.setdefault(solver,[]).append(row)
+        lines.append("| Solver | Rows | Mean gap | Mean hit fraction |")
+        lines.append("|---|---:|---:|---:|")
+        for solver,group in sorted(by_solver.items()):
+            def mean(field: str):
+                vals=[float(r[field]) for r in group if r.get(field) not in (None,"","None")]
+                return None if not vals else sum(vals)/len(vals)
+            lines.append(
+                f"| {solver} | {len(group)} | {_fmt(mean('gap'))} | {_fmt(mean('hit'))} |"
+            )
+        lines.append("")
+    else:
+        lines.append("### 5.1 External VHH benchmark")
+        lines.append("")
+        lines.append("No completed external VHH metrics were found for this run.")
+        lines.append("")
+
+    # Mature biological side-chain packing baseline.
+    baseline_path=ctx.run_dir/"external_validation"/"structural_baselines"/"external_baseline_metrics.csv"
+    if baseline_path.is_file():
+        rows=_read_csv_rows(baseline_path)
+        lines.append("### 5.2 FASPR / standard clashscore baseline")
+        lines.append("")
+        rmsd=[float(r["final_rmsd"]) for r in rows if r.get("final_rmsd") not in (None,"","None")]
+        clash=[float(r["molprobity_clashscore"]) for r in rows
+               if r.get("molprobity_clashscore") not in (None,"","None")]
+        chi1=[float(r["chi1_recovery"]) for r in rows if r.get("chi1_recovery") not in (None,"","None")]
+        lines.append(
+            f"- FASPR rows={len(rows)}; targets={len({r.get('target','') for r in rows})}; "
+            f"mean side-chain RMSD={_fmt(sum(rmsd)/len(rmsd) if rmsd else None)} Å; "
+            f"mean chi1 recovery={_fmt(sum(chi1)/len(chi1) if chi1 else None)}; "
+            f"mean Phenix clashscore={_fmt(sum(clash)/len(clash) if clash else None)}."
+        )
+        lines.append(
+            "- FASPR is a mature biological packing baseline, not a matched-compute solver baseline; "
+            "it is reported separately from QAOA-vs-SA inference."
+        )
+        lines.append("")
+    else:
+        lines.append("### 5.2 FASPR / standard clashscore baseline")
+        lines.append("")
+        lines.append("No completed external structural-baseline metrics were found for this run.")
+        lines.append("")
+
+    # Development-only solvent sensitivity.
+    sensitivity_dirs=sorted(ctx.run_dir.glob("dev_queue_solvent_*"))
+    lines.append("### 5.3 Development-only solvent-model sensitivity")
+    lines.append("")
+    if sensitivity_dirs:
+        lines.append("| Solvent model | Rows | Mean final RMSD | Mean improvement vs input |")
+        lines.append("|---|---:|---:|---:|")
+        for directory in sensitivity_dirs:
+            rows=_load_recovery_rows(directory)
+            finals=[float(r["final_rmsd"]) for r in rows if r.get("final_rmsd") not in (None,"","None")]
+            gains=[float(r["improvement_vs_input"]) for r in rows
+                   if r.get("improvement_vs_input") not in (None,"","None")]
+            model=directory.name.removeprefix("dev_queue_solvent_")
+            lines.append(
+                f"| {model} | {len(rows)} | "
+                f"{_fmt(sum(finals)/len(finals) if finals else None)} | "
+                f"{_fmt(sum(gains)/len(gains) if gains else None)} |"
+            )
+        lines.append("")
+        lines.append(
+            "This sensitivity analysis is development-only. Validation targets remain on the frozen "
+            "primary solvent model and are not used to select the solvent treatment."
+        )
+    else:
+        lines.append("No development solvent-sensitivity results were found.")
+    lines.append("")
+    return lines
+
+
+# ---------------------------------------------------------------------------
+# Section 6: cost
 # ---------------------------------------------------------------------------
 
 def section_cost(ctx: ReportContext) -> List[str]:
-    lines = ["## 5. Cost", ""]
+    lines = ["## 6. Cost", ""]
     if stage_ok(ctx, "qc_benchmark"):
         rows = _read_csv_rows(ctx.run_dir / "qc_benchmark" / "metrics.csv")
         if rows:
@@ -701,6 +795,7 @@ def compile_report(run_dir: Path) -> str:
     lines += section_pruning_contribution(ctx)
     lines += section_search_performance(ctx)
     lines += section_structural_benefit(ctx)
+    lines += section_external_and_robustness(ctx)
     lines += section_cost(ctx)
     lines += section_failures_and_incomplete(ctx)
     lines += section_applicability_boundary(ctx)
