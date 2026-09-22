@@ -759,15 +759,15 @@ class InterfaceQUBOBuilder:
         self,
         min_variables: int = 20,
         max_variables: int = 30,
-        max_sites: int = 15,
+        max_sites: int = 10,
         lambda_value: Optional[float] = None,
         penalty_margin: float = 0.10,
         force_field: Optional[ForceFieldConfig] = None,
     ) -> None:
         if not 2 <= min_variables <= max_variables <= 30:
             raise ValueError("Require 2 <= min_variables <= max_variables <= 30")
-        if not 1 <= max_sites <= 15:
-            raise ValueError("max_sites must be between 1 and 15")
+        if not 1 <= max_sites <= 10:
+            raise ValueError("max_sites must be between 1 and 10 for >=3 states/site under <=30 variables")
         if penalty_margin <= 0:
             raise ValueError("penalty_margin must be positive")
         if lambda_value is not None and lambda_value <= 0:
