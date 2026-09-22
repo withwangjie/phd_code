@@ -756,6 +756,7 @@ class Orchestrator:
             "--depths", *[str(d) for d in cfg.get("depths", [1, 2, 3])],
             "--max-evals", *[str(m) for m in cfg.get("max_evals", [90, 300])],
             "--active-sites", str(cfg.get("active_sites", 6)),
+            "--identity-threshold", str(self.config["queue_freeze"].get("identity_threshold", 0.40)),
             "--antigen-guidance-weight", str(cfg.get("antigen_guidance_weight", 0.25)),
             "--antigen-proximity-scale", str(cfg.get("antigen_proximity_scale_angstrom", 6.0)),
             "--contact-ca-cutoff", str(cfg.get("contact_ca_cutoff_angstrom", 8.0)),
