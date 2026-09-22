@@ -19,21 +19,22 @@ The formal manuscript/report must not turn category 2 or 3 into a claim that the
 | Fixed-backbone side-chain optimization | Discrete rotamer selection with pairwise energies | Direct literature basis | Classical side-chain positioning/GMEC literature establishes the combinatorial rotamer-search formulation and its difficulty [R10-R12]. |
 | QAOA | Gate-based hybrid approximate optimization | Direct literature basis | QAOA originates with Farhi et al. [R7]; protein/peptide quantum optimization provides domain precedent [R16-R18]. |
 | QAOA depth | Primary p=2; development sensitivity p in {1,2,3} | Literature-informed preregistration | QAOA depth is a central hyperparameter and changes approximation quality/resource cost [R7,R9]. **No cited paper establishes p=2 as optimal for this nanobody QUBO.** p=2 is frozen only after development-only depth sensitivity. |
-| CVaR QAOA objective | Primary CVaR alpha=0.1; alpha sensitivity 0.05..1.0 | Literature-informed preregistration | CVaR as a variational quantum optimization objective is supported by [R8]. **alpha=0.1 is not treated as a universal literature optimum.** |
+| CVaR QAOA objective | Primary CVaR alpha=0.1; alpha sensitivity 0.05..1.0 | Literature-supported empirical setting | [R8] supports CVaR for variational quantum optimization, explicitly evaluates alpha=0.10/0.25/1.0, and recommends alpha in approximately [0.1,0.25] as a good empirical range. alpha=0.1 is therefore literature-supported, while this study still preregisters it and retains the broader alpha sensitivity analysis. |
 | Simulated annealing baseline | SA included as classical stochastic optimizer | Direct literature basis | Classical simulated annealing is the canonical stochastic optimization method introduced by Kirkpatrick et al. [R13]. |
 | FASPR baseline | External fixed-backbone side-chain packing baseline | Direct literature basis | FASPR is a peer-reviewed mature protein side-chain packing method [R14]. |
 | Amber ff14SB | All-atom validation / calibration force field | Direct literature basis | ff14SB protein backbone and side-chain parameters are described in [R15]. |
 | OpenMM | All-atom energy/relaxation engine | Direct literature basis | OpenMM 7 is described and benchmarked in [R19]. |
 | Foldseek | Structure-similarity search feeding frozen clusters | Direct literature basis | Foldseek is a peer-reviewed fast protein structure search method [R5]. |
-| Foldseek/TM-score cluster threshold | min_score=0.50 | Literature-informed preregistration | Foldseek supports the structure-search method [R5], but **0.50 is a study-specific frozen threshold**, not claimed as a Foldseek paper default/optimum for this task. |
-| Antigen sequence isolation | identity <0.30 with >=0.70 coverage | Literature-informed preregistration | Sequence identity around 20-35% is the classical sequence-comparison twilight zone [R6]. The exact 0.30 identity and 0.70 coverage gates are conservative preregistered study rules. |
-| VHH / CDR-H3 isolation | VHH <0.80; CDR-H3 <0.50 | Study-specific preregistration | Used to reduce close antibody-family leakage. These exact thresholds are **not represented as universal antibody standards** unless a task-specific paper is added later. |
-| Intra-chain graph radius | C-alpha <8 Å | Study-specific preregistration | Common geometric neighborhood construction motivates a radius graph, but this register does not claim a paper establishes 8 Å as optimal for this task. |
+| Foldseek/TM-score cluster threshold | min_score=0.50 | Direct literature basis for the structural-similarity cutoff | Foldseek supplies the structure-search method [R5]. Independently, [R27] shows a rapid same-fold/topology transition around TM-score=0.5 and proposes 0.5 as a rough quantitative fold/topology cutoff. This supports the frozen 0.50 structural-clustering threshold when the pair-table score semantics are TM-score. |
+| Antigen sequence isolation | identity <0.30 with >=0.70 coverage | Literature-supported empirical setting | [R6] establishes the classical low-identity/twilight-zone context. More directly, PepNN [R25] removes test proteins with >30% identity at 70% coverage to train/validation proteins. The present antigen rule adopts that exact anti-leakage combination as a conservative precedent, without claiming it is the only valid threshold for antibody antigens. |
+| VHH full-chain isolation | identity <0.80 | Literature-supported antibody/nanobody precedent | H3-OPT [R24] constructs a non-redundant antibody dataset including nanobodies using sequence identity <0.8 before train/validation/test splitting. The present VHH rule uses this published non-redundancy level as a conservative precedent, not as a universal VHH standard. |
+| CDR-H3 isolation | identity <0.50 | Direct antibody-design benchmark precedent | DiffAb [R23] and subsequent antibody-design benchmarks cluster/split SAbDab antibodies at 50% CDR-H3 sequence identity. The present split adopts the same threshold to reduce CDR-H3 leakage. |
+| Intra-chain graph radius | C-alpha <8 Å | Literature-supported protein-graph setting | GLINTER [R22] represents residues by C-alpha atoms and explicitly constructs residue-graph edges using a distance cutoff such as 8 Å. This directly supports 8 Å as a published protein-graph setting, while not claiming it is universally optimal for this EGNN task. |
 | Cross-partner graph edges | fixed KNN, k=3 | Study-specific preregistration | Chosen specifically to decouple input edge existence from the 5 Å heavy-atom label and prevent deterministic topology leakage. No paper is claimed to establish k=3 as optimal. |
 | Active-site scaling | 4, 6, 8, 10 sites | Study-specific preregistration | Motivated by the exponential/combinatorial growth of rotamer search [R10-R12] and the current <=30-variable representation. The four values are experimental scaling levels, not literature standards. |
 | Primary active-site size | 6 sites | Study-specific preregistration | Kept as the frozen confirmatory/all-atom size for comparability and compute control. Not a literature optimum. |
 | <=30 QUBO variables | hard representation cap | Study-specific preregistration | Computational/resource cap of the present simulator benchmark. Not claimed as a biological or literature-defined threshold. |
-| 3-6 retained rotamers/site | adaptive state truncation | Literature-informed preregistration | Rotamer discretization itself is literature based [R2,R10-R12]; the 3-6 retained-state cap is specific to this <=30-variable benchmark. |
+| 3-6 retained rotamers/site | adaptive state truncation | Literature-supported adaptive-state design | Rotamer discretization is supported by [R2,R10-R12]. Jumper et al. [R26] further use residue-dependent 1, 3, or 6 coarse rotamer states and explicitly discuss the accuracy/cost tradeoff. This supports adaptive residue-dependent state counts and an upper level of six; this study's minimum of three and global <=30-variable allocation remain preregistered implementation constraints. |
 | Matched-output / matched-time comparisons | separate budget analyses | Direct methodological basis | Modern quantum-optimization benchmarking emphasizes explicit metrics, suitable classical comparators and resource-aware comparisons [R20]. |
 | Quantum-advantage wording | simulator-level relative performance only; no hardware quantum advantage claim | Direct methodological basis | Quantum-optimization reviews emphasize rigorous benchmarking and distinguish empirical algorithm comparisons from demonstrations of hardware quantum advantage [R20]. |
 | CAPRI-style contact metrics | Fnat/contact at 5 Å; iRMSD/LRMSD definitions kept explicit | Direct literature basis | CAPRI uses 5 Å interpartner atom contacts and standard interface/ligand RMSD concepts [R4]. Project-specific DockQ-like fields remain explicitly distinguished from official DockQ. |
@@ -44,7 +45,7 @@ The formal manuscript/report must not turn category 2 or 3 into a claim that the
 
 - A citation justifies the **method or scientific principle** only to the extent stated above.
 - An exact parameter is called “literature-based” only when the cited paper directly supports that exact definition/value in a sufficiently similar setting.
-- Values such as `cross_partner_knn_k=3`, `p=2`, `CVaR alpha=0.1`, `active_sites=[4,6,8,10]`, `primary_active_sites=6`, and the 30-variable cap remain preregistered study choices unless task-specific evidence is added.
+- Values that remain primarily study-specific are `cross_partner_knn_k=3`, `p=2`, `active_sites=[4,6,8,10]`, `primary_active_sites=6`, the 30-variable cap, and engineering compute budgets. CVaR alpha=0.1 is now literature-supported by [R8] as an empirical setting, but remains preregistered and sensitivity-tested for this specific nanobody QUBO.
 - Validation/test data must never be used to choose these values after the freeze.
 - The current QAOA results are classical exact-subspace simulations with finite-shot objectives; they can support quantum-classical **algorithmic relative-performance** statements, not a hardware quantum-advantage or quantum-speedup claim.
 
@@ -91,3 +92,16 @@ The formal manuscript/report must not turn category 2 or 3 into a claim that the
 **[R20]** Abbas, A. et al. (2024). Challenges and opportunities in quantum optimization. *Nature Reviews Physics*, 6, 718-735. https://doi.org/10.1038/s42254-024-00770-9
 
 **[R21]** Holm, S. (1979). A simple sequentially rejective multiple test procedure. *Scandinavian Journal of Statistics*, 6(2), 65-70.
+
+
+**[R22]** Xie, Z., & Xu, J. (2022). Deep graph learning of inter-protein contacts. *Bioinformatics*, 38(4), 947-953. https://doi.org/10.1093/bioinformatics/btab761
+
+**[R23]** Luo, S., Su, Y., Peng, X., Wang, S., Peng, J., & Ma, J. (2022). Antigen-Specific Antibody Design and Optimization with Diffusion-Based Generative Models for Protein Structures. *Advances in Neural Information Processing Systems*, 35, 9754-9767.
+
+**[R24]** Chen, H., Fan, X., Zhu, S., Pei, Y., Zhang, X., Zhang, X., Liu, L., Qian, F., & Tian, B. (2024). Accurate prediction of CDR-H3 loop structures of antibodies with deep learning. *eLife*, 12:RP91512. https://doi.org/10.7554/eLife.91512.4
+
+**[R25]** Abdin, O., Nim, S., Wen, H., & Kim, P. M. (2022). PepNN: a deep attention model for the identification of peptide binding sites. *Communications Biology*, 5, 503. https://doi.org/10.1038/s42003-022-03445-2
+
+**[R26]** Jumper, J. M., Faruk, N. F., Freed, K. F., & Sosnick, T. R. (2018). Accurate calculation of side chain packing and free energy with applications to protein molecular dynamics. *PLoS Computational Biology*, 14(12), e1006342. https://doi.org/10.1371/journal.pcbi.1006342
+
+**[R27]** Xu, J., & Zhang, Y. (2010). How significant is a protein structure similarity with TM-score = 0.5? *Bioinformatics*, 26(7), 889-895. https://doi.org/10.1093/bioinformatics/btq066
