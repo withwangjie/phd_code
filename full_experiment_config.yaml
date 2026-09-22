@@ -288,6 +288,8 @@ qc_benchmark:
       min_cv_r2: 0.20
       min_cv_spearman: 0.40
       min_rmse_improvement_kcal: 0.0
+      max_generation_failure_fraction: 0.10
+      require_family_grouped_cv: true
     max_complexes: 0        # 0 = every eligible training complex
     assignments_per_complex: 64
     active_sites: 6
