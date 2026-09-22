@@ -93,6 +93,8 @@ def main() -> int:
     parser.add_argument("--phenix-clashscore",type=Path)
     parser.add_argument("--out-dir",type=Path,required=True)
     parser.add_argument("--timeout-seconds",type=int,default=1800)
+    parser.add_argument("--expected-seeds",type=int,nargs="+",required=True,
+        help="Frozen structural-recovery seeds; every target must have every seed.")
     args=parser.parse_args()
     if not args.faspr.is_file():
         parser.error(f"FASPR executable not found: {args.faspr}")
@@ -100,6 +102,8 @@ def main() -> int:
         parser.error(f"Phenix clashscore executable not found: {args.phenix_clashscore}")
     if args.timeout_seconds<=0:
         parser.error("--timeout-seconds must be positive")
+    if len(args.expected_seeds)!=len(set(args.expected_seeds)) or any(seed<0 for seed in args.expected_seeds):
+        parser.error("--expected-seeds must be unique nonnegative integers")
 
     prepared=args.validation_dir/"prepared"
     results_root=args.validation_dir/"results"
@@ -117,12 +121,27 @@ def main() -> int:
         active=case["active_residues"]
         alignment=case["alignment_residues"]
         partners=case["partner_residues"]
-        seed_dirs=sorted((results_root/target).glob("seed_*"))
-        for seed_dir in seed_dirs:
+        expected_seed_names=[str(seed) for seed in args.expected_seeds]
+        available={
+            path.name.removeprefix("seed_"):path
+            for path in (results_root/target).glob("seed_*") if path.is_dir()
+        }
+        missing_seed_dirs=[seed for seed in expected_seed_names if seed not in available]
+        if missing_seed_dirs:
+            failures.append(dict(
+                target=target,seed=",".join(missing_seed_dirs),
+                error=f"Missing structural recovery seed directories: {missing_seed_dirs}",
+            ))
+        for seed in expected_seed_names:
+            if seed not in available:
+                continue
+            seed_dir=available[seed]
             perturbed=seed_dir/"perturbed_input.cif"
             if not perturbed.is_file():
+                failures.append(dict(
+                    target=target,seed=seed,error=f"Missing perturbed input: {perturbed}"
+                ))
                 continue
-            seed=seed_dir.name.removeprefix("seed_")
             out_case=args.out_dir/target/f"seed_{seed}"
             out_case.mkdir(parents=True,exist_ok=True)
             try:
@@ -176,10 +195,11 @@ def main() -> int:
         faspr=str(args.faspr),faspr_sha256=sha256(args.faspr),
         phenix_clashscore=(None if args.phenix_clashscore is None else str(args.phenix_clashscore)),
         failures=failures,rows=len(rows),targets=len({r["target"] for r in rows}),
+        expected_seeds=[int(v) for v in args.expected_seeds],
     )
     (args.out_dir/"run_summary.json").write_text(
         json.dumps(provenance,indent=2,sort_keys=True)+"\n",encoding="utf-8")
-    return 0
+    return 1 if failures else 0
 
 
 if __name__=="__main__":
