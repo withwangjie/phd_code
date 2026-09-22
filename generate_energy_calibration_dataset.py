@@ -157,6 +157,8 @@ def main() -> int:
     parser.add_argument("--thermal-energy-kcal",type=float,default=0.593)
     parser.add_argument("--rotamer-probability-floor",type=float,default=1e-4)
     parser.add_argument("--rotamer-sigma-offsets",type=float,nargs="+",default=[-1.0,0.0,1.0])
+    parser.add_argument("--solvent-model",choices=("vacuum","gbn2"),default="vacuum",
+        help="Must match the frozen primary structural energy model.")
     args=parser.parse_args()
 
     if not 5 <= args.active_sites <= 8:
@@ -261,6 +263,7 @@ def main() -> int:
                         rotamer_mode="dunbrack2010",rotamer_library_path=args.rotamer_library,
                         rotamer_probability_floor=args.rotamer_probability_floor,
                         rotamer_sigma_offsets=args.rotamer_sigma_offsets,
+                        solvent_model=args.solvent_model,
                     )
 
                     assignments=calibration_assignments(
@@ -306,6 +309,7 @@ def main() -> int:
             "anchor is exact coarse physical ground state"
         ),
         active_sites=args.active_sites,radius=args.radius,
+        solvent_model=args.solvent_model,
         assignments_per_complex=args.assignments_per_complex,
         rows_written=written,complexes_attempted=len(train),
         complexes_succeeded=succeeded_complexes,
