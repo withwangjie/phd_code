@@ -1312,6 +1312,7 @@ class InterfaceQUBOBuilder:
 
         rotamers: list[RotamerState] = []
         site_to_variables: Dict[int, Tuple[int, ...]] = {}
+        raw_pool_sizes_actual: list[int] = []
         for site_index, (node_index, count) in enumerate(zip(site_nodes, counts)):
             aa = amino_acids[int(node_index)]
             if self.rotamer_mode == "dunbrack2010" and aa not in "AG":
@@ -1322,6 +1323,7 @@ class InterfaceQUBOBuilder:
                 )
             else:
                 templates = _expanded_rotamer_templates(aa)
+            raw_pool_sizes_actual.append(len(templates))
             best_probability = max(template.prior_probability for template in templates)
             candidate_states: list[RotamerState] = []
             for template_index, template in enumerate(templates):
@@ -1460,10 +1462,12 @@ class InterfaceQUBOBuilder:
             "energy_unit": "approximate kcal/mol",
             "site_node_indices": site_nodes.tolist(),
             "rotamers_per_site": counts,
-            "raw_rotamer_pool_sizes": [
-                _raw_rotamer_pool_size(amino_acids[int(node)]) for node in site_nodes
-            ],
-            "rotamer_state_policy": "6/9/12 raw chi1 sub-rotamers by flexibility; retain 3--6 states/site under <=30 total variables",
+            "raw_rotamer_pool_sizes": raw_pool_sizes_actual,
+            "rotamer_state_policy": (
+                "Dunbrack 2010 backbone-dependent chi1 mean±sigma candidates; retain 3--6 states/site under <=30 variables"
+                if self.rotamer_mode == "dunbrack2010"
+                else "legacy 6/9/12 raw chi1 sub-rotamers by flexibility; retain 3--6 states/site under <=30 variables"
+            ),
             "candidate_guidance": "pre-screen by rotamer prior + VHH-only fixed-environment energy + antigen interaction energy; antigen counted once",
             "rotamer_model": self.rotamer_mode,
             "rotamer_library_path": (None if self.rotamer_library_path is None else str(self.rotamer_library_path)),
@@ -1678,10 +1682,11 @@ def _openmm_context(mm: Any, system: Any, integrator: Any) -> Any:
 class AllAtomInterfaceQUBOBuilder:
     """Amber14 fixed-backbone adaptive multi-state chi1 QUBO.
 
-    Formal all-atom validation mirrors the coarse protocol: each Active
-    residue receives a 6/9/12-state chi1 sub-rotamer pool according to
-    side-chain flexibility; single-candidate Amber14 energies pre-screen the
-    pool; 3--6 states/site are retained under a global <=30-variable budget.
+    Formal all-atom validation mirrors the coarse protocol: in Dunbrack mode
+    each Active residue receives backbone-dependent chi1 candidates from the
+    2010 rotamer library (including mean±sigma expansion); single-candidate
+    Amber14 energies pre-screen the pool; 3--6 states/site are retained under
+    a global <=30-variable budget.
     An explicit chi1_angles sequence remains available only as a legacy
     controlled-ablation override.
 
