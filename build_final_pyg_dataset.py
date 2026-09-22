@@ -41,7 +41,7 @@ INTERFACE_LABEL_CUTOFF_ANGSTROM = 5.0
 INTRA_CHAIN_CA_CUTOFF_ANGSTROM = 8.0
 CROSS_PARTNER_KNN_K = 3
 MIN_INTERFACE_RESIDUES = 15
-VERSION = '1.5'
+VERSION = '1.6'
 PROCESS = psutil.Process()
 PEAK_RSS = 0
 MEMORY_LOCK = threading.Lock()
@@ -447,28 +447,36 @@ def validate_graph(g):
         assert np.any(mask & cross_partner), f'node {node} lacks threshold-independent cross-partner context'
     assert len(getattr(g,'vhh_sequences',[]))>=1 and len(getattr(g,'antigen_sequences',[]))>=1
     assert g.num_interface_residues>=min_interface and len(g.cdr3_seq)==g.cdr3_len
+    if getattr(g,'split','') in ('train','test_snac_hard'):
+        assert str(getattr(g,'family_structure_cluster','')), 'formal VHH graph lacks family/structure cluster ID'
     assert g.validate(raise_on_error=True)
 
-def save_graph(row, split, output, pair=None, cluster_id=''):
+def save_graph(row, split, output, pair=None, cluster_id='', family_structure_cluster=''):
     try:
         name=f'{row["subset"]}__{row["pdb_id"].upper()}__{hashlib.sha256(row["id"].encode()).hexdigest()[:16]}.pt'
         path=output/'graphs'/split/name
         existing=path.exists()
         if RESUME and existing:
             g=torch.load(path,map_location='cpu',weights_only=False);validate_graph(g)
-            if g.source_id!=row['id'] or g.split!=split or g.graph_version!=VERSION:raise ValueError('Resume metadata mismatch')
+            if g.source_id!=row['id'] or g.split!=split or g.graph_version!=VERSION:
+                raise ValueError('Resume metadata mismatch')
+            if getattr(g,'family_structure_cluster','') != str(family_structure_cluster or ''):
+                raise ValueError('Resume family/structure cluster metadata mismatch')
             if not hasattr(g,'residue_identity_resolutions'):
                 g.residue_identity_resolutions='[]'
                 torch.save(g,path)
         else:
             g=make_graph(row,split,pair)
+            g.family_structure_cluster=str(family_structure_cluster or '')
             torch.save(g,path)
         # Read-back validation ensures these are actual loadable PyG Data objects.
         loaded=torch.load(path,map_location='cpu',weights_only=False);validate_graph(loaded)
         if not torch.equal(loaded.pos,g.pos) or not torch.equal(loaded.edge_index,g.edge_index):raise ValueError('serialization mismatch')
         record=dict(split=split,path=str(path.relative_to(output)),source_id=row['id'],pdb_id=g.pdb_id,subset_source=row['subset'],nodes=g.num_nodes,
             directed_edges=g.num_edges,undirected_edges=g.num_edges//2,density=g.num_edges/(g.num_nodes*(g.num_nodes-1)),bytes=path.stat().st_size,
-            cdr3_seq=g.cdr3_seq,cdr3_len=g.cdr3_len,num_interface_residues=g.num_interface_residues,cluster_id=cluster_id,sha256=sha256(path),identity_resolution_notes=getattr(g,'residue_identity_resolutions','[]'))
+            cdr3_seq=g.cdr3_seq,cdr3_len=g.cdr3_len,num_interface_residues=g.num_interface_residues,
+            cluster_id=cluster_id,family_structure_cluster=getattr(g,'family_structure_cluster',''),
+            sha256=sha256(path),identity_resolution_notes=getattr(g,'residue_identity_resolutions','[]'))
         return record,None
     except Exception as exc:
         # Only remove an incomplete file created by this call, inside the output tree.
