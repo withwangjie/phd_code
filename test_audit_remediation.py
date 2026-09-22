@@ -45,6 +45,7 @@ import qaoa_interface_sampler as qis
 import subgraph_to_qubo as stq
 import run_full_experiment as rfe
 import batch_benchmark_hard_set as bbh
+import train_egnn_pruning as tep
 
 
 # ---------------------------------------------------------------------------
@@ -342,6 +343,92 @@ def test_training_only_energy_calibration_fit(tmp_path: Path) -> None:
     bad.write_text(text, encoding="utf-8")
     with pytest.raises(ValueError, match="training rows only"):
         bbh.fit_energy_calibration_csv(bad, tmp_path / "bad.json", 0.0)
+
+
+
+def test_multi_chi_rotation_sets_all_lys_torsions() -> None:
+    names=("N","CA","CB","CG","CD","CE","NZ")
+    atoms={name:index for index,name in enumerate(names)}
+    positions=np.asarray([
+        [-1.0, 0.0, 0.2],
+        [ 0.0, 0.0, 0.0],
+        [ 1.0, 0.4, 0.1],
+        [ 1.8, 1.2, 0.6],
+        [ 2.8, 1.0, 1.3],
+        [ 3.5, 1.9, 1.9],
+        [ 4.6, 1.6, 2.3],
+    ],dtype=float)
+    bonds={i:set() for i in range(len(names))}
+    for left,right in ((0,1),(1,2),(2,3),(3,4),(4,5),(5,6)):
+        bonds[left].add(right);bonds[right].add(left)
+    targets=(-60.0, 180.0, 60.0, -90.0)
+    rotated=stq._apply_sidechain_chis(positions,atoms,bonds,"LYS",targets)
+    observed=stq._sidechain_chi_angles(
+        {name:rotated[index] for name,index in atoms.items()},"LYS")
+    assert len(observed)==4
+    for got,want in zip(observed,targets):
+        assert abs(((got-want+180.0)%360.0)-180.0) < 1e-5
+
+
+def test_geometry_logistic_baseline_reports_validation_metrics() -> None:
+    from torch_geometric.data import Data
+    import torch
+    def graph(offset: float) -> Data:
+        # Two VHH and two antigen residues; geometry alone is informative but
+        # labels remain explicitly stored, never used as an input feature.
+        x=torch.zeros((4,21),dtype=torch.float32)
+        x[:,0]=1.0
+        x[2:,-1]=1.0
+        pos=torch.tensor([
+            [0.0,0.0,0.0],[10.0,0.0,0.0],
+            [2.0+offset,0.0,0.0],[20.0,0.0,0.0],
+        ],dtype=torch.float32)
+        edge=torch.tensor([[0,1,2,3],[1,0,3,2]],dtype=torch.long)
+        y=torch.tensor([1.,0.,1.,0.],dtype=torch.float32)
+        return Data(x=x,pos=pos,edge_index=edge,y=y)
+    train=[graph(0.0),graph(0.3),graph(-0.2)]
+    val=[graph(0.1),graph(-0.1)]
+    result=tep.fit_geometry_logistic_baseline(
+        train,val,contact_cutoff=8.0,proximity_scale=6.0,l2=1e-3)
+    assert 0.0 <= result["validation_roc_auc"] <= 1.0
+    assert 0.0 <= result["validation_pr_auc"] <= 1.0
+    assert result["scope"].startswith("fit on EGNN training split only")
+
+
+def test_calibration_reports_grouped_cv_statistics(tmp_path: Path) -> None:
+    csv_path=tmp_path/"calibration_cv.csv"
+    with csv_path.open("w",newline="",encoding="utf-8") as handle:
+        writer=csv.writer(handle)
+        writer.writerow([
+            "pdb_id","split","prior_energy","vhh_environment_energy",
+            "antigen_energy","pair_energy","amber_delta_kcal"])
+        for pdb,shift in (("1aaa",0.0),("2bbb",0.2),("3ccc",-0.1),("4ddd",0.1),("5eee",-0.2)):
+            for value in (0.,1.,2.):
+                writer.writerow([pdb,"train",value,0.5*value,0.25*value,0.1*value,
+                                 1.0+2.0*value+shift])
+    result=bbh.fit_energy_calibration_csv(csv_path,tmp_path/"fit.json",0.1)
+    assert result["cv_scheme"].startswith("deterministic PDB-grouped")
+    assert "cv_r2" in result and "cv_spearman" in result
+    assert result["n_train_complexes"]==5
+
+
+def test_disabled_stage_skip_is_valid_prerequisite(tmp_path: Path) -> None:
+    # Regression is intentionally limited to the status predicate semantics:
+    # a stage explicitly disabled in YAML may be skipped without deadlocking
+    # every downstream stage.
+    config=_minimal_scientific_config()
+    config.update(dict(
+        paths={"repo_root":str(tmp_path),"dataset_dir":"dataset","checkpoint_dir":"checkpoints"},
+        stages={"external_validation":False},
+        hardware={},
+    ))
+    orchestrator=rfe.Orchestrator(config,tmp_path/"run")
+    skipped=rfe.StageResult(
+        "external_validation","skipped","a","b",None,"disabled")
+    orchestrator._save_stage_status(skipped)
+    record=orchestrator._load_stage_status("external_validation")
+    assert record and record["status"]=="skipped"
+    assert not config["stages"]["external_validation"]
 
 
 # ---------------------------------------------------------------------------
