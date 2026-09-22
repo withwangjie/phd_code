@@ -1270,6 +1270,31 @@ class Orchestrator:
                 pdb=str(row.get("pdb_id","")).strip().lower()
                 if pdb:
                     ids.add(pdb)
+            # External VHH structures are part of the SAME frozen structural
+            # similarity universe. They must not be appended as untracked
+            # singleton clusters only at external-validation time.
+            external_cfg=(self.config.get("external_validation",{}) or {}).get("external_vhh",{}) or {}
+            if external_cfg.get("required",False):
+                external_graph_dir=resolve_path(self.config,external_cfg.get("graph_dir",""))
+                if not external_graph_dir.is_dir():
+                    return StageResult(
+                        "queue_freeze","failed",started,utc_timestamp(),None,
+                        f"External VHH graph directory required for frozen clustering universe: {external_graph_dir}")
+                import torch
+                external_ids=set()
+                for graph_path in sorted(external_graph_dir.glob("*.pt")):
+                    graph=torch.load(graph_path,map_location="cpu",weights_only=False)
+                    pdb=str(getattr(graph,"pdb_id",graph_path.stem)).strip().lower()
+                    if not pdb:
+                        return StageResult(
+                            "queue_freeze","failed",started,utc_timestamp(),None,
+                            f"External graph lacks PDB identity: {graph_path}")
+                    external_ids.add(pdb)
+                if not external_ids:
+                    return StageResult(
+                        "queue_freeze","failed",started,utc_timestamp(),None,
+                        f"No external VHH graphs found for frozen clustering universe: {external_graph_dir}")
+                ids.update(external_ids)
             universe_path.write_text("\n".join(sorted(ids))+"\n",encoding="utf-8")
 
         if cluster_map_path is not None and not cluster_map_path.is_file():
@@ -1343,6 +1368,19 @@ class Orchestrator:
                         "queue_freeze","failed",started,utc_timestamp(),None,
                         "Cluster-map provenance is not bound to this run's audited PDB universe"
                     )
+        if cluster_map_path is not None and cluster_map_path.is_file() and universe_path.is_file():
+            cluster_map_payload=json.loads(cluster_map_path.read_text(encoding="utf-8"))
+            required_universe={
+                line.strip().lower() for line in universe_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            }
+            missing_universe=sorted(required_universe-set(str(k).lower() for k in cluster_map_payload))
+            if missing_universe:
+                return StageResult(
+                    "queue_freeze","failed",started,utc_timestamp(),None,
+                    f"Frozen cluster map does not cover the complete internal+external universe: "
+                    f"{missing_universe[:20]}"
+                )
         if clustering_cfg.get("required", False) and (
             cluster_map_path is None or not cluster_map_path.is_file()
         ):
