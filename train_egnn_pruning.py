@@ -840,7 +840,10 @@ def write_summary_json(
             "recoverable_from_input_edges": False,
             "unknown_interface_prediction_validated": False,
             "validation_scope": "known-pose, layered VHH/CDR-H3/antigen homology-isolated components",
-            "deterministic_baseline": "cross-edge existence cannot reconstruct labels; cross edges are fixed-KNN while labels use heavy-atom <5A",
+            "deterministic_baseline": (
+                "cross-edge existence cannot reconstruct labels; fixed-KNN cross edges and "
+                "heavy-atom cutoff labels are stored as separate graph-protocol fields"
+            ),
             "train_positives": train_positives,
             "train_negatives": train_negatives,
         },
@@ -903,9 +906,9 @@ def write_summary(
         f"- 分层同源隔离：训练 {train_count}，验证 {validation_count}；VHH≥{VHH_IDENTITY_THRESHOLD:.2f}、CDR-H3≥{CDR_H3_IDENTITY_THRESHOLD:.2f}、或抗原≥{ANTIGEN_IDENTITY_THRESHOLD:.2f}且长度覆盖≥{ANTIGEN_MIN_LENGTH_COVERAGE:.2f}时并入同一连通分量。",
         "- 分量按SHA-256确定性映射到5个fold，fold 0用于验证；不使用随机90/10切分。",
         f"- 训练节点标签：正例 {train_positives:,}，负例 {train_negatives:,}。",
-        "- 正例定义：跨伙伴重原子距离<5 Å的残基；标签与图边独立构建。",
-        "- 同链消息边采用CA<8 Å；跨伙伴消息边固定为每节点3个最近邻，不使用接触阈值决定边是否存在。",
-        "- 因此跨伙伴edge existence不再能确定性重建5 Å重原子界面标签；仍需通过独立验证AUC/PR-AUC评估泛化。",
+        f"- 图协议：{json.dumps(best_payload.get('graph_protocol', {}), ensure_ascii=False, sort_keys=True)}",
+        "- 界面标签与图边独立构建；固定KNN跨伙伴边不复用heavy-atom标签阈值。",
+        "- 因此跨伙伴edge existence不再能确定性重建界面标签；仍需通过独立验证AUC/PR-AUC评估泛化。",
         "",
         "## 权重完整性",
         "",
