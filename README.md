@@ -280,3 +280,25 @@ The launcher resolves the current server, creates exactly one timestamped run di
 If preflight fails, the same run directory is retained with its provenance and preflight log. If a run is resumed, new timestamped preflight/launch logs are appended as new files inside the same original run directory rather than creating a second result tree.
 
 The formal manuscript/analysis should treat one run directory as the atomic reproducibility unit.
+
+
+## Mandatory experiment-result audit
+
+The formal output requirements are defined in `RESULTS_CONTRACT.md`. A zero subprocess return code is never sufficient to mark an experimental stage complete.
+
+For every executed stage, the orchestrator validates its mandatory raw/aggregate result files and writes:
+
+```text
+results_manifests/<stage>.json
+```
+
+At the end of the run it re-validates all completed stages and writes:
+
+```text
+EXPERIMENT_RESULTS_AUDIT.json
+EXPERIMENT_RESULTS_AUDIT.md
+artifact_inventory.json
+RUN_SUMMARY.json
+```
+
+`RUN_SUMMARY.json.status == "completed"` is permitted only when all formal stages that ran satisfy their result contracts and the global results audit passes. Missing QC metrics, missing sensitivity aggregates, missing per-target recovery outputs, missing external-baseline results, missing statistical artifacts, or an inconsistent raw-case count therefore converts the formal run to failed rather than silently producing a partial result set.
