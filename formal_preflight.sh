@@ -39,6 +39,26 @@ if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/n
     log "Git HEAD: $(git rev-parse HEAD)"
 fi
 
+log "Running syntax checks for formal entrypoints..."
+bash -n "$SCRIPT_DIR/run_full_experiment.sh"
+bash -n "$SCRIPT_DIR/deploy_launch.sh"
+bash -n "$SCRIPT_DIR/check_status.sh"
+python -m py_compile \
+  run_full_experiment.py \
+  resolve_server_config.py \
+  audit_all_datasets.py \
+  build_final_pyg_dataset.py \
+  build_independence_cluster_map.py \
+  train_egnn_pruning.py \
+  generate_energy_calibration_dataset.py \
+  batch_benchmark_hard_set.py \
+  run_real_complex_pilot.py \
+  run_external_structure_baselines.py \
+  audit_external_vhh_independence.py \
+  analyze_structure_recovery.py \
+  analyze_quantum_scaling.py \
+  generate_final_research_report.py
+
 log "Running formal regression suite..."
 python -m pytest -q \
   test_formal_blockers.py \
