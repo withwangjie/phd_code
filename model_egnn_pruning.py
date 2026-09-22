@@ -519,9 +519,14 @@ def select_ablation_active(data: Any, method: str, k: int, seed: int,
     # Formal coarse/all-atom protocol uses the same chemically movable set:
     # A/G lack chi1, Pro is cyclic, and Cys is excluded to avoid disulfide risk.
     allowed = []
+    phi=getattr(data,"backbone_phi",None)
+    psi=getattr(data,"backbone_psi",None)
     for idx in vhh_candidates.tolist():
         aa = AA[int(data.x[idx, :20].argmax())]
-        if aa not in {"A", "G", "P", "C"}:
+        backbone_ok=True
+        if phi is not None and psi is not None:
+            backbone_ok=bool(torch.isfinite(phi[idx]) and torch.isfinite(psi[idx]))
+        if aa not in {"A", "G", "P", "C"} and backbone_ok:
             allowed.append(idx)
     candidates = torch.tensor(allowed, dtype=torch.long)
     if len(candidates) < k:
