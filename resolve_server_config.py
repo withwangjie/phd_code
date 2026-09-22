@@ -161,6 +161,11 @@ def resolve(scientific: dict[str,Any], server: dict[str,Any]) -> tuple[dict[str,
         structural["faspr_executable"]=faspr
     if phenix:
         structural["phenix_clashscore_executable"]=phenix
+    if bool(structural.get("required",False)):
+        if not faspr:
+            raise SystemExit("Required FASPR executable could not be auto-resolved. Set QP_FASPR or server_config.yaml.")
+        if not phenix:
+            raise SystemExit("Required phenix.clashscore executable could not be auto-resolved. Set QP_PHENIX_CLASHSCORE or server_config.yaml.")
 
     report={
         "repo_root":str(REPO_ROOT),
