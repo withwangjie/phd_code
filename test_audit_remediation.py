@@ -40,6 +40,7 @@ import pytest
 
 import evaluate_complex_metrics as ecm
 import qaoa_interface_sampler as qis
+import subgraph_to_qubo as stq
 
 
 # ---------------------------------------------------------------------------
@@ -135,6 +136,38 @@ def test_atom_completeness_accepts_a_complete_structure() -> None:
     assert result["dockq_receptor_aligned_variant"] is not None
     assert result["lrmsd_angstrom"] < 1e-8
 
+
+
+# ---------------------------------------------------------------------------
+# Antigen-energy accounting regressions
+# ---------------------------------------------------------------------------
+
+def test_rotamer_self_energy_counts_antigen_exactly_once() -> None:
+    """Unary physical energy must include the separately-computed antigen term."""
+    state = stq.RotamerState(
+        site_index=0, node_index=0, amino_acid="K", rotamer_index=0,
+        chi1_degrees=-60.0, prior_probability=0.5,
+        positions=np.zeros((1, 3)), sigma=np.ones(1), epsilon=np.ones(1),
+        charges=np.zeros(1), prior_energy=1.25, environment_energy=2.5,
+        antigen_guidance_energy=-0.75,
+    )
+    assert state.self_energy == pytest.approx(3.0)
+
+
+def test_rigid_environment_excludes_antigen_nodes() -> None:
+    """Antigen must not also leak into the VHH fixed-background energy."""
+    builder = stq.InterfaceQUBOBuilder(min_variables=2, max_variables=6, max_sites=2)
+    pos = np.array([[0.,0.,0.],[2.,0.,0.],[4.,0.,0.]], dtype=float)
+    amino = ["K", "E", "R"]
+    # node0 active VHH, node1 frozen VHH, node2 frozen antigen
+    frozen = np.array([False, True, True])
+    active = np.array([True, False, False])
+    vhh = np.array([True, True, False])
+    env_pos, _, _, _ = builder._rigid_environment(
+        pos, amino, frozen, active, vhh, excluded_node=0
+    )
+    assert env_pos.shape == (1, 3)
+    np.testing.assert_allclose(env_pos[0], pos[1])
 
 # ---------------------------------------------------------------------------
 # Patch 2: honest all-restarts-failed handling (qaoa_interface_sampler.py)
