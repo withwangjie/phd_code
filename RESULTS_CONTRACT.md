@@ -34,7 +34,7 @@ Required run-local independence outputs:
 - `independence/pdb_family_clusters.provenance.json`
 - `audit/cluster_universe.txt`
 
-The clustering universe contains both internal study PDBs and required external-VHH PDBs. The frozen pair table/source map must cover this complete universe.
+The clustering universe contains both internal study PDBs and required external-VHH PDBs. The frozen pair table/source map must cover this complete universe. When a pair TSV is the formal structure-similarity source, every universe PDB must appear in its query or target columns; an absent PDB is treated as "not demonstrated as searched", not as an independent singleton.
 
 Required frozen-validation outputs:
 - `validation_queue/freeze/selected_targets.json`
@@ -92,7 +92,7 @@ Required:
 - `qc_benchmark/seed_streams.json`
 - raw `qc_benchmark/cases/*.json`
 
-The raw case count must equal `cases_completed_total`.
+The raw case count must equal `cases_completed_total`. Every scaling case must contain exactly the requested number of Dunbrack-compatible rotamer sites; a mislabeled requested-site condition is a failed case, never silently accepted.
 
 ### structure_experiment
 Both `dev_queue/` and `validation_queue/` require:
@@ -147,9 +147,11 @@ Required:
 - `statistics/structure_statistics.md`
 
 The primary coarse solver inference is restricted to the frozen primary pruning path,
-active-site size, output budget, QAOA objective/restarts, and requires the configured
-minimum independent clusters. Scaling inference uses the pre-declared active-site levels
-under fixed primary depth/resources and a cluster-aware within-PDB slope analysis.
+radius, QAOA depth, optimization-evaluation budget, active-site size, output budget,
+QAOA objective/restarts, and requires the configured minimum independent clusters.
+Scaling inference uses the pre-declared active-site levels under the same frozen primary
+radius/depth/evaluation budget and a cluster-aware within-PDB slope analysis with
+log10(feasible configuration count) as the primary complexity axis.
 
 ### final_report
 Required:
@@ -166,3 +168,11 @@ Every formal run terminates with:
 
 `RUN_SUMMARY.json.status` may be `completed` only when no stage failed and
 `EXPERIMENT_RESULTS_AUDIT.json.all_required_results_present` is true.
+
+
+## Partial reruns
+
+`--only` is an operational repair tool, not a way to declare a partial experiment complete.
+A required stage skipped in the current invocation is acceptable only if an earlier completed
+stage marker exists in the same run and its artifacts revalidate successfully. Otherwise the
+run-level results audit fails and `RUN_SUMMARY.json.status` remains `failed`.
