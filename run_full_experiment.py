@@ -2722,6 +2722,56 @@ def write_run_inventory(run_dir: Path, results: Dict[str, StageResult]) -> None:
     })
 
 
+def audit_experiment_results(
+    orchestrator: Orchestrator, results: Dict[str, StageResult]
+) -> tuple[bool, dict]:
+    """Re-validate every completed stage and write a run-level results audit."""
+    records=[]
+    all_ok=True
+    for stage in STAGE_ORDER:
+        result=results.get(stage)
+        if result is None:
+            continue
+        if result.status in ("completed","completed_with_failures"):
+            ok,detail=orchestrator._validate_completed_stage_artifacts(stage)
+        elif result.status=="skipped":
+            ok,detail=True,"stage skipped by protocol/runtime mode; no experimental result required"
+        else:
+            ok,detail=False,"stage failed; no complete experimental result set"
+        records.append({
+            "stage":stage,
+            "status":result.status,
+            "results_contract_ok":ok,
+            "detail":detail,
+        })
+        if result.status in ("completed","completed_with_failures") and not ok:
+            all_ok=False
+        if result.status=="failed":
+            all_ok=False
+    payload={
+        "generated_utc":utc_timestamp(),
+        "run_dir":str(orchestrator.run_dir),
+        "all_required_results_present":all_ok,
+        "stages":records,
+    }
+    atomic_write_json(orchestrator.run_dir/"EXPERIMENT_RESULTS_AUDIT.json",payload)
+    lines=[
+        "# Experiment results audit","",
+        f"All required results present: **{all_ok}**","",
+        "| Stage | Status | Result contract | Detail |",
+        "|---|---|---|---|",
+    ]
+    for row in records:
+        safe=str(row["detail"]).replace("|","\\|").replace("\n"," ")
+        lines.append(
+            f"| {row['stage']} | {row['status']} | "
+            f"{'PASS' if row['results_contract_ok'] else 'FAIL'} | {safe} |"
+        )
+    (orchestrator.run_dir/"EXPERIMENT_RESULTS_AUDIT.md").write_text(
+        "\n".join(lines)+"\n",encoding="utf-8")
+    return all_ok,payload
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", type=Path, default=Path("full_experiment_config.yaml"))
