@@ -1,10 +1,11 @@
 """Supervised training for the EGNN residue-interface pruning scorer.
 
 Labels are stored during graph construction from inter-partner heavy-atom
-contacts within 5 A and are not reconstructed from the CA graph edges used by
-the EGNN. Training and validation are separated at 40% CDR-H3 sequence
-identity cluster level, preventing closely related CDR-H3 clusters from
-appearing on both sides of the validation boundary.
+contacts within 5 A. Cross-partner graph connectivity is fixed-KNN rather than
+contact-threshold connectivity, so edge existence does not reconstruct the
+target rule. Training and validation are separated by joint connected
+components: two complexes are joined whenever either their full VHH sequences
+or their antigen sequences reach 40% global identity.
 
 Linux dual-T4 launch example::
 
@@ -121,6 +122,10 @@ def interface_labels(data: Data) -> Tensor:
         )
     if not torch.all((labels == 0) | (labels == 1)):
         raise ValueError("interface_label must contain only binary 0/1 values")
+    if getattr(data, "edge_policy", "") != "intra_chain_ca_lt8_plus_cross_partner_knn":
+        raise ValueError("Graph edge policy is not leakage-controlled; rebuild with dataset version >=1.2")
+    if getattr(data, "label_policy", "") != "cross_partner_heavy_atom_lt5":
+        raise ValueError("Graph label policy is missing or unexpected")
     return labels
 
 def seed_everything(seed: int) -> None:
@@ -163,23 +168,41 @@ def _sequence_identity(a: str, b: str) -> float:
     return max(values)
 
 
-def split_paths(paths: Sequence[Path], seed: int) -> Tuple[List[Path], List[Path]]:
-    """Create a deterministic 90/10 split by 40%-identity CDR-H3 components."""
+SPLIT_FOLDS = 5
+VALIDATION_FOLD = 0
 
+
+def _side_identity(left: Sequence[str], right: Sequence[str]) -> float:
+    """Maximum threshold-aware identity across two partner-side sequence sets."""
+    best = 0.0
+    for a in left:
+        for b in right:
+            if not a or not b:
+                continue
+            if min(len(a), len(b)) / max(len(a), len(b)) < SPLIT_IDENTITY_THRESHOLD:
+                continue
+            best = max(best, _sequence_identity(a, b))
+            if best >= SPLIT_IDENTITY_THRESHOLD:
+                return best
+    return best
+
+
+def split_paths(paths: Sequence[Path], seed: int) -> Tuple[List[Path], List[Path]]:
+    """Bilateral 40%-identity component split; no random 90/10 partition."""
+    del seed
     records = []
-    by_sequence: Dict[str, List[Path]] = {}
-    empty_sequence_paths: List[Path] = []
     for path in paths:
         data = torch.load(path, map_location="cpu", weights_only=False)
-        seq = str(getattr(data, "cdr3_seq", "") or "")
-        records.append((path, seq))
-        if seq:
-            by_sequence.setdefault(seq, []).append(path)
-        else:
-            empty_sequence_paths.append(path)
+        vhh = tuple(sorted(set(str(s) for s in getattr(data, "vhh_sequences", []) if str(s))))
+        antigen = tuple(sorted(set(str(s) for s in getattr(data, "antigen_sequences", []) if str(s))))
+        if not vhh or not antigen:
+            raise ValueError(
+                f"{path.name} lacks full-chain vhh_sequences/antigen_sequences; "
+                "rebuild graphs with build_final_pyg_dataset.py >= 1.2"
+            )
+        records.append((path, vhh, antigen))
 
-    sequences = sorted(by_sequence, key=lambda seq: (-len(seq), seq))
-    parent = list(range(len(sequences)))
+    parent = list(range(len(records)))
 
     def find(index: int) -> int:
         while parent[index] != index:
@@ -188,64 +211,70 @@ def split_paths(paths: Sequence[Path], seed: int) -> Tuple[List[Path], List[Path
         return index
 
     def union(left: int, right: int) -> None:
-        root_left, root_right = find(left), find(right)
-        if root_left != root_right:
-            parent[root_right] = root_left
+        a, b = find(left), find(right)
+        if a != b:
+            parent[b] = a
 
-    for i, seq_i in enumerate(sequences):
+    for i in range(len(records)):
+        _, vhh_i, antigen_i = records[i]
         for j in range(i):
-            seq_j = sequences[j]
+            _, vhh_j, antigen_j = records[j]
             if (
-                min(len(seq_i), len(seq_j)) / max(len(seq_i), len(seq_j))
-                < SPLIT_IDENTITY_THRESHOLD
+                _side_identity(vhh_i, vhh_j) >= SPLIT_IDENTITY_THRESHOLD
+                or _side_identity(antigen_i, antigen_j) >= SPLIT_IDENTITY_THRESHOLD
             ):
-                continue
-            if _sequence_identity(seq_i, seq_j) >= SPLIT_IDENTITY_THRESHOLD:
                 union(i, j)
 
-    components: Dict[int, List[Path]] = {}
-    for index, seq in enumerate(sequences):
-        components.setdefault(find(index), []).extend(by_sequence[seq])
+    components: Dict[int, List[int]] = {}
+    for index in range(len(records)):
+        components.setdefault(find(index), []).append(index)
+    if len(components) < 2:
+        raise RuntimeError("Bilateral 40%-identity clustering produced fewer than two components")
 
-    clusters = list(components.values()) + [[path] for path in empty_sequence_paths]
-    rng = random.Random(seed)
-    rng.shuffle(clusters)
-
-    target_validation = max(1, int(round(0.10 * len(paths))))
+    train_paths: List[Path] = []
     validation_paths: List[Path] = []
-    for cluster in clusters:
-        if len(validation_paths) >= target_validation:
-            break
-        validation_paths.extend(cluster)
+    ordered_components = sorted(
+        components.items(),
+        key=lambda item: min(records[i][0].name for i in item[1]),
+    )
+    for _, indices in ordered_components:
+        signature = "\n".join(sorted(records[i][0].name for i in indices)).encode("utf-8")
+        fold = int.from_bytes(hashlib.sha256(signature).digest()[:8], "big") % SPLIT_FOLDS
+        target = validation_paths if fold == VALIDATION_FOLD else train_paths
+        target.extend(records[i][0] for i in indices)
 
+    train_paths = sorted(train_paths, key=lambda path: path.name.lower())
     validation_paths = sorted(validation_paths, key=lambda path: path.name.lower())
-    validation_set = set(validation_paths)
-    train_paths = [path for path in paths if path not in validation_set]
+    if not validation_paths:
+        _, indices = ordered_components[0]
+        chosen = {records[i][0] for i in indices}
+        validation_paths = sorted(chosen, key=lambda p: p.name.lower())
+        train_paths = sorted([p for p in paths if p not in chosen], key=lambda p: p.name.lower())
+    if not train_paths:
+        _, indices = ordered_components[-1]
+        chosen = {records[i][0] for i in indices}
+        train_paths = sorted(chosen, key=lambda p: p.name.lower())
+        validation_paths = sorted([p for p in paths if p not in chosen], key=lambda p: p.name.lower())
     if not train_paths or not validation_paths:
-        raise RuntimeError("Leakage-controlled cluster split produced an empty partition")
+        raise RuntimeError("Bilateral component split produced an empty partition")
 
-    train_set = set(train_paths)
-    train_sequences = sorted({seq for path, seq in records if path in train_set and seq})
-    validation_sequences = sorted(
-        {seq for path, seq in records if path in validation_set and seq}
-    )
-    max_cross_identity = max(
-        (
-            _sequence_identity(train_seq, validation_seq)
-            for train_seq in train_sequences
-            for validation_seq in validation_sequences
-            if min(len(train_seq), len(validation_seq))
-            / max(len(train_seq), len(validation_seq))
-            >= SPLIT_IDENTITY_THRESHOLD
-        ),
-        default=0.0,
-    )
-    if max_cross_identity >= SPLIT_IDENTITY_THRESHOLD:
+    train_set, validation_set = set(train_paths), set(validation_paths)
+    max_vhh_cross = 0.0
+    max_antigen_cross = 0.0
+    for train_path, train_vhh, train_antigen in records:
+        if train_path not in train_set:
+            continue
+        for val_path, val_vhh, val_antigen in records:
+            if val_path not in validation_set:
+                continue
+            max_vhh_cross = max(max_vhh_cross, _side_identity(train_vhh, val_vhh))
+            max_antigen_cross = max(max_antigen_cross, _side_identity(train_antigen, val_antigen))
+    if max(max_vhh_cross, max_antigen_cross) >= SPLIT_IDENTITY_THRESHOLD:
         raise AssertionError(
-            f"Sequence leakage across train/validation: max identity={max_cross_identity:.3f}"
+            "Bilateral sequence leakage across train/validation: "
+            f"max VHH={max_vhh_cross:.3f}, max antigen={max_antigen_cross:.3f}"
         )
     return train_paths, validation_paths
-
 
 def _paths_digest(paths: Sequence[Path]) -> str:
     digest = hashlib.sha256()
@@ -775,12 +804,12 @@ def write_summary(
         "",
         "## 数据与监督定义",
         "",
-        f"- 原图级固定划分：训练 {train_count}，验证 {validation_count}；种子 {SEED}。",
+        f"- 双侧同源隔离：训练 {train_count}，验证 {validation_count}；VHH与抗原任一侧全链全局identity≥0.40即并入同一连通分量。",
+        "- 分量按SHA-256确定性映射到5个fold，fold 0用于验证；不使用随机90/10切分。",
         f"- 训练节点标签：正例 {train_positives:,}，负例 {train_negatives:,}。",
-        "- 正例定义：残基是跨伙伴图边的端点；图边对应 CA 距离严格小于 8 Å。",
-        "- 该节点标签由交付图可重复恢复；它不是原始全原子重原子 5 Å 标签。",
-        "- 输入跨链边端点规则可精确重现监督标签；高 AUC 不能作为未知结合界面预测能力的证据。",
-        "- 当前任务为已知位姿下的接触规则学习，尚未完成独立标签、未结合输入或家族隔离的泛化验证。",
+        "- 正例定义：跨伙伴重原子距离<5 Å的残基；标签与图边独立构建。",
+        "- 同链消息边采用CA<8 Å；跨伙伴消息边固定为每节点3个最近邻，不使用接触阈值决定边是否存在。",
+        "- 因此跨伙伴edge existence不再能确定性重建5 Å重原子界面标签；仍需通过独立验证AUC/PR-AUC评估泛化。",
         "",
         "## 权重完整性",
         "",
@@ -964,7 +993,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     }
     training_config = {
         "seed": SEED,
-        "split": "90/10 CDR-H3 cluster-level at 40% identity",
+        "split": "bilateral full-chain VHH+antigen connected components at 40% identity; deterministic 5-fold hash, validation fold 0; no random 90/10",
         "max_epochs": args.max_epochs,
         "patience": args.patience,
         "batch_size": args.batch_size,
