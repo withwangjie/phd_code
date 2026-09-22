@@ -52,6 +52,7 @@ stages:
   graph_build: true           # produced as part of queue_freeze (build_final_pyg_dataset.py)
   egnn_train: true
   energy_calibration: true    # train-only coarse component -> Amber14 calibration
+  method_sensitivity: true     # development-only QAOA hyperparameter robustness
   qc_benchmark: true          # --research-ablation: pruning x budget x objective sweep
   structure_experiment: true  # dev queue + validation queue recovery-benchmark
   external_validation: true    # external VHH graphs + FASPR/Phenix structural baselines
@@ -306,11 +307,15 @@ qc_benchmark:
   greedy_passes: 50
   energy_window: 2.0
   sensitivity:
+    input_dir: "graphs/train"
+    max_targets: 20
+    outputs: 300
+    repeats: 3
     depths: [1, 2, 3]
     max_evals: [90, 180, 300]
     eval_shots: [200, 500, 1000]
     cvar_alpha: [0.05, 0.10, 0.25, 0.50, 1.0]
-    note: "development/ablation only; primary validation remains frozen at p=2, max_evals=90, shots=500, alpha=0.1"
+    note: "development/training graphs only; primary hard/validation protocol remains frozen at p=2, max_evals=90, shots=500, alpha=0.1"
   # Number of independent repeat/perturb identities per (pruning, radius,
   # depth, max_evals) case -- passed as --seeds to _ablation_main, which now
   # derives each case's independent --master-seed-based optimize/sample
