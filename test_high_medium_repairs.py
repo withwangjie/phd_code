@@ -348,3 +348,66 @@ def test_structure_contract_requires_per_target_recovery_outputs() -> None:
     assert 'target/"run_manifest.json"' in source
     assert 'target/"recovery_metrics.csv"' in source
     assert 'target/"recovery_report.md"' in source
+
+
+
+def test_primary_statistics_freeze_every_case_dimension() -> None:
+    source=inspect.getsource(bbh._paired_statistics_main)
+    for token in (
+        "--primary-pruning",
+        "--primary-radius",
+        "--primary-depth",
+        "--primary-max-evals",
+        "--primary-active-sites",
+        "--primary-outputs",
+        "--primary-objective",
+        "--primary-restarts",
+        "nonprimary_radius",
+        "nonprimary_depth",
+        "nonprimary_max_evals",
+    ):
+        assert token in source
+
+
+def test_scaling_cases_require_exact_requested_rotamer_site_count() -> None:
+    source=inspect.getsource(bbh._ablation_run_case)
+    assert "len(qubo.site_to_variables) != active_sites" in source
+    selector=inspect.getsource(__import__("model_egnn_pruning").select_ablation_active)
+    assert "backbone_phi" in selector and "backbone_psi" in selector
+    assert 'aa not in {"A", "G", "P", "C"} and backbone_ok' in selector
+
+
+def test_formal_statistics_require_scaling_outputs() -> None:
+    source=inspect.getsource(full.Orchestrator._validate_completed_stage_artifacts)
+    assert "quantum_scaling_statistics.json" in source
+    assert "quantum_scaling_statistics.md" in source
+    assert "min_scaling_clusters" in inspect.getsource(full.validate_config)
+
+
+def test_partial_only_run_cannot_pass_global_audit_without_prior_results(tmp_path: Path) -> None:
+    class Dummy:
+        run_dir=tmp_path
+        config={"stages":{stage:True for stage in full.STAGE_ORDER}}
+
+        def _load_stage_status(self,stage):
+            return None
+
+        def _validate_completed_stage_artifacts(self,stage):
+            return False,"missing"
+
+    results={
+        stage:full.StageResult(stage,"skipped","a","b",None,"Skipped (--only targets a different stage; not yet run).")
+        for stage in full.STAGE_ORDER
+    }
+    ok,payload=full.audit_experiment_results(Dummy(),results)
+    assert ok is False
+    assert any(
+        row["status"]=="skipped" and row["results_contract_ok"] is False
+        for row in payload["stages"]
+    )
+
+
+def test_pair_table_coverage_is_required_before_frozen_clustering() -> None:
+    source=inspect.getsource(full.Orchestrator.stage_queue_freeze)
+    assert "missing_pair_coverage" in source
+    assert "does not demonstrate query/target coverage" in source
