@@ -9,6 +9,7 @@ from pathlib import Path
 
 import batch_benchmark_hard_set as bbh
 import build_final_pyg_dataset as dataset_builder
+import generate_final_research_report as report
 import run_real_complex_pilot as pilot
 import run_full_experiment as full
 import resolve_server_config as server_resolver
@@ -232,10 +233,10 @@ def test_methods_evidence_register_covers_formal_design() -> None:
 
 
 def test_final_report_embeds_methods_references() -> None:
-    source=inspect.getsource(full)
-    assert "METHODS_EVIDENCE.md" in source
-    assert "section_literature_basis" in source
-    assert "alpha=0.1 is literature-supported as an empirical CVaR setting" in source
+    report_source=inspect.getsource(report)
+    assert "METHODS_EVIDENCE.md" in report_source
+    assert "section_literature_basis" in report_source
+    assert "alpha=0.1 is literature-supported as an empirical CVaR setting" in report_source
     manifest_source=inspect.getsource(full.build_run_manifest)
     assert "methods_evidence_sha256" in manifest_source
 
