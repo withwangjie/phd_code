@@ -152,7 +152,7 @@ def interface_labels(data: Data) -> Tensor:
     if not hasattr(data, "interface_label"):
         raise ValueError(
             "Graph is missing interface_label; rebuild graphs with "
-            "build_final_pyg_dataset.py version >= 1.3"
+            "build_final_pyg_dataset.py version >= 1.4"
         )
     labels = data.interface_label.detach().cpu().to(torch.float32)
     if labels.shape != (data.num_nodes,):
@@ -655,7 +655,7 @@ def _checkpoint_payload(
         "validation_metrics": asdict(metrics),
         "training_config": dict(training_config),
         "split": {
-            "partition_method": "bilateral_vhh_antigen_identity_components_sha256_5fold",
+            "partition_method": "layered_vhh_cdrh3_antigen_components_sha256_5fold",
             "homology_isolation": {
                 "vhh_full_chain_identity": float(VHH_IDENTITY_THRESHOLD),
                 "cdr_h3_identity": float(CDR_H3_IDENTITY_THRESHOLD),
@@ -828,7 +828,7 @@ def write_summary_json(
             },
         },
         "split": {
-            "partition_method": "bilateral_vhh_antigen_40pct_components_sha256_5fold",
+            "partition_method": "layered_vhh_cdrh3_antigen_components_sha256_5fold",
             "partition_seed": None,
             "training_seed": SEED,
             "train_graphs": train_count,
