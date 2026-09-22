@@ -134,6 +134,13 @@ def main() -> int:
         help="Graph dataset directory containing graph_manifest.json and graphs/train.")
     parser.add_argument("--data-root",type=Path,required=True)
     parser.add_argument("--rotamer-library",type=Path,required=True)
+    parser.add_argument("--selection-mode",choices=("egnn","distance"),default="egnn")
+    parser.add_argument("--checkpoint",type=Path)
+    parser.add_argument("--vhh-identity-threshold",type=float,default=0.80)
+    parser.add_argument("--cdr-h3-identity-threshold",type=float,default=0.50)
+    parser.add_argument("--antigen-identity-threshold",type=float,default=0.30)
+    parser.add_argument("--antigen-min-length-coverage",type=float,default=0.70)
+    parser.add_argument("--antigen-guidance-weight",type=float,default=0.25)
     parser.add_argument("--out-csv",type=Path,required=True)
     parser.add_argument("--out-provenance",type=Path)
     parser.add_argument("--cluster-map",type=Path,
@@ -169,6 +176,27 @@ def main() -> int:
         parser.error("--max-complexes must be >=0")
     if not args.rotamer_library.is_file():
         parser.error("Dunbrack rotamer library not found")
+    homology_isolation=dict(
+        vhh_full_chain_identity=float(args.vhh_identity_threshold),
+        cdr_h3_identity=float(args.cdr_h3_identity_threshold),
+        antigen_identity=float(args.antigen_identity_threshold),
+        antigen_min_length_coverage=float(args.antigen_min_length_coverage),
+    )
+    if any(not 0.0 < value <= 1.0 for value in homology_isolation.values()):
+        parser.error("homology thresholds/coverage must lie in (0,1]")
+    if not 0.0 <= args.antigen_guidance_weight <= 1.0:
+        parser.error("--antigen-guidance-weight must be in [0,1]")
+    scorer=None; model_info=None
+    if args.selection_mode=="egnn":
+        if args.checkpoint is None or not args.checkpoint.is_file():
+            parser.error("--selection-mode egnn requires --checkpoint")
+        from batch_benchmark_hard_set import load_interface_scorer
+        scorer,model_info=load_interface_scorer(
+            args.checkpoint,torch_device=torch.device("cpu"),seed=args.seed
+        )
+        if model_info.status!="checkpoint_loaded":
+            raise ValueError("Calibration requires a valid trained EGNN checkpoint")
+        scorer.eval()
 
     cluster_map=None
     cluster_map_sha256=None
@@ -227,8 +255,14 @@ def main() -> int:
                 if sha256(graph_path)!=row["sha256"]:
                     raise ValueError("Training graph SHA256 mismatch")
                 data=torch.load(graph_path,map_location="cpu",weights_only=False)
+                if args.selection_mode=="egnn":
+                    from batch_benchmark_hard_set import assert_checkpoint_graph_compatible
+                    assert_checkpoint_graph_compatible(
+                        model_info,data,homology_isolation=homology_isolation
+                    )
                 active=select_ablation_active(
-                    data,"distance",args.active_sites,args.seed,None,
+                    data,args.selection_mode,args.active_sites,args.seed,scorer,
+                    antigen_guidance_weight=args.antigen_guidance_weight,
                     antigen_proximity_scale=args.antigen_proximity_scale,
                     contact_ca_cutoff=args.contact_ca_cutoff,
                 )
@@ -303,7 +337,16 @@ def main() -> int:
         source_manifest_sha256=sha256(manifest_path),
         rotamer_library=str(args.rotamer_library),
         rotamer_library_sha256=sha256(args.rotamer_library),
-        active_site_selection="distance baseline; no EGNN/test outcome dependence",
+        active_site_selection=(
+            "formal EGNN + antigen-proximity selector on training complexes only"
+            if args.selection_mode=="egnn"
+            else "distance baseline on training complexes only"
+        ),
+        selection_mode=args.selection_mode,
+        checkpoint=(None if args.checkpoint is None else str(args.checkpoint)),
+        checkpoint_sha256=(None if args.checkpoint is None else sha256(args.checkpoint)),
+        homology_isolation=homology_isolation,
+        antigen_guidance_weight=float(args.antigen_guidance_weight),
         assignment_sampling=(
             "exact feasible-space ranking; lowest-energy half plus unique uniform legal samples; "
             "anchor is exact coarse physical ground state"
