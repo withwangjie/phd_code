@@ -96,6 +96,7 @@ ORCHESTRATED_SCRIPTS: List[str] = [
     "batch_benchmark_hard_set.py",
     "run_real_complex_pilot.py",
     "generate_final_research_report.py",
+    "analyze_structure_recovery.py",
     "model_egnn_pruning.py",
     "subgraph_to_qubo.py",
     "qaoa_interface_sampler.py",
@@ -1162,7 +1163,32 @@ class Orchestrator:
                 if returncode != 0:
                     failures.append(f"{results_dir.name}/{budget_mode} exited {returncode} (see {log_path})")
         status = "completed_with_failures" if failures else "completed"
-        detail = "; ".join(failures) if failures else "Paired statistics computed for every available results directory/budget mode."
+        validation_metrics = self.run_dir / "validation_queue" / "real_complex_metrics.csv"
+        cluster_setting = cfg.get("cluster_map") or (
+            (self.config["queue_freeze"].get("independence_clustering", {}) or {}).get("cluster_map")
+        )
+        if validation_metrics.is_file() and cluster_setting:
+            cluster_path = resolve_path(self.config, cluster_setting)
+            structure_json = self.run_dir / "statistics" / "structure_statistics.json"
+            structure_md = self.run_dir / "statistics" / "structure_statistics.md"
+            structure_json.parent.mkdir(parents=True, exist_ok=True)
+            structure_argv = [
+                self.venv_python, "analyze_structure_recovery.py",
+                "--metrics", str(validation_metrics),
+                "--cluster-map", str(cluster_path),
+                "--out-json", str(structure_json),
+                "--out-md", str(structure_md),
+                "--primary-endpoint", str(cfg.get("primary_structural_endpoint", "final_rmsd")),
+                "--resamples", str(cfg.get("resamples", 10000)),
+                "--seed", str(self.config["master_seed"]),
+            ]
+            returncode, log_path = self._run_subprocess("structure_statistics", structure_argv)
+            if returncode != 0 or not structure_json.is_file():
+                failures.append(f"structure statistics exited {returncode} (see {log_path})")
+        elif not validation_metrics.is_file():
+            failures.append(f"Missing validation structural metrics: {validation_metrics}")
+
+        detail = "; ".join(failures) if failures else "Paired solver statistics plus primary structural/RQ5 analysis completed."
         return StageResult("statistics", status, started, utc_timestamp(), 0, detail, argvs, ";".join(logs), True)
 
     # ================================================================
