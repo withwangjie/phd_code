@@ -47,6 +47,7 @@ dependency via requirements-quantum.txt).
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
 import json
 import math
@@ -436,8 +437,10 @@ class Orchestrator:
         self.repo_root = Path(config["paths"]["repo_root"]).resolve()
         self.status_dir = run_dir / "stage_status"
         self.log_dir = run_dir / "logs"
+        self.results_manifest_dir = run_dir / "results_manifests"
         self.status_dir.mkdir(parents=True, exist_ok=True)
         self.log_dir.mkdir(parents=True, exist_ok=True)
+        self.results_manifest_dir.mkdir(parents=True, exist_ok=True)
         self.progress_path = run_dir / "progress.json"
         self.venv_python = self._venv_python()
 
@@ -546,6 +549,57 @@ class Orchestrator:
                 log_handle.flush()
                 return 124,log_path
 
+    def _stage_result_roots(self, stage: str) -> list[Path]:
+        mapping={
+            "env_check":[self.run_dir/"env_check.json"],
+            "smoke_check":[self.run_dir/"smoke_check"],
+            "data_audit":[self.run_dir/"audit"],
+            "queue_freeze":[self.dataset_dir(),self.run_dir/"validation_queue"/"freeze"],
+            "egnn_train":[self.checkpoint_dir()],
+            "energy_calibration":[self.run_dir/"calibration"],
+            "method_sensitivity":[self.run_dir/"method_sensitivity"],
+            "qc_benchmark":[self.run_dir/"qc_benchmark"],
+            "structure_experiment":[self.run_dir/"dev_queue",self.run_dir/"validation_queue"],
+            "external_validation":[self.run_dir/"external_validation"],
+            "statistics":[self.run_dir/"statistics",self.run_dir/"qc_benchmark"],
+            "final_report":[self.run_dir/(self.config.get("final_report",{}) or {}).get(
+                "filename","FINAL_RESEARCH_REPORT.md")],
+        }
+        return mapping.get(stage,[])
+
+    def _write_stage_results_manifest(self, stage: str, result: StageResult,
+                                      validation_detail: str) -> Path:
+        files=[]
+        seen=set()
+        for root in self._stage_result_roots(stage):
+            candidates=[root] if root.is_file() else (list(root.rglob("*")) if root.is_dir() else [])
+            for file in candidates:
+                if not file.is_file():
+                    continue
+                try:
+                    rel=str(file.relative_to(self.run_dir))
+                except ValueError:
+                    rel=str(file.resolve())
+                if rel in seen:
+                    continue
+                seen.add(rel)
+                size=file.stat().st_size
+                row={"path":rel,"size_bytes":size}
+                if size<=64*1024*1024:
+                    try: row["sha256"]=sha256_of(file)
+                    except OSError: row["sha256"]=None
+                files.append(row)
+        path=self.results_manifest_dir/f"{stage}.json"
+        atomic_write_json(path,{
+            "stage":stage,
+            "status":result.status,
+            "generated_utc":utc_timestamp(),
+            "validation_detail":validation_detail,
+            "artifact_count":len(files),
+            "artifacts":sorted(files,key=lambda x:x["path"]),
+        })
+        return path
+
     # -- generic stage runner ----------------------------------------------
     def run_stage(self, stage: str, prerequisites: Sequence[str],
                   fn: Callable[[], StageResult]) -> StageResult:
@@ -613,6 +667,18 @@ class Orchestrator:
         except Exception:
             result = StageResult(stage, "failed", utc_timestamp(), utc_timestamp(), None,
                                   "Unhandled exception in orchestrator stage function:\n" + traceback.format_exc())
+        validation_detail="stage did not claim completion"
+        if result.status in ("completed","completed_with_failures"):
+            artifacts_ok,validation_detail=self._validate_completed_stage_artifacts(
+                stage,require_results_manifest=False)
+            if not artifacts_ok:
+                result=StageResult(
+                    stage,"failed",result.started_utc,utc_timestamp(),1,
+                    "Stage returned completion but required experimental results failed validation: "
+                    +validation_detail,
+                    result.argv,result.log_path,False,
+                )
+        self._write_stage_results_manifest(stage,result,validation_detail)
         self._save_stage_status(result)
         print(f"[{stage}] {result.status}: {result.detail}")
         return result
@@ -625,8 +691,10 @@ class Orchestrator:
             return False, "Missing or empty expected artifact(s): " + ", ".join(missing)
         return True, "All expected artifacts present and non-empty."
 
-    def _validate_completed_stage_artifacts(self, stage: str) -> tuple[bool, str]:
-        """Revalidate critical artifacts before trusting a completed stage marker."""
+    def _validate_completed_stage_artifacts(
+        self, stage: str, *, require_results_manifest: bool = True
+    ) -> tuple[bool, str]:
+        """Revalidate critical experimental results before trusting completion."""
         def require(paths: Sequence[Path]) -> tuple[bool, str]:
             return self._artifacts_present(paths)
 
@@ -639,8 +707,19 @@ class Orchestrator:
                 return None,f"Expected JSON object at {path}"
             return value,None
 
+        if require_results_manifest and stage!="smoke_check":
+            manifest_path=self.results_manifest_dir/f"{stage}.json"
+            ok,detail=require([manifest_path])
+            if not ok:
+                return False,"Missing stage results manifest: "+detail
+            manifest,error=read_json(manifest_path)
+            if error:return False,error
+            if manifest.get("stage")!=stage or manifest.get("status") not in ("completed","completed_with_failures"):
+                return False,f"Invalid results manifest status for {stage}: {manifest.get('status')}"
+
         if stage=="smoke_check":
-            return True,"optional smoke marker accepted"
+            summary=self.run_dir/"smoke_check"/"smoke_summary.json"
+            return require([summary]) if summary.exists() else (True,"optional smoke skipped before scientific stages")
         if stage=="env_check":
             return require([self.run_dir/"env_check.json"])
         if stage=="data_audit":
@@ -653,6 +732,8 @@ class Orchestrator:
             ok,detail=require([
                 dataset/"graph_manifest.csv",dataset/"graph_manifest.json",
                 dataset/"run_summary.json",dataset/"graph_dataset_delivery_report.md",
+                dataset/"cdr3_clusters.json",dataset/"excluded_samples.csv",
+                dataset/"processing_failures.csv",
                 freeze/"selected_targets.json",freeze/"eligibility.json",freeze/"run_manifest.json",
                 freeze/"freeze_manifest.json",
             ])
@@ -690,7 +771,12 @@ class Orchestrator:
         if stage=="egnn_train":
             checkpoint=self.checkpoint_dir()/"best_egnn_pruning.pt"
             summary_path=self.checkpoint_dir()/"training_summary.json"
-            ok,detail=require([checkpoint,summary_path])
+            ok,detail=require([
+                checkpoint,summary_path,
+                self.checkpoint_dir()/"geometry_baseline.json",
+                self.checkpoint_dir()/"egnn_training_history.csv",
+                self.checkpoint_dir()/"egnn_training_summary.md",
+            ])
             if not ok:return ok,detail
             summary,error=read_json(summary_path)
             if error:return False,error
@@ -711,7 +797,10 @@ class Orchestrator:
             training=self.run_dir/cal.get("training_csv","calibration/coarse_to_amber_train.csv")
             calibration=self.run_dir/cal.get("calibration_file","calibration/coarse_to_amber.json")
             provenance=training.with_suffix(".provenance.json")
-            ok,detail=require([training,provenance,calibration])
+            ok,detail=require([
+                training,provenance,calibration,
+                self.run_dir/"calibration"/"calibration_report.md",
+            ])
             if not ok:return ok,detail
             payload,error=read_json(calibration)
             if error:return False,error
@@ -748,29 +837,53 @@ class Orchestrator:
             for shots in cfg.get("eval_shots",[200,500,1000]):
                 for alpha in cfg.get("cvar_alpha",[0.05,0.1,0.25,0.5,1.0]):
                     sub=self.run_dir/"method_sensitivity"/f"shots_{shots}_alpha_{str(alpha).replace('.','p')}"
+                    required=[
+                        sub/"run_manifest.json",sub/"run_summary.json",sub/"metrics.csv",
+                        sub/"summary.md",sub/"failed_case_keys.json",sub/"seed_streams.json",
+                    ]
+                    ok,detail=require(required)
+                    if not ok:
+                        missing.append(detail);continue
                     summary_path=sub/"run_summary.json"
-                    if not summary_path.is_file():
-                        missing.append(str(summary_path));continue
                     summary,error=read_json(summary_path)
                     if (error or not summary.get("closed")
                             or int(summary.get("failures_total",0) or 0)!=0):
                         missing.append(str(summary_path))
+            aggregate=[
+                self.run_dir/"method_sensitivity"/"sensitivity_summary.csv",
+                self.run_dir/"method_sensitivity"/"sensitivity_summary.json",
+                self.run_dir/"method_sensitivity"/"sensitivity_summary.md",
+            ]
+            ok,detail=require(aggregate)
+            if not ok: missing.append(detail)
             if missing:
-                return False,"Sensitivity sub-runs missing/not closed: "+", ".join(missing[:10])
-            return True,"all configured sensitivity sub-runs are closed"
+                return False,"Sensitivity sub-runs/results missing/not closed: "+", ".join(missing[:10])
+            return True,"all sensitivity sub-runs and aggregate results are closed"
         if stage=="qc_benchmark":
             root=self.run_dir/"qc_benchmark"
-            ok,detail=require([root/"run_manifest.json",root/"run_summary.json"])
+            ok,detail=require([
+                root/"run_manifest.json",root/"run_summary.json",root/"metrics.csv",
+                root/"summary.md",root/"failed_case_keys.json",root/"seed_streams.json",
+            ])
             if not ok:return ok,detail
             summary,error=read_json(root/"run_summary.json")
             if error:return False,error
             if not summary.get("closed") or int(summary.get("cases_completed_total",0) or 0)<=0:
                 return False,"qc_benchmark run_summary.json is not closed with completed cases"
-            return True,"qc_benchmark closure verified"
+            case_count=len(list((root/"cases").glob("*.json")))
+            if case_count!=int(summary.get("cases_completed_total",0) or 0):
+                return False,f"qc_benchmark case artifact count mismatch: files={case_count}, summary={summary.get('cases_completed_total')}"
+            return True,"qc_benchmark metrics/report/cases and closure verified"
         if stage=="structure_experiment":
-            dev=self.run_dir/"dev_queue"/"run_summary.json"
-            validation=self.run_dir/"validation_queue"/"run_summary.json"
-            ok,detail=require([dev,validation])
+            dev_root=self.run_dir/"dev_queue"
+            val_root=self.run_dir/"validation_queue"
+            dev=dev_root/"run_summary.json"
+            validation=val_root/"run_summary.json"
+            ok,detail=require([
+                dev,dev_root/"real_complex_metrics.csv",dev_root/"real_complex_report.md",
+                val_root/"run_summary.json",val_root/"real_complex_metrics.csv",
+                val_root/"real_complex_report.md",
+            ])
             if not ok:return ok,detail
             dev_summary,error=read_json(dev)
             if error:return False,error
@@ -787,11 +900,19 @@ class Orchestrator:
             ext=cfg.get("external_vhh",{}) or {}
             if ext.get("required",False):
                 root=self.run_dir/"external_validation"/"vhh_coarse"
-                paths += [root/"run_summary.json",root/"statistics_outputs.json"]
+                paths += [
+                    root/"run_manifest.json",root/"run_summary.json",root/"metrics.csv",
+                    root/"summary.md",root/"seed_streams.json",
+                    root/"statistics_outputs.json",root/"statistics_outputs.md",
+                    self.run_dir/"external_validation"/"external_vhh_independence_manifest.json",
+                ]
             structural=cfg.get("structural_baselines",{}) or {}
             if structural.get("required",False):
                 root=self.run_dir/"external_validation"/"structural_baselines"
-                paths += [root/"run_summary.json",root/"external_baseline_metrics.csv"]
+                paths += [
+                    root/"run_summary.json",root/"external_baseline_metrics.csv",
+                    root/"external_baseline_report.md",
+                ]
             ok,detail=require(paths)
             if not ok:return ok,detail
             for path in [p for p in paths if p.name=="run_summary.json"]:
