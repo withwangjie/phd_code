@@ -724,7 +724,8 @@ class Orchestrator:
                     if not summary_path.is_file():
                         missing.append(str(summary_path));continue
                     summary,error=read_json(summary_path)
-                    if error or not summary.get("closed"):
+                    if (error or not summary.get("closed")
+                            or int(summary.get("failures_total",0) or 0)!=0):
                         missing.append(str(summary_path))
             if missing:
                 return False,"Sensitivity sub-runs missing/not closed: "+", ".join(missing[:10])
@@ -781,8 +782,8 @@ class Orchestrator:
                 for mode in modes for suffix in ("json","md")
             ]
             paths += [
-                self.run_dir/"structure_statistics.json",
-                self.run_dir/"structure_statistics.md",
+                self.run_dir/"statistics"/"structure_statistics.json",
+                self.run_dir/"statistics"/"structure_statistics.md",
             ]
             return require(paths)
         if stage=="final_report":
@@ -1493,8 +1494,24 @@ class Orchestrator:
                 rc,log=self._run_subprocess(
                     f"sensitivity_shots_{shots}_alpha_{str(alpha).replace('.','p')}",argv)
                 logs.append(str(log));argvs.append(argv)
-                if rc not in (0,1) or not (sub/"run_summary.json").is_file():
+                summary_path=sub/"run_summary.json"
+                if rc!=0 or not summary_path.is_file():
                     failures.append(f"shots={shots}, alpha={alpha}, exit={rc}")
+                    continue
+                try:
+                    summary=json.loads(summary_path.read_text(encoding="utf-8"))
+                except Exception as exc:
+                    failures.append(
+                        f"shots={shots}, alpha={alpha}, unreadable run_summary.json: {exc}")
+                    continue
+                if not summary.get("closed"):
+                    failures.append(
+                        f"shots={shots}, alpha={alpha}, sensitivity sub-run not closed")
+                    continue
+                if int(summary.get("failures_total",0) or 0)!=0:
+                    failures.append(
+                        f"shots={shots}, alpha={alpha}, failures_total="
+                        f"{summary.get('failures_total')}")
         return StageResult(
             "method_sensitivity","completed" if not failures else "failed",
             started,utc_timestamp(),0 if not failures else 1,
