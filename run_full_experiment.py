@@ -193,6 +193,17 @@ def resolve_path(config: Dict[str, Any], relative: str) -> Path:
     return candidate if candidate.is_absolute() else (root / candidate)
 
 
+def apply_runtime_mode_overrides(config: Dict[str, Any], *, smoke_only: bool) -> Dict[str, Any]:
+    """Apply explicit CLI mode overrides without mutating the loaded config."""
+    import copy
+    resolved = copy.deepcopy(config)
+    if smoke_only:
+        stages = resolved.setdefault("stages", {})
+        stages["env_check"] = True
+        stages["smoke_check"] = True
+    return resolved
+
+
 # ---------------------------------------------------------------------------
 # Stage bookkeeping
 # ---------------------------------------------------------------------------
@@ -1186,8 +1197,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--smoke-only", action="store_true",
                          help="Run only env_check + smoke_check, then stop (for a fast preflight pass).")
     args = parser.parse_args(list(argv) if argv is not None else None)
+    if args.smoke_only and args.resume:
+        parser.error("--smoke-only creates a separate disposable preflight run and cannot be combined with --resume")
 
-    config = load_config(args.config)
+    config = apply_runtime_mode_overrides(load_config(args.config), smoke_only=args.smoke_only)
     repo_root = Path(config["paths"]["repo_root"]).resolve()
     lock_root = resolve_path(config, config["paths"]["run_root"])
     lock_root.mkdir(parents=True, exist_ok=True)
