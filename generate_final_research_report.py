@@ -121,7 +121,8 @@ class ReportContext:
 
 STAGE_ORDER = [
     "env_check", "smoke_check", "data_audit", "queue_freeze", "egnn_train",
-    "qc_benchmark", "structure_experiment", "statistics", "final_report",
+    "energy_calibration", "method_sensitivity", "qc_benchmark",
+    "structure_experiment", "external_validation", "statistics", "final_report",
 ]
 
 
@@ -644,8 +645,9 @@ def section_applicability_boundary(ctx: ReportContext) -> List[str]:
         f"VHH < {100.0 * float((((ctx.frozen_config.get('queue_freeze', {}) or {}).get('homology_isolation', {}) or {}).get('vhh_full_chain_identity', 0.80))):.0f}%, "
         f"CDR-H3 < {100.0 * float((((ctx.frozen_config.get('queue_freeze', {}) or {}).get('homology_isolation', {}) or {}).get('cdr_h3_identity', 0.50))):.0f}%, "
         f"antigen < {100.0 * float((((ctx.frozen_config.get('queue_freeze', {}) or {}).get('homology_isolation', {}) or {}).get('antigen_identity', 0.30))):.0f}% "
-        f"with minimum length coverage {100.0 * float((((ctx.frozen_config.get('queue_freeze', {}) or {}).get('homology_isolation', {}) or {}).get('antigen_min_length_coverage', 0.70))):.0f}%; "
-        "this still does NOT establish family/domain-level independence.",
+        f"with minimum length coverage {100.0 * float((((ctx.frozen_config.get('queue_freeze', {}) or {}).get('homology_isolation', {}) or {}).get('antigen_min_length_coverage', 0.70))):.0f}%. "
+        "Formal runs additionally require the frozen family/structure cluster map recorded in section 1; "
+        "independence claims are limited to those explicitly encoded sequence and cluster criteria, not arbitrary remote homology.",
         "- Classical simulation of the discrete QAOA circuit in the feasible subspace is exact-subspace "
         "classical simulation, not a quantum-hardware run; nothing in this report should be read as a "
         "hardware or NISQ-noise result.",
