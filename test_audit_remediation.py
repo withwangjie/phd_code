@@ -286,7 +286,7 @@ def test_cluster_union_find_keeps_singletons_and_components() -> None:
 
 def test_checkpoint_graph_protocol_gate_rejects_semantic_mismatch() -> None:
     protocol = {
-        "graph_version": "1.5",
+        "graph_version": "1.6",
         "edge_policy": "intra_chain_ca_radius_plus_cross_partner_knn",
         "label_policy": "cross_partner_heavy_atom_cutoff",
         "intra_chain_ca_cutoff_angstrom": 8.0,
