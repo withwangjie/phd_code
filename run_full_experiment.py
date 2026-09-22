@@ -702,11 +702,15 @@ class Orchestrator:
             "--batch-size", str(cfg.get("batch_size", 2)),
             "--hidden-dim", str(cfg.get("hidden_dim", 32)),
             "--learning-rate", str(cfg.get("learning_rate", 1e-3)),
+            "--weight-decay", str(cfg.get("weight_decay", 1e-5)),
+            "--gradient-clip", str(cfg.get("gradient_clip", 5.0)),
             "--identity-threshold", str(split_threshold),
             "--device", cfg.get("device", "auto"),
             "--threads", str(cfg.get("threads", 16)),
             "--num-workers", str(cfg.get("num_workers", 8)),
             "--seed", str(streams["train"]),
+            "--amp" if cfg.get("amp", True) else "--no-amp",
+            "--pin-memory" if cfg.get("pin_memory", True) else "--no-pin-memory",
         ]
         ranks = int(cfg.get("nproc_per_node", 1))
         if ranks < 1:
