@@ -88,8 +88,11 @@ def complete_terminal_oxygen(path: Path) -> list[str]:
 
 
 def prepare(graph, source: Path, destination: Path, sites: int, *, pruning: str = 'cdr',
-            seed: int = 42, checkpoint: Path | None = None) -> dict:
-    """Resolve coherent altlocs and remove waters only; reject missing protein atoms."""
+            seed: int = 42, checkpoint: Path | None = None,
+            antigen_guidance_weight: float = 0.25) -> dict:
+    """Resolve structure and select Active sites under the shared main protocol."""
+    if not 0.0 <= antigen_guidance_weight <= 1.0:
+        raise ValueError("antigen_guidance_weight must be in [0,1]")
     residues = read_atomistic_structure(source)
     st = gemmi.read_structure(str(source))
     if len(st) != 1:
@@ -165,15 +168,27 @@ def prepare(graph, source: Path, destination: Path, sites: int, *, pruning: str 
         model_status=info.status
         if model_status!='checkpoint_loaded':
             raise ValueError('EGNN ablation requires a valid trained checkpoint')
-        with torch.no_grad(): scores=model(graph.x,graph.pos,graph.edge_index).reshape(-1).numpy()
-        ordered=sorted(scored,key=lambda x:(-float(scores[x[3]]),x[1]))
+        with torch.no_grad():
+            model_scores=model(graph.x,graph.pos,graph.edge_index).reshape(-1)
+        antigen_nodes=torch.where(graph.x[:,-1]==1)[0]
+        if len(antigen_nodes)==0:
+            raise ValueError('Graph contains no antigen/group-1 nodes')
+        candidate_indices=torch.tensor([item[3] for item in scored],dtype=torch.long)
+        nearest=torch.cdist(graph.pos[candidate_indices],graph.pos[antigen_nodes]).min(1).values
+        proximity=torch.exp(-nearest/6.0)
+        composite=(1.0-antigen_guidance_weight)*model_scores[candidate_indices]+antigen_guidance_weight*proximity
+        composite_map={int(idx):float(score) for idx,score in zip(candidate_indices,composite)}
+        ordered=sorted(scored,key=lambda x:(-composite_map[x[3]],x[1]))
     else: raise ValueError('Unknown pruning strategy')
     active = [item[1] for item in ordered[:sites]]
     st.make_mmcif_document().write_file(str(destination))
     return dict(active_residues=active, alignment_residues=partners, partner_residues=partners,
                 preparation_changes=changes, cdr3_residues=cdr_ids,pruning=pruning,
                 pruning_candidate_count=len(scored),pruning_seed=seed,model_status=model_status,
-                selection_origin=f"{pruning} selection from native-pose VHH heavy-atom <8A interface neighborhood, fixed before perturbation; retrospective control")
+                antigen_guidance_weight=float(antigen_guidance_weight),
+                selection_origin=(f"{pruning} selection from native-pose VHH heavy-atom <8A interface neighborhood; "
+                    f"EGNN path uses shared composite score=(1-w)*EGNN+w*exp(-dAg/6A), w={antigen_guidance_weight:.3f}; "
+                    "fixed before perturbation; retrospective control"))
 
 
 def main(argv=None) -> int:
@@ -186,7 +201,7 @@ def main(argv=None) -> int:
              "target with no hidden cap; a positive value freezes an EXPLICIT subset and must be set "
              "before the run starts (never adjusted after inspecting results). The actual coverage "
              "(selected vs. examined qualifying pool) is always stated in real_complex_report.md.")
-    parser.add_argument("--sites", type=int, default=5)
+    parser.add_argument("--sites", type=int, default=6)
     parser.add_argument("--seeds", type=int, nargs="+", default=[42,43,44])
     parser.add_argument("--outputs", type=int, default=1000)
     parser.add_argument("--max-evals", type=int, default=90)
@@ -207,6 +222,7 @@ def main(argv=None) -> int:
              "restricted set as a safety check -- a target can still end up excluded here, but no target "
              "outside the allowlist can ever be added.")
     parser.add_argument("--checkpoint",type=Path,default=Path('quantum-protein/checkpoints_500/best_egnn_pruning.pt'))
+    parser.add_argument("--antigen-guidance-weight",type=float,default=0.25)
     parser.add_argument("--robust-qaoa", action="store_true")
     parser.add_argument("--qaoa-restarts",type=int,default=4)
     parser.add_argument("--qaoa-objective",choices=("mean","cvar"),default="cvar")
