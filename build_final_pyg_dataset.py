@@ -99,19 +99,57 @@ def load_inputs(root):
     return rows,pairs,{p.name:sha256(p) for p in paths}
 
 def cluster_long(rows):
+    """Cluster long CDR-H3 sequences by 40%-identity connected components."""
     byseq=collections.defaultdict(list)
     for r in rows:
-        if len(cdr(r))>=16:byseq[cdr(r)].append(r)
-    representatives=[];clusters=[]
-    for seq in sorted(byseq,key=lambda s:(-len(s),s)):
-        match=next((i for i,rep in enumerate(representatives) if seqsim(seq,rep)>=CLUSTER_IDENTITY_THRESHOLD),None)
-        if match is None:
-            representatives.append(seq);clusters.append(dict(representative=seq,members=[],sequences=[]));match=len(clusters)-1
-        clusters[match]['members'].extend(byseq[seq]);clusters[match]['sequences'].append(seq)
-    for i,cl in enumerate(clusters):
-        cl['cluster_id']=f'cdr40_{i:04d}'
-        # Representative must have the representative sequence, not a cluster mate.
-        cl['candidates']=sorted([r for r in cl['members'] if cdr(r)==cl['representative']],key=lambda r:(-r['max_contact_residues'],r['id']))
+        if len(cdr(r))>=16:
+            byseq[cdr(r)].append(r)
+
+    sequences=sorted(byseq,key=lambda s:(-len(s),s))
+    parent=list(range(len(sequences)))
+
+    def find(i):
+        while parent[i]!=i:
+            parent[i]=parent[parent[i]]
+            i=parent[i]
+        return i
+
+    def union(i,j):
+        ri,rj=find(i),find(j)
+        if ri!=rj:
+            parent[rj]=ri
+
+    for i,seq_i in enumerate(sequences):
+        for j in range(i):
+            seq_j=sequences[j]
+            if min(len(seq_i),len(seq_j))/max(len(seq_i),len(seq_j)) < CLUSTER_IDENTITY_THRESHOLD:
+                continue
+            if seqsim(seq_i,seq_j)>=CLUSTER_IDENTITY_THRESHOLD:
+                union(i,j)
+
+    components=collections.defaultdict(list)
+    for i,seq in enumerate(sequences):
+        components[find(i)].append(seq)
+
+    clusters=[]
+    ordered_components=sorted(
+        components.values(),
+        key=lambda seqs:(-max(len(s) for s in seqs),min(seqs)),
+    )
+    for i,seqs in enumerate(ordered_components):
+        representative=sorted(seqs,key=lambda s:(-len(s),s))[0]
+        members=[row for seq in seqs for row in byseq[seq]]
+        cl=dict(
+            representative=representative,
+            members=members,
+            sequences=sorted(seqs),
+            cluster_id=f'cdr40_{i:04d}',
+        )
+        cl['candidates']=sorted(
+            [r for r in members if cdr(r)==representative],
+            key=lambda r:(-r['max_contact_residues'],r['id']),
+        )
+        clusters.append(cl)
     return clusters
 
 def build_atoms(st, prefix='', identity_overrides=None):
