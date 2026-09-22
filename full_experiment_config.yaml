@@ -155,7 +155,7 @@ queue_freeze:
   graph_build:
     workers: 8
     # Scientific graph protocol. Changing any value requires a fresh dataset;
-    # graph v1.5 records these values in every .pt and run_summary.json.
+    # graph v1.6 records these values in every .pt and run_summary.json.
     interface_label_cutoff_angstrom: 5.0
     intra_chain_ca_cutoff_angstrom: 8.0
     cross_partner_knn_k: 3
@@ -380,7 +380,7 @@ structure_experiment:
 # ---------------------------------------------------------------------------
 # External validation / mature structural baselines.
 # These are real external dependencies; formal runs fail closed when required
-# inputs are absent. External VHH graphs must have been built with graph v1.5
+# inputs are absent. External VHH graphs must have been built with graph v1.6
 # and independently certified against the training family/structure cluster map.
 # ---------------------------------------------------------------------------
 external_validation:
