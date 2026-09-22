@@ -1490,10 +1490,9 @@ class Orchestrator:
         # ablation), not run_real_complex_pilot.py's per-target/per-seed CSV
         # layout (dev_queue/validation_queue) -- it errors ("No case JSON
         # artifacts") against the latter. The real-atom structural paired
-        # analysis (energy-down vs RMSD-up, within-target-then-across-target
-        # QAOA-vs-classical differences) is computed directly by
-        # generate_final_research_report.py from real_complex_metrics.csv /
-        # recovery_metrics.csv instead, in the "structural benefit" section.
+        # analysis is handled separately by analyze_structure_recovery.py
+        # using the pre-registered primary endpoint/contrast and cluster-aware
+        # energy-to-structure inference.
         results_dirs = [self.run_dir / "qc_benchmark"]
         logs, argvs, failures = [], [], []
         for results_dir in results_dirs:
@@ -1522,7 +1521,6 @@ class Orchestrator:
                 logs.append(str(log_path)); argvs.append(argv)
                 if returncode != 0:
                     failures.append(f"{results_dir.name}/{budget_mode} exited {returncode} (see {log_path})")
-        status = "completed_with_failures" if failures else "completed"
         validation_metrics = self.run_dir / "validation_queue" / "real_complex_metrics.csv"
         cluster_setting = cfg.get("cluster_map") or (
             (self.config["queue_freeze"].get("independence_clustering", {}) or {}).get("cluster_map")
@@ -1548,9 +1546,17 @@ class Orchestrator:
                 failures.append(f"structure statistics exited {returncode} (see {log_path})")
         elif not validation_metrics.is_file():
             failures.append(f"Missing validation structural metrics: {validation_metrics}")
+        else:
+            failures.append("Primary structural statistics require a frozen family/structure cluster map")
 
-        detail = "; ".join(failures) if failures else "Paired solver statistics plus primary structural/RQ5 analysis completed."
-        return StageResult("statistics", status, started, utc_timestamp(), 0, detail, argvs, ";".join(logs), True)
+        status = "failed" if failures else "completed"
+        detail = "; ".join(failures) if failures else (
+            "Paired solver statistics plus pre-registered primary structural/RQ5 analysis completed."
+        )
+        return StageResult(
+            "statistics", status, started, utc_timestamp(), 1 if failures else 0,
+            detail, argvs, ";".join(logs), not failures
+        )
 
     # ================================================================
     # Stage 8: final report
