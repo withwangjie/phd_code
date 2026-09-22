@@ -105,6 +105,7 @@ ORCHESTRATED_SCRIPTS: List[str] = [
     "audit_external_vhh_independence.py",
     "generate_final_research_report.py",
     "analyze_structure_recovery.py",
+    "analyze_quantum_scaling.py",
     "model_egnn_pruning.py",
     "subgraph_to_qubo.py",
     "qaoa_interface_sampler.py",
@@ -297,6 +298,8 @@ def _validate_scientific_config(config: Dict[str, Any]) -> None:
         raise ValueError("statistics.resamples must be >=1000")
     if int(stats.get("min_qc_clusters",10)) < 2:
         raise ValueError("statistics.min_qc_clusters must be >=2")
+    if int(stats.get("min_scaling_clusters",10)) < 2:
+        raise ValueError("statistics.min_scaling_clusters must be >=2")
     if str(stats.get("primary_qc_baseline","sa")) not in ("sa","uniform","greedy"):
         raise ValueError("statistics.primary_qc_baseline must be sa, uniform, or greedy")
     if str(stats.get("primary_qc_metric","gap")) not in (
@@ -1051,6 +1054,8 @@ class Orchestrator:
                 for mode in modes for suffix in ("json","md")
             ]
             paths += [
+                self.run_dir/"statistics"/"quantum_scaling_statistics.json",
+                self.run_dir/"statistics"/"quantum_scaling_statistics.md",
                 self.run_dir/"statistics"/"structure_statistics.json",
                 self.run_dir/"statistics"/"structure_statistics.md",
             ]
@@ -2818,6 +2823,44 @@ class Orchestrator:
                             f"{results_dir.name}/{budget_mode}: primary coarse contrast "
                             f"{cfg.get('primary_qc_baseline','sa')}/{cfg.get('primary_qc_metric','gap')} "
                             f"has {observed_clusters} independent clusters; requires >= {min_qc_clusters}")
+        scaling_json=self.run_dir/"statistics"/"quantum_scaling_statistics.json"
+        scaling_md=self.run_dir/"statistics"/"quantum_scaling_statistics.md"
+        scaling_json.parent.mkdir(parents=True,exist_ok=True)
+        cluster_path=self.frozen_cluster_map_path()
+        if cluster_path.is_file():
+            scaling_argv=[
+                self.venv_python,"analyze_quantum_scaling.py",
+                "--results-dir",str(self.run_dir/"qc_benchmark"),
+                "--cluster-map",str(cluster_path),
+                "--out-json",str(scaling_json),
+                "--out-md",str(scaling_md),
+                "--primary-pruning",primary_pruning,
+                "--primary-outputs",str(primary_outputs),
+                "--primary-objective",primary_objective,
+                "--primary-restarts",str(primary_restarts),
+                "--primary-depth",str(qc_cfg.get("depths",[2])[0]),
+                "--primary-max-evals",str(qc_cfg.get("max_evals",[90])[0]),
+                "--primary-radius",str(qc_cfg.get("radii",[6.0])[0]),
+                "--baseline",str(cfg.get("primary_qc_baseline","sa")),
+                "--active-sites",*[str(v) for v in qc_cfg.get("active_sites",[4,6,8,10])],
+                "--resamples",str(cfg.get("resamples",10000)),
+                "--seed",str(self.config["master_seed"]),
+            ]
+            scaling_rc,scaling_log=self._run_subprocess("quantum_scaling_statistics",scaling_argv)
+            logs.append(str(scaling_log));argvs.append(scaling_argv)
+            if scaling_rc!=0 or not scaling_json.is_file() or not scaling_md.is_file():
+                failures.append(f"quantum scaling statistics exited {scaling_rc} (see {scaling_log})")
+            else:
+                scaling_payload=json.loads(scaling_json.read_text(encoding="utf-8"))
+                scaling_clusters=int((scaling_payload.get("primary",{}) or {}).get("n_clusters",0) or 0)
+                min_scaling=int(cfg.get("min_scaling_clusters",10))
+                if scaling_clusters < min_scaling:
+                    failures.append(
+                        f"Scaling inference has {scaling_clusters} independent clusters; "
+                        f"requires >= {min_scaling}")
+        else:
+            failures.append(f"Quantum scaling statistics require run-local cluster map: {cluster_path}")
+
         validation_metrics = self.run_dir / "validation_queue" / "real_complex_metrics.csv"
         cluster_path=self.frozen_cluster_map_path()
         if validation_metrics.is_file() and cluster_path.is_file():
