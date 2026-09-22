@@ -56,7 +56,9 @@ def sign_flip_p(values: list[float]) -> float|None:
     return (extreme+1)/(trials+1)
 
 
-def grouped_primary(rows: list[dict], cluster_map: dict[str,str], endpoint: str) -> dict:
+def grouped_primary(
+    rows: list[dict], cluster_map: dict[str,str], endpoint: str, contrast: str
+) -> dict:
     by_target=defaultdict(lambda:defaultdict(list))
     for row in rows:
         method=row.get("method","")
@@ -64,21 +66,29 @@ def grouped_primary(rows: list[dict], cluster_map: dict[str,str], endpoint: str)
         value=row.get(endpoint)
         if method and target and value not in (None,"","None"):
             by_target[target][method].append(float(value))
+    baseline_map={
+        "qaoa_vs_sa":"sa",
+        "qaoa_vs_greedy":"greedy",
+        "qaoa_vs_uniform":"uniform",
+    }
+    if contrast not in baseline_map:
+        raise ValueError(f"Unsupported primary contrast: {contrast}")
+    baseline=baseline_map[contrast]
     by_cluster=defaultdict(list)
     excluded=[]
     for target,methods in sorted(by_target.items()):
-        if "qaoa" not in methods or "sa" not in methods:
+        if "qaoa" not in methods or baseline not in methods:
             excluded.append(target);continue
         if target not in cluster_map:
             raise ValueError(f"Missing cluster mapping for structural target {target}")
-        difference=float(np.mean(methods["qaoa"])-np.mean(methods["sa"]))
+        difference=float(np.mean(methods["qaoa"])-np.mean(methods[baseline]))
         by_cluster[cluster_map[target]].append(difference)
     cluster_values=[float(np.mean(values)) for _,values in sorted(by_cluster.items())]
     rng=np.random.default_rng(20260917)
     low,high=percentile_ci(cluster_values,rng,10000)
     return dict(
         endpoint=endpoint,
-        contrast="QAOA-SA; negative RMSD difference favours QAOA",
+        contrast=f"QAOA-{baseline}; sign interpretation depends on endpoint direction",
         n_targets=sum(len(v) for v in by_cluster.values()),
         n_clusters=len(cluster_values),
         mean_difference=(None if not cluster_values else float(np.mean(cluster_values))),
@@ -145,6 +155,8 @@ def main() -> int:
     parser.add_argument("--out-md",type=Path,required=True)
     parser.add_argument("--primary-endpoint",default="final_rmsd",
         choices=("final_rmsd","improvement_vs_input","improvement_vs_relax_only"))
+    parser.add_argument("--primary-contrast",default="qaoa_vs_sa",
+        choices=("qaoa_vs_sa","qaoa_vs_greedy","qaoa_vs_uniform"))
     parser.add_argument("--resamples",type=int,default=10000)
     parser.add_argument("--seed",type=int,default=20260917)
     args=parser.parse_args()
@@ -155,7 +167,7 @@ def main() -> int:
         raise ValueError("Structural metrics CSV is empty")
     raw=json.loads(args.cluster_map.read_text(encoding="utf-8"))
     cluster_map={str(k).lower():str(v) for k,v in raw.items()}
-    primary=grouped_primary(rows,cluster_map,args.primary_endpoint)
+    primary=grouped_primary(rows,cluster_map,args.primary_endpoint,args.primary_contrast)
     rq5=rq5_energy_structure(rows,cluster_map,args.resamples,args.seed)
     payload=dict(
         primary=primary,rq5=rq5,resamples=args.resamples,seed=args.seed,
@@ -166,7 +178,7 @@ def main() -> int:
     args.out_json.write_text(json.dumps(payload,indent=2,sort_keys=True)+"\n",encoding="utf-8")
     lines=[
         "# Structural primary endpoint and RQ5 analysis","",
-        f"Primary endpoint: `{args.primary_endpoint}`; contrast: QAOA - SA.",
+        f"Primary endpoint: `{args.primary_endpoint}`; contrast: `{args.primary_contrast}`.",
         f"Clusters: {primary['n_clusters']}; mean difference: {primary['mean_difference']}; "
         f"95% cluster-bootstrap CI: [{primary['ci_low']}, {primary['ci_high']}]; p={primary['p_value']}.","",
         "## Energy-to-structure transfer","",
