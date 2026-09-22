@@ -24,6 +24,17 @@ fi
 
 log "Python: $(command -v python)"
 python --version
+
+if [ -z "${QP_RESOLVED_CONFIG:-}" ]; then
+    mkdir -p "${SCRIPT_DIR}/.runtime"
+    CONFIG_FILE="${SCRIPT_DIR}/.runtime/resolved_runtime_config.yaml"
+    SERVER_REPORT="${SCRIPT_DIR}/.runtime/server_resolution.json"
+    python "${SCRIPT_DIR}/resolve_server_config.py" \
+        --scientific-config "${SCRIPT_DIR}/full_experiment_config.yaml" \
+        --server-config "${QP_SERVER_CONFIG:-${SCRIPT_DIR}/server_config.yaml}" \
+        --out-config "$CONFIG_FILE" \
+        --out-report "$SERVER_REPORT"
+fi
 if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     log "Git HEAD: $(git rev-parse HEAD)"
 fi
