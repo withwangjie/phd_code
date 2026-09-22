@@ -2095,11 +2095,16 @@ def _allatom_experiment_main(argv: Optional[Sequence[str]] = None) -> int:
                 print(f"Verified completed experiment: {out}");return 0
             raise ValueError("Completed artifacts changed or missing")
         print("Preparing complete atoms and Amber14 parameters",flush=True)
+        rotamer_cfg=case.get("rotamer_model",{}) or {}
         builder=AllAtomInterfaceQUBOBuilder(
             source,case["active_residues"],seed=args.seed,
             chi1_angles=case.get("chi1_angles"),
             site_scores=case.get("active_site_scores"),
-            candidate_relax_iterations=int(case.get("candidate_relax_iterations",0)))
+            candidate_relax_iterations=int(case.get("candidate_relax_iterations",0)),
+            rotamer_mode=rotamer_cfg.get("mode","legacy"),
+            rotamer_library_path=rotamer_cfg.get("library_path"),
+            rotamer_probability_floor=float(rotamer_cfg.get("probability_floor",1e-4)),
+            rotamer_sigma_offsets=rotamer_cfg.get("sigma_offsets",[-1.0,0.0,1.0]))
         builder.write_structure(builder.base_positions,out/"prepared_input.cif")
         # Candidate coordinates make reconstruction independently auditable.
         np.savez_compressed(out/"candidate_coordinates.npz",base_positions_nm=builder.base_positions,
@@ -2293,8 +2298,14 @@ def _recovery_benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
         if record.exists() and json.loads(record.read_text())!=provenance:
             raise ValueError("Recovery provenance changed; use a new output directory")
         _ablation_atomic_json(record,provenance)
-        generator=AllAtomInterfaceQUBOBuilder(native,case["active_residues"],
-            site_scores=case.get("active_site_scores"),seed=42)
+        rotamer_cfg=case.get("rotamer_model",{}) or {}
+        generator=AllAtomInterfaceQUBOBuilder(
+            native,case["active_residues"],
+            site_scores=case.get("active_site_scores"),seed=42,
+            rotamer_mode=rotamer_cfg.get("mode","legacy"),
+            rotamer_library_path=rotamer_cfg.get("library_path"),
+            rotamer_probability_floor=float(rotamer_cfg.get("probability_floor",1e-4)),
+            rotamer_sigma_offsets=rotamer_cfg.get("sigma_offsets",[-1.0,0.0,1.0]))
         with (out/"recovery_metrics.csv").open("w",newline="",encoding="utf-8") as handle:
             writer=None
             for idx, seed in enumerate(args.seeds):
