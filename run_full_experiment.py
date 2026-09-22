@@ -1431,8 +1431,12 @@ class Orchestrator:
                                  f"completed={summary.get('structure_experiment_completed_targets')} "
                                  f"failed={summary.get('structure_experiment_failed_targets')} (see {log_path})")
             elif summary.get("structure_experiment_failed_targets"):
-                queue_partial.append(f"{label}: completed with target failures "
-                                      f"{summary['structure_experiment_failed_targets']}")
+                message=(f"{label}: completed with target failures "
+                         f"{summary['structure_experiment_failed_targets']}")
+                if label=="validation_queue":
+                    failures.append(message+"; confirmatory queue must be complete")
+                else:
+                    queue_partial.append(message)
 
         # Pre-declared solvent sensitivity uses development targets only.
         # Validation remains on the frozen primary solvent protocol.
@@ -1577,6 +1581,24 @@ class Orchestrator:
                 if manifest.get("training_cluster_map_sha256") != current_cluster_sha:
                     ext_failures.append(
                         "External independence manifest is not bound to the current training cluster map"
+                    )
+                training_manifest=self.dataset_dir()/"graph_manifest.json"
+                current_training_manifest_sha=(
+                    sha256_of(training_manifest) if training_manifest.is_file() else None
+                )
+                if manifest.get("training_graph_manifest_sha256") != current_training_manifest_sha:
+                    ext_failures.append(
+                        "External independence manifest is not bound to the current training graph manifest"
+                    )
+                audit_hashes={
+                    str(row.get("graph_sha256",""))
+                    for row in (manifest.get("targets") or [])
+                    if row.get("graph_sha256")
+                }
+                current_external_hashes={sha256_of(path) for path in graph_dir.glob("*.pt")}
+                if audit_hashes != current_external_hashes:
+                    ext_failures.append(
+                        "External graph files do not match the graph hashes certified by independence manifest"
                     )
                 expected_homology={
                     "vhh_full_chain_identity":float(homology.get("vhh_full_chain_identity",0.80)),
