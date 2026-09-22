@@ -24,6 +24,58 @@ from subgraph_to_qubo import read_atomistic_structure, _SIDECHAIN_NAMES, AllAtom
 from seed_streams import derive_streams, derive_child_seed, save_stream_map, DEFAULT_MASTER_SEED
 
 
+def _load_frozen_target_ids(path: Path) -> list[str]:
+    """Load an immutable frozen-target allowlist with strict validation.
+
+    The file may be a JSON list of PDB-id strings or the earlier
+    selected_targets.json list of dictionaries carrying target/pdb_id.
+    IDs are normalized to lowercase, but duplicates, empty IDs and malformed
+    entries fail closed rather than silently shrinking the formal denominator.
+    """
+    raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(raw, list) or not raw:
+        raise ValueError("Frozen target file must contain a nonempty JSON list")
+    target_ids: list[str] = []
+    for index, entry in enumerate(raw):
+        if isinstance(entry, str):
+            value = entry
+        elif isinstance(entry, dict):
+            value = entry.get("target") or entry.get("pdb_id")
+        else:
+            raise ValueError(f"Frozen target entry {index} must be a string or object")
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"Frozen target entry {index} has no target/pdb_id")
+        target_ids.append(value.strip().lower())
+    if len(target_ids) != len(set(target_ids)):
+        raise ValueError("Frozen target file contains duplicate PDB IDs")
+    return target_ids
+
+
+def _reconcile_frozen_targets(
+    frozen_target_ids: list[str],
+    execution_selected_ids: set[str],
+    runtime_failed_ids: set[str],
+) -> tuple[list[str], list[str], bool]:
+    """Account for every frozen target exactly once as completed or failed.
+
+    Any frozen target that disappears during formal re-preparation is a
+    pre-execution failure, never a silent denominator reduction. Targets not
+    present in the frozen set fail closed.
+    """
+    frozen = set(frozen_target_ids)
+    selected = {str(x).lower() for x in execution_selected_ids}
+    runtime_failed = {str(x).lower() for x in runtime_failed_ids}
+    if not selected <= frozen:
+        raise ValueError(f"Execution selected targets outside frozen set: {sorted(selected - frozen)}")
+    if not runtime_failed <= selected:
+        raise ValueError(f"Runtime failures outside execution-selected set: {sorted(runtime_failed - selected)}")
+    pre_execution_failed = frozen - selected
+    failed = pre_execution_failed | runtime_failed
+    completed = selected - runtime_failed
+    closed = (completed | failed) == frozen and not (completed & failed)
+    return sorted(completed), sorted(failed), closed
+
+
 def identity(a: str, b: str, threshold: float = .8) -> float:
     """Global identity over alignment length; length bound only rejects >=threshold."""
     if min(len(a), len(b)) / max(len(a), len(b)) < threshold:
@@ -248,11 +300,15 @@ def main(argv=None) -> int:
     rows = list(csv.DictReader(manifest.open(encoding="utf-8-sig")))
     training = [r for r in rows if r["split"] == "train"]
     candidates = sorted([r for r in rows if r["split"] == "test_snac_hard"], key=lambda r: (int(r["nodes"]),r["pdb_id"],r["path"]))
+    frozen_target_ids = None
+    frozen_target_set = None
+    missing_frozen_from_manifest: list[str] = []
     if args.pdb_allowlist_file:
-        raw_allowlist = json.loads(args.pdb_allowlist_file.read_text(encoding="utf-8"))
-        allowlist = {(entry if isinstance(entry, str) else entry.get("target") or entry.get("pdb_id")).lower()
-                     for entry in raw_allowlist}
-        candidates = [r for r in candidates if r["pdb_id"].lower() in allowlist]
+        frozen_target_ids = _load_frozen_target_ids(args.pdb_allowlist_file)
+        frozen_target_set = set(frozen_target_ids)
+        manifest_candidate_ids = {r["pdb_id"].lower() for r in candidates}
+        missing_frozen_from_manifest = sorted(frozen_target_set - manifest_candidate_ids)
+        candidates = [r for r in candidates if r["pdb_id"].lower() in frozen_target_set]
     excluded_pdb = {x.lower() for x in args.exclude_pdb}
     if args.exclude_pdb_file:
         excluded_pdb |= {line.strip().lower() for line in args.exclude_pdb_file.read_text(encoding="utf-8").splitlines() if line.strip()}
@@ -278,6 +334,7 @@ def main(argv=None) -> int:
         ("run_real_complex_pilot.py","batch_benchmark_hard_set.py","subgraph_to_qubo.py","qaoa_interface_sampler.py",
          "structural_quality.py","prediction_contract.py","evaluate_complex_metrics.py")},
         checkpoint_sha256=_ablation_digest(args.checkpoint) if args.pruning=='egnn' else None,
+        pdb_allowlist_sha256=_ablation_digest(args.pdb_allowlist_file) if args.pdb_allowlist_file else None,
         resolved_target_filter=requested_pdb)
     with FileLock(str(out/".lock"),timeout=0):
         stamp=out/"run_manifest.json"
@@ -301,6 +358,15 @@ def main(argv=None) -> int:
         train_pdb={r["pdb_id"].lower() for r in training}
         train_cdr=sorted({r["cdr3_seq"] for r in training if r["cdr3_seq"]})
         selected=[]; decisions=[]; test_seqs=[]; seen=set()
+        for pdb in missing_frozen_from_manifest:
+            decisions.append(dict(
+                pdb_id=pdb, status="excluded",
+                reason="Frozen target absent from current test_snac_hard manifest",
+                development_exposed=pdb in dev_exposed_pdb,
+                independence_status="frozen_target_missing_from_manifest",
+            ))
+        if decisions:
+            _ablation_atomic_json(out/"eligibility.json", decisions)
         for row in tqdm(candidates,desc="Real complex eligibility"):
             if args.targets and len(selected)>=args.targets: break
             pdb=row["pdb_id"].lower()
@@ -386,9 +452,12 @@ def main(argv=None) -> int:
                     chain_identity_audit=chain_identity_audit,cdr3_identity=cdr3_identity))
             _ablation_atomic_json(out/"eligibility.json",decisions)
         _ablation_atomic_json(out/"selected_targets.json",selected)
-        if not selected:
+        execution_selected_ids = {case["target"].lower() for case in selected}
+        if frozen_target_set is not None and not execution_selected_ids <= frozen_target_set:
+            raise ValueError("Formal execution selected a target outside the frozen target set")
+        if not selected and frozen_target_set is None:
             raise ValueError('No eligible targets; inspect eligibility.json')
-        results=[];failed=[]
+        results=[]; runtime_failed=[]
         if not args.prepare_only:
             for case in selected:
                 pdb=case["target"]
@@ -417,9 +486,9 @@ def main(argv=None) -> int:
                            "--qaoa-objective",args.qaoa_objective,"--cvar-alpha",str(args.cvar_alpha),
                            "--parameter-scale",args.parameter_scale] if args.robust_qaoa else [])])
                     results.extend(csv.DictReader((destination/"recovery_metrics.csv").open(encoding="utf-8")))
-                    if status: failed.append(pdb)
+                    if status: runtime_failed.append(pdb)
                 except Exception:
-                    failed.append(pdb)
+                    runtime_failed.append(pdb)
                     with (out/"failures.log").open("a",encoding="utf-8") as f: f.write(pdb+"\n"+traceback.format_exc())
         if results:
             with (out/"real_complex_metrics.csv").open("w",newline="",encoding="utf-8") as f:
@@ -430,20 +499,38 @@ def main(argv=None) -> int:
         # not assumed, so a process killed mid-loop (leaving some selected
         # targets neither attempted nor recorded) is visible as a MISSING
         # run_summary.json rather than a false "completed".
-        completed_targets=len(selected)-len(failed)
+        runtime_failed_ids = {p.lower() for p in runtime_failed}
+        if frozen_target_ids is not None:
+            completed_target_ids, failed_target_ids, closed = _reconcile_frozen_targets(
+                frozen_target_ids, execution_selected_ids, runtime_failed_ids)
+            accounting_target_ids = sorted(frozen_target_set)
+        else:
+            failed_target_ids = sorted(runtime_failed_ids)
+            completed_target_ids = sorted(execution_selected_ids - runtime_failed_ids)
+            accounting_target_ids = sorted(execution_selected_ids)
+            closed = (
+                set(completed_target_ids) | set(failed_target_ids) == set(accounting_target_ids)
+                and not (set(completed_target_ids) & set(failed_target_ids))
+            )
+        completed_targets=len(completed_target_ids)
         _ablation_atomic_json(out/"run_summary.json", dict(
             examined_candidates=len(decisions), qualifying_pool_size=len(candidates),
             target_cap=args.targets or None, selected_targets=len(selected),
+            frozen_target_ids=sorted(frozen_target_set) if frozen_target_set is not None else None,
+            frozen_target_count=len(frozen_target_set) if frozen_target_set is not None else None,
+            execution_selected_target_ids=sorted(execution_selected_ids),
             structure_experiment_completed_targets=completed_targets,
-            structure_experiment_failed_targets=sorted(failed),
-            closed=(completed_targets+len(failed)==len(selected))))
+            structure_experiment_completed_target_ids=completed_target_ids,
+            structure_experiment_failed_targets=failed_target_ids,
+            frozen_set_accounting_ok=closed if frozen_target_set is not None else None,
+            closed=closed))
         coverage_pct = (len(selected)/len(decisions)*100) if decisions else 0.0
         report=["# Real VHH retrospective side-chain recovery pilot", "",
             f"Queue role: {args.queue_role}. Selection order: {args.selection_order}{' (seed '+str(args.selection_seed)+')' if args.selection_order=='seeded_random' else ''}. "
             f"Excluded PDBs: {sorted(excluded_pdb) or 'none'}.",
             f"Target cap: {args.targets or 'unlimited (all qualifying targets)'}; qualifying candidate pool: {len(candidates)}; "
             f"examined {len(decisions)}; selected {len(selected)} (coverage of examined pool: {coverage_pct:.1f}%); "
-            f"structural experiment completed {completed_targets}, failed {sorted(failed)}.",
+            f"structural experiment completed {completed_targets}, failed {failed_target_ids}.",
             "Input is native backbone/pose plus perturbed Active chi1. Active selection uses native interface contacts. This is an oracle-conditioned retrospective prediction task, not blind docking or CDR-H3 backbone prediction.",
             "Chi1 grids seed candidates. Candidate-local and final relaxation may move all atoms downstream of CA-CB; backbone and background remain frozen. Discrete optimization selects the prepared candidate combinations.",
             "All methods share input/candidates, read budget and relaxation. CPU cost is not equal. Reference structure evaluates accuracy but never selects solver output.",
@@ -459,7 +546,8 @@ def main(argv=None) -> int:
         report += ["", "Eligibility and every exclusion reason are in eligibility.json; no replacement based on solver results. Failed/incomplete targets remain listed. Target means weight seeds within each target first. No significance or quantum advantage is inferred from a small pilot."]
         (out/"real_complex_report.md").write_text("\n".join(report),encoding="utf-8")
         print(out/"real_complex_report.md")
-        return int(bool(failed) or len(selected)<args.targets)
+        return int(bool(failed_target_ids) or
+                   (frozen_target_set is None and bool(args.targets) and len(selected)<args.targets))
 
 
 if __name__=="__main__":
