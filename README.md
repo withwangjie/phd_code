@@ -151,7 +151,7 @@ train/test exclusion, validation-queue eligibility, and cluster-level
 statistics. Missing required cluster metadata fails closed.
 
 The formal pipeline also has an external-validation stage. It requires an
-independently certified graph-v1.5 VHH dataset and runs the frozen EGNN,
+independently certified graph-v1.6 VHH dataset and runs the frozen EGNN,
 calibrated coarse model, and primary solver protocol without refitting.
 FASPR is supported as a mature biological side-chain packing baseline and
 Phenix clashscore as a standard steric-quality diagnostic. These are
