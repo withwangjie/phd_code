@@ -44,8 +44,19 @@ nvidia-smi -L
 export FORMAL_MIN_FREE_DISK_GB="${FORMAL_MIN_FREE_DISK_GB:-50}"
 export FORMAL_MIN_AVAILABLE_RAM_GB="${FORMAL_MIN_AVAILABLE_RAM_GB:-16}"
 
-log "Running 2-rank DDP/NCCL all-reduce probe..."
+DDP_RANKS="$(python - <<'PY'
+import yaml
+from pathlib import Path
+cfg = yaml.safe_load(Path("full_experiment_config.yaml").read_text(encoding="utf-8"))
+print(int(cfg.get("egnn_train", {}).get("nproc_per_node", 1)))
+PY
+)"
+if [ "$DDP_RANKS" -lt 2 ]; then
+    fail "Formal training requires at least 2 DDP ranks for this protocol; config has ${DDP_RANKS}."
+fi
+log "Running ${DDP_RANKS}-rank DDP/NCCL all-reduce probe..."
 DDP_PROBE="$(mktemp "${TMPDIR:-/tmp}/formal_ddp_probe.XXXXXX.py")"
+trap 'rm -f "$DDP_PROBE"' EXIT
 cat >"$DDP_PROBE" <<'PY'
 import os
 import torch
@@ -66,8 +77,9 @@ if abs(x.item() - expected) > 1e-6:
 print(f"DDP/NCCL rank {rank}/{world_size} on cuda:{local_rank}: all_reduce={x.item()} OK", flush=True)
 dist.destroy_process_group()
 PY
-python -m torch.distributed.run --standalone --nproc-per-node=2 "$DDP_PROBE"
+python -m torch.distributed.run --standalone --nproc-per-node="$DDP_RANKS" "$DDP_PROBE"
 rm -f "$DDP_PROBE"
+trap - EXIT
 
 log "Running CUDA/OpenMM/resource probes..."
 python - <<'PY'
