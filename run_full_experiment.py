@@ -248,6 +248,58 @@ def _validate_scientific_config(config: Dict[str, Any]) -> None:
         if any(not math.isfinite(float(v)) for v in offsets):
             raise ValueError("Dunbrack sigma offsets must be finite")
 
+    if clustering.get("required", False):
+        pair_tsv=clustering.get("pair_tsv")
+        if not clustering.get("cluster_map"):
+            raise ValueError("independence_clustering.cluster_map is required")
+        if pair_tsv is not None:
+            min_score=float(clustering.get("min_score",0.50))
+            if not math.isfinite(min_score):
+                raise ValueError("independence_clustering.min_score must be finite")
+            for key in ("query_column","target_column","score_column"):
+                if int(clustering.get(key,0)) < 0:
+                    raise ValueError(f"independence_clustering.{key} must be nonnegative")
+
+    solvent_model=str(structure.get("solvent_model","vacuum")).lower()
+    if solvent_model not in ("vacuum","gbn2"):
+        raise ValueError("structure_experiment.solvent_model must be vacuum or gbn2")
+    sensitivity=[str(v).lower() for v in structure.get("solvent_sensitivity",[])]
+    if any(v not in ("vacuum","gbn2") for v in sensitivity):
+        raise ValueError("structure_experiment.solvent_sensitivity supports only vacuum/gbn2")
+    if len(sensitivity)!=len(set(sensitivity)):
+        raise ValueError("structure_experiment.solvent_sensitivity must not contain duplicates")
+    if str(structure.get("perturbation_mode","multi_chi")) not in ("multi_chi","chi1"):
+        raise ValueError("structure_experiment.perturbation_mode must be multi_chi or chi1")
+    seeds=[int(v) for v in structure.get("seeds",[42,43,44,45,46])]
+    if len(seeds)<3 or len(seeds)!=len(set(seeds)) or min(seeds)<0:
+        raise ValueError("structure_experiment.seeds must contain >=3 unique nonnegative values")
+    if int(qc.get("repeats",10)) < 3:
+        raise ValueError("qc_benchmark.repeats must be >=3")
+
+    stats=config.get("statistics",{}) or {}
+    if stats.get("primary_structural_endpoint","final_rmsd") not in (
+        "final_rmsd","improvement_vs_input","improvement_vs_relax_only"
+    ):
+        raise ValueError("Invalid statistics.primary_structural_endpoint")
+    if stats.get("primary_structural_contrast","qaoa_vs_sa") not in (
+        "qaoa_vs_sa","qaoa_vs_greedy","qaoa_vs_uniform"
+    ):
+        raise ValueError("Invalid statistics.primary_structural_contrast")
+    if int(stats.get("resamples",10000)) < 1000:
+        raise ValueError("statistics.resamples must be >=1000")
+
+    external=config.get("external_validation",{}) or {}
+    if external.get("required",False):
+        ext=external.get("external_vhh",{}) or {}
+        structural=external.get("structural_baselines",{}) or {}
+        if ext.get("required",False) and not ext.get("graph_dir"):
+            raise ValueError("external_validation.external_vhh.graph_dir is required")
+        if ext.get("required",False) and not ext.get("independence_manifest"):
+            raise ValueError("external_validation.external_vhh.independence_manifest is required")
+        if structural.get("required",False):
+            if not structural.get("faspr_executable") or not structural.get("phenix_clashscore_executable"):
+                raise ValueError("Required structural baseline executables must be configured")
+
     calibration_cfg = qc.get("energy_calibration", {}) or {}
     mode = str(calibration_cfg.get("mode", "frozen"))
     if mode not in ("frozen", "off"):
