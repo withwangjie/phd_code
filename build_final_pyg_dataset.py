@@ -33,12 +33,12 @@ BASE = pathlib.Path(__file__).resolve().parent
 AA = 'ACDEFGHIKLMNPQRSTVWY'
 AA_INDEX = {a:i for i,a in enumerate(AA)}
 SEED = 20260917
-CLUSTER_IDENTITY_THRESHOLD = 0.40
+CDR_H3_IDENTITY_THRESHOLD = 0.50
 INTERFACE_LABEL_CUTOFF_ANGSTROM = 5.0
 INTRA_CHAIN_CA_CUTOFF_ANGSTROM = 8.0
 CROSS_PARTNER_KNN_K = 3
 MIN_INTERFACE_RESIDUES = 15
-VERSION = '1.3'
+VERSION = '1.4'
 PROCESS = psutil.Process()
 PEAK_RSS = 0
 MEMORY_LOCK = threading.Lock()
@@ -66,7 +66,7 @@ def write_csv(path, records, fields):
 def similarity(a,b):
     """Symmetric global identity, exact matches / alignment length incl. gaps."""
     if a==b:return 1.0
-    if not a or not b or min(len(a),len(b))/max(len(a),len(b)) < CLUSTER_IDENTITY_THRESHOLD:return 0.0
+    if not a or not b or min(len(a),len(b))/max(len(a),len(b)) < CDR_H3_IDENTITY_THRESHOLD:return 0.0
     r=parasail.nw_stats_striped_16(a,b,10,1,parasail.blosum62)
     s=parasail.nw_stats_striped_16(b,a,10,1,parasail.blosum62)
     if r.saturated or s.saturated:raise ValueError('alignment score saturation')
@@ -103,7 +103,7 @@ def load_inputs(root):
     return rows,pairs,{p.name:sha256(p) for p in paths}
 
 def cluster_long(rows):
-    """Cluster long CDR-H3 sequences by 40%-identity connected components."""
+    """Cluster long CDR-H3 sequences by the configured identity threshold."""
     byseq=collections.defaultdict(list)
     for r in rows:
         if len(cdr(r))>=16:
@@ -126,9 +126,9 @@ def cluster_long(rows):
     for i,seq_i in enumerate(sequences):
         for j in range(i):
             seq_j=sequences[j]
-            if min(len(seq_i),len(seq_j))/max(len(seq_i),len(seq_j)) < CLUSTER_IDENTITY_THRESHOLD:
+            if min(len(seq_i),len(seq_j))/max(len(seq_i),len(seq_j)) < CDR_H3_IDENTITY_THRESHOLD:
                 continue
-            if seqsim(seq_i,seq_j)>=CLUSTER_IDENTITY_THRESHOLD:
+            if seqsim(seq_i,seq_j)>=CDR_H3_IDENTITY_THRESHOLD:
                 union(i,j)
 
     components=collections.defaultdict(list)
@@ -147,7 +147,7 @@ def cluster_long(rows):
             representative=representative,
             members=members,
             sequences=sorted(seqs),
-            cluster_id=f'cdr40_{i:04d}',
+            cluster_id=f'cdr{int(round(CDR_H3_IDENTITY_THRESHOLD*100)):02d}_{i:04d}',
         )
         cl['candidates']=sorted(
             [r for r in members if cdr(r)==representative],
@@ -155,6 +155,23 @@ def cluster_long(rows):
         )
         clusters.append(cl)
     return clusters
+
+def _dihedral_degrees(a, b, c, d):
+    """Signed torsion in degrees for four Cartesian points."""
+
+    p0,p1,p2,p3=(np.asarray(x,dtype=np.float64) for x in (a,b,c,d))
+    b0=-(p1-p0); b1=p2-p1; b2=p3-p2
+    norm=np.linalg.norm(b1)
+    if norm <= 1e-12:
+        return math.nan
+    b1=b1/norm
+    v=b0-np.dot(b0,b1)*b1
+    w=b2-np.dot(b2,b1)*b1
+    if np.linalg.norm(v)<=1e-12 or np.linalg.norm(w)<=1e-12:
+        return math.nan
+    x=np.dot(v,w); y=np.dot(np.cross(b1,v),w)
+    return float(np.degrees(np.arctan2(y,x)))
+
 
 def build_atoms(st, prefix='', identity_overrides=None):
     """Full protein residue nodes; recheck every retained heavy-atom residue."""
@@ -179,9 +196,20 @@ def build_atoms(st, prefix='', identity_overrides=None):
             if key in seen:raise ValueError(f'ambiguous duplicate residue ID: {chain.name}:{key}')
             seen.add(key)
             ca=atoms['CA'].pos
-            nodes.append(dict(aa=aa,pos=(ca.x,ca.y,ca.z),residue_id=prefix+chain.name+':'+key,name=res.name))
+            nodes.append(dict(
+                aa=aa,pos=(ca.x,ca.y,ca.z),residue_id=prefix+chain.name+':'+key,name=res.name,
+                n=(atoms['N'].pos.x,atoms['N'].pos.y,atoms['N'].pos.z),
+                c=(atoms['C'].pos.x,atoms['C'].pos.y,atoms['C'].pos.z),
+                phi=math.nan,psi=math.nan,
+            ))
             for atom in atoms.values():
                 heavy.append((atom.pos.x,atom.pos.y,atom.pos.z));owners.append(len(nodes)-1)
+        for idx,node in enumerate(nodes):
+            ca=np.asarray(node['pos'],dtype=np.float64)
+            if idx>0:
+                node['phi']=_dihedral_degrees(nodes[idx-1]['c'],node['n'],ca,node['c'])
+            if idx+1<len(nodes):
+                node['psi']=_dihedral_degrees(node['n'],ca,node['c'],nodes[idx+1]['n'])
         if nodes:chains.append(dict(name=prefix+chain.name,original_name=chain.name,nodes=nodes,xyz=np.array(heavy),owners=np.array(owners,dtype=np.int64)))
     if not chains:raise ValueError('no amino acid nodes')
     if len({c['name'] for c in chains})!=len(chains):raise ValueError('ambiguous duplicate chain IDs')
@@ -306,8 +334,11 @@ def make_graph(row, split, pair=None):
     chain_sequences=[''.join(r['aa'] for r in c['nodes']) for c in chains]
     vhh_sequences=[s for s,c in zip(chain_sequences,chains) if c['group']==0]
     antigen_sequences=[s for s,c in zip(chain_sequences,chains) if c['group']==1]
+    backbone_phi=np.asarray([r['phi'] for r in nodes],dtype=np.float32)
+    backbone_psi=np.asarray([r['psi'] for r in nodes],dtype=np.float32)
     graph=Data(pos=torch.from_numpy(pos),x=torch.from_numpy(x),edge_index=torch.from_numpy(edge),
         interface_label=torch.from_numpy(heavy_atom_interface_label),
+        backbone_phi=torch.from_numpy(backbone_phi),backbone_psi=torch.from_numpy(backbone_psi),
         pdb_id=row['pdb_id'].upper(),subset_source=row['subset'],cdr3_seq=seq,cdr3_len=len(seq),num_interface_residues=interface,
         split=split,source_id=row['id'],node_chain_id=torch.tensor(chainidx,dtype=torch.long),chain_ids=[c['name'] for c in chains],
         chain_groups=[c['group'] for c in chains],residue_ids=[r['residue_id'] for r in nodes],
@@ -331,6 +362,9 @@ def validate_graph(g):
     n=g.num_nodes;e=g.edge_index
     assert isinstance(g,Data) and g.pos.shape==(n,3) and g.pos.dtype==torch.float32
     assert g.x.shape==(n,21) and g.x.dtype==torch.float32 and e.dtype==torch.long and e.shape[0]==2
+    assert g.backbone_phi.shape==(n,) and g.backbone_psi.shape==(n,)
+    assert torch.all(torch.isfinite(g.backbone_phi)|torch.isnan(g.backbone_phi))
+    assert torch.all(torch.isfinite(g.backbone_psi)|torch.isnan(g.backbone_psi))
     assert torch.isfinite(g.pos).all() and torch.isfinite(g.x).all()
     assert torch.all(g.x[:,:20].sum(1)==1) and torch.all((g.x==0)|(g.x==1))
     assert set(g.x[:,20].tolist())=={0.0,1.0}
@@ -410,10 +444,10 @@ def delivery_report(output,manifest,exclusions,failures,summary,complete):
     lines += ['', '## 4. 清洗、切分与去冗余','', '| 来源 | 审计候选 | 同时通过硬过滤 |','|---|---:|---:|']
     for src,counts in summary.get('admission',{}).items():lines.append(f'| {src} | {counts["input"]} | {counts["eligible"]} |')
     lines += ['',f'- DB5.5目标：248个主链完整且界面通过的bound受体–配体对；实际交付 {sum(r["split"]=="test_db55" for r in manifest)}。',
-        f'- SNAC长CDR-H3：{summary.get("long_eligible",0)}条非DB5.5重叠候选，{summary.get("unique_long_cdr",0)}条唯一序列，{CLUSTER_IDENTITY_THRESHOLD*100:.0f}%代表簇 {summary.get("clusters",0)} 个；固定随机种子 {SEED} 选取目标400个，实际 {sum(r["split"]=="test_snac_hard" for r in manifest)}。',
+        f'- SNAC长CDR-H3：{summary.get("long_eligible",0)}条非DB5.5重叠候选，{summary.get("unique_long_cdr",0)}条唯一序列，{CDR_H3_IDENTITY_THRESHOLD*100:.0f}%代表簇 {summary.get("clusters",0)} 个；固定随机种子 {SEED} 选取目标400个，实际 {sum(r["split"]=="test_snac_hard" for r in manifest)}。',
         '- 去冗余口径由用户确认：仅CDR-H3；全局Needleman–Wunsch、BLOSUM62、gap-open=10、gap-extend=1，相同残基数/含gap的比对长度达到配置的identity阈值时才进入精确相似性判定。取正反向比对身份率较大值，避免最优比对并列导致方向差异。',
-        f'- 贪心按CDR长度降序、序列字典序选代表，代表间身份率均<{CLUSTER_IDENTITY_THRESHOLD:.2f}；每簇仅一个代表进入挑战集。代表同序列多个结构优先选审计接触数较大的条目。固定种子打乱簇顺序，构图失败时尝试同代表序列的其他结构，再补选其他簇。',
-        f'- 用户确认隔离泄漏：训练集排除两组测试的同PDB ID条目；排除CDR-H3与挑战集任一代表身份率≥{CLUSTER_IDENTITY_THRESHOLD:.2f}的条目。RCSB也保守检查本地同PDB的已知VHH CDR标注。被隔离的簇成员不回流训练集。',
+        f'- 贪心按CDR长度降序、序列字典序选代表，代表间身份率均<{CDR_H3_IDENTITY_THRESHOLD:.2f}；每簇仅一个代表进入挑战集。代表同序列多个结构优先选审计接触数较大的条目。固定种子打乱簇顺序，构图失败时尝试同代表序列的其他结构，再补选其他簇。',
+        f'- 用户确认隔离泄漏：训练集排除两组测试的同PDB ID条目；排除CDR-H3与挑战集任一代表身份率≥{CDR_H3_IDENTITY_THRESHOLD:.2f}的条目。RCSB也保守检查本地同PDB的已知VHH CDR标注。被隔离的簇成员不回流训练集。',
         '- 硬过滤和隔离的数量可能重叠；逐样本多原因记录见 `excluded_samples.csv`。SAbDab 847是身份通过数，叠加物理条件后为708，不按847强行入库。',
         '- 本切分保证已核验的PDB与CDR层面隔离，不声称抗原家族、全长VHH同源性或未知免疫链的完全独立。未标注的RCSB隐含VHH仍需更深入序列注释排查。',
         '', '| 排除原因（可重叠） | 条目数 |','|---|---:|']
@@ -434,7 +468,7 @@ def delivery_report(output,manifest,exclusions,failures,summary,complete):
         f'- 总执行时间：{summary.get("elapsed_seconds",0):.1f}秒；torch {torch.__version__}、PyG {torch_geometric.__version__}、Gemmi {gemmi.__version__}、parasail {parasail.__version__}。','',
         '## 7. 验证与异常清单','',
         f'- 每个.pt保存后重新加载并校验Data类型、张量形状/类型、one-hot、坐标有限性、边索引范围、双向对称、无自环/重复边、同链严格{INTRA_CHAIN_CA_CUTOFF_ANGSTROM:.2f}Å阈值、跨伙伴固定KNN策略及≥{MIN_INTERFACE_RESIDUES}界面准入。',
-        f'- 最终检查测试CDR代表两两<{CLUSTER_IDENTITY_THRESHOLD*100:.0f}%、训练/测试PDB互斥、已知训练CDR与挑战CDR<{CLUSTER_IDENTITY_THRESHOLD*100:.0f}%、图文件数量与清单一致，并实测PyG Batch批处理。',
+        f'- 最终检查测试CDR代表两两<{CDR_H3_IDENTITY_THRESHOLD*100:.0f}%、训练/测试PDB互斥、已知训练CDR与挑战CDR<{CDR_H3_IDENTITY_THRESHOLD*100:.0f}%、图文件数量与清单一致，并实测PyG Batch批处理。',
         f'- 解析、编码或内存异常跳过共 {len(failures)} 条；不含正常的审计过滤及泄漏隔离。',
         '', '| 分流 | PDB | 条目 | 类型 | 说明 |','|---|---|---|---|---|']
     for r in failures:lines.append(f'| {r.get("split", "运行")} | {r.get("pdb_id", "")} | {r.get("source_id", "")} | {r["reason"]} | {r["detail"].replace(chr(124),"/").replace(chr(10)," ")} |')
@@ -453,16 +487,16 @@ def delivery_report(output,manifest,exclusions,failures,summary,complete):
     (output/'graph_dataset_delivery_report.md').write_text('\n'.join(lines)+'\n',encoding='utf-8')
 
 def main():
-    global RESUME, PEAK_RSS, CLUSTER_IDENTITY_THRESHOLD
+    global RESUME, PEAK_RSS, CDR_H3_IDENTITY_THRESHOLD
     global INTERFACE_LABEL_CUTOFF_ANGSTROM, INTRA_CHAIN_CA_CUTOFF_ANGSTROM
     global CROSS_PARTNER_KNN_K, MIN_INTERFACE_RESIDUES
-    parser=argparse.ArgumentParser();parser.add_argument('--out',type=pathlib.Path,default=BASE/'dataset_clean_500');parser.add_argument('--workers',type=int,default=2);parser.add_argument('--target-hard',type=int,default=500);parser.add_argument('--no-cap',action='store_true',help='Process every qualifying, deduplicated, isolated CDR-H3 cluster instead of capping at --target-hard.');parser.add_argument('--partition-seed',type=int,default=None,help='Override the module SEED for cluster shuffle order (e.g. an independently-derived partition stream); defaults to SEED when omitted.');parser.add_argument('--audit-dir',type=pathlib.Path,default=BASE);parser.add_argument('--data-root',type=pathlib.Path,default=BASE/'data');parser.add_argument('--identity-threshold',type=float,default=CLUSTER_IDENTITY_THRESHOLD);parser.add_argument('--interface-label-cutoff',type=float,default=INTERFACE_LABEL_CUTOFF_ANGSTROM);parser.add_argument('--intra-chain-ca-cutoff',type=float,default=INTRA_CHAIN_CA_CUTOFF_ANGSTROM);parser.add_argument('--cross-partner-knn-k',type=int,default=CROSS_PARTNER_KNN_K);parser.add_argument('--min-interface-residues',type=int,default=MIN_INTERFACE_RESIDUES);parser.add_argument('--resume',action='store_true');args=parser.parse_args();RESUME=args.resume
-    if not (0.0 < args.identity_threshold < 1.0): parser.error('--identity-threshold must be in (0,1)')
+    parser=argparse.ArgumentParser();parser.add_argument('--out',type=pathlib.Path,default=BASE/'dataset_clean_500');parser.add_argument('--workers',type=int,default=2);parser.add_argument('--target-hard',type=int,default=500);parser.add_argument('--no-cap',action='store_true',help='Process every qualifying, deduplicated, isolated CDR-H3 cluster instead of capping at --target-hard.');parser.add_argument('--partition-seed',type=int,default=None,help='Override the module SEED for cluster shuffle order (e.g. an independently-derived partition stream); defaults to SEED when omitted.');parser.add_argument('--audit-dir',type=pathlib.Path,default=BASE);parser.add_argument('--data-root',type=pathlib.Path,default=BASE/'data');parser.add_argument('--cdr-h3-identity-threshold',type=float,default=CDR_H3_IDENTITY_THRESHOLD);parser.add_argument('--interface-label-cutoff',type=float,default=INTERFACE_LABEL_CUTOFF_ANGSTROM);parser.add_argument('--intra-chain-ca-cutoff',type=float,default=INTRA_CHAIN_CA_CUTOFF_ANGSTROM);parser.add_argument('--cross-partner-knn-k',type=int,default=CROSS_PARTNER_KNN_K);parser.add_argument('--min-interface-residues',type=int,default=MIN_INTERFACE_RESIDUES);parser.add_argument('--resume',action='store_true');args=parser.parse_args();RESUME=args.resume
+    if not (0.0 < args.cdr_h3_identity_threshold < 1.0): parser.error('--identity-threshold must be in (0,1)')
     if not (math.isfinite(args.interface_label_cutoff) and args.interface_label_cutoff > 0): parser.error('--interface-label-cutoff must be positive finite')
     if not (math.isfinite(args.intra_chain_ca_cutoff) and args.intra_chain_ca_cutoff > 0): parser.error('--intra-chain-ca-cutoff must be positive finite')
     if args.cross_partner_knn_k < 1: parser.error('--cross-partner-knn-k must be >=1')
     if args.min_interface_residues < 1: parser.error('--min-interface-residues must be >=1')
-    CLUSTER_IDENTITY_THRESHOLD=float(args.identity_threshold)
+    CDR_H3_IDENTITY_THRESHOLD=float(args.identity_threshold)
     INTERFACE_LABEL_CUTOFF_ANGSTROM=float(args.interface_label_cutoff)
     INTRA_CHAIN_CA_CUTOFF_ANGSTROM=float(args.intra_chain_ca_cutoff)
     CROSS_PARTNER_KNN_K=int(args.cross_partner_knn_k)
@@ -473,7 +507,7 @@ def main():
         prior=json.loads((output/'run_summary.json').read_text(encoding='utf-8'))
         if prior.get('no_cap',False)!=args.no_cap or (not args.no_cap and prior.get('target_hard')!=args.target_hard):
             raise ValueError('Resume target differs or is unknown; choose a fresh output directory')
-        expected_protocol=dict(identity_threshold=CLUSTER_IDENTITY_THRESHOLD,
+        expected_protocol=dict(cdr_h3_identity_threshold=CDR_H3_IDENTITY_THRESHOLD,
             interface_label_cutoff_angstrom=INTERFACE_LABEL_CUTOFF_ANGSTROM,
             intra_chain_ca_cutoff_angstrom=INTRA_CHAIN_CA_CUTOFF_ANGSTROM,
             cross_partner_knn_k=CROSS_PARTNER_KNN_K,
@@ -491,7 +525,7 @@ def main():
             previous_elapsed=previous.get('elapsed_seconds',0)
             PEAK_RSS=max(PEAK_RSS,previous.get('sampled_peak_rss_bytes',0))
         partition_seed=args.partition_seed if args.partition_seed is not None else SEED
-        summary.update(seed=partition_seed,no_cap=args.no_cap,target_hard=(None if args.no_cap else args.target_hard),identity_threshold=CLUSTER_IDENTITY_THRESHOLD,identity_scope='CDR-H3 hard-set isolation; EGNN train/validation uses bilateral full-chain VHH+antigen clustering',graph_protocol=dict(identity_threshold=CLUSTER_IDENTITY_THRESHOLD,interface_label_cutoff_angstrom=INTERFACE_LABEL_CUTOFF_ANGSTROM,intra_chain_ca_cutoff_angstrom=INTRA_CHAIN_CA_CUTOFF_ANGSTROM,cross_partner_knn_k=CROSS_PARTNER_KNN_K,min_interface_residues=MIN_INTERFACE_RESIDUES,graph_version=VERSION),input_sha256=input_hashes,script_sha256=sha256(pathlib.Path(__file__)),admission={})
+        summary.update(seed=partition_seed,no_cap=args.no_cap,target_hard=(None if args.no_cap else args.target_hard),identity_threshold=CDR_H3_IDENTITY_THRESHOLD,identity_scope='CDR-H3 hard-set isolation; EGNN train/validation uses layered VHH/CDR-H3/antigen clustering',graph_protocol=dict(identity_threshold=CDR_H3_IDENTITY_THRESHOLD,interface_label_cutoff_angstrom=INTERFACE_LABEL_CUTOFF_ANGSTROM,intra_chain_ca_cutoff_angstrom=INTRA_CHAIN_CA_CUTOFF_ANGSTROM,cross_partner_knn_k=CROSS_PARTNER_KNN_K,min_interface_residues=MIN_INTERFACE_RESIDUES,graph_version=VERSION),input_sha256=input_hashes,script_sha256=sha256(pathlib.Path(__file__)),admission={})
         lookup={r['path']:r for r in rows if r['subset']=='test_db55'};eligible=[]
         for source in ['train_rcsb','sabdab_vhh','snac_db']:
             subset=[r for r in rows if r['subset']==source];good=[]
@@ -520,7 +554,7 @@ def main():
         long=[r for r in pool if r['subset']=='snac_db' and len(cdr(r))>=16]
         clusters=cluster_long(long);order=list(range(len(clusters)));random.Random(partition_seed).shuffle(order)
         summary.update(long_eligible=len(long),unique_long_cdr=len({cdr(r) for r in long}),clusters=len(clusters))
-        print(f'Hard pool: {len(long)} structures / {len(clusters)} CDR40 clusters',flush=True)
+        print(f'Hard pool: {len(long)} structures / {len(clusters)} CDR-H3 identity clusters',flush=True)
         chosen=[];used_ids=set()
         for index in order:
             cl=clusters[index]
@@ -541,7 +575,7 @@ def main():
             if r['pdb_id'].upper() in hardids:reasons.append('pdb_overlap_snac_hard')
             seqs={cdr(r)} if cdr(r) else set()
             if r['subset']=='train_rcsb':seqs.update(x['cdr3'] for x in audit.PDB_ANNOTATIONS.get(r['pdb_id'].upper(),[]) if x['kind']=='VHH' and x['cdr3'])
-            if any(seqsim(s,t)>=CLUSTER_IDENTITY_THRESHOLD for s in seqs for t in hardseqs):reasons.append('cdr3_overlap_snac_hard_40pct')
+            if any(seqsim(s,t)>=CDR_H3_IDENTITY_THRESHOLD for s in seqs for t in hardseqs):reasons.append('cdr3_overlap_snac_hard_threshold')
             if reasons:exclusions.append(exclusion(r,reasons))
             else:train.append(r);known_train_cdr[r['id']]=sorted(seqs)
         print(f'Building {len(train)} train graphs; hard test {len(chosen)}',flush=True)
@@ -555,9 +589,9 @@ def main():
         assert not ({r['pdb_id'] for r in train_records}&(dbids|hardids))
         assert not (dbids&hardids)
         maxhard=max(seqsim(s,t) for s,t in itertools.combinations(hardseqs,2))
-        assert maxhard<CLUSTER_IDENTITY_THRESHOLD
+        assert maxhard<CDR_H3_IDENTITY_THRESHOLD
         maxtrain=max((seqsim(s,t) for r in train_records for s in known_train_cdr[r['source_id']] for t in hardseqs),default=0)
-        assert maxtrain<CLUSTER_IDENTITY_THRESHOLD
+        assert maxtrain<CDR_H3_IDENTITY_THRESHOLD
         assert len(list((output/'graphs').rglob('*.pt')))==len(manifest)
         assert sum(r['split']=='test_db55' for r in manifest)==248
         for split in ['train','test_db55','test_snac_hard']:
