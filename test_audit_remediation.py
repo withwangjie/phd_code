@@ -260,10 +260,10 @@ def test_scientific_config_rejects_invalid_solvent_and_primary_contrast() -> Non
 
 def test_primary_structural_contrast_is_configurable() -> None:
     rows=[
-        {"target":"1aaa","method":"qaoa","final_rmsd":"1.0"},
-        {"target":"1aaa","method":"greedy","final_rmsd":"2.0"},
-        {"target":"2bbb","method":"qaoa","final_rmsd":"3.0"},
-        {"target":"2bbb","method":"greedy","final_rmsd":"2.5"},
+        {"target":"1aaa","seed":"42","method":"qaoa","final_rmsd":"1.0"},
+        {"target":"1aaa","seed":"42","method":"greedy","final_rmsd":"2.0"},
+        {"target":"2bbb","seed":"42","method":"qaoa","final_rmsd":"3.0"},
+        {"target":"2bbb","seed":"42","method":"greedy","final_rmsd":"2.5"},
     ]
     result=asr.grouped_primary(
         rows,{"1aaa":"c1","2bbb":"c2"},"final_rmsd","qaoa_vs_greedy",1000,7
@@ -346,18 +346,23 @@ def test_dunbrack_parser_and_sigma_expansion(tmp_path: Path) -> None:
 
 def test_training_only_energy_calibration_fit(tmp_path: Path) -> None:
     csv_path = tmp_path / "calibration.csv"
+    # y = 1 + 2*prior + 3*vhh + 4*antigen + 5*pair.
     rows = [
-        ("1aaa","train",0,0,0,0,1),
-        ("1aaa","train",1,0,0,0,3),
-        ("2bbb","train",0,1,0,0,4),
-        ("2bbb","train",0,0,1,0,5),
-        ("3ccc","train",0,0,0,1,6),
-        ("3ccc","train",1,1,1,1,15),
+        ("1aaa","c1","train",0,0,0,0,1),
+        ("1aaa","c1","train",1,0,0,0,3),
+        ("2bbb","c2","train",0,1,0,0,4),
+        ("2bbb","c2","train",0,0,1,0,5),
+        ("3ccc","c3","train",0,0,0,1,6),
+        ("3ccc","c3","train",1,1,1,1,15),
+        ("4ddd","c4","train",2,1,0,0,8),
+        ("4ddd","c4","train",1,0,2,0,11),
+        ("5eee","c5","train",0,2,1,1,16),
+        ("5eee","c5","train",2,0,1,1,14),
     ]
     with csv_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
         writer.writerow([
-            "pdb_id","split","prior_energy","vhh_environment_energy",
+            "pdb_id","family_cluster","split","prior_energy","vhh_environment_energy",
             "antigen_energy","pair_energy","amber_delta_kcal"
         ])
         writer.writerows(rows)
@@ -369,7 +374,10 @@ def test_training_only_energy_calibration_fit(tmp_path: Path) -> None:
     assert result["antigen_weight"] == pytest.approx(4.0, abs=1e-8)
     assert result["pair_weight"] == pytest.approx(5.0, abs=1e-8)
     assert result["train_rmse_kcal"] == pytest.approx(0.0, abs=1e-8)
-    assert result["n_train_complexes"] == 3
+    assert result["n_train_complexes"] == 5
+    assert result["n_train_groups"] == 5
+    assert result["cv_grouping"] == "family_cluster"
+    assert result["cv_fold_count"] == 5
     assert result["coefficient_constraint"].startswith("nonnegative")
     assert "cv_rmse_kcal" in result
 
@@ -378,12 +386,28 @@ def test_training_only_energy_calibration_fit(tmp_path: Path) -> None:
 
     bad = tmp_path / "bad.csv"
     text = csv_path.read_text(encoding="utf-8").replace(
-        "1aaa,train,1,0,0,0,3", "1aaa,validation,1,0,0,0,3"
+        "1aaa,c1,train,1,0,0,0,3", "1aaa,c1,validation,1,0,0,0,3"
     )
     bad.write_text(text, encoding="utf-8")
     with pytest.raises(ValueError, match="training rows only"):
         bbh.fit_energy_calibration_csv(bad, tmp_path / "bad.json", 0.0)
 
+
+def test_primary_structural_statistics_require_same_seed_pairing() -> None:
+    rows=[
+        {"target":"1aaa","seed":"42","method":"qaoa","final_rmsd":"1.0"},
+        {"target":"1aaa","seed":"43","method":"qaoa","final_rmsd":"0.8"},
+        {"target":"1aaa","seed":"42","method":"sa","final_rmsd":"1.5"},
+        # SA seed 43 intentionally missing: it must not be compared to QAOA seed 43.
+        {"target":"2bbb","seed":"42","method":"qaoa","final_rmsd":"2.0"},
+        {"target":"2bbb","seed":"42","method":"sa","final_rmsd":"1.5"},
+    ]
+    result=asr.grouped_primary(
+        rows,{"1aaa":"c1","2bbb":"c2"},"final_rmsd","qaoa_vs_sa",1000,11
+    )
+    assert result["paired_seed_count"] == 2
+    assert result["incomplete_seed_count"] == 1
+    assert result["n_clusters"] == 2
 
 
 def test_multi_chi_rotation_sets_all_lys_torsions() -> None:
