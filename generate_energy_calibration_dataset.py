@@ -136,6 +136,8 @@ def main() -> int:
     parser.add_argument("--rotamer-library",type=Path,required=True)
     parser.add_argument("--out-csv",type=Path,required=True)
     parser.add_argument("--out-provenance",type=Path)
+    parser.add_argument("--cluster-map",type=Path,
+        help="Frozen PDB->family/structure cluster map used for grouped calibration CV.")
     parser.add_argument("--max-complexes",type=int,default=0)
     parser.add_argument("--assignments-per-complex",type=int,default=64)
     parser.add_argument("--active-sites",type=int,default=6)
@@ -166,6 +168,17 @@ def main() -> int:
     if not args.rotamer_library.is_file():
         parser.error("Dunbrack rotamer library not found")
 
+    cluster_map=None
+    cluster_map_sha256=None
+    if args.cluster_map is not None:
+        if not args.cluster_map.is_file():
+            parser.error("--cluster-map not found")
+        raw=json.loads(args.cluster_map.read_text(encoding="utf-8"))
+        cluster_map={str(k).lower():str(v) for k,v in raw.items()}
+        if not cluster_map or any(not k or not v for k,v in cluster_map.items()):
+            raise ValueError("Invalid/empty calibration cluster map")
+        cluster_map_sha256=sha256(args.cluster_map)
+
     manifest_path=args.dataset/"graph_manifest.json"
     manifest=json.loads(manifest_path.read_text(encoding="utf-8"))
     train=[row for row in manifest if row.get("split")=="train"]
@@ -190,7 +203,7 @@ def main() -> int:
 
     args.out_csv.parent.mkdir(parents=True,exist_ok=True)
     fieldnames=[
-        "pdb_id","split","assignment_index",
+        "pdb_id","family_cluster","split","assignment_index",
         "prior_energy","vhh_environment_energy","antigen_energy","pair_energy",
         "amber_delta_kcal","anchor_amber_kcal","active_residues","chi_assignment",
         "graph_sha256","source_id",
@@ -206,6 +219,9 @@ def main() -> int:
             pdb=str(row.get("pdb_id","")).lower()
             graph_path=args.dataset/Path(row["path"].replace("\\","/"))
             try:
+                if cluster_map is not None and pdb not in cluster_map:
+                    raise ValueError(f"Calibration cluster map missing training PDB {pdb}")
+                family_cluster=(cluster_map[pdb] if cluster_map is not None else pdb)
                 if sha256(graph_path)!=row["sha256"]:
                     raise ValueError("Training graph SHA256 mismatch")
                 data=torch.load(graph_path,map_location="cpu",weights_only=False)
@@ -260,7 +276,7 @@ def main() -> int:
                         angles=chi_assignment(coarse,selected)
                         amber=atomistic.energy_for_chi_assignment(angles)-anchor_amber
                         writer.writerow(dict(
-                            pdb_id=pdb,split="train",assignment_index=index,
+                            pdb_id=pdb,family_cluster=family_cluster,split="train",assignment_index=index,
                             prior_energy=components[0],
                             vhh_environment_energy=components[1],
                             antigen_energy=components[2],
@@ -277,6 +293,7 @@ def main() -> int:
                 failures.append(dict(pdb_id=pdb,error=f"{type(exc).__name__}: {exc}"))
             handle.flush()
 
+    succeeded_complexes=len(train)-len(failures)
     provenance=dict(
         scope="training complexes only",
         source_manifest=str(manifest_path),
@@ -291,6 +308,10 @@ def main() -> int:
         active_sites=args.active_sites,radius=args.radius,
         assignments_per_complex=args.assignments_per_complex,
         rows_written=written,complexes_attempted=len(train),
+        complexes_succeeded=succeeded_complexes,
+        generation_failure_fraction=(0.0 if not train else len(failures)/len(train)),
+        cluster_map=(None if args.cluster_map is None else str(args.cluster_map)),
+        cluster_map_sha256=cluster_map_sha256,
         failures=failures,seed=args.seed,
         force_field=force_field.__dict__,
         csv_sha256=sha256(args.out_csv),
