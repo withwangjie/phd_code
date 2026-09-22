@@ -158,6 +158,9 @@ def section_stage_table(ctx: ReportContext) -> List[str]:
         record = ctx.stage_status.get(stage)
         status = record["status"] if record else "not_started"
         detail = (record or {}).get("detail", "")
+        if stage=="final_report" and status=="running":
+            status="in_progress (this report)"
+            detail="The report is being generated; terminal completion is recorded immediately after successful write."
         detail = detail.replace("\n", " ")[:200]
         lines.append(f"| {stage} | {status} | {detail} |")
     return lines
