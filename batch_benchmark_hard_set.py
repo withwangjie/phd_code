@@ -2431,6 +2431,10 @@ def _recovery_benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
                             **{k:result[k] for k in ('dockq_score','fnat','irmsd','lrmsd','dockq_category','num_severe_clashes','has_severe_clash','total_opt_shots','bitstring_entropy','low_energy_fraction','dockq_definition','dockq_backbone_score')},
                             chi1_recovery_initial=initial["chi1_recovery_rate"],chi1_recovery_final=final["chi1_recovery_rate"],
                             contact_f1_initial=initial["contact_f1"],contact_f1_final=final["contact_f1"],
+                            discrete_energy_kcal=result["relaxation"]["discrete_energy_kcal"],
+                            final_physical_energy_kcal=final_energy,
+                            sidechain_rmsd_before_relaxation=rmsd_before,
+                            sidechain_rmsd_after_relaxation=final["sidechain_rmsd_angstrom"],
                             relaxation_energy_drop=energy_drop,
                             relaxation_energy_down_rmsd_up=bool(energy_drop>1e-6 and final["sidechain_rmsd_angstrom"]>rmsd_before+1e-6))
                         if writer is None:
