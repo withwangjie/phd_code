@@ -51,6 +51,7 @@ stages:
   queue_freeze: true          # dataset split (no-cap) + validation-queue selection
   graph_build: true           # produced as part of queue_freeze (build_final_pyg_dataset.py)
   egnn_train: true
+  energy_calibration: true    # train-only coarse component -> Amber14 calibration
   qc_benchmark: true          # --research-ablation: pruning x budget x objective sweep
   structure_experiment: true  # dev queue + validation queue recovery-benchmark
   statistics: true            # --paired-statistics
@@ -258,8 +259,12 @@ qc_benchmark:
     training_csv: "calibration/coarse_to_amber_train.csv"
     require_calibrated: true
     ridge_alpha: 1.0
-    # If calibration_file is absent, the orchestrator may fit it ONLY from
-    # this train-only CSV. Validation/test rows are rejected by the fitter.
+    max_complexes: 0        # 0 = every eligible training complex
+    assignments_per_complex: 64
+    active_sites: 6
+    radius_angstrom: 6.0
+    # Both files are created inside the current run directory. Validation/test
+    # rows are never accepted by the fitter.
   # Coarse-grained non-bonded proxy parameters. These are model parameters,
   # not binding-affinity constants; all values are recorded in QUBO metadata.
   coarse_force_field:
