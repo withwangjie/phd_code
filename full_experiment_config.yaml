@@ -249,8 +249,11 @@ qc_benchmark:
     # all-atom energy deltas, then frozen for validation/test.
     mode: "frozen"
     calibration_file: "calibration/coarse_to_amber.json"
+    training_csv: "calibration/coarse_to_amber_train.csv"
     require_calibrated: true
     ridge_alpha: 1.0
+    # If calibration_file is absent, the orchestrator may fit it ONLY from
+    # this train-only CSV. Validation/test rows are rejected by the fitter.
   # Coarse-grained non-bonded proxy parameters. These are model parameters,
   # not binding-affinity constants; all values are recorded in QUBO metadata.
   coarse_force_field:
