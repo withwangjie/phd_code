@@ -37,14 +37,14 @@ def identity(a: str, b: str, threshold: float = .4) -> float:
     return max(values)
 
 
-def identity_detail(a: str, b: str) -> dict:
+def identity_detail(a: str, b: str, threshold: float = .4) -> dict:
     """Like `identity`, but always returns the actual identity value and the
     length-ratio coverage gate -- for an auditable record, never just a
     boolean pass/fail. Uses the same alignment (parasail NW + BLOSUM62) and
-    the same 40% length-ratio coverage gate as `identity`, just without
+    the same configurable length-ratio coverage gate as `identity`, just without
     collapsing the result to a threshold comparison."""
     coverage = min(len(a), len(b)) / max(len(a), len(b))
-    if coverage < .4:
+    if coverage < threshold:
         return dict(identity=0., coverage=coverage, length_gated=True)
     values = []
     for x, y in ((a, b), (b, a)):
@@ -226,6 +226,7 @@ def main(argv=None) -> int:
              "before the run starts (never adjusted after inspecting results). The actual coverage "
              "(selected vs. examined qualifying pool) is always stated in real_complex_report.md.")
     parser.add_argument("--sites", type=int, default=6)
+    parser.add_argument("--identity-threshold", type=float, default=0.40)
     parser.add_argument("--seeds", type=int, nargs="+", default=[42,43,44])
     parser.add_argument("--outputs", type=int, default=1000)
     parser.add_argument("--max-evals", type=int, default=90)
@@ -263,7 +264,7 @@ def main(argv=None) -> int:
         help="PDB IDs (case-insensitive) known to have been used/inspected during development "
              "(e.g. the historical dev queue). Recorded on every candidate's independence audit as "
              "development_exposed, DISTINCT from --exclude-pdb: exposure is tracked even for "
-             "candidates that are not excluded -- exposure and 40%% identity screening are different, "
+             f"candidates that are not excluded -- exposure and {args.identity_threshold*100:.0f}% identity screening are different, "
              "both-necessary checks, and neither implies the other.")
     parser.add_argument("--dev-exposed-pdb-file",type=Path,default=None,
         help="Optional file with one PDB ID per line, merged with --dev-exposed-pdb.")
@@ -283,6 +284,8 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     if not 1 <= args.sites <= 10 or args.targets < 0:
         parser.error("Require 1..10 sites and a nonnegative target count (0 = unlimited)")
+    if not 0.0 < args.identity_threshold < 1.0:
+        parser.error("--identity-threshold must be in (0,1)")
     from batch_benchmark_hard_set import _ablation_atomic_json, _ablation_digest, _recovery_benchmark_main
     from filelock import FileLock
     out = args.out_dir.resolve(); out.mkdir(parents=True, exist_ok=True)
@@ -382,13 +385,13 @@ def main(argv=None) -> int:
                     role="vhh" if groups.get(chain_id)==0 else "partner_or_antigen"
                     best=dict(identity=0.,coverage=0.,length_gated=True)
                     for other in pool:
-                        detail=identity_detail(seq,other)
+                        detail=identity_detail(seq,other,args.identity_threshold)
                         if detail["identity"]>best["identity"]:
                             best=detail
                     chain_identity_audit.append(dict(chain_id=chain_id,role=role,length=len(seq),
                         best_identity=best["identity"],best_coverage=best["coverage"]))
                     max_chain_identity=max(max_chain_identity,best["identity"])
-                cdr3_identity=max((identity_detail(graph.cdr3_seq,c)["identity"] for c in train_cdr),default=0.)
+                cdr3_identity=max((identity_detail(graph.cdr3_seq,c,args.identity_threshold)["identity"] for c in train_cdr),default=0.)
                 # Family/local-domain-level relatedness (beyond raw sequence
                 # identity) is NOT checked anywhere in this project -- no
                 # PDB-family/cluster map exists (see batch_benchmark_hard_set.py
@@ -397,10 +400,10 @@ def main(argv=None) -> int:
                 # identity/exposure check below is honestly
                 # "independence_not_confirmed", never "confirmed independent";
                 # only exclusion statuses are ever asserted with confidence.
-                if max_chain_identity>=.4:
+                if max_chain_identity>=args.identity_threshold:
                     independence_status="excluded_high_chain_identity"
-                    raise ValueError("Full-chain >=40% global identity overlap with training or selected target")
-                if cdr3_identity>=.4:
+                    raise ValueError(f"Full-chain >={args.identity_threshold:.2f} global identity overlap with training or selected target")
+                if cdr3_identity>=args.identity_threshold:
                     independence_status="excluded_high_cdr_identity"
                     raise ValueError("Training annotated CDR-H3 overlap")
                 config["preparation_changes"].extend(complete_terminal_oxygen(work/"native.cif"))
@@ -413,8 +416,9 @@ def main(argv=None) -> int:
                     protocol="validation_control",graph_sha256=row["sha256"],source_id=graph.source_id,
                     raw_sha256=_ablation_digest(raw),native_sha256=_ablation_digest(work/"native.cif"),
                     development_exposed=development_exposed,chain_identity_audit=chain_identity_audit,
-                    cdr3_identity=cdr3_identity,independence_status=independence_status,
-                    independence=f"independence_not_confirmed: PDB-disjoint and below the 40% full-chain/"
+                    cdr3_identity=cdr3_identity,identity_threshold=float(args.identity_threshold),
+                    independence_status=independence_status,
+                    independence=f"independence_not_confirmed: PDB-disjoint and below the {args.identity_threshold:.2f} full-chain/"
                         f"annotated-CDR3 global identity threshold against training+selected targets "
                         f"(max_chain_identity={max_chain_identity:.4f}, cdr3_identity={cdr3_identity:.4f}); "
                         f"family/local-domain relatedness is NOT checked (no cluster map exists in this "
@@ -493,7 +497,7 @@ def main(argv=None) -> int:
             "Input is native backbone/pose plus perturbed Active chi1. Formal EGNN Active-site selection ranks all chemically movable VHH residues with the shared antigen-guided composite score (EGNN probability plus nearest-antigen proximity); native heavy-atom <8A is no longer an oracle eligibility gate. Contact/distance/CDR/random remain explicit ablation baselines. This is a retrospective native-backbone-conditioned recovery task, not blind docking or CDR-H3 backbone prediction.",
             "Adaptive 6/9/12 raw chi1 sub-rotamer pools are generated by residue flexibility, Amber14 single-candidate energies pre-screen them to 3-6 retained states/site under <=30 variables, and discrete optimization selects among those prepared candidates. Candidate-local and final relaxation may move all atoms downstream of CA-CB; backbone and background remain frozen.",
             "All methods share input/candidates, read budget and relaxation. CPU cost is not equal. Reference structure evaluates accuracy but never selects solver output.",
-            "Independence is limited to PDB plus 40% full-chain/annotated-CDR3 global identity screening (per-chain identity/coverage recorded in eligibility.json). Family/local-domain relatedness is NOT checked (no cluster map exists in this project): every non-excluded target's status is independence_not_confirmed, never confirmed-independent. Development exposure (--dev-exposed-pdb) is recorded per target, separately from the identity screen. This is an exploratory pilot, not a fresh confirmatory test.",
+            f"Independence is limited to PDB plus {args.identity_threshold*100:.0f}% full-chain/annotated-CDR3 global identity screening (per-chain identity/coverage recorded in eligibility.json). Family/local-domain relatedness is NOT checked (no cluster map exists in this project): every non-excluded target's status is independence_not_confirmed, never confirmed-independent. Development exposure (--dev-exposed-pdb) is recorded per target, separately from the identity screen. This is an exploratory pilot, not a fresh confirmatory test.",
             "", "| Method | Targets with results | Mean RMSD gain vs input (A) | Mean gain vs relax-only (A) |", "|---|---:|---:|---:|"]
         for method in ("qaoa","sa","uniform","greedy"):
             group=[r for r in results if r["method"]==method]
