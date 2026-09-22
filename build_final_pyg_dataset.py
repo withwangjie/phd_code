@@ -123,8 +123,20 @@ def audit_reasons(row):
     if row['missing_residues']>0:reasons.append('missing_backbone')
     if row['interface_status']=='weak' or (row.get('max_contact_residues') is not None and row['max_contact_residues']<MIN_INTERFACE_RESIDUES):reasons.append('weak_interface')
     if row['interface_status']!='pass' and 'weak_interface' not in reasons:reasons.append('no_eligible_interface')
-    if row['subset'] in ('sabdab_vhh','snac_db') and row['vhh_status']!='pass':reasons.append('not_strict_vhh')
-    if row.get('structure_quality_status') not in (None,'','not_evaluated','pass'):
+    formal_vhh_subset = (
+        row['subset'] in ('sabdab_vhh','snac_db')
+        or str(row['subset']).startswith('extra_snac_')
+    )
+    if formal_vhh_subset and row['vhh_status']!='pass':
+        reasons.append('not_strict_vhh')
+    quality_status=str(row.get('structure_quality_status') or '')
+    if formal_vhh_subset and quality_status!='pass':
+        if quality_status in ('','not_evaluated'):
+            reasons.append('structure_quality_not_evaluated')
+        else:
+            quality_reasons=row.get('structure_quality_reasons',[]) or [quality_status]
+            reasons.extend(['structure_quality_'+str(reason) for reason in quality_reasons])
+    elif quality_status not in ('','not_evaluated','pass'):
         reasons.extend(['structure_quality_'+str(reason) for reason in row.get('structure_quality_reasons',[])])
     return reasons
 
