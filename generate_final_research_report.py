@@ -363,7 +363,7 @@ def section_pruning_contribution(ctx: ReportContext) -> List[str]:
 # ---------------------------------------------------------------------------
 
 def section_search_performance(ctx: ReportContext) -> List[str]:
-    lines = ["## 3. Search performance: QAOA vs. classical", ""]
+    lines = ["## 3. Quantum-classical search performance and scaling", ""]
     if not stage_ok(ctx, "qc_benchmark"):
         lines += ["qc_benchmark stage did not complete; no search-performance numbers are reported.", ""]
         return lines
@@ -919,12 +919,11 @@ def section_applicability_boundary(ctx: ReportContext) -> List[str]:
         "(`evaluate_complex_metrics.py`/`structural_quality.py`), not the official DockQ reference implementation; "
         "`dockq_definition` on every row records the exact variant. Treat them as project-specific structural-quality "
         "metrics rather than official DockQ values when comparing with literature.",
-        "- No quantum-advantage or quantum-speedup claim is made anywhere in this report. Every QAOA result "
-        "here is an exact-subspace *classical simulation* of a finite-shot circuit (see section 3 and the "
-        "hardware/NISQ-noise disclaimer above); this report states only what the recorded data directly "
-        "shows (matched-output accuracy/energy comparisons against SA/uniform/greedy at recorded, unequal "
-        "wall-clock cost -- see section 5), and states explicitly, in the relevant section, whenever the "
-        "data does not support a directional claim either way.",
+        "- No *hardware* quantum advantage or quantum speedup is claimed: every QAOA result here is an "
+        "exact-subspace classical simulation of a finite-shot circuit. The report may describe a simulator-level "
+        "QAOA relative performance advantage or size-dependent quantum-classical trend only when directly supported "
+        "by the recorded matched-output/matched-time data; such evidence is algorithmic and does not establish "
+        "hardware quantum advantage.",
         "",
     ]
     return lines
