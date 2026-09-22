@@ -284,6 +284,7 @@ qc_benchmark:
       min_rmse_improvement_kcal: 0.0
       max_generation_failure_fraction: 0.10
       require_family_grouped_cv: true
+    selection_mode: "egnn"  # training complexes only, but match the formal downstream site-selection distribution
     max_complexes: 0        # 0 = every eligible training complex
     assignments_per_complex: 64
     active_sites: 6
