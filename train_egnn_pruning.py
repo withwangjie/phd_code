@@ -742,9 +742,10 @@ def write_summary_json(
         "labels": {
             "definition": best_payload["label_definition"],
             "task_scope": "known-pose heavy-atom interface classification from residue-level geometry",
-            "recoverable_from_input_edges": True,
+            "recoverable_from_input_edges": False,
             "unknown_interface_prediction_validated": False,
-            "deterministic_baseline": "not applicable; labels are no longer reconstructed from cross-partner input edges",
+            "validation_scope": "known-pose, bilateral VHH+antigen 40%-homology-isolated components",
+            "deterministic_baseline": "cross-edge existence cannot reconstruct labels; cross edges are fixed-KNN while labels use heavy-atom <5A",
             "train_positives": train_positives,
             "train_negatives": train_negatives,
         },
