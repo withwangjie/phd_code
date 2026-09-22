@@ -323,6 +323,12 @@ def main(argv=None) -> int:
         dev_exposed_pdb |= {line.strip().lower() for line in args.dev_exposed_pdb_file.read_text(encoding="utf-8").splitlines() if line.strip()}
     if args.selection_order == "seeded_random":
         random.Random(args.selection_seed).shuffle(candidates)
+    cluster_map=None
+    if args.cluster_map is not None:
+        raw_clusters=json.loads(args.cluster_map.read_text(encoding="utf-8"))
+        if not isinstance(raw_clusters,dict) or not raw_clusters:
+            raise ValueError("--cluster-map must contain a nonempty JSON object")
+        cluster_map={str(k).lower():str(v) for k,v in raw_clusters.items()}
     streams = derive_streams(args.master_seed)
     # Explicit requested integration smoke uses 4S10, not the first small graph.
     requested_pdb=args.pdb_id or ('4s10' if args.eval_shots and args.targets==1 else None)
@@ -364,7 +370,13 @@ def main(argv=None) -> int:
             _ablation_atomic_json(cache,sequence_inventory)
         train_pdb={r["pdb_id"].lower() for r in training}
         train_cdr=sorted({r["cdr3_seq"] for r in training if r["cdr3_seq"]})
-        selected=[]; decisions=[]; selected_vhh=[]; selected_antigen=[]; selected_cdr=[]; seen=set()
+        train_clusters=set()
+        if cluster_map is not None:
+            missing=[p for p in sorted(train_pdb) if p not in cluster_map]
+            if missing:
+                raise ValueError(f"Cluster map missing training PDBs, e.g. {missing[:10]}")
+            train_clusters={cluster_map[p] for p in train_pdb}
+        selected=[]; decisions=[]; selected_vhh=[]; selected_antigen=[]; selected_cdr=[]; selected_clusters=set(); seen=set()
         for row in tqdm(candidates,desc="Real complex eligibility"):
             if args.targets and len(selected)>=args.targets: break
             pdb=row["pdb_id"].lower()
@@ -382,6 +394,15 @@ def main(argv=None) -> int:
             development_exposed=pdb in dev_exposed_pdb
             try:
                 if pdb in train_pdb: raise ValueError("Training PDB overlap")
+                family_cluster=None
+                if cluster_map is not None:
+                    if pdb not in cluster_map:
+                        independence_status="excluded_missing_family_cluster"
+                        raise ValueError(f"Cluster map missing candidate PDB {pdb}")
+                    family_cluster=cluster_map[pdb]
+                    if family_cluster in train_clusters or family_cluster in selected_clusters:
+                        independence_status="excluded_family_cluster_overlap"
+                        raise ValueError(f"Family/structure cluster overlap: {family_cluster}")
                 path=args.dataset/Path(row["path"].replace("\\","/"))
                 if _ablation_digest(path)!=row["sha256"]: raise ValueError("Test graph hash mismatch")
                 graph=torch.load(path,map_location="cpu",weights_only=False)
@@ -457,6 +478,8 @@ def main(argv=None) -> int:
                     development_exposed=development_exposed,chain_identity_audit=chain_identity_audit,
                     cdr3_identity=cdr3_identity,max_vhh_identity=max_vhh_identity,
                     max_antigen_identity=max_antigen_identity,homology_isolation=homology,
+                    family_structure_cluster=family_cluster,
+                    cluster_map_sha256=(_ablation_digest(args.cluster_map) if args.cluster_map else None),
                     rotamer_model=dict(
                         mode=args.rotamer_mode,
                         library_path=(None if args.rotamer_library is None else str(args.rotamer_library)),
@@ -470,11 +493,12 @@ def main(argv=None) -> int:
                         f"antigen<{args.antigen_identity_threshold:.2f} with coverage>={args.antigen_min_length_coverage:.2f}; "
                         f"observed max VHH={max_vhh_identity:.4f}, CDR-H3={cdr3_identity:.4f}, "
                         f"antigen={max_antigen_identity:.4f}; "
-                        f"family/local-domain relatedness is NOT checked (no cluster map exists in this "
-                        f"project) and must not be read as confirmed independence; "
+                        f"family/structure cluster={family_cluster}; cluster-map checked={cluster_map is not None}; "
                         f"development_exposed={development_exposed}.") )
                 _ablation_atomic_json(work/"recovery_manifest.json",config)
                 selected.append(config)
+                if family_cluster is not None:
+                    selected_clusters.add(family_cluster)
                 selected_vhh.extend(getattr(graph,"vhh_sequences",[]))
                 selected_antigen.extend(getattr(graph,"antigen_sequences",[]))
                 if getattr(graph,"cdr3_seq",""):
@@ -551,7 +575,7 @@ def main(argv=None) -> int:
             "Input is native backbone/pose plus perturbed Active chi1. Formal EGNN Active-site selection ranks all chemically movable VHH residues with the shared antigen-guided composite score (EGNN probability plus nearest-antigen proximity); native heavy-atom <8A is no longer an oracle eligibility gate. Contact/distance/CDR/random remain explicit ablation baselines. This is a retrospective native-backbone-conditioned recovery task, not blind docking or CDR-H3 backbone prediction.",
             f"Formal rotamer model: {args.rotamer_mode}. In Dunbrack mode, backbone-dependent chi1 means and reported sigmas are read at each residue's phi/psi bin, expanded by configured sigma offsets, and Amber14 single-candidate energies pre-screen them to 3-6 retained states/site under <=30 variables. Distal chi angles remain input-conditioned, so this is chi1-centered rather than full multi-chi recovery. Candidate-local and final relaxation may move atoms downstream of CA-CB; backbone and background remain frozen.",
             "All methods share input/candidates, read budget and relaxation. CPU cost is not equal. Reference structure evaluates accuracy but never selects solver output.",
-            f"Independence is limited to PDB plus layered sequence screening: VHH {args.vhh_identity_threshold*100:.0f}%, CDR-H3 {args.cdr_h3_identity_threshold*100:.0f}%, antigen {args.antigen_identity_threshold*100:.0f}% with minimum length coverage {args.antigen_min_length_coverage*100:.0f}% (details in eligibility.json). Family/local-domain relatedness is NOT checked (no cluster map exists in this project): every non-excluded target's status is independence_not_confirmed, never confirmed-independent. Development exposure (--dev-exposed-pdb) is recorded per target, separately from the identity screen. This is an exploratory pilot, not a fresh confirmatory test.",
+            f"Independence uses PDB-disjointness, layered sequence screening (VHH {args.vhh_identity_threshold*100:.0f}%, CDR-H3 {args.cdr_h3_identity_threshold*100:.0f}%, antigen {args.antigen_identity_threshold*100:.0f}% with minimum length coverage {args.antigen_min_length_coverage*100:.0f}%) and the supplied family/structure cluster map when present (details in eligibility.json). Development exposure is recorded separately. This remains a retrospective recovery benchmark.",
             "", "| Method | Targets with results | Mean RMSD gain vs input (A) | Mean gain vs relax-only (A) |", "|---|---:|---:|---:|"]
         for method in ("qaoa","sa","uniform","greedy"):
             group=[r for r in results if r["method"]==method]
