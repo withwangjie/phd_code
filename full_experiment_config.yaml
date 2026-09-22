@@ -264,7 +264,7 @@ qc_benchmark:
     dielectric_base: 4.0
     dielectric_slope: 2.0
     thermal_energy_kcal: 0.593
-  # Side-chain search: 6/9/12 raw sub-rotamers -> retain 3-6 states/site -> <=30 total variables
+  # Side-chain search: Dunbrack backbone-dependent chi1 mean±sigma candidates -> retain 3-6 states/site -> <=30 total variables
   outputs: [10, 30, 100, 300, 1000]  # the output-budget curve
   qaoa_objective: ["mean", "cvar"]
   qaoa_restarts: [1, 4]  # 1 = single-start, 4 = multi-start
@@ -310,7 +310,7 @@ structure_experiment:
     library_path: "data/rotamer/ALL.bbdep.rotamers.lib"
     probability_floor: 1.0e-4
     sigma_offsets: [-1.0, 0.0, 1.0]
-  # Formal all-atom search mirrors coarse benchmark: 6/9/12 raw chi1 sub-rotamers -> 3-6 retained states/site -> <=30 variables.
+  # Formal all-atom search mirrors coarse benchmark: Dunbrack backbone-dependent chi1 candidates -> 3-6 retained states/site -> <=30 variables.
   loop_relax_iterations: 100
   eval_shots: 500
   robust_qaoa: true
