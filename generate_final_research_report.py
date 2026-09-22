@@ -84,6 +84,10 @@ def _formal_statistics_payload(ctx: "ReportContext", mode: str) -> Optional[Dict
     return payload if isinstance(payload,dict) else None
 
 
+def _primary_active_sites(ctx: "ReportContext") -> int:
+    return int(((ctx.frozen_config.get("statistics",{}) or {}).get("primary_active_sites",6)))
+
+
 def _fmt(value: Any, digits: int = 4) -> str:
     if value is None:
         return "n/a"
@@ -322,11 +326,14 @@ def section_pruning_contribution(ctx: ReportContext) -> List[str]:
         return lines
     all_rows = _read_csv_rows(ctx.run_dir / "qc_benchmark" / "metrics.csv")
     rows = _filter_qc_rows(all_rows, "matched_outputs")
+    primary_sites=_primary_active_sites(ctx)
+    rows=[r for r in rows if int(float(r.get("active_sites",primary_sites)))==primary_sites]
     if not rows:
         lines += ["No matched-output rows were found in `qc_benchmark/metrics.csv`.", ""]
         return lines
     prunings = sorted({r.get("pruning", "") for r in rows if r.get("pruning")})
-    lines.append("Five-way pruning-strategy comparison, sharing the same perturbed input, site count, and "
+    lines.append(f"Five-way pruning-strategy comparison at the frozen primary size ({primary_sites} active sites), "
+                  "sharing the same perturbed input, site count, and "
                   "evaluation region (radius/depth) within each case; only the pruning STRATEGY differs "
                   "between compared rows. Downstream search performance (hit fraction, energy gap), not just "
                   "input-graph AUC, is what is compared here.")
@@ -360,10 +367,15 @@ def section_search_performance(ctx: ReportContext) -> List[str]:
     if not stage_ok(ctx, "qc_benchmark"):
         lines += ["qc_benchmark stage did not complete; no search-performance numbers are reported.", ""]
         return lines
-    rows = _read_csv_rows(ctx.run_dir / "qc_benchmark" / "metrics.csv")
-    if not rows:
+    all_rows = _read_csv_rows(ctx.run_dir / "qc_benchmark" / "metrics.csv")
+    if not all_rows:
         lines += ["`qc_benchmark/metrics.csv` is empty or missing.", ""]
         return lines
+    primary_sites=_primary_active_sites(ctx)
+    rows=[
+        r for r in all_rows
+        if int(float(r.get("active_sites",primary_sites)))==primary_sites
+    ]
 
     calibration_cfg=((ctx.frozen_config.get("qc_benchmark",{}) or {}).get("energy_calibration",{}) or {})
     calibration_raw=calibration_cfg.get("calibration_file","calibration/coarse_to_amber.json")
@@ -411,7 +423,56 @@ def section_search_performance(ctx: ReportContext) -> List[str]:
                           f"{_fmt(mean('single_state_energy_queries'))} |")
     lines.append("")
 
-    lines.append("### 3.2 QAOA objective/restart ablation (mean vs. CVaR, single- vs. multi-start)")
+    lines.append("### 3.2 Active-site scaling analysis")
+    lines.append("")
+    stats_cfg=ctx.frozen_config.get("statistics",{}) or {}
+    primary_outputs=int(stats_cfg.get("primary_outputs",1000))
+    primary_objective=str(stats_cfg.get("primary_objective","cvar"))
+    primary_restarts=int(stats_cfg.get("primary_restarts",4))
+    scaling_rows=[
+        r for r in _filter_qc_rows(all_rows,"matched_outputs")
+        if int(float(r.get("outputs",0) or 0))==primary_outputs
+    ]
+    site_values=sorted({
+        int(float(r.get("active_sites")))
+        for r in scaling_rows if r.get("active_sites") not in (None,"","None")
+    })
+    lines.append(
+        f"Descriptive scaling at outputs={primary_outputs}. QAOA uses the frozen primary "
+        f"objective={primary_objective}, restarts={primary_restarts}; classical solvers use their matched-output rows."
+    )
+    lines.append("")
+    lines.append("| Active sites | Solver | Rows | Mean QUBO bits | Mean feasible configurations | Mean hit | Mean gap |")
+    lines.append("|---:|---|---:|---:|---:|---:|---:|")
+    for sites in site_values:
+        for solver in ("qaoa","sa","uniform","greedy"):
+            group=[
+                r for r in scaling_rows
+                if int(float(r.get("active_sites",0) or 0))==sites and r.get("solver")==solver
+                and (solver!="qaoa" or (
+                    r.get("qaoa_objective")==primary_objective
+                    and int(float(r.get("qaoa_restarts",0) or 0))==primary_restarts
+                ))
+            ]
+            if not group:
+                continue
+            def scale_mean(field: str) -> Optional[float]:
+                values=[float(r[field]) for r in group if r.get(field) not in (None,"","None")]
+                return sum(values)/len(values) if values else None
+            lines.append(
+                f"| {sites} | {solver} | {len(group)} | {_fmt(scale_mean('num_bits'))} | "
+                f"{_fmt(scale_mean('configuration_count'))} | {_fmt(scale_mean('hit'))} | "
+                f"{_fmt(scale_mean('gap'))} |"
+            )
+    lines.append("")
+    lines.append(
+        f"The {primary_sites}-site condition is the pre-registered confirmatory size. "
+        "The other site counts are pre-declared scaling conditions used to assess how relative "
+        "quantum-classical performance changes with QUBO/problem size; they are not pooled into the primary test."
+    )
+    lines.append("")
+
+    lines.append("### 3.3 QAOA objective/restart ablation at the primary size (mean vs. CVaR, single- vs. multi-start)")
     lines.append("")
     qaoa_rows = [r for r in rows if r.get("solver") == "qaoa"]
     combos = sorted({(r.get("qaoa_objective", ""), r.get("qaoa_restarts", "")) for r in qaoa_rows})
@@ -435,7 +496,7 @@ def section_search_performance(ctx: ReportContext) -> List[str]:
                   "reported above as `converged`; the raw `termination_reason` distribution is shown as-is.")
     lines.append("")
 
-    lines.append("### 3.3 Frozen primary paired inference")
+    lines.append("### 3.4 Frozen primary paired inference")
     lines.append("")
     if not stage_ok(ctx, "statistics"):
         lines.append("Statistics stage did not complete; no formal paired inference is reported.")
@@ -451,8 +512,9 @@ def section_search_performance(ctx: ReportContext) -> List[str]:
             lines.append("")
             continue
         lines.append(
-            f"Frozen primary contrast: outputs={payload.get('primary_outputs')}, "
-            f"objective={payload.get('primary_objective')}, restarts={payload.get('primary_restarts')}; "
+            f"Frozen primary contrast: active_sites={payload.get('primary_active_sites')}, "
+            f"outputs={payload.get('primary_outputs')}, objective={payload.get('primary_objective')}, "
+            f"restarts={payload.get('primary_restarts')}; "
             f"cluster unit: {payload.get('cluster_unit','n/a')}.")
         lines.append("")
         lines.append("| Baseline | Metric | Clusters | Mean QAOA-classical difference | 95% CI | p | Holm p |")
@@ -726,17 +788,18 @@ def section_cost(ctx: ReportContext) -> List[str]:
         all_rows = _read_csv_rows(ctx.run_dir / "qc_benchmark" / "metrics.csv")
         rows = _filter_qc_rows(all_rows, "matched_outputs")
         if rows:
-            by_solver: Dict[str, List[float]] = {}
+            by_size_solver: Dict[tuple[int,str], List[float]] = {}
             for r in rows:
-                solver = r.get("solver", "")
-                if r.get("solver_seconds") not in (None, "", "None"):
-                    by_solver.setdefault(solver, []).append(float(r["solver_seconds"]))
+                solver=r.get("solver","")
+                if r.get("solver_seconds") not in (None,"","None"):
+                    sites=int(float(r.get("active_sites",_primary_active_sites(ctx))))
+                    by_size_solver.setdefault((sites,solver),[]).append(float(r["solver_seconds"]))
             lines.append("### 5.1 Coarse-grained matched-output solver cost (seconds, mean per row)")
             lines.append("")
-            lines.append("| Solver | Cases | Mean solver_seconds |")
-            lines.append("|---|---:|---:|")
-            for solver, values in sorted(by_solver.items()):
-                lines.append(f"| {solver} | {len(values)} | {_fmt(sum(values)/len(values))} |")
+            lines.append("| Active sites | Solver | Cases | Mean solver_seconds |")
+            lines.append("|---:|---|---:|---:|")
+            for (sites,solver),values in sorted(by_size_solver.items()):
+                lines.append(f"| {sites} | {solver} | {len(values)} | {_fmt(sum(values)/len(values))} |")
             lines.append("")
             lines.append("Only matched-output rows are summarized here; matched-time controls are kept separate. "
                           "For QAOA, `solver_seconds` is a standalone-equivalent cost: measured optimization time "
