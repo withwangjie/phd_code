@@ -296,14 +296,12 @@ def main(argv=None) -> int:
     parser.add_argument("--pruning",choices=('egnn','contact','cdr','random'),default='egnn')
     parser.add_argument("--pdb-id",type=str)
     parser.add_argument("--pdb-allowlist-file",type=Path,default=None,
-        help="Optional JSON file (a plain list of PDB IDs, or a list of dicts each with a "
-             "target/pdb_id key -- e.g. an earlier run's own selected_targets.json) restricting "
-             "candidates to EXACTLY this set before the eligibility loop runs. Used to make a later "
-             "invocation (e.g. with --pruning egnn once a checkpoint exists) reproduce the identical "
-             "frozen target set an earlier --prepare-only freeze already decided, rather than relying "
-             "on re-derivation determinism alone. Identity/exclusion screening still runs against this "
-             "restricted set as a safety check -- a target can still end up excluded here, but no target "
-             "outside the allowlist can ever be added.")
+        help="Optional frozen-target JSON. Current selected_targets.json entries freeze each target's "
+             "exact graph instance using target/pdb_id + source_id + graph_path + graph_sha256; formal "
+             "execution accepts only that exact manifest row, never another graph from the same PDB. "
+             "Plain string PDB IDs remain supported only for legacy development allowlists. "
+             "Identity/exclusion screening still runs as a safety check; a frozen target may fail, "
+             "but no outside target or substitute graph can be added.")
     parser.add_argument("--checkpoint",type=Path,default=Path('quantum-protein/checkpoints_500/best_egnn_pruning.pt'))
     parser.add_argument("--robust-qaoa", action="store_true")
     parser.add_argument("--qaoa-restarts",type=int,default=4)
@@ -410,7 +408,7 @@ def main(argv=None) -> int:
         for pdb in missing_frozen_from_manifest:
             decisions.append(dict(
                 pdb_id=pdb, status="excluded",
-                reason="Frozen target absent from current test_snac_hard manifest",
+                reason="Frozen graph identity absent or mismatched in current test_snac_hard manifest",
                 development_exposed=pdb in dev_exposed_pdb,
                 independence_status="frozen_target_missing_from_manifest",
             ))
