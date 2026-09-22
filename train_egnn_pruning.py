@@ -203,7 +203,7 @@ def _sequence_identity(a: str, b: str, *, min_length_coverage: float = 0.0) -> f
         return 1.0
     values = []
     for left, right in ((a, b), (b, a)):
-        result = parasail.nw_stats_striped_16(left, right, 10, 1, parasail.blosum62)
+        result = parasail.nw_stats_striped_32(left, right, 10, 1, parasail.blosum62)
         if result.saturated:
             raise ValueError("alignment score saturation while building the split")
         values.append(result.matches / result.length)
