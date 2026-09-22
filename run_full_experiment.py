@@ -776,9 +776,27 @@ class Orchestrator:
             resolve_path(self.config, clustering_cfg.get("cluster_map", ""))
             if clustering_cfg.get("cluster_map") else None
         )
+        pair_setting=clustering_cfg.get("pair_tsv")
+        pair_path=resolve_path(self.config,pair_setting) if pair_setting else None
+        # Preserve singleton structures even when the external pair table omits
+        # self hits: derive a frozen PDB universe from this run's audit ledger.
+        universe_path=self.run_dir/"audit"/"cluster_universe.txt"
+        audit_jsonl=self.run_dir/"audit"/"data_audit_details.jsonl"
+        if audit_jsonl.is_file() and not universe_path.is_file():
+            ids=set()
+            for line in audit_jsonl.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    row=json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                pdb=str(row.get("pdb_id","")).strip().lower()
+                if pdb:
+                    ids.add(pdb)
+            universe_path.write_text("\n".join(sorted(ids))+"\n",encoding="utf-8")
+
         if cluster_map_path is not None and not cluster_map_path.is_file():
-            pair_setting=clustering_cfg.get("pair_tsv")
-            pair_path=resolve_path(self.config,pair_setting) if pair_setting else None
             if pair_path is not None and pair_path.is_file():
                 cluster_map_path.parent.mkdir(parents=True,exist_ok=True)
                 cluster_argv=[
@@ -789,6 +807,8 @@ class Orchestrator:
                     "--target-column",str(clustering_cfg.get("target_column",1)),
                     "--score-column",str(clustering_cfg.get("score_column",2)),
                 ]
+                if universe_path.is_file():
+                    cluster_argv += ["--universe",str(universe_path)]
                 cluster_rc,cluster_log=self._run_subprocess("build_independence_cluster_map",cluster_argv)
                 if cluster_rc!=0 or not cluster_map_path.is_file():
                     return StageResult(
@@ -801,6 +821,32 @@ class Orchestrator:
                     "queue_freeze", "failed", started, utc_timestamp(), None,
                     f"Required cluster map missing and no usable frozen pair TSV is available: "
                     f"map={cluster_map_path}, pairs={pair_path}",
+                )
+
+        # A pre-existing map is accepted only if its provenance binds it to
+        # the configured frozen pair table and score threshold.
+        if cluster_map_path is not None and cluster_map_path.is_file() and pair_path is not None:
+            provenance_path=cluster_map_path.with_suffix(".provenance.json")
+            if not provenance_path.is_file():
+                return StageResult(
+                    "queue_freeze","failed",started,utc_timestamp(),None,
+                    f"Cluster map lacks provenance: {provenance_path}"
+                )
+            cluster_prov=json.loads(provenance_path.read_text(encoding="utf-8"))
+            expected_pair_sha=sha256_of(pair_path) if pair_path.is_file() else None
+            if cluster_prov.get("source_pairs_sha256") != expected_pair_sha:
+                return StageResult(
+                    "queue_freeze","failed",started,utc_timestamp(),None,
+                    "Cluster-map provenance does not match configured pair TSV"
+                )
+            if not math.isclose(
+                float(cluster_prov.get("min_score",float("nan"))),
+                float(clustering_cfg.get("min_score",0.50)),
+                rel_tol=0.0,abs_tol=1e-12
+            ):
+                return StageResult(
+                    "queue_freeze","failed",started,utc_timestamp(),None,
+                    "Cluster-map provenance min_score does not match frozen config"
                 )
         if clustering_cfg.get("required", False) and (
             cluster_map_path is None or not cluster_map_path.is_file()
