@@ -159,7 +159,9 @@ queue_freeze:
     workers: 8
     # Scientific graph protocol. Changing any value requires a fresh dataset;
     # graph v1.6 records these values in every .pt and run_summary.json.
+    # 5 A cross-partner atom contact is literature-supported for antibody-antigen/CAPRI-style interfaces [METHODS_EVIDENCE R3,R4].
     interface_label_cutoff_angstrom: 5.0
+    # The following graph-construction values are preregistered study choices for leakage-controlled geometry graphs; they are not claimed as literature-optimal.
     intra_chain_ca_cutoff_angstrom: 8.0
     cross_partner_knn_k: 3
     min_interface_residues: 15
@@ -255,9 +257,10 @@ qc_benchmark:
   max_failure_fraction: 0.0  # formal benchmark is fail-closed by default
   pruning: ["egnn", "contact", "distance", "cdr", "random"]
   radii: [6.0]
+  # QAOA itself follows Farhi et al. [R7]. p=2 is a preregistered primary depth, not a literature optimum; p=1/2/3 are checked development-only [R9].
   depths: [2]
   max_evals: [90]
-  # Active-site scaling axis for the quantum-vs-classical benchmark.
+  # Active-site scaling axis for the quantum-vs-classical benchmark. Combinatorial growth is literature-grounded [R10-R12], while these exact levels are preregistered study choices.
   # 6 sites remains the frozen primary confirmatory size; 4/8/10 are
   # pre-declared scaling conditions used to study size-dependent performance.
   active_sites: [4, 6, 8, 10]
@@ -265,7 +268,7 @@ qc_benchmark:
   antigen_proximity_scale_angstrom: 6.0
   contact_ca_cutoff_angstrom: 8.0
   rotamer_model:
-    mode: "dunbrack2010"
+    mode: "dunbrack2010"  # backbone-dependent Dunbrack 2010 rotamer model [R2]
     # Local path to the licensed/attributed ALL.bbdep.rotamers.lib file.
     # Formal runs fail closed if this file is missing.
     library_path: "data/rotamer/ALL.bbdep.rotamers.lib"
@@ -314,13 +317,13 @@ qc_benchmark:
   # remain chi1-oriented, while complete chi states are retained for Amber
   # calibration/reconstruction -> 3-6 states/site -> <=30 variables
   outputs: [10, 30, 100, 300, 1000]  # the output-budget curve
-  qaoa_objective: ["mean", "cvar"]
+  qaoa_objective: ["mean", "cvar"]  # CVaR variational optimization is literature-supported [R8]
   qaoa_restarts: [1, 4]  # 1 = single-start, 4 = multi-start
-  cvar_alpha: 0.1
+  cvar_alpha: 0.1  # preregistered primary alpha; literature supports CVaR itself [R8], not alpha=0.1 as a universal optimum
   eval_shots: 500
   parameter_scale: "max_coefficient"
   time_baselines: true
-  sa_passes: 100
+  sa_passes: 100  # SA baseline method is literature-established [R13]; pass count is a preregistered compute budget
   greedy_passes: 50
   energy_window: 2.0
   sensitivity:
@@ -417,7 +420,7 @@ statistics:
   primary_outputs: 1000
   primary_objective: "cvar"
   primary_restarts: 4
-  primary_active_sites: 6  # confirmatory size; other active-site counts are scaling analyses
+  primary_active_sites: 6  # preregistered confirmatory size; not a literature-defined optimum
   primary_structural_endpoint: "final_rmsd"
   primary_structural_contrast: "qaoa_vs_sa"
   max_time_overrun_fraction: 0.10
