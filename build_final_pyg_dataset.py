@@ -70,8 +70,8 @@ def similarity(a,b):
     """Symmetric global identity, exact matches / alignment length incl. gaps."""
     if a==b:return 1.0
     if not a or not b or min(len(a),len(b))/max(len(a),len(b)) < CDR_H3_IDENTITY_THRESHOLD:return 0.0
-    r=parasail.nw_stats_striped_16(a,b,10,1,parasail.blosum62)
-    s=parasail.nw_stats_striped_16(b,a,10,1,parasail.blosum62)
+    r=parasail.nw_stats_striped_32(a,b,10,1,parasail.blosum62)
+    s=parasail.nw_stats_striped_32(b,a,10,1,parasail.blosum62)
     if r.saturated or s.saturated:raise ValueError('alignment score saturation')
     return max(r.matches/r.length,s.matches/s.length)
 
@@ -88,7 +88,7 @@ def _global_identity_cached(a: str, b: str) -> float:
         return 0.0
     values=[]
     for left,right in ((a,b),(b,a)):
-        result=parasail.nw_stats_striped_16(left,right,10,1,parasail.blosum62)
+        result=parasail.nw_stats_striped_32(left,right,10,1,parasail.blosum62)
         if result.saturated:
             raise ValueError('alignment score saturation')
         values.append(result.matches/result.length)
