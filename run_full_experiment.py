@@ -95,6 +95,7 @@ ORCHESTRATED_SCRIPTS: List[str] = [
     "generate_energy_calibration_dataset.py",
     "batch_benchmark_hard_set.py",
     "run_real_complex_pilot.py",
+    "run_external_structure_baselines.py",
     "generate_final_research_report.py",
     "analyze_structure_recovery.py",
     "model_egnn_pruning.py",
@@ -114,6 +115,7 @@ STAGE_ORDER: List[str] = [
     "energy_calibration",
     "qc_benchmark",
     "structure_experiment",
+    "external_validation",
     "statistics",
     "final_report",
 ]
@@ -1147,7 +1149,118 @@ class Orchestrator:
                             detail, argvs, ";".join(logs), not failures)
 
     # ================================================================
-    # Stage 7: paired statistics
+    # Stage 7: external VHH validation and mature structural baselines
+    # ================================================================
+    def stage_external_validation(self) -> StageResult:
+        started=utc_timestamp()
+        cfg=self.config.get("external_validation", {}) or {}
+        failures=[];logs=[];argvs=[]
+        qc=self.config["qc_benchmark"]
+        homology=self.config["queue_freeze"]["homology_isolation"]
+        rot=qc.get("rotamer_model", {}) or {}
+        ff=qc.get("coarse_force_field", {}) or {}
+        calibration=self.run_dir/(qc.get("energy_calibration", {}) or {}).get(
+            "calibration_file","calibration/coarse_to_amber.json")
+        checkpoint=self.checkpoint_dir()/qc.get("checkpoint","best_egnn_pruning.pt")
+        rotamer_library=resolve_path(
+            self.config,rot.get("library_path","data/rotamer/ALL.bbdep.rotamers.lib"))
+
+        ext=cfg.get("external_vhh", {}) or {}
+        if ext.get("required", False):
+            graph_dir=resolve_path(self.config,ext.get("graph_dir",""))
+            independence=resolve_path(self.config,ext.get("independence_manifest",""))
+            ext_failures=[]
+            if not graph_dir.is_dir() or not any(graph_dir.glob("*.pt")):
+                ext_failures.append(f"Required external VHH graph set missing/empty: {graph_dir}")
+            if not independence.is_file():
+                ext_failures.append(f"Required external independence manifest missing: {independence}")
+            else:
+                manifest=json.loads(independence.read_text(encoding="utf-8"))
+                if not manifest.get("training_family_overlap_zero",False):
+                    ext_failures.append("External independence manifest does not certify zero training-family overlap")
+                if manifest.get("graph_version")!="1.5":
+                    ext_failures.append(
+                        f"External VHH graph version must be 1.5, got {manifest.get('graph_version')}")
+            failures.extend(ext_failures)
+            if not ext_failures:
+                out=self.run_dir/"external_validation"/"vhh_coarse"
+                argv=[
+                    self.venv_python,"batch_benchmark_hard_set.py","--research-ablation",
+                    "--input-dir",str(graph_dir),"--checkpoint",str(checkpoint),"--out-dir",str(out),
+                    "--pruning","egnn","--radii",str(qc.get("radii",[6.0])[0]),
+                    "--depths",str(qc.get("depths",[2])[0]),
+                    "--max-evals",str(qc.get("max_evals",[90])[0]),
+                    "--active-sites",str(qc.get("active_sites",6)),
+                    "--vhh-identity-threshold",str(homology.get("vhh_full_chain_identity",0.80)),
+                    "--cdr-h3-identity-threshold",str(homology.get("cdr_h3_identity",0.50)),
+                    "--antigen-identity-threshold",str(homology.get("antigen_identity",0.30)),
+                    "--antigen-min-length-coverage",str(homology.get("antigen_min_length_coverage",0.70)),
+                    "--antigen-guidance-weight",str(qc.get("antigen_guidance_weight",0.25)),
+                    "--antigen-proximity-scale",str(qc.get("antigen_proximity_scale_angstrom",6.0)),
+                    "--contact-ca-cutoff",str(qc.get("contact_ca_cutoff_angstrom",8.0)),
+                    "--nonbonded-cutoff",str(ff.get("cutoff_angstrom",8.0)),
+                    "--softcore-delta",str(ff.get("softcore_delta_angstrom",0.5)),
+                    "--hard-core-fraction",str(ff.get("hard_core_fraction",0.72)),
+                    "--hard-sphere-penalty",str(ff.get("hard_sphere_penalty",25.0)),
+                    "--lj-repulsion-cap",str(ff.get("lj_repulsion_cap",50.0)),
+                    "--lj-attraction-cap",str(ff.get("lj_attraction_cap",5.0)),
+                    "--coulomb-cap",str(ff.get("coulomb_cap",20.0)),
+                    "--dielectric-base",str(ff.get("dielectric_base",4.0)),
+                    "--dielectric-slope",str(ff.get("dielectric_slope",2.0)),
+                    "--thermal-energy-kcal",str(ff.get("thermal_energy_kcal",0.593)),
+                    "--rotamer-mode",str(rot.get("mode","dunbrack2010")),
+                    "--rotamer-library",str(rotamer_library),
+                    "--rotamer-probability-floor",str(rot.get("probability_floor",1e-4)),
+                    "--rotamer-sigma-offsets",*[str(v) for v in rot.get("sigma_offsets",[-1,0,1])],
+                    "--energy-calibration-file",str(calibration),"--require-calibrated-energy",
+                    "--outputs","1000","--qaoa-objective","cvar","--qaoa-restarts","4",
+                    "--cvar-alpha",str(qc.get("cvar_alpha",0.1)),
+                    "--eval-shots",str(qc.get("eval_shots",500)),
+                    "--parameter-scale",str(qc.get("parameter_scale","max_coefficient")),
+                    "--sa-passes",str(qc.get("sa_passes",100)),
+                    "--greedy-passes",str(qc.get("greedy_passes",50)),
+                    "--energy-window",str(qc.get("energy_window",2.0)),
+                    "--max-targets",str(ext.get("max_targets",0)),
+                    "--workers",str(qc.get("workers",1)),
+                    "--omp-threads",str(self.config.get("hardware",{}).get("cpu_threads_per_process",2)),
+                    "--master-seed",str(self.config["master_seed"]),
+                ]
+                rc,log=self._run_subprocess("external_vhh_benchmark",argv)
+                logs.append(str(log));argvs.append(argv)
+                if rc not in (0,1) or not (out/"run_summary.json").is_file():
+                    failures.append(f"External VHH benchmark failed (exit={rc}; see {log})")
+
+        structural=cfg.get("structural_baselines", {}) or {}
+        if structural.get("required", False):
+            faspr=Path(structural.get("faspr_executable",""))
+            phenix=Path(structural.get("phenix_clashscore_executable",""))
+            if not faspr.is_file():
+                failures.append(f"Required FASPR executable missing: {faspr}")
+            if not phenix.is_file():
+                failures.append(f"Required Phenix clashscore executable missing: {phenix}")
+            if faspr.is_file() and phenix.is_file():
+                out=self.run_dir/"external_validation"/"structural_baselines"
+                argv=[
+                    self.venv_python,"run_external_structure_baselines.py",
+                    "--validation-dir",str(self.run_dir/"validation_queue"),
+                    "--faspr",str(faspr),"--phenix-clashscore",str(phenix),
+                    "--out-dir",str(out),
+                    "--timeout-seconds",str(structural.get("timeout_seconds",1800)),
+                ]
+                rc,log=self._run_subprocess("external_structure_baselines",argv)
+                logs.append(str(log));argvs.append(argv)
+                if rc!=0 or not (out/"external_baseline_metrics.csv").is_file():
+                    failures.append(f"External structural baselines failed (exit={rc}; see {log})")
+
+        status="completed" if not failures else "failed"
+        return StageResult(
+            "external_validation",status,started,utc_timestamp(),0 if not failures else 1,
+            "External validation complete." if not failures else "; ".join(failures),
+            argvs[-1] if argvs else [],";".join(logs),not failures,
+        )
+
+    # ================================================================
+    # Stage 8: paired statistics
     # ================================================================
     def stage_statistics(self) -> StageResult:
         started = utc_timestamp()
@@ -1252,8 +1365,10 @@ class Orchestrator:
             "qc_benchmark", ["egnn_train", "energy_calibration"], self.stage_qc_benchmark)
         results["structure_experiment"] = self.run_stage(
             "structure_experiment", ["queue_freeze", "egnn_train"], self.stage_structure_experiment)
+        results["external_validation"] = self.run_stage(
+            "external_validation", ["qc_benchmark", "structure_experiment"], self.stage_external_validation)
         results["statistics"] = self.run_stage(
-            "statistics", ["qc_benchmark", "structure_experiment"], self.stage_statistics)
+            "statistics", ["qc_benchmark", "structure_experiment", "external_validation"], self.stage_statistics)
         results["final_report"] = self.run_stage(
             "final_report", ["statistics"], self.stage_final_report)
         return results
