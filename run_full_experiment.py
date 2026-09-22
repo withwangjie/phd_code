@@ -646,6 +646,7 @@ class Orchestrator:
                 dataset/"graph_manifest.csv",dataset/"graph_manifest.json",
                 dataset/"run_summary.json",dataset/"graph_dataset_delivery_report.md",
                 freeze/"selected_targets.json",freeze/"eligibility.json",freeze/"run_manifest.json",
+                freeze/"freeze_manifest.json",
             ])
             if not ok:return ok,detail
             summary,error=read_json(dataset/"run_summary.json")
@@ -658,7 +659,26 @@ class Orchestrator:
                 return False,f"Unreadable frozen selected_targets.json: {exc}"
             if not isinstance(frozen,list) or not frozen:
                 return False,"Frozen validation selected_targets.json is empty or invalid"
-            return True,"queue-freeze artifacts verified"
+            freeze_manifest,error=read_json(freeze/"freeze_manifest.json")
+            if error:return False,error
+            expected_pairs={
+                "selected_targets_sha256": freeze/"selected_targets.json",
+                "eligibility_sha256": freeze/"eligibility.json",
+                "graph_manifest_sha256": dataset/"graph_manifest.csv",
+            }
+            for key,path in expected_pairs.items():
+                expected=freeze_manifest.get(key)
+                if not expected or sha256_of(path)!=expected:
+                    return False,f"Frozen validation provenance mismatch for {key}: {path}"
+            cluster_setting=((self.config.get("queue_freeze",{}) or {}).get("independence_clustering",{}) or {}).get("cluster_map")
+            expected_cluster=freeze_manifest.get("cluster_map_sha256")
+            if cluster_setting:
+                cluster_path=resolve_path(self.config,cluster_setting)
+                if not cluster_path.is_file():
+                    return False,f"Frozen cluster map missing: {cluster_path}"
+                if expected_cluster!=sha256_of(cluster_path):
+                    return False,"Frozen cluster map sha256 mismatch"
+            return True,"queue-freeze artifacts and frozen-input hashes verified"
         if stage=="egnn_train":
             checkpoint=self.checkpoint_dir()/"best_egnn_pruning.pt"
             summary_path=self.checkpoint_dir()/"training_summary.json"
@@ -1194,10 +1214,22 @@ class Orchestrator:
             return StageResult("queue_freeze", "failed", started, utc_timestamp(), returncode,
                                 f"run_real_complex_pilot.py (validation queue) exited {returncode}; {vq_detail} (see {vq_log})",
                                 vq_argv, str(vq_log), vq_ok)
-        selected = json.loads((validation_dir / "selected_targets.json").read_text(encoding="utf-8"))
+        selected_path=validation_dir/"selected_targets.json"
+        eligibility_path=validation_dir/"eligibility.json"
+        freeze_manifest_path=validation_dir/"freeze_manifest.json"
+        freeze_manifest=dict(
+            schema_version=1,
+            selected_targets_sha256=sha256_of(selected_path),
+            eligibility_sha256=sha256_of(eligibility_path),
+            graph_manifest_sha256=sha256_of(dataset_dir/"graph_manifest.csv"),
+            cluster_map_sha256=(sha256_of(cluster_map_path) if cluster_map_path is not None and cluster_map_path.is_file() else None),
+        )
+        atomic_write_json(freeze_manifest_path,freeze_manifest)
+        selected = json.loads(selected_path.read_text(encoding="utf-8"))
         cap_label = vq_cfg.get("target_count", 0) or "unlimited (all qualifying targets)"
         detail = (f"Graph build: {graph_detail} Validation queue: {len(selected)} targets frozen "
-                  f"(cap: {cap_label}; dev queue excluded+exposure-flagged: {dev_cfg.get('excluded_pdb', [])}). {vq_detail}")
+                  f"(cap: {cap_label}; dev queue excluded+exposure-flagged: {dev_cfg.get('excluded_pdb', [])}; "
+                  f"selected_targets_sha256={freeze_manifest['selected_targets_sha256']}). {vq_detail}")
         return StageResult("queue_freeze", "completed", started, utc_timestamp(), 0, detail,
                             graph_argv + ["&&"] + vq_argv, f"{graph_log};{vq_log}", True)
 
@@ -1803,10 +1835,27 @@ class Orchestrator:
             # A target can still fail re-verification here (recorded, not
             # silently dropped), but no target outside the frozen set can
             # ever be added.
-            frozen_targets = validation_dir / "freeze" / "selected_targets.json"
-            argv += ["--targets", str(queue_cfg.get("target_count", 0))]
-            if frozen_targets.is_file():
-                argv += ["--pdb-allowlist-file", str(frozen_targets)]
+            frozen_root=validation_dir/"freeze"
+            frozen_targets=frozen_root/"selected_targets.json"
+            freeze_manifest_path=frozen_root/"freeze_manifest.json"
+            if not frozen_targets.is_file() or not freeze_manifest_path.is_file():
+                failures.append(
+                    f"{label}: frozen target file/manifest missing; refusing confirmatory execution")
+                continue
+            try:
+                freeze_manifest=json.loads(freeze_manifest_path.read_text(encoding="utf-8"))
+            except Exception as exc:
+                failures.append(f"{label}: unreadable freeze_manifest.json: {exc}")
+                continue
+            expected_allowlist_sha=freeze_manifest.get("selected_targets_sha256")
+            actual_allowlist_sha=sha256_of(frozen_targets)
+            if not expected_allowlist_sha or actual_allowlist_sha!=expected_allowlist_sha:
+                failures.append(
+                    f"{label}: frozen selected_targets sha256 mismatch; "
+                    f"expected={expected_allowlist_sha}, actual={actual_allowlist_sha}")
+                continue
+            argv += ["--targets", str(queue_cfg.get("target_count", 0)),
+                     "--pdb-allowlist-file", str(frozen_targets)]
             returncode, log_path = self._run_subprocess(f"structure_experiment_{label}", argv)
             logs.append(str(log_path)); argvs.append(argv)
             # (requirement #5) Reconciled against run_real_complex_pilot.py's
