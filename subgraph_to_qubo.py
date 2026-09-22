@@ -414,6 +414,28 @@ class ForceFieldConfig:
 
 
 @dataclass(frozen=True)
+class EnergyCalibration:
+    """Frozen linear calibration from coarse components to all-atom energy deltas."""
+
+    prior_weight: float = 1.0
+    vhh_environment_weight: float = 1.0
+    antigen_weight: float = 1.0
+    pair_weight: float = 1.0
+    intercept: float = 0.0
+    source: str = "uncalibrated"
+
+    @classmethod
+    def from_json(cls, path: Path) -> "EnergyCalibration":
+        payload=json.loads(Path(path).read_text(encoding="utf-8"))
+        required=("prior_weight","vhh_environment_weight","antigen_weight","pair_weight","intercept")
+        missing=[key for key in required if key not in payload]
+        if missing: raise ValueError(f"Calibration file missing keys: {missing}")
+        values={key:float(payload[key]) for key in required}
+        if not all(math.isfinite(v) for v in values.values()):
+            raise ValueError("Calibration coefficients must be finite")
+        return cls(**values,source=str(path))
+
+@dataclass(frozen=True)
 class RotamerTemplate:
     """One statistically defined rotamer state."""
 
@@ -834,6 +856,7 @@ class InterfaceQUBOBuilder:
         rotamer_library_path: Optional[Path] = None,
         rotamer_probability_floor: float = 1e-4,
         rotamer_sigma_offsets: Sequence[float] = (-1.0, 0.0, 1.0),
+        energy_calibration: Optional[EnergyCalibration] = None,
     ) -> None:
         if not 2 <= min_variables <= max_variables <= 30:
             raise ValueError("Require 2 <= min_variables <= max_variables <= 30")
@@ -855,6 +878,7 @@ class InterfaceQUBOBuilder:
         self.rotamer_library_path = None if rotamer_library_path is None else Path(rotamer_library_path)
         self.rotamer_probability_floor = float(rotamer_probability_floor)
         self.rotamer_sigma_offsets = tuple(float(v) for v in rotamer_sigma_offsets)
+        self.energy_calibration = energy_calibration or EnergyCalibration()
         if not 0.0 < self.rotamer_probability_floor < 1.0:
             raise ValueError("rotamer_probability_floor must lie in (0,1)")
         if not self.rotamer_sigma_offsets or not all(math.isfinite(v) for v in self.rotamer_sigma_offsets):
@@ -1296,12 +1320,12 @@ class InterfaceQUBOBuilder:
                 )
                 candidate_states.append(state)
 
+            cal=self.energy_calibration
             candidate_states.sort(
                 key=lambda state: (
-                    state.prior_energy
-                    + state.environment_energy
-                    + state.antigen_guidance_energy,
-                    state.prior_energy + state.antigen_guidance_energy,
+                    cal.prior_weight*state.prior_energy
+                    + cal.vhh_environment_weight*state.environment_energy
+                    + cal.antigen_weight*state.antigen_guidance_energy,
                     state.rotamer_index,
                 )
             )
@@ -1316,16 +1340,20 @@ class InterfaceQUBOBuilder:
         variable_count = len(rotamers)
         if not self.min_variables <= variable_count <= self.max_variables:
             raise RuntimeError(f"Produced invalid QUBO dimension {variable_count}")
-        physical_self = np.asarray(
-            [state.self_energy for state in rotamers], dtype=np.float64
-        )
+        cal=self.energy_calibration
+        physical_self = np.asarray([
+            cal.prior_weight*state.prior_energy
+            + cal.vhh_environment_weight*state.environment_energy
+            + cal.antigen_weight*state.antigen_guidance_energy
+            for state in rotamers
+        ],dtype=np.float64)
         physical_pair = np.zeros((variable_count, variable_count), dtype=np.float64)
         for left in range(variable_count):
             for right in range(left + 1, variable_count):
                 if rotamers[left].site_index == rotamers[right].site_index:
                     continue
                 a, b = rotamers[left], rotamers[right]
-                physical_pair[left, right] = _nonbonded_energy(
+                physical_pair[left, right] = cal.pair_weight * _nonbonded_energy(
                     a.positions,
                     a.sigma,
                     a.epsilon,
@@ -1386,7 +1414,7 @@ class InterfaceQUBOBuilder:
             0.0,
             -float(np.min(physical_pair)) if physical_pair.size else 0.0,
         )
-        constant_offset = float(lambda_value * len(site_to_variables))
+        constant_offset = float(lambda_value * len(site_to_variables) + cal.intercept)
         ising_h, ising_J, ising_offset = qubo_to_ising(Q, constant_offset)
         max_equivalence_error = validate_qubo_ising_equivalence(
             Q, constant_offset, ising_h, ising_J, ising_offset
@@ -1405,6 +1433,7 @@ class InterfaceQUBOBuilder:
             "rotamer_library_path": (None if self.rotamer_library_path is None else str(self.rotamer_library_path)),
             "rotamer_probability_floor": self.rotamer_probability_floor,
             "rotamer_sigma_offsets": list(self.rotamer_sigma_offsets),
+            "energy_calibration": asdict(cal),
             "antigen_guidance_energy": [float(state.antigen_guidance_energy) for state in rotamers],
             "variable_count": variable_count,
             "active_residue_count": int(active_mask.sum()),
