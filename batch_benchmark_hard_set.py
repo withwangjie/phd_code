@@ -1162,7 +1162,10 @@ def _ablation_run_case(data: Any, scorer: Any, config: dict, args: Any, artifact
     objective/restart ablation vary within this one case; pruning/radius/depth/max_evals/seed (the
     shared input and fixed evaluation region) are fixed by ``config`` before any solver runs."""
     begin = time.perf_counter()
-    active = select_ablation_active(data, config["pruning"], args.active_sites, config["seed"], scorer)
+    active = select_ablation_active(
+        data, config["pruning"], args.active_sites, config["seed"], scorer,
+        antigen_guidance_weight=args.antigen_guidance_weight,
+    )
     sub = build_ablation_subgraph(data, active, config["radius"])
     qubo = InterfaceQUBOBuilder(
         min_variables=2 * args.active_sites,
@@ -1403,6 +1406,8 @@ def _ablation_main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--depths", type=int, nargs="+", default=[1,2,3])
     parser.add_argument("--max-evals", type=int, nargs="+", default=[90,300])
     parser.add_argument("--active-sites", type=int, default=10)
+    parser.add_argument("--antigen-guidance-weight", type=float, default=0.25,
+        help="Blend weight for label-free nearest-antigen proximity in EGNN site ranking.")
     parser.add_argument("--outputs", type=int, nargs="+", default=[1000],
         help="Output-budget curve (e.g. 10 30 100 300 1000): each value is a fully matched-output "
              "comparison across all four solvers, so equal-output at one budget is never conflated "
@@ -1427,9 +1432,10 @@ def _ablation_main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--omp-threads", type=int, default=2)
     args = parser.parse_args(argv)
     if (not 5 <= args.active_sites <= 15
+            or not 0.0 <= args.antigen_guidance_weight <= 1.0
             or min(*args.outputs, args.sa_passes, args.greedy_passes, *args.max_evals) <= 0
             or min(args.qaoa_restarts) <= 0 or args.eval_shots <= 0):
-        parser.error("Require 5..15 sites and positive budgets (outputs/sa-passes/greedy-passes/max-evals/qaoa-restarts/eval-shots).")
+        parser.error("Require 5..15 sites, antigen-guidance-weight in [0,1], and positive budgets.")
     if any(not math.isfinite(r) or r<=0 for r in args.radii) or any(p not in (1,2,3) for p in args.depths):
         parser.error("Require positive finite radii and depths 1/2/3.")
     if args.max_targets < 0 or args.energy_window < 0 or not math.isfinite(args.energy_window):
