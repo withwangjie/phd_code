@@ -262,7 +262,7 @@ def section_pruning_contribution(ctx: ReportContext) -> List[str]:
         lines += ["`qc_benchmark/metrics.csv` is empty or missing.", ""]
         return lines
     prunings = sorted({r.get("pruning", "") for r in rows if r.get("pruning")})
-    lines.append("Four-way pruning-strategy comparison, sharing the same perturbed input, site count, and "
+    lines.append("Five-way pruning-strategy comparison, sharing the same perturbed input, site count, and "
                   "evaluation region (radius/depth) within each case; only the pruning STRATEGY differs "
                   "between compared rows. Downstream search performance (hit fraction, energy gap), not just "
                   "input-graph AUC, is what is compared here.")
