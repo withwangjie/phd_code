@@ -2711,19 +2711,20 @@ def write_run_inventory(run_dir: Path, results: Dict[str, StageResult]) -> None:
     })
     stage_status={name: result.status for name,result in results.items()}
     failed=sorted(name for name,status in stage_status.items() if status=="failed")
+    audit_path=run_dir/"EXPERIMENT_RESULTS_AUDIT.json"
+    audit_ok=(
+        bool(json.loads(audit_path.read_text(encoding="utf-8")).get("all_required_results_present"))
+        if audit_path.is_file() else False
+    )
     atomic_write_json(summary_path,{
         "generated_utc":utc_timestamp(),
         "run_dir":str(run_dir),
-        "status":"completed" if not failed else "failed",
+        "status":"completed" if (not failed and audit_ok) else "failed",
         "failed_stages":failed,
         "stages":stage_status,
         "artifact_inventory":"artifact_inventory.json",
-        "results_audit":"EXPERIMENT_RESULTS_AUDIT.json" if (run_dir/"EXPERIMENT_RESULTS_AUDIT.json").is_file() else None,
-        "results_audit_ok":(
-            json.loads((run_dir/"EXPERIMENT_RESULTS_AUDIT.json").read_text(encoding="utf-8")).get(
-                "all_required_results_present")
-            if (run_dir/"EXPERIMENT_RESULTS_AUDIT.json").is_file() else None
-        ),
+        "results_audit":"EXPERIMENT_RESULTS_AUDIT.json" if audit_path.is_file() else None,
+        "results_audit_ok":audit_ok,
         "final_report":"FINAL_RESEARCH_REPORT.md" if (run_dir/"FINAL_RESEARCH_REPORT.md").is_file() else None,
     })
 
