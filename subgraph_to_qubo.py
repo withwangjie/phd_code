@@ -2083,6 +2083,57 @@ class AllAtomInterfaceQUBOBuilder:
         if not math.isfinite(value): raise FloatingPointError("Nonfinite all-atom energy")
         return value
 
+    def positions_for_chi_assignment(
+        self, assignment: Mapping[str, Sequence[float]]
+    ) -> np.ndarray:
+        """Apply explicit residue->chi1..chiN targets without candidate projection.
+
+        Used by TRAIN-ONLY coarse-to-Amber calibration so the atomistic target
+        is evaluated for the exact same multi-chi rotamer represented by the
+        coarse candidate metadata.
+        """
+        positions=self.base_positions.copy()
+        residue_lookup={}
+        bond_graph={}
+        for residue in self.topology.residues():
+            rid=f"{residue.chain.id}:{residue.id}{residue.insertionCode.strip()}"
+            residue_lookup[rid]=residue
+        for bond in self.topology.bonds():
+            a,b=bond[0].index,bond[1].index
+            bond_graph.setdefault(a,set()).add(b);bond_graph.setdefault(b,set()).add(a)
+        for rid,targets in assignment.items():
+            if rid not in self.active_residues:
+                raise ValueError(f"Calibration assignment contains non-active residue: {rid}")
+            residue=residue_lookup[rid]
+            atoms={a.name:a.index for a in residue.atoms()}
+            target_tuple=tuple(float(v) for v in targets)
+            expected=len(_CHI_DEFINITIONS.get(residue.name, ()))
+            if expected == 0 or len(target_tuple) != expected:
+                raise ValueError(
+                    f"{rid} expects {expected} chi angles, received {len(target_tuple)}"
+                )
+            positions=_apply_sidechain_chis(
+                positions, atoms, bond_graph, residue.name, target_tuple
+            )
+            observed=_sidechain_chi_angles(
+                {name:positions[index] for name,index in atoms.items()}, residue.name
+            )
+            if len(observed)!=len(target_tuple):
+                raise AssertionError("Explicit multi-chi assignment dimensionality mismatch")
+            for got,want in zip(observed,target_tuple):
+                if abs((float(got)-float(want)+180)%360-180)>1e-4:
+                    raise AssertionError(
+                        f"Explicit multi-chi calibration rotation mismatch for {rid}: "
+                        f"observed={observed}, target={target_tuple}"
+                    )
+        return positions
+
+    def energy_for_chi_assignment(
+        self, assignment: Mapping[str, Sequence[float]]
+    ) -> float:
+        """Amber14 potential for an exact residue->chi1..chiN assignment."""
+        return self.energy(self.positions_for_chi_assignment(assignment))
+
     def positions_for_chi1_assignment(self, assignment: Mapping[str, float]) -> np.ndarray:
         """Apply explicit chi1 angles to Active residues without candidate-set projection.
 
