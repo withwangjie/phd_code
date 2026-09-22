@@ -245,7 +245,7 @@ def test_adaptive_coarse_builder_rejects_more_than_ten_sites() -> None:
 
 def test_checkpoint_graph_protocol_gate_rejects_semantic_mismatch() -> None:
     protocol = {
-        "graph_version": "1.4",
+        "graph_version": "1.5",
         "edge_policy": "intra_chain_ca_radius_plus_cross_partner_knn",
         "label_policy": "cross_partner_heavy_atom_cutoff",
         "intra_chain_ca_cutoff_angstrom": 8.0,
@@ -306,30 +306,42 @@ def test_dunbrack_parser_and_sigma_expansion(tmp_path: Path) -> None:
 def test_training_only_energy_calibration_fit(tmp_path: Path) -> None:
     csv_path = tmp_path / "calibration.csv"
     rows = [
-        ("train",0,0,0,0,1),
-        ("train",1,0,0,0,3),
-        ("train",0,1,0,0,4),
-        ("train",0,0,1,0,5),
-        ("train",0,0,0,1,6),
+        ("1aaa","train",0,0,0,0,1),
+        ("1aaa","train",1,0,0,0,3),
+        ("2bbb","train",0,1,0,0,4),
+        ("2bbb","train",0,0,1,0,5),
+        ("3ccc","train",0,0,0,1,6),
+        ("3ccc","train",1,1,1,1,15),
     ]
     with csv_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
-        writer.writerow(["split","prior_energy","vhh_environment_energy","antigen_energy","pair_energy","amber_delta_kcal"])
+        writer.writerow([
+            "pdb_id","split","prior_energy","vhh_environment_energy",
+            "antigen_energy","pair_energy","amber_delta_kcal"
+        ])
         writer.writerows(rows)
     out = tmp_path / "calibration.json"
     result = bbh.fit_energy_calibration_csv(csv_path, out, 0.0)
-    assert result["intercept"] == pytest.approx(1.0)
-    assert result["prior_weight"] == pytest.approx(2.0)
-    assert result["vhh_environment_weight"] == pytest.approx(3.0)
-    assert result["antigen_weight"] == pytest.approx(4.0)
-    assert result["pair_weight"] == pytest.approx(5.0)
-    assert result["rmse_kcal"] == pytest.approx(0.0, abs=1e-10)
+    assert result["intercept"] == pytest.approx(1.0, abs=1e-8)
+    assert result["prior_weight"] == pytest.approx(2.0, abs=1e-8)
+    assert result["vhh_environment_weight"] == pytest.approx(3.0, abs=1e-8)
+    assert result["antigen_weight"] == pytest.approx(4.0, abs=1e-8)
+    assert result["pair_weight"] == pytest.approx(5.0, abs=1e-8)
+    assert result["train_rmse_kcal"] == pytest.approx(0.0, abs=1e-8)
+    assert result["n_train_complexes"] == 3
+    assert result["coefficient_constraint"].startswith("nonnegative")
+    assert "cv_rmse_kcal" in result
+
+    loaded = stq.EnergyCalibration.from_json(out)
+    assert loaded.prior_weight == pytest.approx(2.0, abs=1e-8)
 
     bad = tmp_path / "bad.csv"
-    text = csv_path.read_text(encoding="utf-8").replace("train,1,0,0,0,3", "validation,1,0,0,0,3")
+    text = csv_path.read_text(encoding="utf-8").replace(
+        "1aaa,train,1,0,0,0,3", "1aaa,validation,1,0,0,0,3"
+    )
     bad.write_text(text, encoding="utf-8")
     with pytest.raises(ValueError, match="training rows only"):
-        bbh.fit_energy_calibration_csv(bad, tmp_path/"bad.json", 0.0)
+        bbh.fit_energy_calibration_csv(bad, tmp_path / "bad.json", 0.0)
 
 
 # ---------------------------------------------------------------------------
