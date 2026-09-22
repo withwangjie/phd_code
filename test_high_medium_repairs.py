@@ -11,6 +11,7 @@ import batch_benchmark_hard_set as bbh
 import build_final_pyg_dataset as dataset_builder
 import run_real_complex_pilot as pilot
 import run_full_experiment as full
+import resolve_server_config as server_resolver
 from run_full_experiment import Orchestrator, StageResult, apply_runtime_mode_overrides
 
 
@@ -241,3 +242,20 @@ def test_resume_rejects_methods_evidence_changes() -> None:
     source=inspect.getsource(full.main)
     assert 'previous.get("methods_evidence_sha256") != current["methods_evidence_sha256"]' in source
     assert "literature-evidence hash" in source
+
+
+
+def test_server_resolver_preserves_target_global_batch() -> None:
+    assert server_resolver._choose_ddp_ranks(1,4,4) == 1
+    assert server_resolver._choose_ddp_ranks(2,4,4) == 2
+    assert server_resolver._choose_ddp_ranks(3,4,4) == 2
+    assert server_resolver._choose_ddp_ranks(4,4,4) == 4
+
+
+def test_server_config_is_infrastructure_only() -> None:
+    import yaml
+    server=yaml.safe_load(Path("server_config.yaml").read_text(encoding="utf-8"))
+    assert "paths" in server and "resources" in server
+    forbidden=("homology_isolation","active_sites","cvar_alpha","qaoa_objective","interface_label_cutoff_angstrom")
+    rendered=json.dumps(server,sort_keys=True)
+    assert all(key not in rendered for key in forbidden)
