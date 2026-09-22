@@ -42,6 +42,7 @@ import evaluate_complex_metrics as ecm
 import qaoa_interface_sampler as qis
 import subgraph_to_qubo as stq
 import run_full_experiment as rfe
+import batch_benchmark_hard_set as bbh
 
 
 # ---------------------------------------------------------------------------
@@ -233,6 +234,40 @@ def test_scientific_config_rejects_cross_stage_drift() -> None:
 def test_adaptive_coarse_builder_rejects_more_than_ten_sites() -> None:
     with pytest.raises(ValueError, match="between 1 and 10"):
         stq.InterfaceQUBOBuilder(min_variables=20, max_variables=30, max_sites=11)
+
+
+def test_checkpoint_graph_protocol_gate_rejects_semantic_mismatch() -> None:
+    protocol = {
+        "graph_version": "1.3",
+        "edge_policy": "intra_chain_ca_radius_plus_cross_partner_knn",
+        "label_policy": "cross_partner_heavy_atom_cutoff",
+        "intra_chain_ca_cutoff_angstrom": 8.0,
+        "cross_partner_knn_k": 3,
+        "interface_label_cutoff_angstrom": 5.0,
+        "min_interface_residues": 15,
+    }
+    info = bbh.ModelLoadInfo(
+        "checkpoint_loaded", Path("checkpoint.pt"),
+        graph_protocol=protocol, identity_threshold=0.40,
+    )
+
+    class Graph:
+        pass
+
+    graph = Graph()
+    for key, value in protocol.items():
+        setattr(graph, key, value)
+
+    bbh.assert_checkpoint_graph_compatible(info, graph, identity_threshold=0.40)
+
+    graph.cross_partner_knn_k = 4
+    with pytest.raises(ValueError, match="Checkpoint/graph protocol mismatch"):
+        bbh.assert_checkpoint_graph_compatible(info, graph, identity_threshold=0.40)
+
+    graph.cross_partner_knn_k = 3
+    with pytest.raises(ValueError, match="identity threshold mismatch"):
+        bbh.assert_checkpoint_graph_compatible(info, graph, identity_threshold=0.50)
+
 
 # ---------------------------------------------------------------------------
 # Patch 2: honest all-restarts-failed handling (qaoa_interface_sampler.py)
