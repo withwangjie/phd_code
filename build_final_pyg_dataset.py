@@ -33,7 +33,8 @@ BASE = pathlib.Path(__file__).resolve().parent
 AA = 'ACDEFGHIKLMNPQRSTVWY'
 AA_INDEX = {a:i for i,a in enumerate(AA)}
 SEED = 20260917
-VERSION = '1.0'
+CLUSTER_IDENTITY_THRESHOLD = 0.40
+VERSION = '1.1'
 PROCESS = psutil.Process()
 PEAK_RSS = 0
 MEMORY_LOCK = threading.Lock()
@@ -61,7 +62,7 @@ def write_csv(path, records, fields):
 def similarity(a,b):
     """Symmetric global identity, exact matches / alignment length incl. gaps."""
     if a==b:return 1.0
-    if not a or not b or min(len(a),len(b))/max(len(a),len(b)) < .8:return 0.0
+    if not a or not b or min(len(a),len(b))/max(len(a),len(b)) < CLUSTER_IDENTITY_THRESHOLD:return 0.0
     r=parasail.nw_stats_striped_16(a,b,10,1,parasail.blosum62)
     s=parasail.nw_stats_striped_16(b,a,10,1,parasail.blosum62)
     if r.saturated or s.saturated:raise ValueError('alignment score saturation')
@@ -103,12 +104,12 @@ def cluster_long(rows):
         if len(cdr(r))>=16:byseq[cdr(r)].append(r)
     representatives=[];clusters=[]
     for seq in sorted(byseq,key=lambda s:(-len(s),s)):
-        match=next((i for i,rep in enumerate(representatives) if seqsim(seq,rep)>=.8),None)
+        match=next((i for i,rep in enumerate(representatives) if seqsim(seq,rep)>=CLUSTER_IDENTITY_THRESHOLD),None)
         if match is None:
             representatives.append(seq);clusters.append(dict(representative=seq,members=[],sequences=[]));match=len(clusters)-1
         clusters[match]['members'].extend(byseq[seq]);clusters[match]['sequences'].append(seq)
     for i,cl in enumerate(clusters):
-        cl['cluster_id']=f'cdr80_{i:04d}'
+        cl['cluster_id']=f'cdr40_{i:04d}'
         # Representative must have the representative sequence, not a cluster mate.
         cl['candidates']=sorted([r for r in cl['members'] if cdr(r)==cl['representative']],key=lambda r:(-r['max_contact_residues'],r['id']))
     return clusters
@@ -311,7 +312,7 @@ def delivery_report(output,manifest,exclusions,failures,summary,complete):
     lines += ['', '## 4. 清洗、切分与去冗余','', '| 来源 | 审计候选 | 同时通过硬过滤 |','|---|---:|---:|']
     for src,counts in summary.get('admission',{}).items():lines.append(f'| {src} | {counts["input"]} | {counts["eligible"]} |')
     lines += ['',f'- DB5.5目标：248个主链完整且界面通过的bound受体–配体对；实际交付 {sum(r["split"]=="test_db55" for r in manifest)}。',
-        f'- SNAC长CDR-H3：{summary.get("long_eligible",0)}条非DB5.5重叠候选，{summary.get("unique_long_cdr",0)}条唯一序列，80%代表簇 {summary.get("clusters",0)} 个；固定随机种子 {SEED} 选取目标400个，实际 {sum(r["split"]=="test_snac_hard" for r in manifest)}。',
+        f'- SNAC长CDR-H3：{summary.get("long_eligible",0)}条非DB5.5重叠候选，{summary.get("unique_long_cdr",0)}条唯一序列，40%代表簇 {summary.get("clusters",0)} 个；固定随机种子 {SEED} 选取目标400个，实际 {sum(r["split"]=="test_snac_hard" for r in manifest)}。',
         '- 去冗余口径由用户确认：仅CDR-H3；全局Needleman–Wunsch、BLOSUM62、gap-open=10、gap-extend=1，相同残基数/含gap的比对长度≥0.8归为相似。取正反向比对身份率较大值，避免最优比对并列导致方向差异。',
         '- 贪心按CDR长度降序、序列字典序选代表，代表间身份率均<0.8；每簇仅一个代表进入挑战集。代表同序列多个结构优先选审计接触数较大的条目。固定种子打乱簇顺序，构图失败时尝试同代表序列的其他结构，再补选其他簇。',
         '- 用户确认隔离泄漏：训练集排除两组测试的同PDB ID条目；排除CDR-H3与挑战集任一代表身份率≥0.8的条目。RCSB也保守检查本地同PDB的已知VHH CDR标注。被隔离的簇成员不回流训练集。',
@@ -402,7 +403,7 @@ def main():
         long=[r for r in pool if r['subset']=='snac_db' and len(cdr(r))>=16]
         clusters=cluster_long(long);order=list(range(len(clusters)));random.Random(partition_seed).shuffle(order)
         summary.update(long_eligible=len(long),unique_long_cdr=len({cdr(r) for r in long}),clusters=len(clusters))
-        print(f'Hard pool: {len(long)} structures / {len(clusters)} CDR80 clusters',flush=True)
+        print(f'Hard pool: {len(long)} structures / {len(clusters)} CDR40 clusters',flush=True)
         chosen=[];used_ids=set()
         for index in order:
             cl=clusters[index]
@@ -423,7 +424,7 @@ def main():
             if r['pdb_id'].upper() in hardids:reasons.append('pdb_overlap_snac_hard')
             seqs={cdr(r)} if cdr(r) else set()
             if r['subset']=='train_rcsb':seqs.update(x['cdr3'] for x in audit.PDB_ANNOTATIONS.get(r['pdb_id'].upper(),[]) if x['kind']=='VHH' and x['cdr3'])
-            if any(seqsim(s,t)>=.8 for s in seqs for t in hardseqs):reasons.append('cdr3_overlap_snac_hard_80pct')
+            if any(seqsim(s,t)>=CLUSTER_IDENTITY_THRESHOLD for s in seqs for t in hardseqs):reasons.append('cdr3_overlap_snac_hard_40pct')
             if reasons:exclusions.append(exclusion(r,reasons))
             else:train.append(r);known_train_cdr[r['id']]=sorted(seqs)
         print(f'Building {len(train)} train graphs; hard test {len(chosen)}',flush=True)
@@ -437,9 +438,9 @@ def main():
         assert not ({r['pdb_id'] for r in train_records}&(dbids|hardids))
         assert not (dbids&hardids)
         maxhard=max(seqsim(s,t) for s,t in itertools.combinations(hardseqs,2))
-        assert maxhard<.8
+        assert maxhard<CLUSTER_IDENTITY_THRESHOLD
         maxtrain=max((seqsim(s,t) for r in train_records for s in known_train_cdr[r['source_id']] for t in hardseqs),default=0)
-        assert maxtrain<.8
+        assert maxtrain<CLUSTER_IDENTITY_THRESHOLD
         assert len(list((output/'graphs').rglob('*.pt')))==len(manifest)
         assert sum(r['split']=='test_db55' for r in manifest)==248
         for split in ['train','test_db55','test_snac_hard']:
