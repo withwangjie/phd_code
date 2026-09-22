@@ -349,7 +349,7 @@ qc_benchmark:
 # energy-down/RMSD-up analysis in the final report.
 # ---------------------------------------------------------------------------
 structure_experiment:
-  # Shared chi1-perturbation repeat identities, passed through to
+  # Shared side-chain perturbation repeat identities, passed through to
   # run_real_complex_pilot.py as --seeds. run_real_complex_pilot.py itself
   # now derives each selected target's independent --optimize-seeds/
   # --sample-seeds from streams["optimize"]/streams["sample"] keyed by
