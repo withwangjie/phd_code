@@ -191,9 +191,11 @@ def section_data_reliability(ctx: ReportContext) -> List[str]:
     lines.append(f"- Processing failures during graph construction: {len(failures_rows)}.")
     lines.append("")
 
-    validation_dir = ctx.run_dir / "validation_queue"
-    eligibility = _read_json(validation_dir / "eligibility.json") or []
-    selected = _read_json(validation_dir / "selected_targets.json") or []
+    validation_root = ctx.run_dir / "validation_queue"
+    validation_freeze_dir = validation_root / "freeze"
+    validation_execution_dir = validation_root / "execution"
+    eligibility = _read_json(validation_freeze_dir / "eligibility.json") or []
+    selected = _read_json(validation_freeze_dir / "selected_targets.json") or []
     excluded = [d for d in eligibility if d.get("status") == "excluded"]
     dev_pdb = ((ctx.frozen_config.get("queue_freeze", {}) or {}).get("dev_queue", {}) or {}).get("excluded_pdb", [])
     lines.append("### 1.3 Frozen, blind validation-target queue (requirement #2)")
@@ -391,7 +393,7 @@ def section_structural_benefit(ctx: ReportContext) -> List[str]:
         return lines
 
     dev_rows = _load_recovery_rows(ctx.run_dir / "dev_queue")
-    validation_rows = _load_recovery_rows(ctx.run_dir / "validation_queue")
+    validation_rows = _load_recovery_rows(ctx.run_dir / "validation_queue" / "execution")
 
     for label, rows in (("4.1 Historical development queue (4S10/8YVO/9GCN; NOT a confirmatory test)", dev_rows),
                          ("4.2 Frozen, blind validation queue (requirement #6)", validation_rows)):
@@ -423,7 +425,7 @@ def section_structural_benefit(ctx: ReportContext) -> List[str]:
         lines.append("")
 
     # Failure denominators, preserved explicitly rather than dropped.
-    for label, directory in (("dev queue", ctx.run_dir / "dev_queue"), ("validation queue", ctx.run_dir / "validation_queue")):
+    for label, directory in (("dev queue", ctx.run_dir / "dev_queue"), ("validation queue", ctx.run_dir / "validation_queue" / "execution")):
         failures_log = directory / "failures.log"
         if failures_log.is_file():
             failed = [line for line in _read_text(failures_log).splitlines() if line and not line.startswith(" ")]
@@ -458,7 +460,7 @@ def section_cost(ctx: ReportContext) -> List[str]:
                           "(`oracle_seconds`/`build_seconds` in the raw CSV) and excluded from the solver "
                           "timings above, per this project's existing convention.")
             lines.append("")
-    for label, directory in (("dev queue", ctx.run_dir / "dev_queue"), ("validation queue", ctx.run_dir / "validation_queue")):
+    for label, directory in (("dev queue", ctx.run_dir / "dev_queue"), ("validation queue", ctx.run_dir / "validation_queue" / "execution")):
         rows = _load_recovery_rows(directory)
         if not rows:
             continue
@@ -503,7 +505,7 @@ def section_failures_and_incomplete(ctx: ReportContext) -> List[str]:
                       f"closed={qc_summary.get('closed')}.")
         if not qc_summary.get("closed"):
             any_incomplete = True
-    for label, directory in (("dev_queue", ctx.run_dir / "dev_queue"), ("validation_queue", ctx.run_dir / "validation_queue")):
+    for label, directory in (("dev_queue", ctx.run_dir / "dev_queue"), ("validation_queue", ctx.run_dir / "validation_queue" / "execution")):
         summary = _read_json(directory / "run_summary.json")
         if summary:
             lines.append(f"- `{label}`: qualifying_pool={summary.get('qualifying_pool_size')} "
