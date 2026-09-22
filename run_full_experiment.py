@@ -858,11 +858,32 @@ class Orchestrator:
         ]
         fit_returncode, fit_log = self._run_subprocess("energy_calibration_fit", fit_argv)
         ok = fit_returncode == 0 and calibration_file.is_file() and calibration_file.stat().st_size > 0
+        acceptance_detail = ""
+        if ok:
+            payload=json.loads(calibration_file.read_text(encoding="utf-8"))
+            limits=cal_cfg.get("acceptance", {}) or {}
+            checks=[
+                ("cv_rmse_kcal","max_cv_rmse_kcal",lambda value,limit:value<=limit),
+                ("cv_mae_kcal","max_cv_mae_kcal",lambda value,limit:value<=limit),
+                ("cv_r2","min_cv_r2",lambda value,limit:value>=limit),
+                ("cv_spearman","min_cv_spearman",lambda value,limit:value>=limit),
+            ]
+            failed_checks=[]
+            for metric,key,predicate in checks:
+                if key not in limits:
+                    continue
+                value=payload.get(metric)
+                limit=float(limits[key])
+                if value is None or not math.isfinite(float(value)) or not predicate(float(value),limit):
+                    failed_checks.append(f"{metric}={value} violates {key}={limit}")
+            if failed_checks:
+                ok=False
+                acceptance_detail="; ".join(failed_checks)
         return StageResult(
             "energy_calibration", "completed" if ok else "failed", started, utc_timestamp(),
             fit_returncode,
-            (f"Training-only calibration frozen at {calibration_file}" if ok
-             else f"Calibration fit failed; see {fit_log}"),
+            (f"Training-only calibration frozen and accepted at {calibration_file}" if ok
+             else f"Calibration failed acceptance: {acceptance_detail or 'fit/artifact failure'}; see {fit_log}"),
             fit_argv, str(fit_log), ok,
         )
 
