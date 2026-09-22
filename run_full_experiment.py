@@ -1791,20 +1791,31 @@ class Orchestrator:
                 with metrics.open(newline="",encoding="utf-8") as handle:
                     rows=list(csv.DictReader(handle))
                 qrows=[r for r in rows if r.get("solver")=="qaoa"]
-                def mean_field(field):
-                    vals=[float(r[field]) for r in qrows if r.get(field) not in (None,"","None")]
-                    return (sum(vals)/len(vals)) if vals else None
-                aggregate_rows.append({
-                    "eval_shots":shots,"cvar_alpha":alpha,"rows":len(qrows),
-                    "mean_hit":mean_field("hit"),"mean_gap":mean_field("gap"),
-                    "mean_ground_probability":mean_field("ground_probability"),
-                    "mean_low_energy_mass":mean_field("low_energy_mass"),
-                    "mean_solver_seconds":mean_field("solver_seconds"),
-                })
+                groups={}
+                for row in qrows:
+                    key=(
+                        int(float(row.get("active_sites",cfg.get("active_sites",6)))),
+                        int(float(row.get("depth",0) or 0)),
+                        int(float(row.get("max_evals",0) or 0)),
+                    )
+                    groups.setdefault(key,[]).append(row)
+                for (active_sites,depth,max_evals),group in sorted(groups.items()):
+                    def mean_field(field):
+                        vals=[float(r[field]) for r in group if r.get(field) not in (None,"","None")]
+                        return (sum(vals)/len(vals)) if vals else None
+                    aggregate_rows.append({
+                        "active_sites":active_sites,"depth":depth,"max_evals":max_evals,
+                        "eval_shots":shots,"cvar_alpha":alpha,"rows":len(group),
+                        "mean_hit":mean_field("hit"),"mean_gap":mean_field("gap"),
+                        "mean_ground_probability":mean_field("ground_probability"),
+                        "mean_low_energy_mass":mean_field("low_energy_mass"),
+                        "mean_solver_seconds":mean_field("solver_seconds"),
+                    })
         out.mkdir(parents=True,exist_ok=True)
         summary_csv=out/"sensitivity_summary.csv"
-        fields=["eval_shots","cvar_alpha","rows","mean_hit","mean_gap",
-                "mean_ground_probability","mean_low_energy_mass","mean_solver_seconds"]
+        fields=["active_sites","depth","max_evals","eval_shots","cvar_alpha","rows",
+                "mean_hit","mean_gap","mean_ground_probability","mean_low_energy_mass",
+                "mean_solver_seconds"]
         with summary_csv.open("w",newline="",encoding="utf-8") as handle:
             writer=csv.DictWriter(handle,fieldnames=fields);writer.writeheader();writer.writerows(aggregate_rows)
         atomic_write_json(out/"sensitivity_summary.json",{
@@ -1816,10 +1827,10 @@ class Orchestrator:
             "rows":aggregate_rows,
         })
         md=["# Development-only QAOA sensitivity","","Validation/test data were not used to select hyperparameters.","",
-            "| eval shots | CVaR alpha | QAOA rows | mean hit | mean gap | mean ground probability | mean low-energy mass | mean solver seconds |",
-            "|---:|---:|---:|---:|---:|---:|---:|---:|"]
+            "| sites | p | max evals | eval shots | CVaR alpha | QAOA rows | mean hit | mean gap | mean ground probability | mean low-energy mass | mean solver seconds |",
+            "|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|"]
         for row in aggregate_rows:
-            md.append("| {eval_shots} | {cvar_alpha} | {rows} | {mean_hit} | {mean_gap} | {mean_ground_probability} | {mean_low_energy_mass} | {mean_solver_seconds} |".format(**row))
+            md.append("| {active_sites} | {depth} | {max_evals} | {eval_shots} | {cvar_alpha} | {rows} | {mean_hit} | {mean_gap} | {mean_ground_probability} | {mean_low_energy_mass} | {mean_solver_seconds} |".format(**row))
         (out/"sensitivity_summary.md").write_text("\n".join(md)+"\n",encoding="utf-8")
         return StageResult(
             "method_sensitivity","completed" if not failures else "failed",
