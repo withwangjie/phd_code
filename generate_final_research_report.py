@@ -2,15 +2,13 @@
 """generate_final_research_report.py -- recompute FINAL_RESEARCH_REPORT.md
 from one run_full_experiment.py run directory's raw per-instance artifacts.
 
-Never reads a cached/previous summary of itself: every number in the
-generated report is recomputed here, directly, from the run's own
-per-case/per-target CSV and JSON records, each run's own stage_status/*.json
-markers, and (for data-audit counts) the repository-root audit artifacts
-that stage produced. This is deliberate -- a report that trusted an
-upstream script's own prose summary could silently drift from what actually
-happened; recomputation from raw records is the only way "budget exhaustion
-was reported as convergence" or "process startup was reported as
-experiment completion" cannot slip through.
+Never reads a cached/previous summary of itself. Descriptive numbers are
+recomputed from the run's raw per-case/per-target CSV/JSON records and
+stage-status markers. Formal inferential results are read from the
+machine-readable statistics_outputs.json/statistics_time.json artifacts
+produced by the frozen paired-statistics stage, never from prose summaries;
+this keeps the report aligned with the exact primary contrast, exclusion
+ledger, bootstrap/sign-flip tests and Holm correction actually executed.
 
 Organized in exactly the order requested: data reliability -> pruning
 contribution -> search performance -> structural benefit -> cost ->
@@ -68,6 +66,26 @@ def _read_csv_rows(path: Path) -> List[Dict[str, str]]:
 
 def _read_text(path: Path) -> Optional[str]:
     return path.read_text(encoding="utf-8") if path.is_file() else None
+
+
+def _filter_qc_rows(rows: List[Dict[str, str]], budget_mode: str) -> List[Dict[str, str]]:
+    """Keep one benchmark budget family separate from the other.
+
+    Legacy rows without budget_mode are treated as matched_outputs only for
+    backwards-compatible development reports. Formal current runs record the
+    field explicitly.
+    """
+    selected = []
+    for row in rows:
+        mode = row.get("budget_mode") or "matched_outputs"
+        if mode == budget_mode:
+            selected.append(row)
+    return selected
+
+
+def _formal_statistics_payload(ctx: "ReportContext", mode: str) -> Optional[Dict[str, Any]]:
+    payload = _read_json(ctx.run_dir / "qc_benchmark" / f"statistics_{mode}.json")
+    return payload if isinstance(payload, dict) else None
 
 
 def _fmt(value: Any, digits: int = 4) -> str:
@@ -257,9 +275,10 @@ def section_pruning_contribution(ctx: ReportContext) -> List[str]:
     if not stage_ok(ctx, "qc_benchmark"):
         lines += ["qc_benchmark stage did not complete; no pruning-ablation numbers are reported.", ""]
         return lines
-    rows = _read_csv_rows(ctx.run_dir / "qc_benchmark" / "metrics.csv")
+    all_rows = _read_csv_rows(ctx.run_dir / "qc_benchmark" / "metrics.csv")
+    rows = _filter_qc_rows(all_rows, "matched_outputs")
     if not rows:
-        lines += ["`qc_benchmark/metrics.csv` is empty or missing.", ""]
+        lines += ["No matched-output rows were found in `qc_benchmark/metrics.csv`.", ""]
         return lines
     prunings = sorted({r.get("pruning", "") for r in rows if r.get("pruning")})
     lines.append("Four-way pruning-strategy comparison, sharing the same perturbed input, site count, and "
@@ -295,9 +314,10 @@ def section_search_performance(ctx: ReportContext) -> List[str]:
     if not stage_ok(ctx, "qc_benchmark"):
         lines += ["qc_benchmark stage did not complete; no search-performance numbers are reported.", ""]
         return lines
-    rows = _read_csv_rows(ctx.run_dir / "qc_benchmark" / "metrics.csv")
+    all_rows = _read_csv_rows(ctx.run_dir / "qc_benchmark" / "metrics.csv")
+    rows = _filter_qc_rows(all_rows, "matched_outputs")
     if not rows:
-        lines += ["`qc_benchmark/metrics.csv` is empty or missing.", ""]
+        lines += ["No matched-output rows were found in `qc_benchmark/metrics.csv`.", ""]
         return lines
 
     lines.append("### 3.1 Output-budget curve (equal OUTPUT count across solvers; not equal total compute)")
@@ -340,6 +360,47 @@ def section_search_performance(ctx: ReportContext) -> List[str]:
     lines.append("A run whose termination reason is `max_evaluations_reached` (budget exhausted) is never "
                   "reported above as `converged`; the raw `termination_reason` distribution is shown as-is.")
     lines.append("")
+
+    lines.append("### 3.3 Frozen primary paired inference")
+    lines.append("")
+    if not stage_ok(ctx, "statistics"):
+        lines.append("Statistics stage did not complete; no formal paired inference is reported.")
+        lines.append("")
+        return lines
+    for mode in ("outputs", "time"):
+        payload = _formal_statistics_payload(ctx, mode)
+        label = "Matched outputs" if mode == "outputs" else "Matched time"
+        lines.append(f"#### {label}")
+        lines.append("")
+        if not payload:
+            lines.append(f"`statistics_{mode}.json` is missing or unreadable.")
+            lines.append("")
+            continue
+        lines.append(
+            f"Frozen primary contrast: outputs={payload.get('primary_outputs')}, "
+            f"objective={payload.get('primary_objective')}, restarts={payload.get('primary_restarts')}; "
+            f"cluster unit: {payload.get('cluster_unit', 'n/a')}.")
+        lines.append("")
+        lines.append("| Baseline | Metric | Clusters | Mean QAOA-classical difference | 95% CI | p | Holm p |")
+        lines.append("|---|---|---:|---:|---|---:|---:|")
+        effects = payload.get("effects") or []
+        if effects:
+            for effect in effects:
+                lines.append(
+                    f"| {effect.get('baseline')} | {effect.get('metric')} | {effect.get('n_clusters', 0)} | "
+                    f"{_fmt(effect.get('mean_difference'))} | "
+                    f"{_fmt(effect.get('ci_low'))}, {_fmt(effect.get('ci_high'))} | "
+                    f"{_fmt(effect.get('p_value'))} | {_fmt(effect.get('p_holm'))} |")
+        else:
+            lines.append("| — | — | 0 | n/a | n/a | n/a | n/a |")
+        lines.append("")
+        lines.append(f"Paired-case counts: `{json.dumps(payload.get('paired_cases', {}), sort_keys=True)}`.")
+        lines.append(f"Exclusions: `{json.dumps(payload.get('exclusions', {}), sort_keys=True)}`.")
+        if mode == "time":
+            lines.append(
+                "Time-mode inference is restricted to gap/hit and excludes excessive soft-deadline overruns; "
+                "the QAOA donor budget is the same frozen primary objective/restart variant.")
+        lines.append("")
     return lines
 
 
@@ -442,23 +503,36 @@ def section_structural_benefit(ctx: ReportContext) -> List[str]:
 def section_cost(ctx: ReportContext) -> List[str]:
     lines = ["## 5. Cost", ""]
     if stage_ok(ctx, "qc_benchmark"):
-        rows = _read_csv_rows(ctx.run_dir / "qc_benchmark" / "metrics.csv")
+        all_rows = _read_csv_rows(ctx.run_dir / "qc_benchmark" / "metrics.csv")
+        rows = _filter_qc_rows(all_rows, "matched_outputs")
         if rows:
             by_solver: Dict[str, List[float]] = {}
             for r in rows:
                 solver = r.get("solver", "")
                 if r.get("solver_seconds") not in (None, "", "None"):
                     by_solver.setdefault(solver, []).append(float(r["solver_seconds"]))
-            lines.append("### 5.1 Coarse-grained ablation solver wall time (seconds, mean per case)")
+            lines.append("### 5.1 Coarse-grained matched-output solver cost")
             lines.append("")
-            lines.append("| Solver | Cases | Mean solver_seconds |")
-            lines.append("|---|---:|---:|")
+            lines.append("| Solver | Rows | Mean recorded solver_seconds | Interpretation |")
+            lines.append("|---|---:|---:|---|")
             for solver, values in sorted(by_solver.items()):
-                lines.append(f"| {solver} | {len(values)} | {_fmt(sum(values)/len(values))} |")
+                interpretation = (
+                    "standalone-equivalent = measured optimization + this output's measured sampling"
+                    if solver == "qaoa"
+                    else "measured wall time for this matched-output solver call")
+                lines.append(
+                    f"| {solver} | {len(values)} | {_fmt(sum(values)/len(values))} | {interpretation} |")
             lines.append("")
-            lines.append("Oracle/exact-landscape preprocessing time is recorded separately "
-                          "(`oracle_seconds`/`build_seconds` in the raw CSV) and excluded from the solver "
-                          "timings above, per this project's existing convention.")
+            lines.append(
+                "QAOA optimization is executed once per objective/restart variant and reused across the "
+                "output-budget sampling curve. Therefore a QAOA row's `solver_seconds` is a "
+                "**standalone-equivalent** cost (measured optimization_seconds + measured sampling_seconds), "
+                "not the incremental wall-clock time consumed by that cached row in the benchmark process. "
+                "The raw CSV records `optimization_seconds`, `sampling_seconds`, and "
+                "`optimization_reused` explicitly.")
+            lines.append(
+                "Oracle/exact-landscape preprocessing time is recorded separately "
+                "(`oracle_seconds`/`build_seconds`) and excluded from these solver costs.")
             lines.append("")
     for label, directory in (("dev queue", ctx.run_dir / "dev_queue"), ("validation queue", ctx.run_dir / "validation_queue" / "execution")):
         rows = _load_recovery_rows(directory)
@@ -469,9 +543,9 @@ def section_cost(ctx: ReportContext) -> List[str]:
             lines.append(f"- {label}: mean `total_opt_shots` per method x seed row: {_fmt(sum(shots)/len(shots))} "
                           f"(n={len(shots)}).")
     lines.append("")
-    lines.append("Equal output/shot counts across solvers are matched-output comparisons, not matched-time or "
-                  "matched-compute comparisons; see the raw per-case JSON (`qc_benchmark/cases/*.json`) for the "
-                  "full cost breakdown behind every summary number above.")
+    lines.append("Matched-output and matched-time records are never pooled in the descriptive tables above. "
+                  "Formal paired inference for each budget family is reported separately in section 3.3 from "
+                  "the frozen statistics JSON artifacts. See `qc_benchmark/cases/*.json` for the per-case cost ledger.")
     lines.append("")
     return lines
 
