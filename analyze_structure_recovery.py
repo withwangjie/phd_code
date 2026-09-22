@@ -35,7 +35,7 @@ def percentile_ci(values: list[float], rng: np.random.Generator, resamples: int)
     return float(np.percentile(draws,2.5)),float(np.percentile(draws,97.5))
 
 
-def sign_flip_p(values: list[float]) -> float|None:
+def sign_flip_p(values: list[float], seed: int) -> float|None:
     d=np.asarray(values,float)
     if len(d)<2:
         return None
@@ -47,7 +47,7 @@ def sign_flip_p(values: list[float]) -> float|None:
             if abs(float(np.mean(signs*d)))>=observed-1e-15:
                 extreme+=1
         return extreme/total
-    rng=np.random.default_rng(20260917)
+    rng=np.random.default_rng(seed)
     trials=200000
     extreme=0
     for _ in range(trials):
@@ -57,7 +57,8 @@ def sign_flip_p(values: list[float]) -> float|None:
 
 
 def grouped_primary(
-    rows: list[dict], cluster_map: dict[str,str], endpoint: str, contrast: str
+    rows: list[dict], cluster_map: dict[str,str], endpoint: str, contrast: str,
+    resamples: int, seed: int,
 ) -> dict:
     by_target=defaultdict(lambda:defaultdict(list))
     for row in rows:
@@ -84,15 +85,15 @@ def grouped_primary(
         difference=float(np.mean(methods["qaoa"])-np.mean(methods[baseline]))
         by_cluster[cluster_map[target]].append(difference)
     cluster_values=[float(np.mean(values)) for _,values in sorted(by_cluster.items())]
-    rng=np.random.default_rng(20260917)
-    low,high=percentile_ci(cluster_values,rng,10000)
+    rng=np.random.default_rng(seed)
+    low,high=percentile_ci(cluster_values,rng,resamples)
     return dict(
         endpoint=endpoint,
         contrast=f"QAOA-{baseline}; sign interpretation depends on endpoint direction",
         n_targets=sum(len(v) for v in by_cluster.values()),
         n_clusters=len(cluster_values),
         mean_difference=(None if not cluster_values else float(np.mean(cluster_values))),
-        ci_low=low,ci_high=high,p_value=sign_flip_p(cluster_values),
+        ci_low=low,ci_high=high,p_value=sign_flip_p(cluster_values,seed),
         excluded_targets=excluded,
     )
 
@@ -167,7 +168,7 @@ def main() -> int:
         raise ValueError("Structural metrics CSV is empty")
     raw=json.loads(args.cluster_map.read_text(encoding="utf-8"))
     cluster_map={str(k).lower():str(v) for k,v in raw.items()}
-    primary=grouped_primary(rows,cluster_map,args.primary_endpoint,args.primary_contrast)
+    primary=grouped_primary(rows,cluster_map,args.primary_endpoint,args.primary_contrast,args.resamples,args.seed)
     rq5=rq5_energy_structure(rows,cluster_map,args.resamples,args.seed)
     payload=dict(
         primary=primary,rq5=rq5,resamples=args.resamples,seed=args.seed,
