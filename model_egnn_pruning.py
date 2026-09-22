@@ -304,7 +304,7 @@ def extract_top_interface_subgraph(
     model: EGNNInterfaceScorer,
     probability_threshold: float = 0.5,
     min_active: int = 5,
-    max_active: int = 15,
+    max_active: int = 10,
     environment_radius: float = 6.0,
     antigen_guidance_weight: float = 0.25,
     antigen_proximity_scale: float = 6.0,
@@ -345,8 +345,8 @@ def extract_top_interface_subgraph(
         raise ValueError("probability_threshold must be in [0, 1]")
     if not 1 <= min_active <= max_active:
         raise ValueError("Require 1 <= min_active <= max_active")
-    if max_active > 15:
-        raise ValueError("max_active cannot exceed 15 under the 30-bit budget")
+    if max_active > 10:
+        raise ValueError("max_active cannot exceed 10: adaptive coarse QUBO requires >=3 states/site under the 30-variable budget")
     if environment_radius <= 0:
         raise ValueError("environment_radius must be positive")
     if not 0.0 <= antigen_guidance_weight <= 1.0:
@@ -618,7 +618,7 @@ if __name__ == "__main__":
         scorer,
         probability_threshold=1.0,
         min_active=5,
-        max_active=15,
+        max_active=10,
         environment_radius=100.0,
     )
     assert pruned.x.shape[1] == 21
