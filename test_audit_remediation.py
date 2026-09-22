@@ -180,7 +180,12 @@ def test_rigid_environment_excludes_antigen_nodes() -> None:
 def _minimal_scientific_config() -> Dict[str, Any]:
     return {
         "queue_freeze": {
-            "identity_threshold": 0.40,
+            "homology_isolation": {
+                "vhh_full_chain_identity": 0.80,
+                "cdr_h3_identity": 0.50,
+                "antigen_identity": 0.30,
+                "antigen_min_length_coverage": 0.70,
+            },
             "graph_build": {
                 "interface_label_cutoff_angstrom": 5.0,
                 "intra_chain_ca_cutoff_angstrom": 8.0,
@@ -189,7 +194,7 @@ def _minimal_scientific_config() -> Dict[str, Any]:
             },
             "validation_queue": {"sites": 6},
         },
-        "egnn_train": {"identity_threshold": 0.40},
+        "egnn_train": {},
         "qc_benchmark": {
             "active_sites": 6,
             "antigen_guidance_weight": 0.25,
@@ -227,8 +232,8 @@ def test_scientific_config_rejects_cross_stage_drift() -> None:
         rfe._validate_scientific_config(config)
 
     config = _minimal_scientific_config()
-    config["egnn_train"]["identity_threshold"] = 0.50
-    with pytest.raises(ValueError, match="Identity threshold must be shared"):
+    config["queue_freeze"]["homology_isolation"]["antigen_identity"] = 0.0
+    with pytest.raises(ValueError, match="homology_isolation values"):
         rfe._validate_scientific_config(config)
 
 
@@ -239,7 +244,7 @@ def test_adaptive_coarse_builder_rejects_more_than_ten_sites() -> None:
 
 def test_checkpoint_graph_protocol_gate_rejects_semantic_mismatch() -> None:
     protocol = {
-        "graph_version": "1.3",
+        "graph_version": "1.4",
         "edge_policy": "intra_chain_ca_radius_plus_cross_partner_knn",
         "label_policy": "cross_partner_heavy_atom_cutoff",
         "intra_chain_ca_cutoff_angstrom": 8.0,
@@ -247,9 +252,15 @@ def test_checkpoint_graph_protocol_gate_rejects_semantic_mismatch() -> None:
         "interface_label_cutoff_angstrom": 5.0,
         "min_interface_residues": 15,
     }
+    homology = {
+        "vhh_full_chain_identity": 0.80,
+        "cdr_h3_identity": 0.50,
+        "antigen_identity": 0.30,
+        "antigen_min_length_coverage": 0.70,
+    }
     info = bbh.ModelLoadInfo(
         "checkpoint_loaded", Path("checkpoint.pt"),
-        graph_protocol=protocol, identity_threshold=0.40,
+        graph_protocol=protocol, homology_isolation=homology,
     )
 
     class Graph:
@@ -259,15 +270,16 @@ def test_checkpoint_graph_protocol_gate_rejects_semantic_mismatch() -> None:
     for key, value in protocol.items():
         setattr(graph, key, value)
 
-    bbh.assert_checkpoint_graph_compatible(info, graph, identity_threshold=0.40)
+    bbh.assert_checkpoint_graph_compatible(info, graph, homology_isolation=homology)
 
     graph.cross_partner_knn_k = 4
     with pytest.raises(ValueError, match="Checkpoint/graph protocol mismatch"):
-        bbh.assert_checkpoint_graph_compatible(info, graph, identity_threshold=0.40)
+        bbh.assert_checkpoint_graph_compatible(info, graph, homology_isolation=homology)
 
     graph.cross_partner_knn_k = 3
-    with pytest.raises(ValueError, match="identity threshold mismatch"):
-        bbh.assert_checkpoint_graph_compatible(info, graph, identity_threshold=0.50)
+    altered = dict(homology); altered["cdr_h3_identity"] = 0.60
+    with pytest.raises(ValueError, match="homology protocol mismatch"):
+        bbh.assert_checkpoint_graph_compatible(info, graph, homology_isolation=altered)
 
 
 # ---------------------------------------------------------------------------
