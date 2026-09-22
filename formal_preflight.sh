@@ -106,8 +106,8 @@ platform_name=str(hardware.get("openmm_platform","CUDA"))
 platform=mm.Platform.getPlatformByName(platform_name)
 properties={}
 if platform_name=="CUDA":
-    properties["CudaDeviceIndex"]=str(hardware.get("openmm_device","0"))
-    properties["CudaPrecision"]=str(hardware.get("openmm_precision","double"))
+    properties["DeviceIndex"]=str(hardware.get("openmm_device","0"))
+    properties["Precision"]=str(hardware.get("openmm_precision","double"))
 system=mm.System(); system.addParticle(12.0)
 force=mm.CustomExternalForce("0.5*k*(x*x+y*y+z*z)")
 force.addGlobalParameter("k",1.0); force.addParticle(0,[]); system.addForce(force)
