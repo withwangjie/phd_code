@@ -215,8 +215,9 @@ qc_benchmark:
   radii: [6.0]
   depths: [2]
   max_evals: [90]
-  active_sites: 10
+  active_sites: 6
   antigen_guidance_weight: 0.25  # EGNN probability / label-free nearest-antigen proximity blend
+  # Side-chain search: 6/9/12 raw sub-rotamers -> retain 3-6 states/site -> <=30 total variables
   outputs: [10, 30, 100, 300, 1000]  # the output-budget curve
   qaoa_objective: ["mean", "cvar"]
   qaoa_restarts: [1, 4]  # 1 = single-start, 4 = multi-start
