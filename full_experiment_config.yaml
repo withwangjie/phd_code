@@ -155,7 +155,7 @@ queue_freeze:
     sites: 6
     selection_order: "seeded_random"  # never "ascending_size" for this queue
     # The REAL, final validation protocol: formal validation uses the
-    # trained EGNN main pipeline, not contact/cdr/random (those are
+    # trained EGNN main pipeline, not contact/distance/cdr/random (those are
     # matched-budget ABLATION baselines only, swept explicitly in
     # qc_benchmark.pruning -- never silently substituted for the main
     # validation strategy here).
