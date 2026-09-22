@@ -491,12 +491,12 @@ def main():
     global INTERFACE_LABEL_CUTOFF_ANGSTROM, INTRA_CHAIN_CA_CUTOFF_ANGSTROM
     global CROSS_PARTNER_KNN_K, MIN_INTERFACE_RESIDUES
     parser=argparse.ArgumentParser();parser.add_argument('--out',type=pathlib.Path,default=BASE/'dataset_clean_500');parser.add_argument('--workers',type=int,default=2);parser.add_argument('--target-hard',type=int,default=500);parser.add_argument('--no-cap',action='store_true',help='Process every qualifying, deduplicated, isolated CDR-H3 cluster instead of capping at --target-hard.');parser.add_argument('--partition-seed',type=int,default=None,help='Override the module SEED for cluster shuffle order (e.g. an independently-derived partition stream); defaults to SEED when omitted.');parser.add_argument('--audit-dir',type=pathlib.Path,default=BASE);parser.add_argument('--data-root',type=pathlib.Path,default=BASE/'data');parser.add_argument('--cdr-h3-identity-threshold',type=float,default=CDR_H3_IDENTITY_THRESHOLD);parser.add_argument('--interface-label-cutoff',type=float,default=INTERFACE_LABEL_CUTOFF_ANGSTROM);parser.add_argument('--intra-chain-ca-cutoff',type=float,default=INTRA_CHAIN_CA_CUTOFF_ANGSTROM);parser.add_argument('--cross-partner-knn-k',type=int,default=CROSS_PARTNER_KNN_K);parser.add_argument('--min-interface-residues',type=int,default=MIN_INTERFACE_RESIDUES);parser.add_argument('--resume',action='store_true');args=parser.parse_args();RESUME=args.resume
-    if not (0.0 < args.cdr_h3_identity_threshold < 1.0): parser.error('--identity-threshold must be in (0,1)')
+    if not (0.0 < args.cdr_h3_identity_threshold < 1.0): parser.error('--cdr-h3-identity-threshold must be in (0,1)')
     if not (math.isfinite(args.interface_label_cutoff) and args.interface_label_cutoff > 0): parser.error('--interface-label-cutoff must be positive finite')
     if not (math.isfinite(args.intra_chain_ca_cutoff) and args.intra_chain_ca_cutoff > 0): parser.error('--intra-chain-ca-cutoff must be positive finite')
     if args.cross_partner_knn_k < 1: parser.error('--cross-partner-knn-k must be >=1')
     if args.min_interface_residues < 1: parser.error('--min-interface-residues must be >=1')
-    CDR_H3_IDENTITY_THRESHOLD=float(args.identity_threshold)
+    CDR_H3_IDENTITY_THRESHOLD=float(args.cdr_h3_identity_threshold)
     INTERFACE_LABEL_CUTOFF_ANGSTROM=float(args.interface_label_cutoff)
     INTRA_CHAIN_CA_CUTOFF_ANGSTROM=float(args.intra_chain_ca_cutoff)
     CROSS_PARTNER_KNN_K=int(args.cross_partner_knn_k)
@@ -507,7 +507,7 @@ def main():
         prior=json.loads((output/'run_summary.json').read_text(encoding='utf-8'))
         if prior.get('no_cap',False)!=args.no_cap or (not args.no_cap and prior.get('target_hard')!=args.target_hard):
             raise ValueError('Resume target differs or is unknown; choose a fresh output directory')
-        expected_protocol=dict(cdr_h3_identity_threshold=CDR_H3_IDENTITY_THRESHOLD,
+        expected_protocol=dict(cdr_h3_cdr_h3_identity_threshold=CDR_H3_IDENTITY_THRESHOLD,
             interface_label_cutoff_angstrom=INTERFACE_LABEL_CUTOFF_ANGSTROM,
             intra_chain_ca_cutoff_angstrom=INTRA_CHAIN_CA_CUTOFF_ANGSTROM,
             cross_partner_knn_k=CROSS_PARTNER_KNN_K,
@@ -525,7 +525,7 @@ def main():
             previous_elapsed=previous.get('elapsed_seconds',0)
             PEAK_RSS=max(PEAK_RSS,previous.get('sampled_peak_rss_bytes',0))
         partition_seed=args.partition_seed if args.partition_seed is not None else SEED
-        summary.update(seed=partition_seed,no_cap=args.no_cap,target_hard=(None if args.no_cap else args.target_hard),identity_threshold=CDR_H3_IDENTITY_THRESHOLD,identity_scope='CDR-H3 hard-set isolation; EGNN train/validation uses layered VHH/CDR-H3/antigen clustering',graph_protocol=dict(identity_threshold=CDR_H3_IDENTITY_THRESHOLD,interface_label_cutoff_angstrom=INTERFACE_LABEL_CUTOFF_ANGSTROM,intra_chain_ca_cutoff_angstrom=INTRA_CHAIN_CA_CUTOFF_ANGSTROM,cross_partner_knn_k=CROSS_PARTNER_KNN_K,min_interface_residues=MIN_INTERFACE_RESIDUES,graph_version=VERSION),input_sha256=input_hashes,script_sha256=sha256(pathlib.Path(__file__)),admission={})
+        summary.update(seed=partition_seed,no_cap=args.no_cap,target_hard=(None if args.no_cap else args.target_hard),cdr_h3_identity_threshold=CDR_H3_IDENTITY_THRESHOLD,identity_scope='CDR-H3 hard-set isolation; EGNN train/validation uses layered VHH/CDR-H3/antigen clustering',graph_protocol=dict(identity_threshold=CDR_H3_IDENTITY_THRESHOLD,interface_label_cutoff_angstrom=INTERFACE_LABEL_CUTOFF_ANGSTROM,intra_chain_ca_cutoff_angstrom=INTRA_CHAIN_CA_CUTOFF_ANGSTROM,cross_partner_knn_k=CROSS_PARTNER_KNN_K,min_interface_residues=MIN_INTERFACE_RESIDUES,graph_version=VERSION),input_sha256=input_hashes,script_sha256=sha256(pathlib.Path(__file__)),admission={})
         lookup={r['path']:r for r in rows if r['subset']=='test_db55'};eligible=[]
         for source in ['train_rcsb','sabdab_vhh','snac_db']:
             subset=[r for r in rows if r['subset']==source];good=[]
