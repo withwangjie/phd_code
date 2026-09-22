@@ -1,0 +1,409 @@
+r"""Fast, reproducible coordinate audit. Requires gemmi, numpy and scipy.
+
+Run: .venv\Scripts\python.exe audit_all_datasets.py
+No source structures are modified. Multi-model files use model 1 only.
+"""
+from __future__ import annotations
+import argparse
+import ast
+import collections
+import concurrent.futures
+import csv
+import gzip
+import json
+import math
+import pathlib
+import re
+import sys
+import threading
+import time
+import zipfile
+import gemmi
+import numpy as np
+from scipy.spatial import cKDTree
+
+BASE = pathlib.Path(__file__).resolve().parent
+ANNOTATIONS = {}
+PDB_ANNOTATIONS = collections.defaultdict(list)
+CHAIN_ANNOTATIONS = {}
+BACKBONE = {'N', 'CA', 'C', 'O'}
+ZIP_LOCAL = threading.local()
+
+def literal(s, default):
+    try:
+        return ast.literal_eval(s)
+    except (ValueError, SyntaxError, TypeError):
+        return default
+
+def load_annotations(root):
+    ANNOTATIONS.clear()
+    PDB_ANNOTATIONS.clear()
+    CHAIN_ANNOTATIONS.clear()
+    for path in sorted(root.rglob('*_curation_summary.csv')):
+        if path.parent.name not in ('curated_structures', 'benchmark_dataset'):
+            continue
+        for row in csv.DictReader(path.open(encoding='utf-8-sig', newline='')):
+            ANNOTATIONS[(str(path.parent), row['Name'])] = row
+            for field, old_id, typ in [('VH', 'Chain_VH_old_id', 'VHH' if path.name.startswith('nb_') else 'VH'), ('VL', 'Chain_VL_old_id', 'VL')]:
+                seq = row.get('Sequence_' + field, '')
+                if not seq or seq.lower() == 'nan':
+                    continue
+                if row.get('TCR_Chain', '').lower() == 'true':
+                    typ = 'TCR'
+                regions = literal(row.get('Region_Split_' + field), {})
+                rec = dict(kind=typ, sequence=seq, cdr3=regions.get('cdr3', ''), chain=row.get(old_id, ''), source=row['Name'])
+                if rec not in PDB_ANNOTATIONS[row['PDB_ID'].upper()]:
+                    PDB_ANNOTATIONS[row['PDB_ID'].upper()].append(rec)
+    for path in root.rglob('all_input_PDB_files_parsed_file_chains.csv'):
+        with path.open(encoding='utf-8-sig', newline='') as handle:
+            for row in csv.DictReader(handle):
+                pid=row['PDB_ID'].upper()
+                if row['Bioassembly']=='0' and pid in PDB_ANNOTATIONS:
+                    CHAIN_ANNOTATIONS[pid]={k:literal(row.get(k),[]) for k in ('Chain_VH','Chain_VL','Chain_VHH')}
+
+def pdb_compat(raw, task):
+    try:
+        return gemmi.read_pdb_string(raw)
+    except RuntimeError as exc:
+        if 'Wrong format for charge' not in str(exc):
+            raise
+        # Historic DB5.5 records retain obsolete PDB identifiers/line numbers
+        # in columns 67+. Coordinates/occupancy/B-factor remain untouched.
+        task['_legacy_pdb_tail'] = True
+        return gemmi.read_pdb_string(raw, max_line_length=66)
+
+def structural(name):
+    return name.lower().endswith(('.pdb', '.cif', '.cif.gz'))
+
+def discover(root):
+    tasks, ignored = [], []
+    mapping = {'rcsb_non_redundant_dataset': 'train_rcsb', 'sabdab_all_sd_h_structures': 'sabdab_vhh', 'sabdab_all_single_domain_structures': 'sabdab_vhh', 'benchmark5.5': 'test_db55'}
+    for path in sorted(root.rglob('*')):
+        if not path.is_file() or not structural(path.name):
+            continue
+        if path.name.startswith('._'):
+            ignored.append(str(path.relative_to(root)))
+            continue
+        parts = path.relative_to(root).parts
+        subset = mapping.get(parts[0], parts[0] if parts[0] in ('train_rcsb', 'sabdab_vhh', 'snac_db', 'test_db55') else 'extra_' + parts[0])
+        if parts[0] == 'SNAC-DataBase':
+            subset = 'snac_db' if 'curated_structures' in parts and 'nb_complexes' in parts else 'extra_SNAC_loose'
+        tasks.append(dict(path=str(path), member='', subset=subset, id=str(path.relative_to(root))))
+    archives = []
+    for path in sorted(root.rglob('*.zip')):
+        with zipfile.ZipFile(path) as z:
+            members = [n for n in z.namelist() if structural(n) and not pathlib.PurePosixPath(n).name.startswith('._')]
+        selected = path.stem in ('nb_complexes', 'nb_unbound') and path.parent.name in ('curated_structures', 'benchmark_dataset')
+        archives.append({'path': str(path.relative_to(root)), 'structures': len(members), 'audited': selected})
+        if not selected:
+            continue
+        for member in members:
+            # If already extracted, audit the physical file once, not twice.
+            if (path.parent / member).exists():
+                continue
+            subset = 'snac_db' if path.parent.name == 'curated_structures' and path.stem == 'nb_complexes' else 'extra_snac_' + path.parent.name + '_' + path.stem
+            tasks.append(dict(path=str(path), member=member, subset=subset, id=str(path.relative_to(root)) + '::' + member))
+    return tasks, ignored, archives
+
+def read_structure(task):
+    name = task['member'] or task['path']
+    if not task['member'] and not name.lower().endswith('.pdb'):
+        return gemmi.read_structure(task['path']), False
+    if task['member']:
+        if not hasattr(ZIP_LOCAL, 'archives'):
+            ZIP_LOCAL.archives = {}
+        if task['path'] not in ZIP_LOCAL.archives:
+            ZIP_LOCAL.archives[task['path']] = zipfile.ZipFile(task['path'])
+        raw = ZIP_LOCAL.archives[task['path']].read(task['member'])  # validates CRC
+    else:
+        # Do not load gigabyte-sized CAPRI ensembles into memory.
+        chunks, has_models = [], False
+        with open(task['path'], 'rb') as f:
+            for line in f:
+                if line.startswith(b'MODEL '):
+                    has_models = True
+                chunks.append(line)
+                if line.startswith(b'ENDMDL'):
+                    break
+        raw = b''.join(chunks)
+        return pdb_compat(raw, task), has_models
+    if name.lower().endswith('.cif.gz'):
+        raw = gzip.decompress(raw)
+    if name.lower().endswith(('.cif', '.cif.gz')):
+        return gemmi.make_structure_from_block(gemmi.cif.read_string(raw.decode('utf-8')).sole_block()), False
+    return pdb_compat(raw, task), b'MODEL ' in raw
+
+def chain_data(model):
+    chains, missing, total, details = [], 0, 0, []
+    for chain in model:
+        coords, owners, sequence = [], [], []
+        for res in chain:
+            info = gemmi.find_tabulated_residue(res.name)
+            if not info.is_amino_acid() or res.entity_type in (gemmi.EntityType.Water, gemmi.EntityType.NonPolymer):
+                continue
+            # Unknown entity type (common in PDB) is accepted for amino acids.
+            atoms = {}
+            for atom in res:
+                if atom.occ <= 0 or atom.element.is_hydrogen:
+                    continue
+                if not all(math.isfinite(v) for v in (atom.pos.x, atom.pos.y, atom.pos.z)):
+                    raise ValueError('non-finite coordinate')
+                if atom.name not in atoms or atom.occ > atoms[atom.name].occ:
+                    atoms[atom.name] = atom
+            if not atoms:
+                continue
+            rid = len(sequence)
+            sequence.append(info.one_letter_code.upper())
+            absent = sorted(BACKBONE - atoms.keys())
+            total += 1
+            if absent:
+                missing += 1
+                details.append(f'{chain.name}:{res.seqid}:{res.name}({",".join(absent)})')
+            for atom in atoms.values():
+                coords.append((atom.pos.x, atom.pos.y, atom.pos.z))
+                owners.append(rid)
+        if coords:
+            xyz = np.array(coords, dtype=np.float64)
+            chains.append(dict(name=chain.name, sequence=''.join(sequence), xyz=xyz, owners=np.array(owners), tree=cKDTree(xyz), low=xyz.min(0), high=xyz.max(0)))
+    return chains, missing, total, details
+
+def contact(a, b):
+    # Nearest-neighbour queries avoid enumerating every atom-atom pair.
+    da = b['tree'].query(a['xyz'], distance_upper_bound=5.0)[0]
+    db = a['tree'].query(b['xyz'], distance_upper_bound=5.0)[0]
+    return len(np.unique(a['owners'][da < 5.0])), len(np.unique(b['owners'][db < 5.0]))
+
+def interfaces(chains, allowed=None):
+    pairs = []
+    for i, a in enumerate(chains):
+        for b in chains[i+1:]:
+            if allowed is not None and not allowed(a['name'], b['name']):
+                continue
+            if np.any(np.maximum(a['low']-b['high'], b['low']-a['high']) >= 5):
+                na, nb = 0, 0
+            else:
+                na, nb = contact(a, b)
+            pairs.append((a['name'], b['name'], na, nb))
+    return pairs
+
+def is_subsequence(short, long):
+    it = iter(long)
+    return all(c in it for c in short)
+
+def nano_features(task, chains, pdbid):
+    result = dict(vhh_status='unknown', vhh_reason='缺少可验证链标注', cdr3_lengths=[], cdr3_sequences=[])
+    name = pathlib.PurePosixPath(task['member'] or task['path']).stem
+    parent = str(pathlib.Path(task['path']).parent)
+    row = ANNOTATIONS.get((parent, name))
+    if row is None and not task['member']:
+        row = ANNOTATIONS.get((str(pathlib.Path(task['path']).parent.parent), name))
+    if row is not None:
+        if row.get('TCR_Chain', '').lower() == 'true':
+            result.update(vhh_status='fail', vhh_reason='SNAC 标记 TCR')
+            return result, None
+        heavy = [c for c in chains if c['name'] == row.get('Chain_VH')]
+        if row.get('Chain_VL', '').strip() not in ('', 'nan', 'None') or any(c['name'] == 'L' for c in chains):
+            result.update(vhh_status='fail', vhh_reason='含轻链/VH-VL')
+            return result, None
+        if len(heavy) != 1:
+            result.update(vhh_status='fail', vhh_reason='H 链缺失或不唯一')
+            return result, None
+        seq = row.get('Sequence_VH', '')
+        obs = heavy[0]['sequence']
+        if not seq or not is_subsequence(obs, seq) or len(obs) < .7 * len(seq):
+            result.update(vhh_reason='H 链与标注序列不匹配或覆盖不足')
+            return result, None
+        regions = literal(row.get('Region_Split_VH'), {})
+        cdr = regions.get('cdr3', '')
+        if cdr:
+            result.update(cdr3_lengths=[len(cdr)], cdr3_sequences=[cdr])
+        # c_st/c_e can be short cloning/expression extensions, not Ig constant domains.
+        # Long unclassified extensions need review, rather than a false non-VHH claim.
+        extensions=len(regions.get('c_st',''))+len(regions.get('c_e',''))
+        if extensions>20:
+            result.update(vhh_status='unknown', vhh_reason=f'可变域外端部扩展{extensions}aa，需复核是否融合域')
+        else:
+            result.update(vhh_status='pass', vhh_reason='SNAC 非TCR单VHH标注 + H链序列核对；端部扩展不超过20aa')
+        antigen = set(literal(row.get('Chain_Ag'), []))
+        return result, lambda a, b: (a == heavy[0]['name'] and b in antigen) or (b == heavy[0]['name'] and a in antigen)
+    records = PDB_ANNOTATIONS.get(pdbid, [])
+    matches = []
+    for chain in chains:
+        obs = chain['sequence']
+        found = [r for r in records if len(obs) >= 70 and len(obs) >= .7 * len(r['sequence']) and is_subsequence(obs, r['sequence'])]
+        kinds = {r['kind'] for r in found}
+        if len(kinds) == 1:
+            matches.append((chain['name'], found[0]['kind'], {r['cdr3'] for r in found if r['cdr3']}))
+        elif kinds:
+            result['vhh_reason'] = '跨标注链类型冲突'
+            return result, None
+    vhh = [m for m in matches if m[1] == 'VHH']
+    other = [m for m in matches if m[1] != 'VHH']
+    if other:
+        result.update(vhh_status='fail', vhh_reason='检出VH/VL/TCR标注序列')
+    elif len(vhh) > 1:
+        result.update(vhh_status='fail', vhh_reason='含多个VHH链副本（非单VHH条目）')
+    elif len(vhh) == 1:
+        # Only a metadata-supported candidate: unmatched chains have no independent Ig classifier.
+        result.update(vhh_status='candidate', vhh_reason='一条VHH匹配；其他链未独立排除免疫球蛋白域')
+        source=CHAIN_ANNOTATIONS.get(pdbid)
+        if source:
+            names={c['name'] for c in chains}
+            domains=lambda key:[x for x in source[key] if x.rsplit('_',1)[0] in names]
+            hh,hl,hv=domains('Chain_VHH'),domains('Chain_VL'),domains('Chain_VH')
+            if len(hh)==1 and not hl and set(hv)==set(hh) and hh[0].rsplit('_',1)[0]==vhh[0][0]:
+                result.update(vhh_status='pass',vhh_reason='ASU0全链标注仅单VHH域 + 非TCR序列匹配')
+            elif hl or len(hv)>1 or len(hh)>1:
+                result.update(vhh_status='fail',vhh_reason='ASU0标注含额外VH/VL域')
+    if vhh:
+        unique = {next(iter(m[2])) for m in vhh if len(m[2]) == 1}
+        if len(unique) == 1 and all(len(m[2]) == 1 for m in vhh):
+            cdr = next(iter(unique))
+            result.update(cdr3_lengths=[len(cdr)], cdr3_sequences=[cdr])
+        elif len(unique) > 1:
+            result['vhh_reason'] += '；多种CDR-H3，文件级长度未判定'
+        vhhnames = {m[0] for m in vhh}
+        return result, lambda a, b: (a in vhhnames) != (b in vhhnames)
+    return result, None
+
+def audit(task):
+    out = dict(task, valid=False, error='', residues=0, missing_residues=0, missing_examples=[], chains=0, interface_status='not_applicable', max_contact_residues=None, weak_pairs=0, pairs=[], models_first_only=False, vhh_status='not_applicable', cdr3_lengths=[])
+    try:
+        st, multi = read_structure(task)
+        if not len(st):
+            raise ValueError('no coordinate model')
+        chains, missing, total, details = chain_data(st[0])
+        if not chains or not total:
+            raise ValueError('no usable amino-acid heavy atoms')
+        name = pathlib.Path(task['member'] or task['path']).name
+        pdbid = re.search(r'pdb_0000([a-zA-Z0-9]{4})', name)
+        pdbid = pdbid.group(1).upper() if pdbid else name[:4].upper()
+        out.update(valid=True, pdb_id=pdbid, chains=len(chains), residues=total, missing_residues=missing, missing_examples=details[:20], models_first_only=multi or len(st)>1, legacy_pdb_tail=task.get('_legacy_pdb_tail',False))
+        allowed = None
+        if task['subset'] in ('sabdab_vhh', 'snac_db') or task['subset'].startswith('extra_snac_'):
+            features, allowed = nano_features(task, chains, pdbid)
+            out.update(features)
+        # DB5.5 component files are not independently docking complexes.
+        if task['subset'] == 'test_db55':
+            return out
+        pairs = interfaces(chains, allowed)
+        out['pairs'] = pairs
+        if pairs:
+            maximum = max(p[2]+p[3] for p in pairs)
+            out.update(max_contact_residues=maximum, weak_pairs=sum(p[2]+p[3]<15 for p in pairs), interface_status='weak' if maximum < 15 else 'pass')
+        return out
+    except Exception as exc:
+        out.update(valid=False, error=f'{type(exc).__name__}: {exc}')
+        return out
+
+def db55_pairs(tasks):
+    bypath = {t['path']: t for t in tasks if t['subset']=='test_db55'}
+    results = []
+    for path, task in bypath.items():
+        if not path.endswith('_r_b.pdb'):
+            continue
+        partner = path[:-8] + '_l_b.pdb'
+        out = dict(id=pathlib.Path(path).name[:4], receptor=path, ligand=partner, valid=False, error='missing bound ligand')
+        if partner in bypath:
+            try:
+                a, _, _, _ = chain_data(read_structure(task)[0][0])
+                b, _, _, _ = chain_data(read_structure(bypath[partner])[0][0])
+                if not a or not b:
+                    raise ValueError('empty receptor/ligand')
+                # Union per residue over all receptor-ligand chain pairs.
+                ac = dict(xyz=np.concatenate([c['xyz'] for c in a]), owners=np.concatenate([c['owners']+sum(len(x['sequence']) for x in a[:i]) for i,c in enumerate(a)]))
+                bc = dict(xyz=np.concatenate([c['xyz'] for c in b]), owners=np.concatenate([c['owners']+sum(len(x['sequence']) for x in b[:i]) for i,c in enumerate(b)]))
+                ac['tree'], bc['tree'] = cKDTree(ac['xyz']), cKDTree(bc['xyz'])
+                nr,nl=contact(ac,bc)
+                out.update(valid=True,error='', receptor_contacts=nr,ligand_contacts=nl,contact_residues=nr+nl,interface_status='weak' if nr+nl<15 else 'pass')
+            except Exception as exc:
+                out['error']=str(exc)
+        results.append(out)
+    return results
+
+def pct(n,d,digits=1):
+    return f'{n/d:.{digits}%}' if d else 'N/A'
+
+def report(root, rows, ignored, archives, pairs, elapsed, destination):
+    groups=collections.defaultdict(list)
+    for r in rows:groups[r['subset']].append(r)
+    lines=['# 全数据集结构快速审计报告','',f'生成时间：{time.strftime("%Y-%m-%d %H:%M:%S")}。',f'数据目录：`{root}`。Gemmi {gemmi.__version__}；NumPy {np.__version__}。','', '## 统计口径与范围','',
+    '- 有效文件：格式可解析，首模型含至少一个具有正占有率、有限坐标的氨基酸重原子残基；不等于完整结构或独立样本。忽略 `._` AppleDouble 资源文件。',
+    '- 主链缺失：已观测氨基酸残基缺少 N、CA、C、O 任一原子；同名原子选最高占有率构象。完全未建模的残基不在分母内，本次不根据 SEQRES 补计。非蛋白链、水和游离配体不参与。',
+    '- 界面：严格距离 <5.0 Å；统计两侧接触残基数之和，不是原子对数或残基对数。多链结构默认取最强链对；有VHH标注时仅比较VHH–其他/已标注抗原链。各链对计数保存在 JSONL。最强链对仍 <15 才标记疑似弱界面；该启发式不能证明晶体伪接触。',
+    '- 合格率是严格基础筛查率：有效、观测残基主链无缺失、可评估界面且接触≥15；分母为有效文件。纳米专区的“VHH严格通过率”另列，不混同基础物理合格率。',
+    '- DB5.5 的单独 receptor/ligand 文件只做格式与主链检查；界面按 `_r_b`+`_l_b` 结合态坐标配对统计，不对未结合态强行叠合。',
+    '- 快速模式只计算每个文件首模型。CAPRI 多模型 PDB 仅读至首个 ENDMDL，后续模型既未解析也未做完整性验证；本报告不是全部 decoy 的质量分布。',
+    '- SNAC 主表 snac_db = curated_structures/nb_complexes（ZIP 内直接读）；nb_unbound 和 benchmark/nb_complexes 单列。其他 SNAC ZIP 只登记、不解析内部结构；所有松散 .pdb/.cif/.cif.gz 均已纳入。',
+    '- CDR-H3 使用 SNAC 的 IMGT Region_Split_VH.cdr3；SAbDab 通过同PDB来源标注与坐标序列匹配转移，不套用未经确认的残基编号。分箱为 <12、12–15、≥16，避免16 aa重复计数。',
+    '- VHH通过 = SNAC非TCR单VHH来源标注、唯一H链、无L链、H链序列覆盖≥70%且与标注一致，允许合计≤20aa的端部扩展（标签等），更长扩展记未判定；或SAbDab同PDB的ASU0全链域标注仅一个VHH且坐标序列匹配。c_st/c_e不直接当成恒定域。缺乏完整域标注时记candidate；多VHH晶体副本记fail仅表示不符合单链条目要求。未运行ANARCI，本项是本地来源标注核验，不是独立序列分类，未知/候选不得当作合格。','',
+    '## 核心子集规模与基础质量','', '| 子集 | 结构文件 | 有效 | 解析/坐标失败 | 有主链缺失文件（占有效） | 缺原子残基/观测残基 | 可评估界面 | 弱界面 | 基础合格/有效 |', '|---|---:|---:|---:|---:|---:|---:|---:|---:|']
+    order=['train_rcsb','sabdab_vhh','snac_db','test_db55']
+    def summary(g):
+        rr=groups[g];v=[r for r in rr if r['valid']];m=sum(r['missing_residues']>0 for r in v);nr=sum(r['residues'] for r in v);nm=sum(r['missing_residues'] for r in v); ev=sum(r['interface_status']!='not_applicable' for r in v);w=sum(r['interface_status']=='weak' for r in v);good=sum(r['missing_residues']==0 and r['interface_status']=='pass' for r in v)
+        quality=f'{good}/{len(v)} ({pct(good,len(v))})' if g!='test_db55' else '见配对统计'
+        if g.endswith('nb_unbound'):quality='N/A（未结合单链）'
+        return f'| {g} | {len(rr)} | {len(v)} | {len(rr)-len(v)} | {m} ({pct(m,len(v))}) | {nm}/{nr} ({pct(nm,nr,3)}) | {ev} | {w} | {quality} |'
+    lines += [summary(g) for g in order]
+    validpairs=[p for p in pairs if p['valid']];weakpairs=[p for p in validpairs if p['interface_status']=='weak']
+    lookup={r['path']:r for r in rows if r['subset']=='test_db55'}
+    paired_good=sum(p['interface_status']=='pass' and all(lookup.get(p[k],{}).get('valid') and lookup[p[k]]['missing_residues']==0 for k in ('receptor','ligand')) for p in validpairs)
+    lines += ['',f'DB5.5：发现 {len(pairs)} 个结合态配对，{len(validpairs)} 个成功评估，{len(weakpairs)} 个界面接触残基<15；界面通过率 {pct(len(validpairs)-len(weakpairs),len(validpairs))}。同时满足两侧观测残基主链完整、界面通过的配对为 {paired_good}/{len(validpairs)}（基础合格率 {pct(paired_good,len(validpairs))}）。', '', '## 纳米抗体身份与 CDR-H3','', '| 子集 | 有效 | VHH严格通过 | 单VHH候选 | 不满足单VHH条件 | 未判定 | 严格通过率 |','|---|---:|---:|---:|---:|---:|---:|']
+    for g in ['sabdab_vhh','snac_db']:
+        v=[r for r in groups[g] if r['valid']];c=collections.Counter(r['vhh_status'] for r in v)
+        lines.append(f'| {g} | {len(v)} | {c["pass"]} | {c["candidate"]} | {c["fail"]} | {c["unknown"]} | {pct(c["pass"],len(v))} |')
+    lines += ['', '| 子集/口径 | 可判定长度文件 | <12 aa | 12–15 aa | ≥16 aa | 长度未判定 |','|---|---:|---:|---:|---:|---:|']
+    for g in ['sabdab_vhh','snac_db']:
+        for strict in [False,True]:
+            v=[r for r in groups[g] if r['valid'] and (not strict or r['vhh_status']=='pass')];lens=[r['cdr3_lengths'][0] for r in v if len(r['cdr3_lengths'])==1];bins=[sum(x<12 for x in lens),sum(12<=x<16 for x in lens),sum(x>=16 for x in lens)]
+            lines.append(f'| {g}/'+('严格VHH' if strict else '全部可注释文件')+f' | {len(lens)} | '+' | '.join(f'{n} ({pct(n,len(lens))})' for n in bins)+f' | {len(v)-len(lens)} |')
+    lines += ['', '百分比分母为该行可判定长度的文件数；相同CDR的多链副本在文件级只计一次，不同CDR并存则不强行赋予单一长度。','', '## 其余松散结构与补充子集','', '| 子集 | 结构文件 | 有效 | 解析/坐标失败 | 有主链缺失文件（占有效） | 缺原子残基/观测残基 | 可评估界面 | 弱界面 | 基础合格/有效 |','|---|---:|---:|---:|---:|---:|---:|---:|---:|']
+    lines += [summary(g) for g in sorted(groups) if g not in order]
+    lines += ['', f'忽略 AppleDouble 资源文件 {len(ignored)} 个；首模型审计且检测到 MODEL 标记/多个模型的文件 {sum(r["models_first_only"] for r in rows)} 个。',f'兼容读取旧版PDB尾部字段的文件 {sum(r.get("legacy_pdb_tail",False) for r in rows)} 个：仅在电荷字段解析失败时忽略第67列及之后的旧编号，保留坐标/占有率/B因子，由原子名推断元素；不修改源文件。','', '## 压缩包覆盖范围','', '| 压缩包 | 内部结构文件 | 本次解析 |','|---|---:|---|']
+    lines += [f'| {a["path"]} | {a["structures"]} | {"是（或已解压文件去重）" if a["audited"] else "否，仅登记"} |' for a in archives]
+    lines += ['', '## 格式破损、无有效蛋白坐标或疑似弱界面清单','', '完整清单如下；主链缺失和VHH不符合条件的逐条记录另见 `data_audit_details.csv` / `data_audit_details.jsonl`。','', '| 子集 | PDB/条目 | 异常 | 文件/ZIP成员 |','|---|---|---|---|']
+    anomalies=0
+    for r in rows:
+        if not r['valid'] or r['interface_status']=='weak':
+            msg=r['error'] if not r['valid'] else f'最强界面仅{r["max_contact_residues"]}个接触残基'
+            lines.append(f'| {r["subset"]} | {r.get("pdb_id", "未知")} | {msg.replace(chr(124),"/")} | `{r["id"]}` |');anomalies+=1
+    for p in pairs:
+        if not p['valid'] or p.get('interface_status')=='weak':
+            lines.append(f'| test_db55 配对 | {p["id"]} | {p["error"] or str(p["contact_residues"])+"个接触残基"} | `{p["receptor"]}` + `{p["ligand"]}` |');anomalies+=1
+    if not anomalies:lines.append('| — | — | 无 | — |')
+    lines += ['', '## 可复现性与限制','', '- 逐文件结果：`data_audit_details.csv`、`data_audit_details.jsonl`；DB5.5配对：`data_audit_db55_pairs.json`；范围清单：`data_audit_inventory.json`。', '- 本次不去重、不划分训练集/测试集、不判断跨库泄漏、不生成生物学装配、不做能量松弛；目录名train/test仅为用户指定用途映射。', '- 原子缺失和小界面阈值属于初筛，不等同实验结构质量、亲和力或生物学真实性。单链/无合适抗原链为界面不适用，不标成伪复合物。', '- 解析实现参考：[Gemmi 官方接口](https://project-gemmi.github.io/python-api/gemmi.html)；SNAC链命名、TCR标识、IMGT分区依据本地README和CSV标注。']
+    destination.write_text('\n'.join(lines)+'\n',encoding='utf-8')
+
+def main():
+    parser=argparse.ArgumentParser();parser.add_argument('--data',type=pathlib.Path,default=BASE/'data');parser.add_argument('--workers',type=int,default=4);parser.add_argument('--limit',type=int,default=0);parser.add_argument('--out',type=pathlib.Path,default=BASE);parser.add_argument('--reuse-non-nano',action='store_true',help='Explicitly reuse valid non-nano geometry from this output directory; assumes unchanged files and geometry rules. Nano annotations and failed entries are recomputed.');args=parser.parse_args()
+    start=time.time();root=args.data.resolve();args.out.mkdir(parents=True,exist_ok=True);load_annotations(root);tasks,ignored,archives=discover(root)
+    if args.limit:tasks=tasks[:args.limit]
+    print(f'Found {len(tasks)} structures; ignored {len(ignored)} resource files',flush=True)
+    cached={}
+    previous=args.out/'data_audit_details.jsonl'
+    if args.reuse_non_nano and previous.exists():
+        stamp=previous.stat().st_mtime
+        for line in previous.read_text(encoding='utf-8').splitlines():
+            try:r=json.loads(line)
+            except json.JSONDecodeError:continue
+            if r['valid'] and r['subset'] not in ('sabdab_vhh','snac_db') and not r['subset'].startswith('extra_snac_') and pathlib.Path(r['path']).exists() and pathlib.Path(r['path']).stat().st_mtime<=stamp:
+                cached[r['id']]=r
+        print(f'Reusing {len(cached)} valid non-nano geometry records; rechecking all nano annotations and failures',flush=True)
+    def work(task):
+        return cached[task['id']] if task['id'] in cached else audit(task)
+    rows=[]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as pool, (args.out/'data_audit_details.jsonl').open('w',encoding='utf-8') as handle:
+        for r in pool.map(work,tasks):
+            rows.append(r);handle.write(json.dumps(r,ensure_ascii=False)+'\n')
+            if len(rows)%250==0:handle.flush();print(f'{len(rows)}/{len(tasks)} audited, {time.time()-start:.0f}s',flush=True)
+    pairs=db55_pairs(tasks)
+    fields=['subset','id','pdb_id','valid','error','chains','residues','missing_residues','interface_status','max_contact_residues','weak_pairs','vhh_status','vhh_reason','cdr3_lengths','models_first_only','legacy_pdb_tail']
+    with (args.out/'data_audit_details.csv').open('w',encoding='utf-8-sig',newline='') as handle:
+        writer=csv.DictWriter(handle,fieldnames=fields,extrasaction='ignore');writer.writeheader();writer.writerows(rows)
+    (args.out/'data_audit_db55_pairs.json').write_text(json.dumps(pairs,ensure_ascii=False,indent=2),encoding='utf-8')
+    (args.out/'data_audit_inventory.json').write_text(json.dumps(dict(ignored=ignored,archives=archives,tasks=len(tasks),partial_run=bool(args.limit)),ensure_ascii=False,indent=2),encoding='utf-8')
+    report(root,rows,ignored,archives,pairs,time.time()-start,args.out/'data_audit_report.md')
+    print(f'Done: {args.out / "data_audit_report.md"}',flush=True)
+
+if __name__=='__main__':
+    main()
