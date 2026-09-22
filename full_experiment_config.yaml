@@ -87,6 +87,7 @@ env_check:
 smoke_check:
   ablation_max_targets: 1
   recovery_pilot_targets: 1
+  recovery_pilot_pdb_id: "4s10"  # explicit smoke target; never inferred from targets/eval_shots
   recovery_pilot_sites: 5
   recovery_pilot_seeds: [42]
   recovery_pilot_max_evals: 12
@@ -266,6 +267,9 @@ structure_experiment:
 statistics:
   resamples: 10000
   budget_modes: ["outputs", "time"]
+  primary_outputs: 1000
+  primary_objective: "cvar"
+  primary_restarts: 4
   max_time_overrun_fraction: 0.10
   cluster_map: null  # path to a PDB->family JSON if/when one exists; without
                       # it, PDB itself is the cluster (documented limitation).
