@@ -154,6 +154,42 @@ def _rigid_fit(moving: np.ndarray, reference: np.ndarray) -> tuple[np.ndarray, n
     return rotation, reference.mean(0) - moving.mean(0) @ rotation
 
 
+def _torsion_angle_degrees(p0, p1, p2, p3) -> float:
+    """Signed four-point torsion in degrees."""
+    p0,p1,p2,p3=(np.asarray(p,dtype=float) for p in (p0,p1,p2,p3))
+    b0=-(p1-p0); b1=p2-p1; b2=p3-p2
+    norm=np.linalg.norm(b1)
+    if norm<1e-10: raise ValueError("Degenerate torsion axis")
+    b1=b1/norm
+    v=b0-np.dot(b0,b1)*b1
+    w=b2-np.dot(b2,b1)*b1
+    if min(np.linalg.norm(v),np.linalg.norm(w))<1e-10:
+        raise ValueError("Undefined torsion")
+    return float(np.degrees(np.arctan2(np.dot(np.cross(b1,v),w),np.dot(v,w))))
+
+def _backbone_phi_psi(residues: Mapping[str, Mapping[str, Any]], rid: str) -> Tuple[float,float]:
+    """Backbone phi/psi for one author residue id; termini fail closed."""
+    match=_RESIDUE_ID_PATTERN.match(rid)
+    if match is None: raise ValueError(f"Cannot parse residue id {rid}")
+    chain=match.group("chain")
+    ordered=[]
+    for key in residues:
+        m=_RESIDUE_ID_PATTERN.match(key)
+        if m and m.group("chain")==chain:
+            ordered.append((int(m.group("seqid")),m.group("icode") or "",key))
+    ordered.sort()
+    keys=[item[2] for item in ordered]
+    idx=keys.index(rid)
+    if idx==0 or idx==len(keys)-1:
+        raise ValueError(f"Dunbrack mode requires non-terminal Active residue: {rid}")
+    prev,current,nxt=residues[keys[idx-1]],residues[rid],residues[keys[idx+1]]
+    for entry,names in ((prev,("C",)),(current,("N","CA","C")),(nxt,("N",))):
+        missing=[name for name in names if name not in entry["atoms"]]
+        if missing: raise ValueError(f"Missing backbone atoms {missing} for Dunbrack lookup at {rid}")
+    phi=_torsion_angle_degrees(prev["atoms"]["C"],current["atoms"]["N"],current["atoms"]["CA"],current["atoms"]["C"])
+    psi=_torsion_angle_degrees(current["atoms"]["N"],current["atoms"]["CA"],current["atoms"]["C"],nxt["atoms"]["N"])
+    return phi,psi
+
 def _chi1_angle(atoms: Mapping[str, np.ndarray], residue_name: str) -> Optional[float]:
     """Signed N-CA-CB-X torsion in degrees; Ala/Gly have no chi1."""
     if residue_name in ("ALA", "GLY"):
@@ -1658,7 +1694,11 @@ class AllAtomInterfaceQUBOBuilder:
     def __init__(self, structure_path: Path, active_residues: Sequence[str], *,
                  chi1_angles: Optional[Sequence[float]] = None,
                  site_scores: Optional[Sequence[float]] = None, seed: int = 42,
-                 candidate_relax_iterations: int = 0):
+                 candidate_relax_iterations: int = 0,
+                 rotamer_mode: str = "legacy",
+                 rotamer_library_path: Optional[Path] = None,
+                 rotamer_probability_floor: float = 1e-4,
+                 rotamer_sigma_offsets: Sequence[float] = (-1.0,0.0,1.0)):
         import openmm as mm
         from openmm import app, unit
         import random
@@ -1667,6 +1707,12 @@ class AllAtomInterfaceQUBOBuilder:
         if candidate_relax_iterations < 0:
             raise ValueError("Candidate relaxation iterations must be nonnegative")
         self.candidate_relax_iterations = candidate_relax_iterations
+        self.rotamer_mode=str(rotamer_mode)
+        if self.rotamer_mode not in ("legacy","dunbrack2010"):
+            raise ValueError("rotamer_mode must be legacy or dunbrack2010")
+        self.rotamer_library_path=None if rotamer_library_path is None else Path(rotamer_library_path)
+        self.rotamer_probability_floor=float(rotamer_probability_floor)
+        self.rotamer_sigma_offsets=tuple(float(v) for v in rotamer_sigma_offsets)
         if chi1_angles is not None:
             chi1_angles=tuple(float(a) for a in chi1_angles)
             if not 2 <= len(chi1_angles) <= 6 or not np.isfinite(chi1_angles).all():
@@ -1696,6 +1742,20 @@ class AllAtomInterfaceQUBOBuilder:
         self.source_structure=structure_path
         # Explicitly validate selected canonical heavy atoms before hydrogen addition.
         protein=read_atomistic_structure(structure_path)
+        allatom_dunbrack_bins={}
+        allatom_backbone_angles={}
+        if self.rotamer_mode=="dunbrack2010" and chi1_angles is None:
+            if self.rotamer_library_path is None:
+                raise ValueError("Dunbrack all-atom mode requires rotamer_library_path")
+            requested=set()
+            for rid in ids:
+                residue_name=protein[rid]["name"]
+                aa=gemmi.find_tabulated_residue(residue_name).one_letter_code
+                if aa in "AG": continue
+                phi,psi=_backbone_phi_psi(protein,rid)
+                allatom_backbone_angles[rid]=(phi,psi)
+                requested.add((_THREE_LETTER[aa],_nearest_dunbrack_bin(phi),_nearest_dunbrack_bin(psi)))
+            allatom_dunbrack_bins=_load_dunbrack_bins(self.rotamer_library_path,requested) if requested else {}
         for rid in ids:
             if rid not in protein or protein[rid]["name"] in ("ALA","GLY","PRO"):
                 raise ValueError(f"Active site has no supported acyclic chi1: {rid}")
@@ -1754,7 +1814,16 @@ class AllAtomInterfaceQUBOBuilder:
             atom_coordinates={name:self.base_positions[index] for name,index in atoms.items()}
             original=_chi1_angle(atom_coordinates,residue.name)
             if self.chi1_angles_override is None:
-                angles=tuple(t.chi1_degrees for t in _expanded_rotamer_templates(one_letter))
+                if self.rotamer_mode=="dunbrack2010" and one_letter not in "AG":
+                    phi,psi=allatom_backbone_angles[rid]
+                    templates=_dunbrack_templates_for_site(
+                        allatom_dunbrack_bins,one_letter,phi,psi,
+                        probability_floor=self.rotamer_probability_floor,
+                        sigma_offsets=self.rotamer_sigma_offsets,
+                    )
+                    angles=tuple(t.chi1_degrees for t in templates)
+                else:
+                    angles=tuple(t.chi1_degrees for t in _expanded_rotamer_templates(one_letter))
             else:
                 angles=tuple(self.chi1_angles_override)
             raw_pool_sizes[site]=len(angles)
@@ -1906,7 +1975,8 @@ class AllAtomInterfaceQUBOBuilder:
                 solvent="vacuum; NoCutoff",raw_rotamer_pool_sizes=self.raw_rotamer_pool_sizes,
                 rotamers_per_site=self.retained_rotamers_per_site,
                 site_scores=self.site_scores.tolist(),
-                rotamer_state_policy=("adaptive 6/9/12 raw chi1 sub-rotamers -> 3--6 retained under <=30 variables" if self.chi1_angles_override is None else "explicit legacy chi1 angle override"),
+                rotamer_state_policy=(f"{self.rotamer_mode} chi1 candidates -> 3--6 retained under <=30 variables" if self.chi1_angles_override is None else "explicit legacy chi1 angle override"),
+                rotamer_library_path=(None if self.rotamer_library_path is None else str(self.rotamer_library_path)),
                 candidate_scope="input-conditioned distal chi; Amber14 single-candidate prescreen, no affinity claim"))
 
     def write_structure(self, positions: np.ndarray, destination: Path) -> None:
