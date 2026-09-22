@@ -190,6 +190,9 @@ def _validate_scientific_config(config: Dict[str, Any]) -> None:
     qc = config.get("qc_benchmark", {}) or {}
     structure = config.get("structure_experiment", {}) or {}
     validation = qf.get("validation_queue", {}) or {}
+    clustering = qf.get("independence_clustering", {}) or {}
+    if clustering.get("required", False) and not clustering.get("cluster_map"):
+        raise ValueError("queue_freeze.independence_clustering.cluster_map is required")
 
     homology = qf.get("homology_isolation", {}) or {}
     required_homology = {
@@ -630,6 +633,16 @@ class Orchestrator:
             "--cross-partner-knn-k", str(qf_cfg["graph_build"].get("cross_partner_knn_k", 3)),
             "--min-interface-residues", str(qf_cfg["graph_build"].get("min_interface_residues", 15)),
         ]
+        clustering_cfg = qf_cfg.get("independence_clustering", {}) or {}
+        cluster_map_path = resolve_path(self.config, clustering_cfg.get("cluster_map", "")) if clustering_cfg.get("cluster_map") else None
+        if clustering_cfg.get("required", False):
+            if cluster_map_path is None or not cluster_map_path.is_file():
+                return StageResult(
+                    "queue_freeze", "failed", started, utc_timestamp(), None,
+                    f"Required family/domain/structure cluster map missing: {cluster_map_path}",
+                )
+        if cluster_map_path is not None and cluster_map_path.is_file():
+            graph_argv += ["--cluster-map", str(cluster_map_path)]
         if qf_cfg["graph_build"].get("no_cap", True):
             graph_argv += ["--no-cap", "--partition-seed", str(streams["partition"])]
         else:
@@ -1126,8 +1139,15 @@ class Orchestrator:
                     "--budget-mode", budget_mode,
                     "--max-time-overrun-fraction", str(cfg.get("max_time_overrun_fraction", 0.10)),
                 ]
-                if cfg.get("cluster_map"):
-                    argv += ["--cluster-map", str(resolve_path(self.config, cfg["cluster_map"]))]
+                cluster_setting = cfg.get("cluster_map") or (
+                    (self.config["queue_freeze"].get("independence_clustering", {}) or {}).get("cluster_map")
+                )
+                if cluster_setting:
+                    cluster_path = resolve_path(self.config, cluster_setting)
+                    if not cluster_path.is_file():
+                        failures.append(f"Missing required cluster map for statistics: {cluster_path}")
+                        continue
+                    argv += ["--cluster-map", str(cluster_path)]
                 returncode, log_path = self._run_subprocess(
                     f"statistics_{results_dir.name}_{budget_mode}", argv)
                 logs.append(str(log_path)); argvs.append(argv)
