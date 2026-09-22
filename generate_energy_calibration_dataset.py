@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Generate TRAIN-ONLY paired coarse/Amber calibration rows.
 
-The exact same residue->chi1 assignment is evaluated by the coarse QUBO
-component model and by Amber14. Rows are within-complex deltas relative to a
-fixed deterministic anchor assignment, which removes arbitrary per-complex
-absolute energy offsets before the cross-complex ridge fit.
+The exact same full Dunbrack residue->chi1..chiN assignment represented by a
+coarse QUBO bit is reconstructed atomistically and evaluated by Amber14. The
+coarse pseudo-atom geometry remains chi1-oriented, so this calibration measures
+how well its component scores rank the corresponding full side-chain states.
+Rows are within-complex deltas relative to a fixed deterministic anchor, which
+removes arbitrary per-complex absolute energy offsets before cross-complex fit.
 """
 from __future__ import annotations
 
@@ -61,11 +63,10 @@ def chi_assignment(qubo, selected: list[int]) -> dict[str,tuple[float,...]]:
     for index in selected:
         record=by_variable.get(int(index))
         if record is None:
-            # Legacy/debug compatibility only; formal Dunbrack runs must carry
-            # complete rotamer-state metadata.
-            variable=qubo.variable_map[int(index)]
-            result[variable.residue_id]=(float(variable.chi1_degrees),)
-            continue
+            raise ValueError(
+                f"Formal Dunbrack calibration requires complete rotamer_state_records; "
+                f"missing QUBO variable {index}"
+            )
         chis=tuple(float(v) for v in record.get("chi_degrees",[]))
         if not chis:
             raise ValueError(f"Missing multi-chi metadata for QUBO variable {index}")
