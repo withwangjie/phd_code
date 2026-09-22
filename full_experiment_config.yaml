@@ -132,7 +132,7 @@ queue_freeze:
   graph_build:
     workers: 8
     # Scientific graph protocol. Changing any value requires a fresh dataset;
-    # graph v1.3 records these values in every .pt and run_summary.json.
+    # graph v1.4 records these values in every .pt and run_summary.json.
     interface_label_cutoff_angstrom: 5.0
     intra_chain_ca_cutoff_angstrom: 8.0
     cross_partner_knn_k: 3
@@ -188,9 +188,9 @@ queue_freeze:
 
 # ---------------------------------------------------------------------------
 # Stage 3: EGNN training (train_egnn_pruning.py). Runs against the uncapped
-# dataset's train split. Internal train/validation partitioning uses bilateral
-# full-chain VHH+antigen 40% connected components with deterministic 5-fold hashing
-# (validation fold 0), never random 90/10. checkpoint_dir matches queue_freeze.validation_queue
+# dataset's train split. Internal train/validation partitioning uses layered
+# VHH/CDR-H3/antigen connected components from queue_freeze.homology_isolation
+# with deterministic 5-fold hashing (validation fold 0), never random 90/10. checkpoint_dir matches queue_freeze.validation_queue
 # .checkpoint's directory above so the freshly trained weights are what the
 # validation-queue EGNN pruning selection actually uses.
 # ---------------------------------------------------------------------------
