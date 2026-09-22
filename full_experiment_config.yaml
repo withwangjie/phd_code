@@ -40,9 +40,11 @@ paths:
   run_prefix: "experiments_full_run_"
 
 # ---------------------------------------------------------------------------
-# Stage toggles -- allows re-running a subset without editing the script.
-# Every stage still individually checks its own prerequisites' completion
-# markers before running, regardless of these toggles.
+# Stage toggles control whether a stage is eligible to run. Disabled stages
+# are recorded as skipped, but skipped does NOT generally satisfy downstream
+# prerequisites. Only smoke_check is explicitly optional; scientific stages
+# fail closed when a required prerequisite is disabled/incomplete. Use
+# --resume/--only only with already completed, artifact-verified prerequisites.
 # ---------------------------------------------------------------------------
 stages:
   env_check: true
