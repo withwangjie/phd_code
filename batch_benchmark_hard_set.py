@@ -1164,8 +1164,11 @@ def _ablation_run_case(data: Any, scorer: Any, config: dict, args: Any, artifact
     begin = time.perf_counter()
     active = select_ablation_active(data, config["pruning"], args.active_sites, config["seed"], scorer)
     sub = build_ablation_subgraph(data, active, config["radius"])
-    qubo = InterfaceQUBOBuilder(min_variables=2*args.active_sites,
-                              max_variables=2*args.active_sites, max_sites=args.active_sites).build(sub)
+    qubo = InterfaceQUBOBuilder(
+        min_variables=2 * args.active_sites,
+        max_variables=3 * args.active_sites,
+        max_sites=args.active_sites,
+    ).build(sub)
     # Independent optimize/sample seeds (never the shared perturb/input seed
     # config["seed"] above, and never each other): derived per-case, before
     # this function is ever called, from the master-seed optimize/sample
