@@ -92,6 +92,35 @@ from nanoqc.inference.paired_statistics import paired_denominator_failures, holm
 PREREQUISITE_BLOCK_PREFIX = "Prerequisite stage '"
 
 
+def quantum_protocol(config: Mapping[str, Any]) -> Dict[str, Any]:
+    """Return the frozen top-level quantum protocol."""
+    value=config.get("quantum_protocol",{}) or {}
+    if not isinstance(value,dict):
+        raise ValueError("quantum_protocol must be a mapping")
+    return value
+
+
+def quantum_primary(config: Mapping[str, Any]) -> Dict[str, Any]:
+    value=quantum_protocol(config).get("primary",{}) or {}
+    if not isinstance(value,dict):
+        raise ValueError("quantum_protocol.primary must be a mapping")
+    return value
+
+
+def quantum_benchmark_ablation(config: Mapping[str, Any]) -> Dict[str, Any]:
+    value=quantum_protocol(config).get("benchmark_ablation",{}) or {}
+    if not isinstance(value,dict):
+        raise ValueError("quantum_protocol.benchmark_ablation must be a mapping")
+    return value
+
+
+def quantum_development_sensitivity(config: Mapping[str, Any]) -> Dict[str, Any]:
+    value=quantum_protocol(config).get("development_sensitivity",{}) or {}
+    if not isinstance(value,dict):
+        raise ValueError("quantum_protocol.development_sensitivity must be a mapping")
+    return value
+
+
 def primary_qc_effect_name(baseline: str, budget_mode: str) -> str:
     """Effect name written by batch_benchmark_hard_set --paired-statistics.
 
@@ -271,8 +300,92 @@ def _validate_scientific_config(config: Dict[str, Any]) -> None:
     train = config.get("egnn_train", {}) or {}
     qc = config.get("qc_benchmark", {}) or {}
     structure = config.get("structure_experiment", {}) or {}
+    qproto = quantum_protocol(config)
+    qprimary = quantum_primary(config)
+    qablation = quantum_benchmark_ablation(config)
+    qsensitivity = quantum_development_sensitivity(config)
     validation = qf.get("validation_queue", {}) or {}
     clustering = qf.get("independence_clustering", {}) or {}
+    if str(qproto.get("algorithm","")) != "xy_qaoa":
+        raise ValueError("quantum_protocol.algorithm must be xy_qaoa")
+    if str(qproto.get("encoding","")) != "one_hot_rotamer_registers":
+        raise ValueError("quantum_protocol.encoding must be one_hot_rotamer_registers")
+    if str(qproto.get("mixer","")) != "local_xy":
+        raise ValueError("quantum_protocol.mixer must be local_xy")
+    if str(qproto.get("initial_state","")) != "local_w_state":
+        raise ValueError("quantum_protocol.initial_state must be local_w_state")
+    if str(qproto.get("simulation_scope","")) != "exact_feasible_subspace_classical_simulation":
+        raise ValueError(
+            "quantum_protocol.simulation_scope must explicitly identify exact feasible-subspace classical simulation"
+        )
+
+    legacy_qc_keys={
+        "depths","max_evals","qaoa_objective","qaoa_restarts",
+        "cvar_alpha","eval_shots","parameter_scale",
+    }
+    stale_qc=sorted(k for k in legacy_qc_keys if k in qc)
+    if stale_qc:
+        raise ValueError(
+            f"QAOA settings must live only under quantum_protocol; remove qc_benchmark keys {stale_qc}"
+        )
+    legacy_structure_keys={
+        "outputs","max_evals","qaoa_depth","eval_shots","qaoa_restarts",
+        "qaoa_objective","cvar_alpha","parameter_scale",
+    }
+    stale_structure=sorted(k for k in legacy_structure_keys if k in structure)
+    if stale_structure:
+        raise ValueError(
+            f"QAOA settings must live only under quantum_protocol; remove structure_experiment keys {stale_structure}"
+        )
+    stats_probe=config.get("statistics",{}) or {}
+    legacy_stats_keys={
+        "primary_depth","primary_max_evals","primary_outputs",
+        "primary_objective","primary_restarts",
+    }
+    stale_stats=sorted(k for k in legacy_stats_keys if k in stats_probe)
+    if stale_stats:
+        raise ValueError(
+            f"QAOA primary settings must live only under quantum_protocol.primary; remove statistics keys {stale_stats}"
+        )
+
+    depth=int(qprimary.get("depth",0) or 0)
+    if depth not in (1,2,3):
+        raise ValueError("quantum_protocol.primary.depth must be one of 1, 2, 3")
+    for key in ("max_evals","restarts","eval_shots","output_shots"):
+        value=qprimary.get(key)
+        if isinstance(value,bool) or value is None or int(value)!=value or int(value)<=0:
+            raise ValueError(f"quantum_protocol.primary.{key} must be a positive integer")
+    if str(qprimary.get("objective","")) not in ("mean","cvar"):
+        raise ValueError("quantum_protocol.primary.objective must be mean or cvar")
+    alpha=float(qprimary.get("cvar_alpha",0.0))
+    if not math.isfinite(alpha) or not 0.0 < alpha <= 1.0:
+        raise ValueError("quantum_protocol.primary.cvar_alpha must lie in (0,1]")
+    if str(qprimary.get("parameter_scale","")) not in ("max_coefficient","feasible_iqr"):
+        raise ValueError(
+            "quantum_protocol.primary.parameter_scale must be max_coefficient or feasible_iqr"
+        )
+
+    objectives=[str(v) for v in qablation.get("objectives",[])]
+    restarts=[int(v) for v in qablation.get("restarts",[])]
+    if not objectives or any(v not in ("mean","cvar") for v in objectives) or len(objectives)!=len(set(objectives)):
+        raise ValueError("quantum_protocol.benchmark_ablation.objectives must be unique mean/cvar values")
+    if not restarts or any(v<=0 for v in restarts) or len(restarts)!=len(set(restarts)):
+        raise ValueError("quantum_protocol.benchmark_ablation.restarts must be unique positive integers")
+    if str(qprimary["objective"]) not in objectives or int(qprimary["restarts"]) not in restarts:
+        raise ValueError("quantum_protocol primary objective/restarts must be present in benchmark_ablation")
+
+    sensitivity_depths=[int(v) for v in qsensitivity.get("depths",[])]
+    if not sensitivity_depths or any(v not in (1,2,3) for v in sensitivity_depths):
+        raise ValueError("quantum_protocol.development_sensitivity.depths must use supported p in {1,2,3}")
+    for key in ("max_evals","eval_shots"):
+        values=[int(v) for v in qsensitivity.get(key,[])]
+        if not values or any(v<=0 for v in values) or len(values)!=len(set(values)):
+            raise ValueError(f"quantum_protocol.development_sensitivity.{key} must be unique positive integers")
+    sensitivity_alpha=[float(v) for v in qsensitivity.get("cvar_alpha",[])]
+    if (not sensitivity_alpha or any((not math.isfinite(v)) or not 0.0<v<=1.0 for v in sensitivity_alpha)
+            or len(sensitivity_alpha)!=len(set(sensitivity_alpha))):
+        raise ValueError("quantum_protocol.development_sensitivity.cvar_alpha must be unique values in (0,1]")
+
     if clustering.get("required", False) and not clustering.get("cluster_map"):
         raise ValueError("queue_freeze.independence_clustering.cluster_map is required")
 
@@ -428,15 +541,7 @@ def _validate_scientific_config(config: Dict[str, Any]) -> None:
                 f"qc_benchmark={left}, structure_experiment={right}"
             )
 
-    qc_depths=[int(v) for v in qc.get("depths",[2])]
-    if not qc_depths or any(v<=0 for v in qc_depths):
-        raise ValueError("qc_benchmark.depths must contain positive integers")
-    structure_depth=int(structure.get("qaoa_depth",qc_depths[0]))
-    if structure_depth != qc_depths[0]:
-        raise ValueError(
-            f"Primary QAOA depth mismatch: qc_benchmark={qc_depths[0]}, "
-            f"structure_experiment={structure_depth}"
-        )
+    qc_depths=[int(qprimary["depth"])]
     qc_sites=[int(v) for v in qc.get("active_sites",[6])]
     if not qc_sites or len(qc_sites)!=len(set(qc_sites)) or any(v<4 or v>10 for v in qc_sites):
         raise ValueError("qc_benchmark.active_sites must contain unique integers in 4..10")
@@ -458,12 +563,12 @@ def _validate_scientific_config(config: Dict[str, Any]) -> None:
     primary_radius=float(stats.get("primary_radius",6.0))
     if primary_radius not in [float(v) for v in qc.get("radii",[6.0])]:
         raise ValueError("statistics.primary_radius must be present in qc_benchmark.radii")
-    primary_depth=int(stats.get("primary_depth",2))
-    if primary_depth not in [int(v) for v in qc.get("depths",[2])]:
-        raise ValueError("statistics.primary_depth must be present in qc_benchmark.depths")
-    primary_max_evals=int(stats.get("primary_max_evals",90))
-    if primary_max_evals not in [int(v) for v in qc.get("max_evals",[90])]:
-        raise ValueError("statistics.primary_max_evals must be present in qc_benchmark.max_evals")
+    primary_depth=int(qprimary["depth"])
+    primary_max_evals=int(qprimary["max_evals"])
+    if int(qprimary["output_shots"]) not in [int(v) for v in qc.get("outputs",[1000])]:
+        raise ValueError(
+            "quantum_protocol.primary.output_shots must be present in qc_benchmark.outputs"
+        )
     stats_primary_sites=int(stats.get("primary_active_sites",6))
     if stats_primary_sites not in qc_sites:
         raise ValueError(
