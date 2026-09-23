@@ -241,7 +241,10 @@ Every formal run terminates with:
 
 ## Partial reruns
 
-`--only` is an operational repair tool, not a way to declare a partial experiment complete.
+`--only` is an operational repair tool and must be paired with `--resume <run_dir>`.
+It cannot be used on a fresh invocation because the skipped stages have no completed
+markers or validated artifacts in the new run directory. It is not a way to declare a
+partial experiment complete.
 A required stage skipped in the current invocation is acceptable only if an earlier completed
 stage marker exists in the same run and its artifacts revalidate successfully. Otherwise the
 run-level results audit fails and `RUN_SUMMARY.json.status` remains `failed`.

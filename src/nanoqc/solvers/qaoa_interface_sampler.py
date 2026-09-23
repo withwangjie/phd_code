@@ -1366,10 +1366,22 @@ class XYMixerQAOASampler:
                 ]
                 proposal = int(rng.choice(alternatives))
                 previous = chosen[site]
+                # The one-hot move changes only one variable.  Evaluate its
+                # local QUBO delta instead of rescanning the complete energy
+                # table for every proposal (the latter was a measurable cost
+                # in matched-time SA runs).
+                delta = float(self.physical_self[proposal] - self.physical_self[previous])
+                for selected in chosen:
+                    if selected == previous:
+                        continue
+                    left, right = sorted((proposal, int(selected)))
+                    new_pair = float(self.physical_pair[left, right])
+                    left, right = sorted((previous, int(selected)))
+                    old_pair = float(self.physical_pair[left, right])
+                    delta += new_pair - old_pair
                 state[previous] = 0
                 state[proposal] = 1
-                proposed_energy = self.physical_energy(state)
-                delta = proposed_energy - energy
+                proposed_energy = energy + delta
                 accept = delta <= 0.0 or rng.random() < math.exp(
                     -delta / max(temperature, 1e-15)
                 )

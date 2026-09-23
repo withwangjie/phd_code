@@ -964,9 +964,9 @@ def section_applicability_boundary(ctx: ReportContext) -> List[str]:
         "CDR-H3 backbone prediction, not de novo complex structure prediction.",
         "- 4S10/8YVO/9GCN remain development-only regression targets (selection order: ascending structure "
         "size; already inspected during development). They are never reported above as a confirmatory result.",
-        "- The validation queue in section 1.3/4.2 is the only queue in this run intended to support a "
+        "- The validation queue in section 1.3 is the only queue in this run intended to support a "
         "confirmatory claim, and only to the extent its own target count and per-target variance support one "
-        "-- a small queue (see section 1.3 for its actual selected count) supports stability/sanity checking, "
+        "- A small queue (see section 1.3 for its actual selected count) supports stability/sanity checking, "
         "not a general statistical-power guarantee.",
         f"- Independence checking is PDB-disjoint plus layered sequence isolation using published anti-leakage precedents: "
         f"VHH < {100.0 * float((((ctx.frozen_config.get('queue_freeze', {}) or {}).get('homology_isolation', {}) or {}).get('vhh_full_chain_identity', 0.80))):.0f}%, "

@@ -1255,7 +1255,8 @@ def _ablation_export_results(out: Path) -> None:
         return
     temp = out/"metrics.csv.tmp"
     with temp.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=list(dict.fromkeys(k for row in rows for k in row)))
+        fields = list(dict.fromkeys(k for row in rows for k in row))
+        writer = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)
         f.flush()
@@ -1289,10 +1290,22 @@ def _ablation_append_results(out: Path, key: str) -> None:
     if not new_file:
         with path.open(newline="", encoding="utf-8") as handle:
             fields = next(csv.reader(handle))
-    if any(set(row) - set(fields) for row in rows):
-        raise ValueError("Case CSV schema changed within a frozen run")
+    # A case may legitimately add a metric column as the pipeline evolves.
+    # Rebuild the aggregate with the union schema instead of aborting the run.
+    extra = [k for row in rows for k in row if k not in fields]
+    if extra:
+        existing = list(csv.DictReader(path.open(newline="", encoding="utf-8"))) if path.exists() else []
+        fields = list(dict.fromkeys(fields + extra))
+        merged = existing + rows
+        temp = path.with_suffix(path.suffix + ".tmp")
+        with temp.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore")
+            writer.writeheader(); writer.writerows(merged)
+            handle.flush(); os.fsync(handle.fileno())
+        os.replace(temp, path)
+        return
     with path.open("a", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore")
         if new_file:
             writer.writeheader()
         writer.writerows(rows)
@@ -1686,8 +1699,11 @@ def _ablation_main(argv: Optional[Sequence[str]] = None) -> int:
             )
             scorer.eval()
         _ablation_export_results(out)
-        settings = list(itertools.product(
-            args.pruning,args.radii,args.depths,args.max_evals,args.active_sites,args.seeds))
+        # Treat repeated CLI values as one grid point.  Artifact keys are
+        # intentionally content-addressed, so counting duplicate tuples would
+        # otherwise make completion impossible even though every artifact exists.
+        settings = list(dict.fromkeys(itertools.product(
+            args.pruning,args.radii,args.depths,args.max_evals,args.active_sites,args.seeds)))
         total_planned = len(files)*len(settings)
         failed_keys_path = out/"failed_case_keys.json"
         failed_keys = set(json.loads(failed_keys_path.read_text())) if failed_keys_path.exists() else set()
@@ -1990,7 +2006,7 @@ def _structure_evaluation_main(argv: Optional[Sequence[str]] = None) -> int:
                              protocol=case["protocol"],selection_origin=case["selection_origin"],**hashes)
                     row.update({k:v for k,v in result.items() if not isinstance(v,(list,dict))})
                     if writer is None:
-                        writer=csv.DictWriter(handle,fieldnames=list(row)); writer.writeheader()
+                        writer=csv.DictWriter(handle,fieldnames=list(row),extrasaction="ignore"); writer.writeheader()
                     writer.writerow(row); handle.flush(); os.fsync(handle.fileno()); rows.append(row)
                 except Exception:
                     failures+=1
@@ -2216,7 +2232,7 @@ def _allatom_experiment_main(argv: Optional[Sequence[str]] = None) -> int:
                     sidechain_rmsd_before=before["sidechain_rmsd_angstrom"] if before else None,
                     sidechain_rmsd_after=after["sidechain_rmsd_angstrom"] if after else None)
                 if writer is None:
-                    writer=csv.DictWriter(handle,fieldnames=list(row));writer.writeheader()
+                    writer=csv.DictWriter(handle,fieldnames=list(row),extrasaction="ignore");writer.writeheader()
                 writer.writerow(row);handle.flush();os.fsync(handle.fileno());records.append(row)
         lines=["# All-atom fixed-backbone experiment", "", "Protocol: "+case["protocol"],
             "Amber14 vacuum potential; not binding free energy. Input-conditioned distal chi, uniform chi1 grid; not a full rotamer library.",
@@ -2391,7 +2407,7 @@ def _recovery_benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
                             relaxation_energy_drop=energy_drop,
                             relaxation_energy_down_rmsd_up=bool(energy_drop>1e-6 and final["sidechain_rmsd_angstrom"]>rmsd_before+1e-6))
                         if writer is None:
-                            writer=csv.DictWriter(handle,fieldnames=list(row));writer.writeheader()
+                            writer=csv.DictWriter(handle,fieldnames=list(row),extrasaction="ignore");writer.writeheader()
                         writer.writerow(row);handle.flush();os.fsync(handle.fileno());rows.append(row)
                 except Exception:
                     failures+=1

@@ -708,6 +708,23 @@ def main(argv=None) -> int:
         _ablation_atomic_json(out/"selected_targets.json",selected)
         if not selected:
             raise ValueError('No eligible targets; inspect eligibility.json')
+        # Final independent-set audit: selection-time pools cover sequence and
+        # family thresholds, but this catches duplicate source structures that
+        # carry different PDB labels or manifests.
+        duplicate_keys = {}
+        for case in selected:
+            for key_name in ("source_id", "native_sha256", "graph_sha256"):
+                value = case.get(key_name)
+                if value:
+                    duplicate_keys.setdefault((key_name, value), []).append(case["target"])
+        duplicate_groups = [targets for targets in duplicate_keys.values() if len(targets) > 1]
+        if duplicate_groups:
+            raise ValueError(f"External validation set contains duplicate structures: {duplicate_groups}")
+        _ablation_atomic_json(out/"selection_audit.json", {
+            "selected_targets": [case["target"] for case in selected],
+            "internal_deduplication": "pdb_id, source_id, graph_sha256, native_sha256, layered sequence/family thresholds",
+            "duplicate_groups": [],
+        })
         results=[];failed=[]
         if not args.prepare_only:
             for case in selected:

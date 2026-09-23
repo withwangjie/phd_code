@@ -43,6 +43,11 @@ INTERFACE_LABEL_CUTOFF_ANGSTROM = 5.0
 INTRA_CHAIN_CA_CUTOFF_ANGSTROM = 8.0
 CROSS_PARTNER_KNN_K = 3
 MIN_INTERFACE_RESIDUES = 15
+# Deterministic admission budget.  Do not derive graph eligibility from the
+# machine's momentary free RAM: that made the dataset depend on build host
+# load.  Override explicitly in code/config when a different contract is
+# intended, and record the value in each graph's provenance.
+GRAPH_MEMORY_BUDGET_BYTES = 4 * 1024**3
 VERSION = '1.6'
 PROCESS = psutil.Process()
 PEAK_RSS = 0
@@ -367,7 +372,7 @@ def make_graph(row, split, pair=None, family_structure_cluster=''):
                 pair_set.add(tuple(sorted((int(node),int(partner[int(partner_local)])))))
     pairs=np.asarray(sorted(pair_set),dtype=np.int64)
     if pairs.ndim!=2 or pairs.shape[1]!=2 or not len(pairs):raise ValueError('edge construction produced no pairs')
-    budget=min(4*1024**3,int(psutil.virtual_memory().available*.25))
+    budget=GRAPH_MEMORY_BUDGET_BYTES
     if len(pairs)>10000000 or len(pairs)*128+n*512>budget:raise MemoryError(f'edge allocation budget exceeded: {len(pairs)} undirected edges')
     edge=np.concatenate([pairs.T,pairs[:,::-1].T],axis=1).astype(np.int64,copy=False)
     x=np.zeros((n,21),dtype=np.float32);x[np.arange(n),[AA_INDEX[r['aa']] for r in nodes]]=1;x[:,20]=groups
@@ -395,7 +400,8 @@ def make_graph(row, split, pair=None, family_structure_cluster=''):
         homology_antigen_identity_threshold=float(ANTIGEN_IDENTITY_THRESHOLD),
         homology_antigen_min_length_coverage=float(ANTIGEN_MIN_LENGTH_COVERAGE),
         audit_interface_residues=row.get('max_contact_residues',pair['contact_residues'] if pair else 0),
-        audit_vhh_status=row.get('vhh_status','not_applicable'),graph_version=VERSION)
+        audit_vhh_status=row.get('vhh_status','not_applicable'),graph_version=VERSION,
+        graph_memory_budget_bytes=int(GRAPH_MEMORY_BUDGET_BYTES))
     gnotes={json.dumps(note,sort_keys=True) for chain in chains for note in chain.get('identity_resolutions',[])}
     graph.residue_identity_resolutions=json.dumps([json.loads(s) for s in sorted(gnotes)])
     graph.num_nodes=n

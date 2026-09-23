@@ -35,7 +35,7 @@ file rather than racing.
 
     python -m nanoqc.pipeline.run_full_experiment --config configs/full_experiment_config.yaml
     python -m nanoqc.pipeline.run_full_experiment --config configs/full_experiment_config.yaml --resume experiments_full_run_20260920_010203
-    python -m nanoqc.pipeline.run_full_experiment --config configs/full_experiment_config.yaml --only qc_benchmark
+    python -m nanoqc.pipeline.run_full_experiment --config configs/full_experiment_config.yaml --resume <run_dir> --only qc_benchmark
     python -m nanoqc.pipeline.run_full_experiment --config configs/full_experiment_config.yaml --smoke-only
 
 Requires PyYAML and ``filelock`` (both listed in requirements.txt).
@@ -2754,7 +2754,7 @@ class Orchestrator:
                     "--max-perturb-degrees",str(cfg.get("max_perturb_degrees",120.0)),
                     "--outputs",str(cfg.get("outputs",1000)),
                     "--max-evals",str(cfg.get("max_evals",90)),
-                    "--sa-passes","100",
+                    "--sa-passes",str(cfg.get("sa_passes",100)),
                     "--relax-iterations",str(cfg.get("relax_iterations",200)),
                     "--loop-relax-iterations",str(cfg.get("loop_relax_iterations",100)),
                     "--seeds",*[str(v) for v in cfg.get("seeds",[42,43,44,45,46])],
@@ -2762,6 +2762,7 @@ class Orchestrator:
                     "--measurement-seeds",*[str(v) for v in measurement_seeds],
                     "--sample-seeds",*[str(v) for v in sample_seeds],
                     "--robust-qaoa","--qaoa-restarts",str(cfg.get("qaoa_restarts",4)),
+                    "--qaoa-depth",str(cfg.get("qaoa_depth",2)),
                     "--qaoa-objective",str(cfg.get("qaoa_objective","cvar")),
                     "--cvar-alpha",str(cfg.get("cvar_alpha",0.1)),
                     "--parameter-scale",str(cfg.get("parameter_scale","max_coefficient")),
