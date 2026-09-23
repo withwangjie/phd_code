@@ -100,6 +100,7 @@ def test_quantum_protocol_is_single_source_of_truth() -> None:
     assert qp["primary"]["objective"]=="cvar"
     forbidden={"depths","max_evals","qaoa_objective","qaoa_restarts","cvar_alpha","eval_shots","parameter_scale"}
     assert not (forbidden & set(config["qc_benchmark"]))
+    assert not ({"depths","max_evals","eval_shots","cvar_alpha","qaoa_objective","qaoa_restarts"} & set(config["qc_benchmark"]["sensitivity"]))
     assert not ({"outputs","max_evals","qaoa_depth","eval_shots","qaoa_restarts","qaoa_objective","cvar_alpha","parameter_scale"} & set(config["structure_experiment"]))
     assert not ({"primary_depth","primary_max_evals","primary_outputs","primary_objective","primary_restarts"} & set(config["statistics"]))
 
