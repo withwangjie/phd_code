@@ -506,6 +506,18 @@ def test_formal_statistics_require_scaling_outputs() -> None:
     assert "min_scaling_clusters" in inspect.getsource(full._validate_scientific_config)
 
 
+def test_statistics_reuse_run_local_frozen_cluster_map() -> None:
+    source=inspect.getsource(full.Orchestrator.stage_statistics)
+    assert "statistics_cluster_path = self.frozen_cluster_map_path()" in source
+    assert 'cfg_probe["cluster_map"]' not in source
+    assert "resolve_path(self.config" not in source
+
+
+def test_statistics_cluster_map_override_is_rejected() -> None:
+    source=inspect.getsource(full._validate_scientific_config)
+    assert "statistics.cluster_map is obsolete" in source
+
+
 def test_partial_only_run_cannot_pass_global_audit_without_prior_results(tmp_path: Path) -> None:
     class Dummy:
         run_dir=tmp_path
