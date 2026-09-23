@@ -78,7 +78,9 @@ def test_benchmark_contract_separates_proposed_baselines_and_oracle() -> None:
     assert 'method_role="classical_baseline"' in source
     assert '"schema":"quantum_classical_benchmark_v1"' in source
     assert '"role":"retrospective_ground_truth_only"' in source
-    assert "quantum_instance=quantum_instance.manifest()" in source
+    assert "quantum_instance={" in source
+    assert "**quantum_instance.manifest()" in source
+    assert '"Q":quantum_instance.Q.tolist()' in source
     assert "estimate_qaoa_resources(" in source
 
 
