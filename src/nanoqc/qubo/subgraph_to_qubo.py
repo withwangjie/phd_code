@@ -727,9 +727,9 @@ class QUBOResult:
     def export(self, output_dir: Path, stem: str = "interface") -> Dict[str, Path]:
         """Persist matrix components and a human-readable mapping manifest.
 
-        Returns paths to an ``.npz`` bundle and a ``.json`` manifest. Existing
-        files with the same names are replaced intentionally by this explicit
-        method call.
+        Returns paths to the matrix bundle, variable-mapping manifest, and
+        solver-facing quantum-instance manifest. Existing files with the same
+        names are replaced intentionally by this explicit method call.
         """
 
         if not stem or Path(stem).name != stem:
