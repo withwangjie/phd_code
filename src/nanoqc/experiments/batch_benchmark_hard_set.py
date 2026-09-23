@@ -1172,6 +1172,7 @@ def _ablation_run_case(data: Any, scorer: Any, config: dict, args: Any, artifact
                         qaoa_xy_gates=resources.xy_gates_total,
                         qaoa_two_qubit_gates=resources.two_qubit_gates_total,
                         qaoa_max_measurement_shots=resources.max_measurement_shots,
+                        qaoa_total_measurement_shots=opt.total_opt_shots+outputs,
                         solver_seconds=elapsed,
                         optimization_seconds=optimization_seconds,
                         sampling_seconds=sampling_seconds,
@@ -1243,6 +1244,9 @@ def _ablation_run_case(data: Any, scorer: Any, config: dict, args: Any, artifact
                     row = dict(donor_row)
                     row.update(metrics, solver=method+"_time", method_role="classical_baseline",
                         reference_outputs=outputs, solver_seconds=elapsed,
+                        qaoa_parameter_count=None,qaoa_rz_gates=None,qaoa_zz_gates=None,
+                        qaoa_xy_gates=None,qaoa_two_qubit_gates=None,
+                        qaoa_max_measurement_shots=None,qaoa_total_measurement_shots=None,
                         single_state_energy_queries=queries, optimizer_success=None,
                         optimizer_evaluations=None, termination_reason=None,
                         optimization_energy_start=None, optimization_energy_end=None,
