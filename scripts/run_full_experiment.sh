@@ -20,8 +20,8 @@
 #   ./scripts/run_full_experiment.sh --only qc_benchmark
 #   ./scripts/run_full_experiment.sh --smoke-only
 #
-# Every argument after the script name is forwarded verbatim to
-# run_full_experiment.py (see its --help for the full flag list).
+# Supported run controls are forwarded to run_full_experiment.py. The launcher
+# owns --config and --run-dir because they must match the preflight/provenance.
 #
 set -eo pipefail
 
@@ -41,6 +41,13 @@ if [[ "$SERVER_CONFIG" != /* ]]; then
 fi
 [ -f "$SCIENTIFIC_CONFIG" ] || fail "Scientific config file not found: ${REPO_ROOT}/${SCIENTIFIC_CONFIG}"
 [ -f "$SERVER_CONFIG" ] || fail "Server config file not found: ${SERVER_CONFIG}"
+for ARG in "$@"; do
+    case "$ARG" in
+        --config|--config=*|--run-dir|--run-dir=*)
+            fail "$ARG is launcher-owned; use the resolved config and selected run directory"
+            ;;
+    esac
+done
 
 # ---------------------------------------------------------------------------
 # 1. Activate the local virtual environment (POSIX or Windows layout).
@@ -59,9 +66,9 @@ python --version
 
 # ---------------------------------------------------------------------------
 # 1b. Resolve infrastructure/runtime settings for THIS server.
-# Scientific protocol values remain unchanged; only paths, worker counts,
-# DDP ranks/batch split, OpenMM platform/device and external executable paths
-# are resolved here.
+# Scientific protocol values remain unchanged. DDP ranks/batch split are
+# resolved here and rank count affects the trained EGNN checkpoint; the value
+# is recorded in the resolved config and provenance.
 # ---------------------------------------------------------------------------
 RUNTIME_DIR="${REPO_ROOT}/.runtime"
 mkdir -p "$RUNTIME_DIR"

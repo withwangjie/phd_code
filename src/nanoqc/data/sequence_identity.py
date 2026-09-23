@@ -5,8 +5,9 @@ parasail ``nw_stats_striped_32`` with BLOSUM62, gap open 10 / extend 1,
 identity = matches / alignment length (gaps included), evaluated in both
 argument orders and symmetrised by ``max``. That kernel now lives here once.
 
-The length-coverage gates, ``a == b`` shortcuts, caching and return types stay
-in each caller's wrapper, because they differ on purpose between call sites
+The common length-ratio calculation lives here too. Coverage thresholds,
+``a == b`` shortcuts, caching and return types stay in each caller's wrapper,
+because they differ on purpose between call sites
 (for example ``build_final_pyg_dataset.similarity`` gates on the CDR-H3
 threshold, ``run_real_complex_pilot.identity_detail`` returns a record).
 """
@@ -16,6 +17,11 @@ import parasail
 
 GAP_OPEN = 10
 GAP_EXTEND = 1
+
+
+def length_coverage(a: str, b: str) -> float:
+    """Shorter/longer sequence length, or zero when either is empty."""
+    return min(len(a),len(b))/max(len(a),len(b)) if a and b else 0.0
 
 
 def nw_identity(a: str, b: str, *, saturation_message: str = "alignment score saturation") -> float:

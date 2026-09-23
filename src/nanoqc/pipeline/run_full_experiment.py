@@ -146,6 +146,7 @@ ORCHESTRATED_SCRIPTS: List[str] = [
     "generate_figure1_pymol_script.py",
     "repo_io.py",
     "sequence_identity.py",
+    "safe_graph_load.py",
     "residue_tables.py",
     "paired_statistics.py",
 ]
@@ -1399,10 +1400,10 @@ class Orchestrator:
                     return StageResult(
                         "queue_freeze","failed",started,utc_timestamp(),None,
                         f"External VHH graph directory required for frozen clustering universe: {external_graph_dir}")
-                import torch
+                from nanoqc.data.safe_graph_load import load_graph
                 external_ids=set()
                 for graph_path in sorted(external_graph_dir.glob("*.pt")):
-                    graph=torch.load(graph_path,map_location="cpu",weights_only=False)
+                    graph=load_graph(graph_path)
                     pdb=str(getattr(graph,"pdb_id",graph_path.stem)).strip().lower()
                     if not pdb:
                         return StageResult(
@@ -3366,7 +3367,8 @@ def audit_experiment_results(
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
+                                     allow_abbrev=False)
     parser.add_argument("--config", type=Path, default=REPO_ROOT / CONFIGS_DIR / "full_experiment_config.yaml")
     parser.add_argument("--resume", type=str, default=None,
                          help="Continue a specific previous run directory (name or path) instead of "

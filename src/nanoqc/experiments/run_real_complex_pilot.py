@@ -21,7 +21,7 @@ from tqdm import tqdm
 from nanoqc.reporting.generate_figure1_pymol_script import extract_source
 from nanoqc.qubo.subgraph_to_qubo import read_atomistic_structure, _SIDECHAIN_NAMES, AllAtomInterfaceQUBOBuilder
 from nanoqc.common.seed_streams import derive_streams, derive_child_seed, save_stream_map, DEFAULT_MASTER_SEED
-from nanoqc.data.sequence_identity import nw_identity
+from nanoqc.data.sequence_identity import nw_identity, length_coverage
 
 
 def identity_detail(a: str, b: str, threshold: float = .4) -> dict:
@@ -29,7 +29,7 @@ def identity_detail(a: str, b: str, threshold: float = .4) -> dict:
 
     Always returns the actual identity value and coverage, never just a boolean
     pass/fail. Alignment: :func:`sequence_identity.nw_identity`."""
-    coverage = min(len(a), len(b)) / max(len(a), len(b))
+    coverage = length_coverage(a, b)
     if coverage < threshold:
         return dict(identity=0., coverage=coverage, length_gated=True)
     return dict(identity=nw_identity(a, b, saturation_message="Alignment saturation"),

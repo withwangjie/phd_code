@@ -47,7 +47,7 @@ from tqdm.auto import tqdm
 
 from nanoqc.model.model_egnn_pruning import EGNNInterfaceScorer
 from nanoqc.common.repo_io import sha256_file as _file_sha256
-from nanoqc.data.sequence_identity import nw_identity
+from nanoqc.data.sequence_identity import nw_identity, length_coverage
 
 
 SEED = 20260917
@@ -197,7 +197,7 @@ def _sequence_identity(a: str, b: str, *, min_length_coverage: float = 0.0) -> f
     a, b = str(a or ""), str(b or "")
     if not a or not b:
         return 0.0
-    coverage = min(len(a), len(b)) / max(len(a), len(b))
+    coverage = length_coverage(a, b)
     if coverage < min_length_coverage:
         return 0.0
     if a == b:

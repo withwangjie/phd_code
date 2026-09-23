@@ -29,7 +29,7 @@ from scipy.spatial import cKDTree
 from torch_geometric.data import Data, Batch
 import nanoqc.data.audit_all_datasets as audit
 from nanoqc.common.repo_io import sha256_file as sha256, REPO_ROOT
-from nanoqc.data.sequence_identity import nw_identity
+from nanoqc.data.sequence_identity import nw_identity, length_coverage
 
 BASE = REPO_ROOT  # standalone-run defaults (data/, outputs) are relative to the checkout root
 AA = 'ACDEFGHIKLMNPQRSTVWY'
@@ -62,7 +62,7 @@ def write_csv(path, records, fields):
 def similarity(a,b):
     """Symmetric global identity, exact matches / alignment length incl. gaps."""
     if a==b:return 1.0
-    if not a or not b or min(len(a),len(b))/max(len(a),len(b)) < CDR_H3_IDENTITY_THRESHOLD:return 0.0
+    if not a or not b or length_coverage(a,b) < CDR_H3_IDENTITY_THRESHOLD:return 0.0
     return nw_identity(a,b,saturation_message='alignment score saturation')
 
 def seqsim(a,b):
@@ -89,7 +89,7 @@ def global_identity(a: str, b: str, *, min_length_coverage: float = 0.0) -> floa
     a,b=str(a or ''),str(b or '')
     if not a or not b:
         return 0.0
-    coverage=min(len(a),len(b))/max(len(a),len(b))
+    coverage=length_coverage(a,b)
     if coverage < min_length_coverage:
         return 0.0
     return _global_identity_cached(*sorted((a,b)))

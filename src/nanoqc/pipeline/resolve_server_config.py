@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Resolve infrastructure-only server settings into a concrete runtime config.
+"""Resolve server settings into a concrete runtime config.
 
 Scientific parameters are loaded from full_experiment_config.yaml and preserved.
-Only infrastructure/runtime fields (paths, worker counts, DDP ranks, batch split,
-OpenMM platform/device and external executable paths) may be overridden here.
+Paths, worker counts, DDP ranks, batch split, OpenMM platform/device and tool
+paths may be overridden here. DDP ranks affect rank seeds and sampler partitions,
+so the resolved value is a result-affecting runtime parameter.
 """
 from __future__ import annotations
 import argparse, json, os, shutil
@@ -176,6 +177,7 @@ def resolve(scientific: dict[str,Any], server: dict[str,Any]) -> tuple[dict[str,
         "ram_gb":ram,
         "cuda_gpus":gpus,
         "ddp_ranks":ranks,
+        "result_affecting_runtime_parameters":["ddp_ranks"],
         "target_global_batch_size":target_global,
         "per_gpu_batch_size":per_gpu_batch,
         "data_audit_workers":workers,

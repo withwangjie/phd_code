@@ -1,6 +1,8 @@
 # Server/runtime configuration.
-# This file contains infrastructure settings only. Scientific protocol choices
-# stay in full_experiment_config.yaml and are never auto-tuned from hardware.
+# Scientific protocol choices stay in full_experiment_config.yaml. DDP rank
+# count is selected from available GPUs and can change the trained EGNN model:
+# rank-specific seeds and DistributedSampler partitions depend on it. The
+# resolved rank count is recorded in runtime_resolution and the config hash.
 
 version: 1
 
@@ -23,7 +25,8 @@ resources:
   mode: "auto"
   require_cuda: true
 
-  # Training keeps this global batch invariant when DDP rank count changes.
+  # Training keeps this global batch invariant when DDP rank count changes,
+  # but identical global batch size does not make checkpoints identical.
   # The resolver chooses the largest available GPU rank count <= max_ddp_gpus
   # that exactly divides target_global_batch_size.
   target_global_batch_size: 4

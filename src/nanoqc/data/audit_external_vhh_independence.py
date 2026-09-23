@@ -13,16 +13,16 @@ import argparse
 import json
 from pathlib import Path
 
-import torch
 from nanoqc.common.repo_io import sha256_file as sha256
-from nanoqc.data.sequence_identity import nw_identity
+from nanoqc.data.safe_graph_load import load_graph
+from nanoqc.data.sequence_identity import nw_identity, length_coverage
 
 
 def identity(a: str, b: str, min_length_coverage: float = 0.0) -> tuple[float,float]:
     a,b=str(a or ""),str(b or "")
     if not a or not b:
         return 0.0,0.0
-    coverage=min(len(a),len(b))/max(len(a),len(b))
+    coverage=length_coverage(a,b)
     if coverage < min_length_coverage:
         return 0.0,coverage
     return nw_identity(a,b,saturation_message="parasail alignment saturated"),coverage
@@ -39,14 +39,15 @@ def side_max(left: list[str], right: list[str], coverage: float = 0.0) -> tuple[
 
 
 def graph_sequences(path: Path) -> dict:
-    graph=torch.load(path,map_location="cpu",weights_only=False)
+    digest=sha256(path)
+    graph=load_graph(path)
     return dict(
         pdb_id=str(getattr(graph,"pdb_id",path.stem)).lower(),
         graph_version=str(getattr(graph,"graph_version","")),
         vhh=[str(x) for x in getattr(graph,"vhh_sequences",[]) if str(x)],
         antigen=[str(x) for x in getattr(graph,"antigen_sequences",[]) if str(x)],
         cdr_h3=str(getattr(graph,"cdr3_seq","") or ""),
-        sha256=sha256(path),
+        sha256=digest,
     )
 
 

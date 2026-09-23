@@ -38,6 +38,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 import numpy as np
 import pennylane as qml
 import torch
+from nanoqc.data.safe_graph_load import load_graph
 from scipy.optimize import lsq_linear
 from scipy.stats import spearmanr
 from tqdm.auto import tqdm
@@ -54,7 +55,7 @@ from nanoqc.qubo.subgraph_to_qubo import InterfaceQUBOBuilder, ForceFieldConfig,
 CSV_FILENAME = "snac_hard_qaoa_vs_sa_metrics.csv"
 # Dependency-free helper modules whose code was factored out of the modules
 # fingerprinted below; they are hashed alongside them in every code_sha256.
-SHARED_HELPER_MODULES = ("repo_io.py", "paired_statistics.py", "residue_tables.py")
+SHARED_HELPER_MODULES = ("repo_io.py", "paired_statistics.py", "residue_tables.py", "safe_graph_load.py")
 REPORT_FILENAME = "benchmark_summary_report.md"
 FAILED_LOG_FILENAME = "failed_cases.log"
 OPTIMIZATION_WARNINGS_FILENAME = "optimization_warnings.log"
@@ -201,7 +202,7 @@ def evaluate_single_target(
     print(f"START {graph_path.name} pid={os.getpid()}", flush=True)
     try:
         start = time.perf_counter()
-        data = torch.load(graph_path, map_location="cpu", weights_only=False)
+        data = load_graph(graph_path)
         row["load_seconds"] = time.perf_counter() - start
         row["pdb_id"] = str(_scalar(getattr(data, "pdb_id", graph_path.stem)))
         cdr3_len = _scalar(getattr(data, "cdr3_len", ""))
@@ -1301,7 +1302,7 @@ def _ablation_worker(task: tuple) -> tuple:
     path, config, args, artifact, key = task
     try:
         torch.set_num_threads(args.omp_threads)
-        data = torch.load(path, map_location="cpu", weights_only=False)
+        data = load_graph(path)
         if config["pruning"] == "egnn" and _ABLATION_SCORER is None:
             _ABLATION_SCORER, _ABLATION_MODEL_INFO = load_interface_scorer(
                 args.checkpoint, torch_device=torch.device("cpu"), seed=42)
@@ -1671,7 +1672,7 @@ def _ablation_main(argv: Optional[Sequence[str]] = None) -> int:
             if status.status != "checkpoint_loaded":
                 raise ValueError("A trained matching checkpoint is mandatory; no random fallback.")
             assert_checkpoint_graph_compatible(
-                status, torch.load(files[0], map_location="cpu", weights_only=False),
+                status, load_graph(files[0]),
                 homology_isolation={
                     "vhh_full_chain_identity": args.vhh_identity_threshold,
                     "cdr_h3_identity": args.cdr_h3_identity_threshold,

@@ -39,6 +39,11 @@ fail construction. This PDB-level reservation is not a homology claim.
 Required run-local independence outputs:
 - `independence/pdb_family_clusters.json`
 - `independence/pdb_family_clusters.provenance.json`
+
+Similarity edges use connected components (single linkage). A chain of edges
+can merge endpoints with no direct high-similarity edge. This is conservative
+for leakage prevention and may reduce the number of independent clusters;
+`largest_component` is reported for auditing, with no fixed rejection cutoff.
 - `audit/cluster_universe.txt`
 
 The clustering universe contains both internal study PDBs and required external-VHH PDBs. The frozen pair table/source map must cover this complete universe. When a pair TSV is the formal structure-similarity source, every universe PDB must appear in its query or target columns; an absent PDB is treated as "not demonstrated as searched", not as an independent singleton.
@@ -171,9 +176,18 @@ validation applies the same gate to previously written results.
 The primary coarse solver inference is restricted to the frozen primary pruning path,
 radius, QAOA depth, optimization-evaluation budget, active-site size, output budget,
 QAOA objective/restarts, and requires the configured minimum independent clusters.
+The exploratory paired-statistics command counts and excludes
+`all_restarts_failed` cases; the formal orchestrator rejects any such primary
+case so its confirmatory denominator cannot shrink. Scaling inference also
+rejects an incomplete primary denominator.
 Scaling inference uses the pre-declared active-site levels under the same frozen primary
 radius/depth/evaluation budget and a cluster-aware within-PDB slope analysis with
 log10(feasible configuration count) as the primary complexity axis.
+
+The resolved DDP rank count is a result-affecting runtime parameter: rank seeds
+and sampler partitions can change the EGNN checkpoint even at fixed global
+batch size. `runtime_resolution.ddp_ranks` and the resolved-config hash bind
+each run to the chosen rank count.
 
 ### final_report
 Required:

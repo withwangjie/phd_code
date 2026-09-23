@@ -38,6 +38,7 @@ MODULE_LAYOUT = {
     "build_independence_cluster_map.py": "src/nanoqc/data/build_independence_cluster_map.py",
     "audit_external_vhh_independence.py": "src/nanoqc/data/audit_external_vhh_independence.py",
     "sequence_identity.py": "src/nanoqc/data/sequence_identity.py",
+    "safe_graph_load.py": "src/nanoqc/data/safe_graph_load.py",
     "model_egnn_pruning.py": "src/nanoqc/model/model_egnn_pruning.py",
     "train_egnn_pruning.py": "src/nanoqc/model/train_egnn_pruning.py",
     "subgraph_to_qubo.py": "src/nanoqc/qubo/subgraph_to_qubo.py",

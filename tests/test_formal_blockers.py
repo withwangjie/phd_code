@@ -123,6 +123,13 @@ def test_launcher_runs_preflight_before_nohup() -> None:
     assert source.index('bash "$PREFLIGHT_SCRIPT"') < source.index("nohup python")
 
 
+def test_launcher_rejects_config_and_run_dir_override_before_preflight() -> None:
+    source=(REPO/"scripts"/"run_full_experiment.sh").read_text(encoding="utf-8")
+    guard='--config|--config=*|--run-dir|--run-dir=*)'
+    assert guard in source
+    assert source.index(guard)<source.index('bash "$PREFLIGHT_SCRIPT"')
+
+
 
 def test_execution_provenance_binds_frozen_allowlist_sha() -> None:
     source=inspect.getsource(pilot.main)
