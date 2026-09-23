@@ -36,8 +36,11 @@ fail() { echo "[run_full_experiment] ERROR: $*" >&2; exit 1; }
 
 SCIENTIFIC_CONFIG="configs/full_experiment_config.yaml"
 SERVER_CONFIG="${QP_SERVER_CONFIG:-configs/server_config.yaml}"
+if [[ "$SERVER_CONFIG" != /* ]]; then
+    SERVER_CONFIG="${REPO_ROOT}/${SERVER_CONFIG}"
+fi
 [ -f "$SCIENTIFIC_CONFIG" ] || fail "Scientific config file not found: ${REPO_ROOT}/${SCIENTIFIC_CONFIG}"
-[ -f "$SERVER_CONFIG" ] || fail "Server config file not found: ${REPO_ROOT}/${SERVER_CONFIG}"
+[ -f "$SERVER_CONFIG" ] || fail "Server config file not found: ${SERVER_CONFIG}"
 
 # ---------------------------------------------------------------------------
 # 1. Activate the local virtual environment (POSIX or Windows layout).
@@ -67,7 +70,7 @@ SERVER_REPORT="${RUNTIME_DIR}/server_resolution.json"
 log "Resolving server paths/resources from ${SERVER_CONFIG}..."
 python -m nanoqc.pipeline.resolve_server_config \
     --scientific-config "${REPO_ROOT}/${SCIENTIFIC_CONFIG}" \
-    --server-config "${REPO_ROOT}/${SERVER_CONFIG}" \
+    --server-config "$SERVER_CONFIG" \
     --out-config "$RESOLVED_CONFIG" \
     --out-report "$SERVER_REPORT"
 log "Resolved runtime config: $RESOLVED_CONFIG"
@@ -218,7 +221,7 @@ log "Lock file:         ${LOCK_FILE}"
 log "Preflight log:     ${PREFLIGHT_LOG}"
 log "Launch log:        ${LAUNCH_LOG}"
 log "Scientific config: ${REPO_ROOT}/${SCIENTIFIC_CONFIG}"
-log "Server config:     ${REPO_ROOT}/${SERVER_CONFIG}"
+log "Server config:     ${SERVER_CONFIG}"
 log "Resolved config:   ${RESOLVED_CONFIG}"
 log "Server report:     ${SERVER_REPORT}"
 log ""
