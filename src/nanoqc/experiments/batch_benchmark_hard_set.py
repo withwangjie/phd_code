@@ -1048,6 +1048,9 @@ def _ablation_run_case(data: Any, scorer: Any, config: dict, args: Any, artifact
     objective/restart ablation vary within this one case; pruning/radius/depth/max_evals/seed (the
     shared input and fixed evaluation region) are fixed by ``config`` before any solver runs."""
     begin = time.perf_counter()
+    state_policy=("fixed_three_chi1_wells" if args.states_per_site==3
+                  else f"fixed_{args.states_per_site}_chi1_coverage")
+    config = dict(config, state_policy=state_policy, states_per_site=args.states_per_site)
     active_sites=int(config["active_sites"])
     active = select_ablation_active(
         data, config["pruning"], active_sites, config["seed"], scorer,
@@ -1073,9 +1076,11 @@ def _ablation_run_case(data: Any, scorer: Any, config: dict, args: Any, artifact
         if args.energy_calibration_file is not None else EnergyCalibration()
     )
     qubo = InterfaceQUBOBuilder(
-        min_variables=3 * active_sites,
-        max_variables=30,
+        min_variables=args.states_per_site * active_sites,
+        max_variables=args.states_per_site * active_sites,
         max_sites=active_sites,
+        fixed_chi1_wells=True,
+        fixed_states_per_site=args.states_per_site,
         force_field=force_field,
         rotamer_mode=args.rotamer_mode,
         rotamer_library_path=args.rotamer_library,
@@ -1229,6 +1234,7 @@ def _ablation_run_case(data: Any, scorer: Any, config: dict, args: Any, artifact
         frozen_residue_ids=[sub.residue_ids[i] for i in range(sub.num_nodes) if sub.is_frozen_environment[i]],
         physical_self=qubo.physical_self.tolist(), physical_pair=qubo.physical_pair.tolist(),
         site_to_variables=qubo.site_to_variables, variable_map=[vars(r) for r in qubo.variable_map],
+        rotamer_state_records=qubo.metadata.get("rotamer_state_records",[]),
         ground_energy=truth.energy, total_seconds=time.perf_counter()-begin,
         scope=("coarse-grained fixed-backbone; classical exact subspace simulation; "
                "matched-output records plus optional matched-time controls; budget_mode disambiguates")))
@@ -1527,6 +1533,8 @@ def _ablation_main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--max-evals", type=int, nargs="+", default=[90,300])
     parser.add_argument("--active-sites", type=int, nargs="+", default=[6],
         help="Active-site scaling axis. Each value defines a separate paired QUBO case family.")
+    parser.add_argument("--states-per-site", type=int, default=3,
+        help="Fixed retained rotamers per site (3..6), covering all three chi1 wells.")
     parser.add_argument("--vhh-identity-threshold", type=float, default=0.80)
     parser.add_argument("--cdr-h3-identity-threshold", type=float, default=0.50)
     parser.add_argument("--antigen-identity-threshold", type=float, default=0.30)
@@ -1590,6 +1598,8 @@ def _ablation_main(argv: Optional[Sequence[str]] = None) -> int:
         return 0
     if (not args.active_sites or any(site < 4 or site > 10 for site in args.active_sites)
             or len(args.active_sites) != len(set(args.active_sites))
+            or args.states_per_site not in (3,4,5,6)
+            or any(site * args.states_per_site > 30 for site in args.active_sites)
             or any(not 0.0 < value <= 1.0 for value in (
                 args.vhh_identity_threshold, args.cdr_h3_identity_threshold,
                 args.antigen_identity_threshold, args.antigen_min_length_coverage))

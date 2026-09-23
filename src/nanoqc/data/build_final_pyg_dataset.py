@@ -475,6 +475,10 @@ def save_graph(row, split, output, pair=None, cluster_id='', family_structure_cl
 def exclusion(row,reasons):
     return dict(source_id=row['id'],pdb_id=row.get('pdb_id',''),subset_source=row['subset'],reasons=';'.join(reasons))
 
+def db55_reserved_pdb_ids(pairs):
+    """Reserve every audited DB5.5 PDB, even if its graph cannot be built."""
+    return {str(p['id']).upper() for p in pairs}
+
 
 def layered_graph_homology(left: Data, right: Data) -> dict:
     """Return cross-complex similarities under the formal layered protocol."""
@@ -525,6 +529,8 @@ def delivery_report(output,manifest,exclusions,failures,summary,complete):
     lines += ['', '## 4. 清洗、切分与去冗余','', '| 来源 | 审计候选 | 同时通过硬过滤 |','|---|---:|---:|']
     for src,counts in summary.get('admission',{}).items():lines.append(f'| {src} | {counts["input"]} | {counts["eligible"]} |')
     lines += ['',f'- DB5.5目标：248个主链完整且界面通过的bound受体–配体对；实际交付 {sum(r["split"]=="test_db55" for r in manifest)}。',
+        '- `test_db55` 当前仅为备用图集，不进入本流水线的训练或正式评估；其准入仅检查可解析性、已观测主链完整性和结合态界面，不代表通过完整结构质量门控。',
+        '- 训练候选按审计清单中的全部DB5.5配对PDB ID保守排除，即使对应备用图构建失败也不放回训练池；PDB ID排除不构成序列同源独立性证明。',
         f'- SNAC长CDR-H3：{summary.get("long_eligible",0)}条非DB5.5重叠候选，{summary.get("unique_long_cdr",0)}条唯一序列，{CDR_H3_IDENTITY_THRESHOLD*100:.0f}%代表簇 {summary.get("clusters",0)} 个；固定随机种子 {SEED} 选取目标400个，实际 {sum(r["split"]=="test_snac_hard" for r in manifest)}。',
         '- SNAC候选首先按CDR-H3做代表簇选择；最终图级隔离进一步统一检查VHH全链、CDR-H3和抗原序列。',
         f'- 分层阈值：VHH全链<{VHH_IDENTITY_THRESHOLD:.2f}、CDR-H3<{CDR_H3_IDENTITY_THRESHOLD:.2f}、抗原<{ANTIGEN_IDENTITY_THRESHOLD:.2f}（抗原最小长度覆盖{ANTIGEN_MIN_LENGTH_COVERAGE:.2f}）。任一阈值触发即判为同源并隔离。',
@@ -662,7 +668,7 @@ def main():
             record,error=save_graph(row,'test_db55',output,pair=p)
             if record:manifest.append(record)
             if error:failures.append(error)
-        dbids={r['pdb_id'] for r in manifest}
+        dbids=db55_reserved_pdb_ids(pairs)
         pool=[]
         for r in eligible:
             if r['pdb_id'].upper() in dbids:exclusions.append(exclusion(r,['pdb_overlap_db55']))

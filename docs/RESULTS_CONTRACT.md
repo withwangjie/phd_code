@@ -29,6 +29,13 @@ Required dataset outputs:
 - `dataset/excluded_samples.csv`
 - `dataset/processing_failures.csv`
 
+`test_db55` is a reserved graph set. The formal training and evaluation stages
+consume `train` and `test_snac_hard`; they do not score `test_db55`. DB5.5
+graphs receive the documented backbone and bound-interface checks, not the
+full structure-quality gate. Every DB5.5 pair PDB ID in the audited pair table
+is excluded from the training candidate pool, including pairs whose graphs
+fail construction. This PDB-level reservation is not a homology claim.
+
 Required run-local independence outputs:
 - `independence/pdb_family_clusters.json`
 - `independence/pdb_family_clusters.provenance.json`
@@ -93,6 +100,15 @@ Required:
 - raw `qc_benchmark/cases/*.json`
 
 The raw case count must equal `cases_completed_total`. Every scaling case must contain exactly the requested number of Dunbrack-compatible rotamer sites; a mislabeled requested-site condition is a failed case, never silently accepted.
+Scaling cases also require exactly three retained states per site, one in each
+chi1 well. The statistics stage rejects older adaptive-allocation cases. A
+fresh benchmark output directory is required after this protocol change.
+The training-only rotamer-resolution sensitivity runs eight paired conditions:
+4 and 5 sites crossed with 3, 4, 5 and 6 states per site, using the same
+target subset and repeat seeds. Its `method_sensitivity/rotamer_resolution/`
+directory contains separate case runs plus `summary.csv`, `summary.json`, and
+`summary.md`.
+These solver metrics do not establish native chi1/chi2 or all-atom recovery.
 
 ### structure_experiment
 Both `dev_queue/` and `validation_queue/` require:
@@ -145,6 +161,12 @@ Required:
 - `statistics/quantum_scaling_statistics.md`
 - `statistics/structure_statistics.json`
 - `statistics/structure_statistics.md`
+
+RQ5 completion requires the configured minimum independent clusters and finite
+Spearman rho, permutation p value, bootstrap confidence limits, and Holm-adjusted
+p value. A constant cluster-level energy or RMSD difference makes rho undefined;
+the statistics stage fails and reports the missing fields in that case. Resume
+validation applies the same gate to previously written results.
 
 The primary coarse solver inference is restricted to the frozen primary pruning path,
 radius, QAOA depth, optimization-evaluation budget, active-site size, output budget,

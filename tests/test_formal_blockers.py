@@ -8,7 +8,33 @@ REPO = Path(__file__).resolve().parents[1]
 
 import nanoqc.reporting.generate_final_research_report as report
 import nanoqc.experiments.run_real_complex_pilot as pilot
-from nanoqc.pipeline.run_full_experiment import Orchestrator
+from nanoqc.pipeline.run_full_experiment import Orchestrator, rq5_inference_failures
+from nanoqc.inference.analyze_structure_recovery import rq5_energy_structure
+
+
+def test_rq5_constant_energy_fails_despite_sufficient_clusters() -> None:
+    rows=[]
+    clusters={}
+    for index in range(12):
+        target=f"target_{index}"
+        clusters[target]=f"cluster_{index}"
+        rows.extend([
+            {"target":target,"seed":42,"method":"qaoa",
+             "discrete_energy_kcal":-10,"final_rmsd":float(index+1)},
+            {"target":target,"seed":42,"method":"sa",
+             "discrete_energy_kcal":-10,"final_rmsd":1.0},
+        ])
+    rq5=rq5_energy_structure(rows,clusters,"qaoa_vs_sa",1000,42)
+    assert rq5["n_clusters"]==12
+    assert rq5["spearman_rho"] is None
+    failures=rq5_inference_failures(rq5,10)
+    assert any("spearman_rho" in failure for failure in failures)
+
+
+def test_rq5_finite_inference_passes_gate() -> None:
+    rq5={"n_clusters":12,"spearman_rho":0.4,"p_value":0.03,
+         "ci_low":0.1,"ci_high":0.7,"p_holm_confirmatory_family":0.06}
+    assert rq5_inference_failures(rq5,10)==[]
 
 
 def test_final_report_filters_budget_modes() -> None:

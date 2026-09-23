@@ -177,11 +177,21 @@ def test_statistics_resume_checks_statistics_subdirectory(tmp_path: Path) -> Non
     stats.mkdir()
     (stats/"quantum_scaling_statistics.json").write_text("{}",encoding="utf-8")
     (stats/"quantum_scaling_statistics.md").write_text("ok",encoding="utf-8")
-    (stats/"structure_statistics.json").write_text("{}",encoding="utf-8")
+    valid_rq5={"n_clusters":10,"spearman_rho":0.4,"p_value":0.03,
+               "ci_low":0.1,"ci_high":0.7,"p_holm_confirmatory_family":0.06}
+    (stats/"structure_statistics.json").write_text(
+        json.dumps({"rq5":valid_rq5}),encoding="utf-8")
     (stats/"structure_statistics.md").write_text("ok",encoding="utf-8")
     ok,detail=Orchestrator._validate_completed_stage_artifacts(
         Dummy(),"statistics",require_results_manifest=False)
     assert ok is True, detail
+
+    (stats/"structure_statistics.json").write_text(
+        json.dumps({"rq5":{**valid_rq5,"spearman_rho":None}}),encoding="utf-8")
+    ok,detail=Orchestrator._validate_completed_stage_artifacts(
+        Dummy(),"statistics",require_results_manifest=False)
+    assert ok is False
+    assert "spearman_rho" in detail
 
 
 
@@ -200,7 +210,7 @@ def test_ablation_active_sites_are_a_case_dimension() -> None:
     assert "args.active_sites,args.seeds" in source
     assert "active_sites=setting[4]" in source
     assert 'active_sites=int(config["active_sites"])' in case_source
-    assert "min_variables=3 * active_sites" in case_source
+    assert "min_variables=args.states_per_site * active_sites" in case_source
     assert "max_sites=active_sites" in case_source
 
 

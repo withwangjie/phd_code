@@ -625,6 +625,31 @@ class RotamerState:
         return self.prior_energy + self.environment_energy + self.antigen_guidance_energy
 
 
+def chi1_well_index(angle: float) -> int:
+    """Assign chi1 to the nearest gauche+, gauche- or trans well."""
+    centers = (60.0, -60.0, 180.0)
+    return min(range(3), key=lambda index: abs((angle - centers[index] + 180.0) % 360.0 - 180.0))
+
+
+def select_chi1_well_representatives(states: Sequence[RotamerState], count: int = 3) -> list[RotamerState]:
+    """Cover all chi1 wells, then fill remaining slots by calibrated energy."""
+    if count < 3:
+        raise ValueError("Chi1-well coverage requires at least three states")
+    selected: dict[int, RotamerState] = {}
+    for state in states:
+        selected.setdefault(chi1_well_index(state.chi1_degrees), state)
+    if len(selected) != 3:
+        raise ValueError("Fixed three-state scaling requires a candidate in each chi1 well")
+    chosen_ids = {id(state) for state in selected.values()}
+    for state in states:
+        if len(chosen_ids) >= count:
+            break
+        chosen_ids.add(id(state))
+    if len(chosen_ids) != count:
+        raise ValueError(f"Only {len(chosen_ids)} rotamers available for {count} states/site")
+    return [state for state in states if id(state) in chosen_ids]
+
+
 @dataclass(frozen=True)
 class VariableRecord:
     """Trace one QUBO bit to its residue and rotamer state."""
@@ -1025,6 +1050,8 @@ class InterfaceQUBOBuilder:
         rotamer_probability_floor: float = 1e-4,
         rotamer_sigma_offsets: Sequence[float] = (-1.0, 0.0, 1.0),
         energy_calibration: Optional[EnergyCalibration] = None,
+        fixed_chi1_wells: bool = False,
+        fixed_states_per_site: Optional[int] = None,
     ) -> None:
         if not 2 <= min_variables <= max_variables <= 30:
             raise ValueError("Require 2 <= min_variables <= max_variables <= 30")
@@ -1037,6 +1064,13 @@ class InterfaceQUBOBuilder:
         self.min_variables = min_variables
         self.max_variables = max_variables
         self.max_sites = max_sites
+        self.fixed_chi1_wells = bool(fixed_chi1_wells)
+        self.fixed_states_per_site = (3 if fixed_chi1_wells and fixed_states_per_site is None
+                                      else fixed_states_per_site)
+        if self.fixed_states_per_site is not None and not self.fixed_chi1_wells:
+            raise ValueError("fixed_states_per_site requires chi1-well coverage")
+        if self.fixed_states_per_site is not None and not 3 <= self.fixed_states_per_site <= 6:
+            raise ValueError("fixed_states_per_site must be in 3..6")
         self.lambda_value = lambda_value
         self.penalty_margin = penalty_margin
         self.force_field = force_field or ForceFieldConfig()
@@ -1400,7 +1434,10 @@ class InterfaceQUBOBuilder:
             site_scores = all_site_scores[site_nodes]
         else:
             site_scores = np.zeros(len(site_nodes), dtype=np.float64)
-        counts = self._allocate_rotamer_counts(site_nodes, amino_acids, site_scores)
+        counts = ([self.fixed_states_per_site] * len(site_nodes) if self.fixed_chi1_wells
+                  else self._allocate_rotamer_counts(site_nodes, amino_acids, site_scores))
+        if self.fixed_chi1_wells and not self.min_variables <= self.fixed_states_per_site * len(site_nodes) <= self.max_variables:
+            raise ValueError("Fixed state policy exceeds the configured QUBO dimension")
         active_mask = np.zeros(len(x), dtype=bool)
         active_mask[site_nodes] = True
         declared_active = (
@@ -1513,7 +1550,8 @@ class InterfaceQUBOBuilder:
                     state.rotamer_index,
                 )
             )
-            selected_states = candidate_states[:count]
+            selected_states = (select_chi1_well_representatives(candidate_states, count)
+                               if self.fixed_chi1_wells else candidate_states[:count])
             variable_indices = []
             for selected_index, state in enumerate(selected_states):
                 state.rotamer_index = selected_index
@@ -1619,6 +1657,8 @@ class InterfaceQUBOBuilder:
             ),
             "candidate_guidance": "pre-screen by rotamer prior + VHH-only fixed-environment energy + antigen interaction energy; antigen counted once",
             "rotamer_model": self.rotamer_mode,
+            "state_policy": (f"fixed_{self.fixed_states_per_site}_chi1_coverage" if self.fixed_chi1_wells and self.fixed_states_per_site != 3
+                             else "fixed_three_chi1_wells" if self.fixed_chi1_wells else "adaptive_3_to_6"),
             "rotamer_library_path": (None if self.rotamer_library_path is None else str(self.rotamer_library_path)),
             "rotamer_probability_floor": self.rotamer_probability_floor,
             "rotamer_sigma_offsets": list(self.rotamer_sigma_offsets),

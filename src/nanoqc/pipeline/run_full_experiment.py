@@ -84,6 +84,35 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 from nanoqc.common.seed_streams import derive_streams, derive_child_seed, save_stream_map, verify_stream_map, DEFAULT_MASTER_SEED  # noqa: E402
 from nanoqc.common.repo_io import sha256_file as sha256_of, repo_path, module_name, DOCS_DIR, CONFIGS_DIR  # noqa: E402
 
+
+def rq5_inference_failures(rq5: dict, min_clusters: int) -> list[str]:
+    """Require an estimable, fully reported confirmatory RQ5 result."""
+    if not isinstance(rq5,dict):
+        return ["RQ5 energy-structure inference payload is not an object"]
+    failures=[]
+    try:
+        clusters=int(rq5.get("n_clusters",0) or 0)
+    except (TypeError,ValueError):
+        clusters=0
+    if clusters<min_clusters:
+        failures.append(
+            f"RQ5 energy-structure inference has {clusters} clusters; requires >= {min_clusters}"
+        )
+    missing=[]
+    for field in ("spearman_rho","p_value","ci_low","ci_high","p_holm_confirmatory_family"):
+        try:
+            valid=math.isfinite(float(rq5.get(field)))
+        except (TypeError,ValueError):
+            valid=False
+        if not valid:
+            missing.append(field)
+    if missing:
+        failures.append(
+            "RQ5 energy-structure inference is undefined or incomplete "
+            f"({', '.join(missing)}); check for constant cluster-level energy/RMSD differences"
+        )
+    return failures
+
 # ---------------------------------------------------------------------------
 # Scripts this orchestrator shells out to. Every one of these is fingerprinted
 # (SHA-256) into run_manifest.json for provenance, exactly like every other
@@ -261,6 +290,8 @@ def _validate_scientific_config(config: Dict[str, Any]) -> None:
             min_score=float(clustering.get("min_score",0.50))
             if not math.isfinite(min_score):
                 raise ValueError("independence_clustering.min_score must be finite")
+            if str(clustering.get("score_semantics","")).lower() not in ("qtmscore","ttmscore"):
+                raise ValueError("independence_clustering.score_semantics must be qtmscore or ttmscore")
             for key in ("query_column","target_column","score_column"):
                 if int(clustering.get(key,0)) < 0:
                     raise ValueError(f"independence_clustering.{key} must be nonnegative")
@@ -355,6 +386,16 @@ def _validate_scientific_config(config: Dict[str, Any]) -> None:
     qc_sites=[int(v) for v in qc.get("active_sites",[6])]
     if not qc_sites or len(qc_sites)!=len(set(qc_sites)) or any(v<4 or v>10 for v in qc_sites):
         raise ValueError("qc_benchmark.active_sites must contain unique integers in 4..10")
+    resolution=(qc.get("sensitivity",{}) or {}).get("rotamer_resolution",{}) or {}
+    if resolution:
+        site_levels=[int(v) for v in resolution.get("active_sites",[])]
+        state_levels=[int(v) for v in resolution.get("states_per_site",[])]
+        if (not site_levels or not state_levels or len(site_levels)!=len(set(site_levels))
+                or len(state_levels)!=len(set(state_levels))
+                or any(site not in (4,5) for site in site_levels)
+                or any(state not in (3,4,5,6) for state in state_levels)
+                or any(site*state>30 for site in site_levels for state in state_levels)):
+            raise ValueError("rotamer_resolution requires unique 4-5 sites and 3-6 states/site within 30 bits")
     primary_pruning=str(stats.get("primary_pruning","egnn"))
     if primary_pruning not in [str(v) for v in qc.get("pruning",["egnn"])]:
         raise ValueError(
@@ -942,6 +983,20 @@ class Orchestrator:
             ]
             ok,detail=require(aggregate)
             if not ok: missing.append(detail)
+            resolution=(cfg.get("rotamer_resolution",{}) or {})
+            if resolution:
+                root=self.run_dir/"method_sensitivity"/"rotamer_resolution"
+                ok,detail=require([root/"summary.json",root/"summary.csv",root/"summary.md"])
+                if not ok: missing.append(detail)
+                for sites in resolution.get("active_sites",[4,5]):
+                    for states in resolution.get("states_per_site",[3,4,5,6]):
+                        sub=root/f"sites_{sites}_states_{states}"
+                        ok,detail=require([sub/"run_manifest.json",sub/"run_summary.json",sub/"metrics.csv"])
+                        if not ok:
+                            missing.append(detail);continue
+                        summary,error=read_json(sub/"run_summary.json")
+                        if error or not summary.get("closed") or int(summary.get("failures_total",0) or 0)!=0:
+                            missing.append(str(sub/"run_summary.json"))
             if missing:
                 return False,"Sensitivity sub-runs/results missing/not closed: "+", ".join(missing[:10])
             return True,"all sensitivity sub-runs and aggregate results are closed"
@@ -1075,7 +1130,14 @@ class Orchestrator:
                 self.run_dir/"statistics"/"structure_statistics.json",
                 self.run_dir/"statistics"/"structure_statistics.md",
             ]
-            return require(paths)
+            ok,detail=require(paths)
+            if not ok:return ok,detail
+            structure,error=read_json(self.run_dir/"statistics"/"structure_statistics.json")
+            if error:return False,error
+            min_rq5=int((self.config.get("statistics",{}) or {}).get("min_rq5_clusters",10))
+            failures=rq5_inference_failures(structure.get("rq5") or {},min_rq5)
+            if failures:return False,"; ".join(failures)
+            return True,"statistics artifacts and RQ5 inference verified"
         if stage=="final_report":
             filename=(self.config.get("final_report",{}) or {}).get(
                 "filename","FINAL_RESEARCH_REPORT.md")
@@ -1453,6 +1515,12 @@ class Orchestrator:
                 return StageResult(
                     "queue_freeze","failed",started,utc_timestamp(),None,
                     "Cluster-map score semantics do not match frozen config"
+                )
+            if (cluster_prov.get("score_header_validated") is not True
+                    or cluster_prov.get("score_field") != str(clustering_cfg.get("score_semantics",""))):
+                return StageResult(
+                    "queue_freeze","failed",started,utc_timestamp(),None,
+                    "Cluster-map provenance lacks a validated TM-score column header"
                 )
             if universe_path.is_file():
                 universe_sha=sha256_of(universe_path)
@@ -1952,6 +2020,106 @@ class Orchestrator:
                         "mean_low_energy_mass":mean_field("low_energy_mass"),
                         "mean_solver_seconds":mean_field("solver_seconds"),
                     })
+        resolution_cfg=cfg.get("rotamer_resolution",{}) or {}
+        resolution_rows=[]
+        resolution_case_keys={}
+        if resolution_cfg:
+            if not argvs:
+                failures.append("rotamer resolution sensitivity has no base arguments")
+            else:
+                def replace_option(arguments, name, values):
+                    arguments=list(arguments)
+                    if name not in arguments:
+                        return arguments+[name,*values]
+                    start=arguments.index(name)+1
+                    end=start
+                    while end<len(arguments) and not arguments[end].startswith("--"):
+                        end+=1
+                    return arguments[:start]+values+arguments[end:]
+                for sites in resolution_cfg.get("active_sites",[4,5]):
+                    for states in resolution_cfg.get("states_per_site",[3,4,5,6]):
+                        sub=out/"rotamer_resolution"/f"sites_{sites}_states_{states}"
+                        command=list(argvs[0])
+                        for name,values in (
+                            ("--out-dir",[str(sub)]),
+                            ("--active-sites",[str(sites)]),
+                            ("--states-per-site",[str(states)]),
+                            ("--depths",[str(self.config.get("statistics",{}).get("primary_depth",2))]),
+                            ("--max-evals",[str(self.config.get("statistics",{}).get("primary_max_evals",90))]),
+                            ("--eval-shots",[str(qc.get("eval_shots",500))]),
+                            ("--cvar-alpha",[str(qc.get("cvar_alpha",0.1))]),
+                        ):
+                            command=replace_option(command,name,values)
+                        rc,log=self._run_subprocess(f"rotamer_resolution_{sites}_{states}",command)
+                        logs.append(str(log));argvs.append(command)
+                        summary_path=sub/"run_summary.json"
+                        if rc!=0 or not summary_path.is_file():
+                            failures.append(f"rotamer resolution {sites} sites/{states} states failed (exit={rc})")
+                            continue
+                        summary=json.loads(summary_path.read_text(encoding="utf-8"))
+                        if not summary.get("closed") or int(summary.get("failures_total",0) or 0)!=0:
+                            failures.append(f"rotamer resolution {sites} sites/{states} states incomplete")
+                            continue
+                        case_keys={path.name for path in (sub/"cases").glob("*.json")}
+                        if int(summary.get("cases_completed_total",0) or 0)!=len(case_keys):
+                            failures.append(f"rotamer resolution {sites}/{states} case count mismatch")
+                            continue
+                        previous=resolution_case_keys.setdefault(int(sites),case_keys)
+                        if case_keys!=previous:
+                            failures.append(f"rotamer resolution {sites}/{states} is not paired on the same cases")
+                            continue
+                        metrics_path=sub/"metrics.csv"
+                        if not metrics_path.is_file():
+                            failures.append(f"rotamer resolution {sites} sites/{states} states lacks metrics")
+                            continue
+                        with metrics_path.open(newline="",encoding="utf-8") as handle:
+                            metrics=list(csv.DictReader(handle))
+                        for solver in ("qaoa","sa","greedy","uniform"):
+                            selected=[row for row in metrics if row.get("solver")==solver
+                                      and row.get("budget_mode")=="matched_outputs"
+                                      and (solver!="qaoa" or (row.get("qaoa_objective")=="cvar"
+                                          and int(float(row.get("qaoa_restarts",0) or 0))==4))]
+                            if not selected:
+                                failures.append(f"rotamer resolution {sites}/{states} lacks {solver} rows")
+                                continue
+                            resolution_rows.append(dict(active_sites=int(sites),states_per_site=int(states),
+                                solver=solver,rows=len(selected),
+                                mean_hit=sum(float(row["hit"]) for row in selected)/len(selected),
+                                mean_gap=sum(float(row["gap"]) for row in selected)/len(selected),
+                                mean_solver_seconds=sum(float(row["solver_seconds"]) for row in selected)/len(selected)))
+                        oracle_times=[]
+                        for case_path in (sub/"cases").glob("*.json"):
+                            case=json.loads(case_path.read_text(encoding="utf-8"))
+                            oracle_times.append(float(case["oracle_seconds"]))
+                        if not oracle_times:
+                            failures.append(f"rotamer resolution {sites}/{states} lacks exact-oracle timing")
+                        else:
+                            resolution_rows.append(dict(active_sites=int(sites),states_per_site=int(states),
+                                solver="exact_enumeration",rows=len(oracle_times),mean_hit=1.0,mean_gap=0.0,
+                                mean_solver_seconds=sum(oracle_times)/len(oracle_times)))
+        if resolution_cfg:
+            expected_rows=(len(resolution_cfg.get("active_sites",[4,5]))
+                           *len(resolution_cfg.get("states_per_site",[3,4,5,6]))*5)
+            if len(resolution_rows)!=expected_rows:
+                failures.append(f"rotamer resolution has {len(resolution_rows)}/{expected_rows} solver summaries")
+        if resolution_cfg:
+            resolution_root=out/"rotamer_resolution"
+            resolution_root.mkdir(parents=True,exist_ok=True)
+            atomic_write_json(resolution_root/"summary.json",dict(
+                scope="training-only representation and solver sensitivity",
+                protocol="fixed sites, 3-6 states/site with chi1-well coverage; same target subset and repeat seeds; exact enumeration timed after QUBO build",
+                rows=resolution_rows,failures=failures))
+            with (resolution_root/"summary.csv").open("w",newline="",encoding="utf-8") as handle:
+                writer=csv.DictWriter(handle,fieldnames=["active_sites","states_per_site","solver","rows","mean_hit","mean_gap","mean_solver_seconds"])
+                writer.writeheader();writer.writerows(resolution_rows)
+            resolution_md=["# Rotamer-resolution sensitivity","",
+                "Training-only paired cases. Each state count covers all three chi1 wells. Exact enumeration is timed after QUBO construction.",
+                "These results compare solver behavior and do not measure native chi1/chi2 or all-atom recovery.","",
+                "| Sites | States/site | Solver | Rows | Mean hit | Mean gap | Mean solver seconds |",
+                "|---:|---:|---|---:|---:|---:|---:|"]
+            for row in resolution_rows:
+                resolution_md.append(f"| {row['active_sites']} | {row['states_per_site']} | {row['solver']} | {row['rows']} | {row['mean_hit']:.6g} | {row['mean_gap']:.6g} | {row['mean_solver_seconds']:.6g} |")
+            (resolution_root/"summary.md").write_text("\n".join(resolution_md)+"\n",encoding="utf-8")
         out.mkdir(parents=True,exist_ok=True)
         summary_csv=out/"sensitivity_summary.csv"
         fields=["active_sites","depth","max_evals","eval_shots","cvar_alpha","rows",
@@ -2009,6 +2177,7 @@ class Orchestrator:
             "--depths", *[str(d) for d in cfg.get("depths", [1, 2, 3])],
             "--max-evals", *[str(m) for m in cfg.get("max_evals", [90, 300])],
             "--active-sites", *[str(v) for v in cfg.get("active_sites", [6])],
+            "--states-per-site", "3",
             "--vhh-identity-threshold", str(self.config["queue_freeze"]["homology_isolation"].get("vhh_full_chain_identity", 0.80)),
             "--cdr-h3-identity-threshold", str(self.config["queue_freeze"]["homology_isolation"].get("cdr_h3_identity", 0.50)),
             "--antigen-identity-threshold", str(self.config["queue_freeze"]["homology_isolation"].get("antigen_identity", 0.30)),
@@ -2964,7 +3133,6 @@ class Orchestrator:
             else:
                 structure_payload=json.loads(structure_json.read_text(encoding="utf-8"))
                 primary_clusters=int((structure_payload.get("primary",{}) or {}).get("n_clusters",0) or 0)
-                rq5_clusters=int((structure_payload.get("rq5",{}) or {}).get("n_clusters",0) or 0)
                 min_primary=int(cfg.get("min_primary_clusters",10))
                 min_rq5=int(cfg.get("min_rq5_clusters",10))
                 if primary_clusters < min_primary:
@@ -2972,11 +3140,8 @@ class Orchestrator:
                         f"Primary structural inference has {primary_clusters} clusters; "
                         f"requires >= {min_primary}"
                     )
-                if rq5_clusters < min_rq5:
-                    failures.append(
-                        f"RQ5 energy-structure inference has {rq5_clusters} clusters; "
-                        f"requires >= {min_rq5}"
-                    )
+                failures.extend(rq5_inference_failures(
+                    structure_payload.get("rq5") or {},min_rq5))
         elif not validation_metrics.is_file():
             failures.append(f"Missing validation structural metrics: {validation_metrics}")
         else:

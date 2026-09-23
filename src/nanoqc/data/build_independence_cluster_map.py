@@ -77,13 +77,30 @@ def main() -> int:
 
     dsu = DSU()
     total_rows = kept_edges = skipped_rows = 0
+    score_field = None
     with args.pairs.open(encoding="utf-8-sig") as handle:
         for line in handle:
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
-            total_rows += 1
             fields = line.split(args.delimiter)
+            if score_field is None:
+                need = max(args.query_column, args.target_column, args.score_column)
+                if len(fields) <= need:
+                    raise ValueError("Pair-table header does not contain the configured columns")
+                header = [field.strip().lower() for field in fields]
+                score_field = header[args.score_column]
+                if header[args.query_column] != "query" or header[args.target_column] != "target":
+                    raise ValueError("Pair-table header must identify query and target columns")
+                if args.min_score is not None:
+                    if score_field not in ("qtmscore", "ttmscore"):
+                        raise ValueError(
+                            f"Score column {args.score_column} is {score_field!r}; "
+                            "require qtmscore or ttmscore normalized by a protein length")
+                    if args.score_semantics.lower() != score_field:
+                        raise ValueError("Configured score semantics must equal the TM-score header field")
+                continue
+            total_rows += 1
             need = max(args.query_column, args.target_column,
                        args.score_column if args.min_score is not None else 0)
             if len(fields) <= need:
@@ -100,11 +117,15 @@ def main() -> int:
                 except ValueError:
                     skipped_rows += 1
                     continue
+                if not math.isfinite(score) or not 0 <= score <= 1:
+                    raise ValueError(f"Invalid {score_field} value on pair row {total_rows}")
                 if score < args.min_score:
                     continue
             dsu.add(q); dsu.add(t); dsu.union(q, t); kept_edges += 1
 
     universe: list[str] = []
+    if score_field is None:
+        raise ValueError("Pair table is empty or lacks a header")
     if args.universe is not None:
         if not args.universe.is_file():
             parser.error("--universe file not found")
@@ -144,6 +165,8 @@ def main() -> int:
         target_column=args.target_column,
         score_column=args.score_column,
         score_semantics=str(args.score_semantics),
+        score_field=score_field,
+        score_header_validated=True,
         total_rows=total_rows,
         kept_edges=kept_edges,
         skipped_rows=skipped_rows,

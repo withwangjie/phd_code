@@ -508,8 +508,11 @@ def section_search_performance(ctx: ReportContext) -> List[str]:
         )
         lines.append(
             "Negative slope means the QAOA-minus-classical energy-gap difference becomes more favorable "
-            "to QAOA as the feasible configuration space grows. This is a fixed-p=2 simulator-level "
-            "algorithmic scaling test, not a hardware quantum-speedup claim."
+            "to QAOA as the feasible configuration space grows. Every scaling size uses three states "
+            "per site, one from each chi1 well; the analysis rejects cases lacking this policy. "
+            "QAOA depth and optimizer evaluations stay fixed, so the slope estimates fixed-resource "
+            "scaling rather than equal-compute scaling. This simulator-level analysis does "
+            "not establish hardware quantum speedup."
         )
         lines.append("")
     elif stage_ok(ctx,"statistics"):

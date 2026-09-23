@@ -141,10 +141,13 @@ queue_freeze:
     required: true
     cluster_map: "data/independence/pdb_family_clusters.json"
     pair_tsv: "data/independence/foldseek_pairs.tsv"
-    # Pair TSV third column must be a symmetric/normalized structure-similarity
-    # score such as TM-score. TM-score 0.50 has published fold/topology significance [METHODS_EVIDENCE R27].
+    # Pair TSV must start with: query<TAB>target<TAB>qtmscore.
+    # Foldseek's default third column is fident and is rejected. Generate scores
+    # with --format-output query,target,qtmscore, then prepend that header.
+    # qtmscore is normalized by query protein length; direction matters.
+    # TM-score 0.50 has published fold/topology significance [METHODS_EVIDENCE R27].
     min_score: 0.50
-    score_semantics: "TM-score"
+    score_semantics: "qtmscore"
     query_column: 0
     target_column: 1
     score_column: 2
@@ -264,7 +267,11 @@ qc_benchmark:
   # QAOA itself follows Farhi et al. [R7]. p=2 is a preregistered primary depth, not a literature optimum; p=1/2/3 are checked development-only [R9].
   depths: [2]
   max_evals: [90]
-  # Active-site scaling axis for the quantum-vs-classical benchmark. Combinatorial growth is literature-grounded [R10-R12], while these exact levels are preregistered study choices.
+  # Active-site scaling axis for the quantum-vs-classical benchmark. Every
+  # scaling case uses three states/site, one from each chi1 well (12/18/24/30
+  # bits); cases lacking all three wells fail instead of changing resolution.
+  # Combinatorial growth is literature-grounded [R10-R12], while these exact
+  # levels are preregistered study choices.
   # 6 sites remains the frozen primary confirmatory size; 4/8/10 are
   # pre-declared scaling conditions used to study size-dependent performance.
   active_sites: [4, 6, 8, 10]
@@ -340,6 +347,12 @@ qc_benchmark:
     max_evals: [90, 180, 300]
     eval_shots: [200, 500, 1000]
     cvar_alpha: [0.05, 0.10, 0.25, 0.50, 1.0]
+    rotamer_resolution:
+      active_sites: [4, 5]
+      states_per_site: [3, 4, 5, 6]
+      # Same frozen training subset and repeat seeds in all eight conditions.
+      # QAOA uses the primary p=2, max_evals=90, alpha=0.1 and 500 eval shots.
+      # This is a representation/solver sensitivity, not a quantum-advantage test.
     note: "development/training graphs only; primary hard/validation protocol remains frozen at p=2, max_evals=90, shots=500, alpha=0.1"
   # Number of independent repeat/perturb identities per (pruning, radius,
   # depth, max_evals) case -- passed as --seeds to _ablation_main, which now

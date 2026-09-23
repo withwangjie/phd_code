@@ -42,6 +42,26 @@ def _cluster_effect(values:list[float],seed:int,resamples:int)->dict:
     result["p_value"]=p
     return result
 
+def _validate_fixed_state_case(case:dict, sites:int, num_bits:int)->None:
+    if case.get("config",{}).get("state_policy") != "fixed_three_chi1_wells":
+        raise ValueError("scaling case lacks the fixed three-chi1-well state policy")
+    groups=case.get("site_to_variables",{})
+    if num_bits != 3*sites or len(groups) != sites or any(len(v)!=3 for v in groups.values()):
+        raise ValueError("scaling case does not have exactly three states per site")
+    records=case.get("variable_map",[])
+    if len(records)!=num_bits:
+        raise ValueError("scaling case variable map is incomplete")
+    wells=defaultdict(set)
+    for record in records:
+        angle=float(record["chi1_degrees"])
+        if not math.isfinite(angle):
+            raise ValueError("scaling case has a nonfinite chi1 angle")
+        centers=(60.0,-60.0,180.0)
+        well=min(range(3),key=lambda i:abs((angle-centers[i]+180.0)%360.0-180.0))
+        wells[int(record["site_index"])].add(well)
+    if len(wells)!=sites or any(len(group)!=3 for group in wells.values()):
+        raise ValueError("scaling case lacks three distinct chi1 wells per site")
+
 def main(argv:Optional[Sequence[str]]=None)->int:
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument("--results-dir",type=Path,required=True)
@@ -113,6 +133,12 @@ def main(argv:Optional[Sequence[str]]=None)->int:
         num_bits=int(q.get("num_bits",0) or 0)
         if config_count<=0 or num_bits<=0:
             failures.append(f"{path.name}: invalid complexity metadata");continue
+        if config_count != 3 ** int(cfg["active_sites"]):
+            failures.append(f"{path.name}: feasible configuration count is not 3^active_sites");continue
+        try:
+            _validate_fixed_state_case(case,int(cfg["active_sites"]),num_bits)
+        except (ValueError,KeyError,TypeError) as exc:
+            failures.append(f"{path.name}: {exc}");continue
         observations.append(dict(
             pdb_id=pdb,cluster=cluster_map[pdb],seed=int(cfg.get("seed",0)),
             active_sites=int(cfg["active_sites"]),num_bits=num_bits,
@@ -179,12 +205,13 @@ def main(argv:Optional[Sequence[str]]=None)->int:
         size_summary.append(dict(
             active_sites=size,n_rows=len(rows),n_pdb=len({r["pdb_id"] for r in rows}),
             mean_num_bits=float(np.mean([r["num_bits"] for r in rows])),
+            mean_states_per_site=float(np.mean([r["num_bits"] / size for r in rows])),
             mean_log10_configuration_count=float(np.mean([r["log10_configuration_count"] for r in rows])),
             mean_delta_gap=float(np.mean([r["delta_gap"] for r in rows])),
             mean_delta_hit=float(np.mean([r["delta_hit"] for r in rows])),
         ))
     payload=dict(
-        definition="within-PDB slope of QAOA-minus-classical energy gap versus log10 feasible configuration count; PDB slopes averaged within family/structure cluster",
+        definition="within-PDB slope of QAOA-minus-classical energy gap versus log10 feasible configuration count under a fixed three-chi1-well state policy; PDB slopes averaged within family/structure cluster",
         sign_interpretation="negative slope means QAOA relative gap improves versus the classical baseline as complexity increases",
         simulator_scope="classical exact-subspace finite-shot QAOA; not hardware quantum speedup",
         primary_predictor="log10_configuration_count",
@@ -212,17 +239,18 @@ def main(argv:Optional[Sequence[str]]=None)->int:
         f"Independent family/structure clusters: {primary['n_clusters']}; mean cluster slope: {primary['mean_slope']}; "
         f"95% bootstrap CI: [{primary['ci_low']}, {primary['ci_high']}]; sign-flip p={primary['p_value']}.",
         "",
-        "| Active sites | Rows | PDBs | Mean QUBO bits | Mean log10(|Omega|) | Mean QAOA-baseline gap | Mean QAOA-baseline hit |",
-        "|---:|---:|---:|---:|---:|---:|---:|",
+        "| Active sites | Rows | PDBs | Mean QUBO bits | Mean states/site | Mean log10(|Omega|) | Mean QAOA-baseline gap | Mean QAOA-baseline hit |",
+        "|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for row in size_summary:
         lines.append(
             f"| {row['active_sites']} | {row['n_rows']} | {row['n_pdb']} | "
-            f"{row['mean_num_bits']:.6g} | {row['mean_log10_configuration_count']:.6g} | "
+            f"{row['mean_num_bits']:.6g} | {row['mean_states_per_site']:.6g} | {row['mean_log10_configuration_count']:.6g} | "
             f"{row['mean_delta_gap']:.6g} | {row['mean_delta_hit']:.6g} |"
         )
     lines += ["",
-        "This is a fixed-resource shallow-QAOA scaling analysis. It tests whether relative algorithmic performance changes systematically with problem complexity; it does not establish hardware quantum advantage or computational speedup.",
+        "Every size uses exactly three rotamer states per site, with one representative from each chi1 well. The configuration count therefore changes with site count at fixed state resolution. QAOA depth and optimizer evaluations remain fixed across sizes, so this estimates fixed-resource scaling rather than equal-compute scaling.",
+        "This is a fixed-resource shallow-QAOA scaling analysis; it does not establish hardware quantum advantage or computational speedup.",
     ]
     args.out_md.write_text("\n".join(lines)+"\n",encoding="utf-8")
     return 0
