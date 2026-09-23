@@ -374,6 +374,19 @@ def _validate_scientific_config(config: Dict[str, Any]) -> None:
     if str(qprimary["objective"]) not in objectives or int(qprimary["restarts"]) not in restarts:
         raise ValueError("quantum_protocol primary objective/restarts must be present in benchmark_ablation")
 
+    qc_sensitivity=qc.get("sensitivity",{}) or {}
+    stale_nested=sorted(
+        k for k in ("depths","max_evals","eval_shots","cvar_alpha","qaoa_objective","qaoa_restarts")
+        if k in qc_sensitivity
+    )
+    if stale_nested:
+        raise ValueError(
+            f"Quantum sensitivity axes must live only under quantum_protocol.development_sensitivity; "
+            f"remove qc_benchmark.sensitivity keys {stale_nested}"
+        )
+    if structure.get("robust_qaoa",True) is not True:
+        raise ValueError("Formal structure_experiment.robust_qaoa must remain true for the frozen quantum protocol")
+
     sensitivity_depths=[int(v) for v in qsensitivity.get("depths",[])]
     if not sensitivity_depths or any(v not in (1,2,3) for v in sensitivity_depths):
         raise ValueError("quantum_protocol.development_sensitivity.depths must use supported p in {1,2,3}")
@@ -385,6 +398,14 @@ def _validate_scientific_config(config: Dict[str, Any]) -> None:
     if (not sensitivity_alpha or any((not math.isfinite(v)) or not 0.0<v<=1.0 for v in sensitivity_alpha)
             or len(sensitivity_alpha)!=len(set(sensitivity_alpha))):
         raise ValueError("quantum_protocol.development_sensitivity.cvar_alpha must be unique values in (0,1]")
+    if int(qprimary["depth"]) not in sensitivity_depths:
+        raise ValueError("quantum primary depth must be included in development_sensitivity.depths")
+    if int(qprimary["max_evals"]) not in [int(v) for v in qsensitivity.get("max_evals",[])]:
+        raise ValueError("quantum primary max_evals must be included in development_sensitivity.max_evals")
+    if int(qprimary["eval_shots"]) not in [int(v) for v in qsensitivity.get("eval_shots",[])]:
+        raise ValueError("quantum primary eval_shots must be included in development_sensitivity.eval_shots")
+    if float(qprimary["cvar_alpha"]) not in sensitivity_alpha:
+        raise ValueError("quantum primary cvar_alpha must be included in development_sensitivity.cvar_alpha")
 
     if clustering.get("required", False) and not clustering.get("cluster_map"):
         raise ValueError("queue_freeze.independence_clustering.cluster_map is required")
