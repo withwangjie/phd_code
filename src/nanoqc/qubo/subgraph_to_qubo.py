@@ -761,7 +761,12 @@ class QUBOResult:
             json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
-        return {"matrix": matrix_path, "mapping": manifest_path}
+        quantum_path=output_dir / f"{stem}_quantum_instance.json"
+        quantum_path.write_text(
+            json.dumps(self.to_quantum_instance().manifest(),ensure_ascii=False,indent=2)+"\n",
+            encoding="utf-8",
+        )
+        return {"matrix": matrix_path, "mapping": manifest_path, "quantum_instance": quantum_path}
 
 
 _THREE_LETTER = {
