@@ -2664,6 +2664,7 @@ class Orchestrator:
     def stage_structure_experiment(self) -> StageResult:
         started = utc_timestamp()
         cfg = self.config["structure_experiment"]
+        qprimary=quantum_primary(self.config)
         dataset_dir = self.dataset_dir()
         checkpoint_dir = self.checkpoint_dir()
         validation_dir = self.run_dir / "validation_queue"
@@ -2672,9 +2673,9 @@ class Orchestrator:
 
         def shared_flags() -> List[str]:
             flags = [
-                "--outputs", str(cfg.get("outputs", 1000)),
-                "--max-evals", str(cfg.get("max_evals", 90)),
-                "--qaoa-depth", str(cfg.get("qaoa_depth", 2)),
+                "--outputs", str(qprimary.get("output_shots",1000)),
+                "--max-evals", str(qprimary.get("max_evals",90)),
+                "--qaoa-depth", str(qprimary.get("depth",2)),
                 "--perturbation-mode", str(cfg.get("perturbation_mode", "multi_chi")),
                 "--solvent-model", str(cfg.get("solvent_model", "vacuum")),
                 "--min-perturb-degrees", str(cfg.get("min_perturb_degrees", 40.0)),
@@ -2693,7 +2694,7 @@ class Orchestrator:
                 "--antigen-identity-threshold", str(qf_cfg["homology_isolation"].get("antigen_identity", 0.30)),
                 "--antigen-min-length-coverage", str(qf_cfg["homology_isolation"].get("antigen_min_length_coverage", 0.70)),
                 "--loop-relax-iterations", str(cfg.get("loop_relax_iterations", 100)),
-                "--eval-shots", str(cfg.get("eval_shots", 500)),
+                "--eval-shots", str(qprimary.get("eval_shots",500)),
                 "--seeds", *[str(s) for s in cfg.get("seeds", [42, 43, 44])],
                 # (requirement #2) --master-seed lets run_real_complex_pilot.py
                 # derive its own independent, saved --optimize-seeds/
@@ -2706,10 +2707,10 @@ class Orchestrator:
                 raise FileNotFoundError(f"Required run-local family/structure cluster map missing: {cluster_path}")
             flags += ["--cluster-map", str(cluster_path)]
             if cfg.get("robust_qaoa", True):
-                flags += ["--robust-qaoa", "--qaoa-restarts", str(cfg.get("qaoa_restarts", 4)),
-                          "--qaoa-objective", cfg.get("qaoa_objective", "cvar"),
-                          "--cvar-alpha", str(cfg.get("cvar_alpha", 0.1)),
-                          "--parameter-scale", cfg.get("parameter_scale", "max_coefficient")]
+                flags += ["--robust-qaoa", "--qaoa-restarts", str(qprimary.get("restarts",4)),
+                          "--qaoa-objective", str(qprimary.get("objective","cvar")),
+                          "--cvar-alpha", str(qprimary.get("cvar_alpha",0.1)),
+                          "--parameter-scale", str(qprimary.get("parameter_scale","max_coefficient"))]
             return flags
 
         runs = [
@@ -2945,8 +2946,8 @@ class Orchestrator:
                     "--perturbation-mode",str(cfg.get("perturbation_mode","multi_chi")),
                     "--min-perturb-degrees",str(cfg.get("min_perturb_degrees",40.0)),
                     "--max-perturb-degrees",str(cfg.get("max_perturb_degrees",120.0)),
-                    "--outputs",str(cfg.get("outputs",1000)),
-                    "--max-evals",str(cfg.get("max_evals",90)),
+                    "--outputs",str(qprimary.get("output_shots",1000)),
+                    "--max-evals",str(qprimary.get("max_evals",90)),
                     "--sa-passes",str(cfg.get("sa_passes",100)),
                     "--relax-iterations",str(cfg.get("relax_iterations",200)),
                     "--loop-relax-iterations",str(cfg.get("loop_relax_iterations",100)),
@@ -2954,12 +2955,12 @@ class Orchestrator:
                     "--optimize-seeds",*[str(v) for v in optimize_seeds],
                     "--measurement-seeds",*[str(v) for v in measurement_seeds],
                     "--sample-seeds",*[str(v) for v in sample_seeds],
-                    "--robust-qaoa","--qaoa-restarts",str(cfg.get("qaoa_restarts",4)),
-                    "--qaoa-depth",str(cfg.get("qaoa_depth",2)),
-                    "--qaoa-objective",str(cfg.get("qaoa_objective","cvar")),
-                    "--cvar-alpha",str(cfg.get("cvar_alpha",0.1)),
-                    "--parameter-scale",str(cfg.get("parameter_scale","max_coefficient")),
-                    "--eval-shots",str(cfg.get("eval_shots",500)),
+                    "--robust-qaoa","--qaoa-restarts",str(qprimary.get("restarts",4)),
+                    "--qaoa-depth",str(qprimary.get("depth",2)),
+                    "--qaoa-objective",str(qprimary.get("objective","cvar")),
+                    "--cvar-alpha",str(qprimary.get("cvar_alpha",0.1)),
+                    "--parameter-scale",str(qprimary.get("parameter_scale","max_coefficient")),
+                    "--eval-shots",str(qprimary.get("eval_shots",500)),
                 ]
                 rc,log=self._run_subprocess(f"dev_solvent_{solvent}_{target}",sensitivity_argv)
                 logs.append(str(log));argvs.append(sensitivity_argv)
@@ -3014,6 +3015,7 @@ class Orchestrator:
         cfg=self.config.get("external_validation", {}) or {}
         failures=[];logs=[];argvs=[]
         qc=self.config["qc_benchmark"]
+        qprimary=quantum_primary(self.config)
         homology=self.config["queue_freeze"]["homology_isolation"]
         rot=qc.get("rotamer_model", {}) or {}
         ff=qc.get("coarse_force_field", {}) or {}
@@ -3174,8 +3176,8 @@ class Orchestrator:
                     "--input-dir",str(graph_dir),"--checkpoint",str(checkpoint),"--out-dir",str(out),
                     "--pruning",str(self.config.get("statistics",{}).get("primary_pruning","egnn")),
                     "--radii",str(self.config.get("statistics",{}).get("primary_radius",6.0)),
-                    "--depths",str(self.config.get("statistics",{}).get("primary_depth",2)),
-                    "--max-evals",str(self.config.get("statistics",{}).get("primary_max_evals",90)),
+                    "--depths",str(qprimary.get("depth",2)),
+                    "--max-evals",str(qprimary.get("max_evals",90)),
                     "--active-sites",str(
                         self.config.get("statistics",{}).get("primary_active_sites",6)),
                     "--vhh-identity-threshold",str(homology.get("vhh_full_chain_identity",0.80)),
@@ -3200,12 +3202,12 @@ class Orchestrator:
                     "--rotamer-probability-floor",str(rot.get("probability_floor",1e-4)),
                     "--rotamer-sigma-offsets",*[str(v) for v in rot.get("sigma_offsets",[-1,0,1])],
                     "--energy-calibration-file",str(calibration),"--require-calibrated-energy",
-                    "--outputs",str(self.config.get("statistics",{}).get("primary_outputs",1000)),
-                    "--qaoa-objective",str(self.config.get("statistics",{}).get("primary_objective","cvar")),
-                    "--qaoa-restarts",str(self.config.get("statistics",{}).get("primary_restarts",4)),
-                    "--cvar-alpha",str(qc.get("cvar_alpha",0.1)),
-                    "--eval-shots",str(qc.get("eval_shots",500)),
-                    "--parameter-scale",str(qc.get("parameter_scale","max_coefficient")),
+                    "--outputs",str(qprimary.get("output_shots",1000)),
+                    "--qaoa-objective",str(qprimary.get("objective","cvar")),
+                    "--qaoa-restarts",str(qprimary.get("restarts",4)),
+                    "--cvar-alpha",str(qprimary.get("cvar_alpha",0.1)),
+                    "--eval-shots",str(qprimary.get("eval_shots",500)),
+                    "--parameter-scale",str(qprimary.get("parameter_scale","max_coefficient")),
                     "--sa-passes",str(qc.get("sa_passes",100)),
                     "--greedy-passes",str(qc.get("greedy_passes",50)),
                     "--energy-window",str(qc.get("energy_window",2.0)),
@@ -3371,13 +3373,14 @@ class Orchestrator:
         results_dirs = [self.run_dir / "qc_benchmark"]
         logs, argvs, failures = [], [], []
         qc_cfg = self.config["qc_benchmark"]
+        qprimary=quantum_primary(self.config)
         primary_pruning = str(cfg.get("primary_pruning","egnn"))
         primary_radius = float(cfg.get("primary_radius",qc_cfg.get("radii",[6.0])[0]))
-        primary_depth = int(cfg.get("primary_depth",qc_cfg.get("depths",[2])[0]))
-        primary_max_evals = int(cfg.get("primary_max_evals",qc_cfg.get("max_evals",[90])[0]))
-        primary_outputs = int(cfg.get("primary_outputs", max(qc_cfg.get("outputs", [1000]))))
-        primary_objective = str(cfg.get("primary_objective", "cvar"))
-        primary_restarts = int(cfg.get("primary_restarts", 4))
+        primary_depth = int(qprimary.get("depth",2))
+        primary_max_evals = int(qprimary.get("max_evals",90))
+        primary_outputs = int(qprimary.get("output_shots",1000))
+        primary_objective = str(qprimary.get("objective","cvar"))
+        primary_restarts = int(qprimary.get("restarts",4))
         primary_active_sites = int(cfg.get("primary_active_sites", 6))
         if primary_active_sites not in [int(v) for v in qc_cfg.get("active_sites",[6])]:
             failures.append(
@@ -3386,12 +3389,13 @@ class Orchestrator:
         if primary_outputs not in qc_cfg.get("outputs", []):
             failures.append(
                 f"statistics primary_outputs={primary_outputs} is not present in qc_benchmark.outputs")
-        if primary_objective not in qc_cfg.get("qaoa_objective", []):
+        qablation=quantum_benchmark_ablation(self.config)
+        if primary_objective not in [str(v) for v in qablation.get("objectives",[])]:
             failures.append(
-                f"statistics primary_objective={primary_objective} is not present in qc_benchmark.qaoa_objective")
-        if primary_restarts not in qc_cfg.get("qaoa_restarts", []):
+                f"quantum primary objective={primary_objective} is not present in benchmark_ablation.objectives")
+        if primary_restarts not in [int(v) for v in qablation.get("restarts",[])]:
             failures.append(
-                f"statistics primary_restarts={primary_restarts} is not present in qc_benchmark.qaoa_restarts")
+                f"quantum primary restarts={primary_restarts} is not present in benchmark_ablation.restarts")
         for results_dir in results_dirs:
             if not results_dir.is_dir():
                 failures.append(f"statistics input directory is missing: {results_dir}")
