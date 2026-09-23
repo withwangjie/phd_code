@@ -42,6 +42,30 @@ if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/n
     log "Git HEAD: $(git rev-parse HEAD)"
 fi
 
+log "Validating frozen scientific protocol and declared formal resources..."
+QP_PREFLIGHT_CONFIG="$CONFIG_FILE" python - <<'PY'
+from __future__ import annotations
+import os
+import tempfile
+from pathlib import Path
+import yaml
+
+from nanoqc.pipeline.run_full_experiment import Orchestrator, _validate_scientific_config
+
+config_path=Path(os.environ["QP_PREFLIGHT_CONFIG"])
+config=yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+_validate_scientific_config(config)
+
+runtime_root=Path(config["paths"]["repo_root"]).resolve()/".runtime"
+runtime_root.mkdir(parents=True,exist_ok=True)
+with tempfile.TemporaryDirectory(prefix="formal_preflight_env.",dir=runtime_root) as tmp:
+    orchestrator=Orchestrator(config,Path(tmp),only="env_check")
+    result=orchestrator.stage_env_check()
+    if result.status!="completed":
+        raise SystemExit(f"Formal environment/resource gate failed: {result.detail}")
+print("Frozen scientific protocol and declared formal resources: OK")
+PY
+
 log "Running syntax checks for formal entrypoints..."
 bash -n "$SCRIPT_DIR/run_full_experiment.sh"
 bash -n "$SCRIPT_DIR/deploy_launch.sh"
