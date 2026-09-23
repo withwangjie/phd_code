@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import math
 import os
@@ -82,6 +83,12 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from nanoqc.common.seed_streams import derive_streams, derive_child_seed, save_stream_map, verify_stream_map, DEFAULT_MASTER_SEED  # noqa: E402
 from nanoqc.common.repo_io import sha256_file as sha256_of, repo_path, module_name, DOCS_DIR, CONFIGS_DIR  # noqa: E402
+
+
+# Detail prefix of the failure recorded when a stage is refused because a
+# prerequisite is incomplete. Such a stage never started, so a later resume
+# retries it automatically once its prerequisites are complete.
+PREREQUISITE_BLOCK_PREFIX = "Prerequisite stage '"
 
 
 def primary_qc_effect_name(baseline: str, budget_mode: str) -> str:
@@ -359,8 +366,13 @@ def _validate_scientific_config(config: Dict[str, Any]) -> None:
             raise ValueError("external_validation.external_vhh.graph_dir is required")
         if ext.get("required",False) and not ext.get("source_structure_dir"):
             raise ValueError("external_validation.external_vhh.source_structure_dir is required")
-        if ext.get("required",False) and not ext.get("independence_manifest"):
-            raise ValueError("external_validation.external_vhh.independence_manifest is required")
+        if ext.get("independence_manifest"):
+            # The independence audit is bound to this run's frozen dataset and
+            # cluster map, so it is always regenerated inside the run directory.
+            raise ValueError(
+                "external_validation.external_vhh.independence_manifest is obsolete: the audit "
+                "is regenerated as <run_dir>/external_validation/external_vhh_independence_manifest.json; "
+                "remove the key")
         if structural.get("required",False):
             if not structural.get("faspr_executable") or not structural.get("phenix_clashscore_executable"):
                 raise ValueError("Required structural baseline executables must be configured")
@@ -658,8 +670,31 @@ class Orchestrator:
         }
         return mapping.get(stage,[])
 
+    def _upstream_fingerprints(self, prerequisites: Sequence[str]) -> Dict[str, Optional[str]]:
+        """Content fingerprint of each prerequisite's recorded results (None when absent).
+
+        Hashes the status and the (path, size, sha256) artifact list of the
+        prerequisite's results manifest, not its timestamp, so a bit-identical
+        re-run does not invalidate downstream results but any changed artifact does.
+        """
+        fingerprints: Dict[str, Optional[str]] = {}
+        for prereq in prerequisites:
+            path=self.results_manifest_dir/f"{prereq}.json"
+            try:
+                manifest=json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
+            except (OSError,json.JSONDecodeError):
+                manifest={"unreadable":True}
+            if not isinstance(manifest,dict):
+                fingerprints[prereq]=None
+                continue
+            content=json.dumps({"status":manifest.get("status"),
+                                "artifacts":manifest.get("artifacts")},sort_keys=True)
+            fingerprints[prereq]=hashlib.sha256(content.encode("utf-8")).hexdigest()
+        return fingerprints
+
     def _write_stage_results_manifest(self, stage: str, result: StageResult,
-                                      validation_detail: str) -> Path:
+                                      validation_detail: str,
+                                      upstream: Optional[Dict[str, Optional[str]]] = None) -> Path:
         files=[]
         seen=set()
         for root in self._stage_result_roots(stage):
@@ -686,6 +721,10 @@ class Orchestrator:
             "status":result.status,
             "generated_utc":utc_timestamp(),
             "validation_detail":validation_detail,
+            # Binds this stage's results to the exact upstream results it
+            # consumed; a resumed run rejects them if an upstream stage has
+            # been re-run since (see run_stage).
+            "upstream_results_manifest_sha256":dict(upstream or {}),
             "artifact_count":len(files),
             "artifacts":sorted(files,key=lambda x:x["path"]),
         })
@@ -741,13 +780,37 @@ class Orchestrator:
                         existing.get("argv",[]),existing.get("log_path"),False)
                     self._save_stage_status(result)
                     return result
+                try:
+                    recorded=json.loads((self.results_manifest_dir/f"{stage}.json").read_text(encoding="utf-8"))
+                except (OSError,json.JSONDecodeError):
+                    recorded=None
+                recorded_upstream=(recorded or {}).get("upstream_results_manifest_sha256") if isinstance(recorded,dict) else None
+                current_upstream=self._upstream_fingerprints(prerequisites)
+                if recorded_upstream!=current_upstream:
+                    changed=sorted(
+                        name for name in set(current_upstream)|set(recorded_upstream or {})
+                        if (recorded_upstream or {}).get(name)!=current_upstream.get(name))
+                    result=StageResult(
+                        stage,"failed",existing["started_utc"],utc_timestamp(),1,
+                        "Resume integrity check failed: upstream stage results changed since this "
+                        f"stage completed ({', '.join(changed) or 'unrecorded upstream binding'}). "
+                        f"Its results were built on superseded inputs; use --force-restage {stage} "
+                        "(with a fresh output) or start a new run.",
+                        existing.get("argv",[]),existing.get("log_path"),False)
+                    self._save_stage_status(result)
+                    return result
                 print(f"[{stage}] Already {existing['status']}; verified artifacts and skipping "
                       f"(use --force-restage {stage} to redo).")
                 return StageResult(stage, existing["status"], existing["started_utc"],
                                     existing["finished_utc"], existing["returncode"],
                                     "Resumed with artifact verification: "+resume_detail,
                                     existing.get("argv", []), existing.get("log_path"), True)
-            if existing["status"] == "failed":
+            if existing["status"] == "failed" and str(existing.get("detail","")).startswith(
+                    PREREQUISITE_BLOCK_PREFIX):
+                # Refused earlier only because a prerequisite was incomplete; the
+                # stage never ran. Prerequisites are verified above, so run it now.
+                print(f"[{stage}] Previously blocked by a prerequisite; prerequisites now verified, running.")
+            elif existing["status"] == "failed":
                 print(f"[{stage}] Previously FAILED systemically: {existing['detail']}")
                 print(f"[{stage}] Not auto-retrying. Pass --force-restage {stage} to retry after investigating.")
                 return StageResult(stage, "failed", existing["started_utc"], utc_timestamp(),
@@ -773,7 +836,8 @@ class Orchestrator:
                     +validation_detail,
                     result.argv,result.log_path,False,
                 )
-        self._write_stage_results_manifest(stage,result,validation_detail)
+        self._write_stage_results_manifest(
+            stage,result,validation_detail,upstream=self._upstream_fingerprints(prerequisites))
         self._save_stage_status(result)
         print(f"[{stage}] {result.status}: {result.detail}")
         return result
@@ -1265,17 +1329,12 @@ class Orchestrator:
             if ext.get("required",False):
                 graph_dir=resolve_path(self.config,ext.get("graph_dir",""))
                 source_dir=resolve_path(self.config,ext.get("source_structure_dir",""))
-                manifest=resolve_path(self.config,ext.get("independence_manifest",""))
                 graph_ok=graph_dir.is_dir() and any(graph_dir.glob("*.pt"))
                 checks["external_vhh_graphs"]=graph_ok
                 checks["external_vhh_raw_structures"]=source_dir.is_dir()
-                # The independence manifest is deliberately generated later,
-                # after this run has frozen its own training dataset/cluster
-                # map. A pre-existing manifest is accepted but not required
-                # during preflight because it cannot be validly generated
-                # before queue_freeze.
-                checks["external_vhh_independence_manifest_preexisting"]=manifest.is_file()
-                checks["external_vhh_independence_manifest_generated_later"]=not manifest.is_file()
+                # The independence manifest is generated run-locally during
+                # external_validation, after queue_freeze has frozen this run's
+                # training dataset and cluster map; it is never read from the repo.
                 if not graph_ok:
                     missing_resources.append(str(graph_dir))
                 if not source_dir.is_dir():
@@ -2759,20 +2818,26 @@ class Orchestrator:
         if ext.get("required", False):
             graph_dir=resolve_path(self.config,ext.get("graph_dir",""))
             source_dir=resolve_path(self.config,ext.get("source_structure_dir",""))
-            independence=resolve_path(self.config,ext.get("independence_manifest",""))
+            run_external_root=self.run_dir/"external_validation"
+            run_external_root.mkdir(parents=True,exist_ok=True)
+            # Always regenerated for this run (never reused from another run or
+            # from an earlier failed attempt), because it certifies this run's
+            # frozen training graphs and cluster map.
+            independence=run_external_root/"external_vhh_independence_manifest.json"
+            if independence.exists():
+                independence.unlink()
             ext_failures=[]
             if not graph_dir.is_dir() or not any(graph_dir.glob("*.pt")):
                 ext_failures.append(f"Required external VHH graph set missing/empty: {graph_dir}")
             if not source_dir.is_dir():
                 ext_failures.append(f"Required external VHH raw structures missing: {source_dir}")
-            if not independence.is_file() and graph_dir.is_dir() and source_dir.is_dir() and any(graph_dir.glob("*.pt")):
+            if graph_dir.is_dir() and source_dir.is_dir() and any(graph_dir.glob("*.pt")):
                 cluster_path=self.frozen_cluster_map_path()
                 if cluster_path is None or not cluster_path.is_file():
                     ext_failures.append(
                         "Cannot generate external independence manifest without frozen cluster map"
                     )
                 else:
-                    independence.parent.mkdir(parents=True,exist_ok=True)
                     audit_argv=[
                         self.venv_python,"-m", module_name("audit_external_vhh_independence.py"),
                         "--training-dataset",str(self.dataset_dir()),
@@ -2796,10 +2861,6 @@ class Orchestrator:
                 ext_failures.append(f"Required external independence manifest missing: {independence}")
             else:
                 manifest=json.loads(independence.read_text(encoding="utf-8"))
-                run_external_root=self.run_dir/"external_validation"
-                run_external_root.mkdir(parents=True,exist_ok=True)
-                local_independence=run_external_root/"external_vhh_independence_manifest.json"
-                shutil.copy2(independence,local_independence)
                 current_cluster_path=self.frozen_cluster_map_path()
                 current_cluster_sha=(
                     sha256_of(current_cluster_path)

@@ -21,7 +21,7 @@ from tqdm import tqdm
 from nanoqc.reporting.generate_figure1_pymol_script import extract_source
 from nanoqc.qubo.subgraph_to_qubo import read_atomistic_structure, _SIDECHAIN_NAMES, AllAtomInterfaceQUBOBuilder
 from nanoqc.common.seed_streams import derive_streams, derive_child_seed, save_stream_map, DEFAULT_MASTER_SEED
-from nanoqc.data.sequence_identity import nw_identity, length_coverage
+from nanoqc.data.sequence_identity import nw_identity, length_coverage, partner_roles_anchored
 from nanoqc.data.safe_graph_load import load_graph
 
 
@@ -80,6 +80,44 @@ def complete_terminal_oxygen(path: Path) -> list[str]:
     return changes
 
 
+def strip_to_protein_conformer(st, residues: dict) -> list[str]:
+    """Reduce a single-model gemmi structure to force-field-ready protein atoms.
+
+    In place: removes waters, hydrogens/deuteriums and zero-occupancy atoms,
+    keeps exactly one alternate conformer per residue (the one
+    :func:`read_atomistic_structure` chose, passed in as ``residues``) and
+    clears altloc labels. Fails closed on any non-protein component or a
+    residue missing canonical heavy atoms; never repairs coordinates. Shared
+    by target preparation and energy-calibration data generation.
+    """
+    changes = []
+    for chain in st[0]:
+        for k in reversed(range(len(chain))):
+            r = chain[k]
+            if r.is_water():
+                changes.append(f"removed water {chain.name}:{r.seqid}")
+                del chain[k]
+                continue
+            rid = f"{chain.name}:{r.seqid}"
+            if rid not in residues:
+                raise ValueError(f"Unsupported nonprotein component {rid}/{r.name}")
+            entry = residues[rid]
+            required = set(("N", "CA", "C", "O")) | set(_SIDECHAIN_NAMES[r.name].split())
+            missing = required - entry["atoms"].keys()
+            if missing:
+                raise ValueError(f"Missing heavy atoms {rid}: {sorted(missing)}")
+            label = entry["altloc"]
+            for j in reversed(range(len(r))):
+                atom = r[j]
+                if atom.element.name in ("H", "D") or atom.occ <= 0 or atom.altloc not in ("\x00", " ", "", label):
+                    del r[j]
+                else:
+                    atom.altloc = "\x00"
+            if label:
+                changes.append(f"altloc {rid}={label}")
+    return changes
+
+
 def prepare(graph, source: Path, destination: Path, sites: int, *, pruning: str = 'cdr',
             seed: int = 42, checkpoint: Path | None = None,
             antigen_guidance_weight: float = 0.25,
@@ -114,31 +152,7 @@ def prepare(graph, source: Path, destination: Path, sites: int, *, pruning: str 
     expected = set(graph.residue_ids)
     if set(residues) != expected:
         raise ValueError("Raw/graph protein residue identities differ")
-    changes = []
-    for chain in st[0]:
-        for k in reversed(range(len(chain))):
-            r = chain[k]
-            if r.is_water():
-                changes.append(f"removed water {chain.name}:{r.seqid}")
-                del chain[k]
-                continue
-            rid = f"{chain.name}:{r.seqid}"
-            if rid not in residues:
-                raise ValueError(f"Unsupported nonprotein component {rid}/{r.name}")
-            entry = residues[rid]
-            required = set(("N", "CA", "C", "O")) | set(_SIDECHAIN_NAMES[r.name].split())
-            missing = required - entry["atoms"].keys()
-            if missing:
-                raise ValueError(f"Missing heavy atoms {rid}: {sorted(missing)}")
-            label = entry["altloc"]
-            for j in reversed(range(len(r))):
-                atom = r[j]
-                if atom.element.name in ("H", "D") or atom.occ <= 0 or atom.altloc not in ("\x00", " ", "", label):
-                    del r[j]
-                else:
-                    atom.altloc = "\x00"
-            if label:
-                changes.append(f"altloc {rid}={label}")
+    changes = strip_to_protein_conformer(st, residues)
     for i, rid in enumerate(graph.residue_ids):
         if not np.allclose(residues[rid]["atoms"]["CA"], graph.pos[i].numpy(), atol=.002):
             raise ValueError(f"Raw/graph coordinates differ at {rid}")
@@ -471,18 +485,27 @@ def main(argv=None) -> int:
         _ablation_atomic_json(stamp,provenance)
         save_stream_map(out/"seed_streams.json", args.master_seed, streams)
         cache=out/"training_sequences.json"
-        if cache.exists():
-            sequence_inventory=json.loads(cache.read_text())
+        cached=json.loads(cache.read_text()) if cache.exists() else None
+        if cached is not None and cached.get("schema")==2:
+            sequence_inventory=cached
         else:
-            sequence_inventory={"vhh": {}, "antigen": {}}
+            # schema 2: training complexes whose partner roles are not
+            # annotation-anchored (e.g. train_rcsb) contribute every chain to
+            # BOTH role pools, so a target nanobody is compared with a training
+            # nanobody stored in the "antigen" slot under the VHH threshold.
+            sequence_inventory={"schema": 2, "vhh": {}, "antigen": {}}
             for row in tqdm(training,desc="Training sequence inventory"):
                 path=_manifest_graph_path(args.dataset, row.get("path"))
                 if _ablation_digest(path)!=row["sha256"]:
                     raise ValueError(f"Training graph hash mismatch {path}")
                 data=load_graph(path)
-                for seq in getattr(data,"vhh_sequences",[]):
+                vhh_side=list(getattr(data,"vhh_sequences",[]))
+                antigen_side=list(getattr(data,"antigen_sequences",[]))
+                if not partner_roles_anchored(getattr(data,"subset_source","")):
+                    vhh_side=antigen_side=vhh_side+antigen_side
+                for seq in vhh_side:
                     sequence_inventory["vhh"].setdefault(seq,[]).append(row["pdb_id"])
-                for seq in getattr(data,"antigen_sequences",[]):
+                for seq in antigen_side:
                     sequence_inventory["antigen"].setdefault(seq,[]).append(row["pdb_id"])
             _ablation_atomic_json(cache,sequence_inventory)
         train_pdb={r["pdb_id"].lower() for r in training}
@@ -780,6 +803,12 @@ def main(argv=None) -> int:
                 controls=[np.mean([float(r["improvement_vs_relax_only"]) for r in group if r["target"]==t]) for t in targets]
                 report.append(f"| {method} | {len(targets)} | {np.mean(gains):.6g} | {np.mean(controls):.6g} |")
         report += ["", "Eligibility and every exclusion reason are in eligibility.json; no replacement based on solver results. Failed/incomplete targets remain listed. Target means weight seeds within each target first. No significance or quantum advantage is inferred from a small pilot."]
+        if args.solvent_model!="vacuum":
+            report += ["", f"Energy-model note: {args.solvent_model} implicit solvent is not exactly "
+                "pair-decomposable, so its QUBO is a pairwise approximation of the full energy. "
+                "Decomposition errors are recorded per case (all_atom_equivalence_max_error / "
+                "all_atom_equivalence_rms_error) and per selected structure (qubo_energy_discrepancy_kcal); "
+                "all structures are still relaxed and scored with the full energy model."]
         (out/"real_complex_report.md").write_text("\n".join(report),encoding="utf-8")
         print(out/"real_complex_report.md")
         if formal_frozen_execution:

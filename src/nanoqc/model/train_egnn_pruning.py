@@ -47,7 +47,7 @@ from tqdm.auto import tqdm
 
 from nanoqc.model.model_egnn_pruning import EGNNInterfaceScorer
 from nanoqc.common.repo_io import sha256_file as _file_sha256
-from nanoqc.data.sequence_identity import nw_identity, length_coverage
+from nanoqc.data.sequence_identity import nw_identity, length_coverage, partner_orientations, partner_roles_anchored
 
 
 SEED = 20260917
@@ -246,7 +246,8 @@ def split_paths(paths: Sequence[Path], seed: int) -> Tuple[List[Path], List[Path
                 f"{path.name} lacks family_structure_cluster; rebuild formal graphs with "
                 "build_final_pyg_dataset.py graph version >=1.6"
             )
-        records.append((path, vhh, antigen, cdr3, family_cluster))
+        anchored = partner_roles_anchored(getattr(data, "subset_source", ""))
+        records.append((path, vhh, antigen, cdr3, family_cluster, anchored))
 
     parent = list(range(len(records)))
 
@@ -262,19 +263,22 @@ def split_paths(paths: Sequence[Path], seed: int) -> Tuple[List[Path], List[Path
             parent[b] = a
 
     for i in range(len(records)):
-        _, vhh_i, antigen_i, cdr_i, family_i = records[i]
+        _, vhh_i, antigen_i, cdr_i, family_i, anchored_i = records[i]
         for j in range(i):
-            _, vhh_j, antigen_j, cdr_j, family_j = records[j]
-            same_vhh = _side_identity(vhh_i, vhh_j) >= VHH_IDENTITY_THRESHOLD
+            _, vhh_j, antigen_j, cdr_j, family_j, anchored_j = records[j]
+            # Unanchored partner roles (e.g. train_rcsb) are also compared with
+            # partners swapped, so cross-role homology is not missed.
+            same_vhh = same_antigen = False
+            for lv, rv, la, ra in partner_orientations(
+                    vhh_i, antigen_i, anchored_i, vhh_j, antigen_j, anchored_j):
+                same_vhh = same_vhh or _side_identity(lv, rv) >= VHH_IDENTITY_THRESHOLD
+                same_antigen = same_antigen or (
+                    _side_identity(la, ra, min_length_coverage=ANTIGEN_MIN_LENGTH_COVERAGE)
+                    >= ANTIGEN_IDENTITY_THRESHOLD
+                )
             same_cdr = (
                 bool(cdr_i and cdr_j)
                 and _sequence_identity(cdr_i, cdr_j) >= CDR_H3_IDENTITY_THRESHOLD
-            )
-            same_antigen = (
-                _side_identity(
-                    antigen_i, antigen_j,
-                    min_length_coverage=ANTIGEN_MIN_LENGTH_COVERAGE,
-                ) >= ANTIGEN_IDENTITY_THRESHOLD
             )
             same_family_structure = family_i == family_j
             if same_vhh or same_cdr or same_antigen or same_family_structure:

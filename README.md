@@ -16,6 +16,10 @@ prediction.
    - EGNN train/validation split: layered connected components. Complexes are
      joined if VHH full-chain identity >=80% [R24], CDR-H3 identity >=50% [R23], or
      antigen identity >=30% with >=70% minimum length coverage [R25]; no random 90/10 split.
+     Complexes whose partner roles are not annotation-anchored (e.g. `train_rcsb`, where
+     group 0 is the first chain of the strongest contact pair) are also compared with
+     their partners swapped, so a nanobody stored in the antigen slot is still checked
+     against other nanobodies under the VHH threshold.
 
 2. **Antigen-conditioned Active-site selection**
    - E(n)-equivariant EGNN [R1] provides residue-level interface probabilities.
@@ -185,6 +189,10 @@ manifest. The external-validation stage verifies that manifest before running
 the frozen model.
 
 The primary all-atom protocol uses vacuum/NoCutoff Amber14 packing energy.
+GBN2 energies are not exactly pair-decomposable (Born radii depend on every atom), so
+the GBN2 QUBO is a recorded pairwise approximation (`pair_decomposition`,
+`all_atom_equivalence_max_error/rms_error`, per-structure `qubo_energy_discrepancy_kcal`);
+the vacuum primary protocol still requires exact decomposition (1e-4 kcal/mol).
 A pre-declared GBN2 sensitivity run is performed on development targets only;
 the validation queue never chooses its solvent model after inspecting results.
 

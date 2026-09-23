@@ -23,9 +23,10 @@ import torch
 
 from nanoqc.reporting.generate_figure1_pymol_script import extract_source
 from nanoqc.model.model_egnn_pruning import select_ablation_active, build_ablation_subgraph
-from nanoqc.experiments.run_real_complex_pilot import complete_terminal_oxygen
+from nanoqc.experiments.run_real_complex_pilot import complete_terminal_oxygen, strip_to_protein_conformer
 from nanoqc.qubo.subgraph_to_qubo import (
     AllAtomInterfaceQUBOBuilder,
+    read_atomistic_structure,
     EnergyCalibration,
     ForceFieldConfig,
     InterfaceQUBOBuilder,
@@ -295,6 +296,19 @@ def main() -> int:
                         raise ValueError("Source structure has no coordinate model")
                     while len(structure)>1:
                         del structure[1]
+                    model_one=temp/"model1.cif"
+                    structure.make_mmcif_document().write_file(str(model_one))
+                    # Same force-field preparation as validation targets
+                    # (run_real_complex_pilot.prepare): drop waters/H/zero-occupancy
+                    # atoms, keep one alternate conformer, and bind the raw
+                    # protein residues and CA coordinates to the training graph.
+                    residues=read_atomistic_structure(model_one)
+                    if set(residues)!=set(data.residue_ids):
+                        raise ValueError("Raw/graph protein residue identities differ")
+                    for node,rid in enumerate(data.residue_ids):
+                        if not np.allclose(residues[rid]["atoms"]["CA"],data.pos[node].numpy(),atol=.002):
+                            raise ValueError(f"Raw/graph coordinates differ at {rid}")
+                    strip_to_protein_conformer(structure,residues)
                     local=temp/"native.cif"
                     structure.make_mmcif_document().write_file(str(local))
                     complete_terminal_oxygen(local)

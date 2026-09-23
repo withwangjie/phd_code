@@ -29,7 +29,7 @@ from scipy.spatial import cKDTree
 from torch_geometric.data import Data, Batch
 import nanoqc.data.audit_all_datasets as audit
 from nanoqc.common.repo_io import sha256_file as sha256, REPO_ROOT
-from nanoqc.data.sequence_identity import nw_identity, length_coverage
+from nanoqc.data.sequence_identity import nw_identity, length_coverage, partner_orientations, partner_roles_anchored
 
 BASE = REPO_ROOT  # standalone-run defaults (data/, outputs) are relative to the checkout root
 AA = 'ACDEFGHIKLMNPQRSTVWY'
@@ -491,9 +491,15 @@ def layered_graph_homology(left: Data, right: Data) -> dict:
     right_ag=tuple(str(s) for s in getattr(right,'antigen_sequences',[]) if str(s))
     left_cdr=str(getattr(left,'cdr3_seq','') or '')
     right_cdr=str(getattr(right,'cdr3_seq','') or '')
-    vhh=side_identity(left_vhh,right_vhh)
+    # Complexes without annotation-anchored partner roles (e.g. train_rcsb)
+    # are also compared with their partners swapped; see partner_orientations.
+    vhh=0.0;antigen=0.0
+    for lv,rv,la,ra in partner_orientations(
+            left_vhh,left_ag,partner_roles_anchored(getattr(left,'subset_source','')),
+            right_vhh,right_ag,partner_roles_anchored(getattr(right,'subset_source',''))):
+        vhh=max(vhh,side_identity(lv,rv))
+        antigen=max(antigen,side_identity(la,ra,min_length_coverage=ANTIGEN_MIN_LENGTH_COVERAGE))
     cdr_id=global_identity(left_cdr,right_cdr) if left_cdr and right_cdr else 0.0
-    antigen=side_identity(left_ag,right_ag,min_length_coverage=ANTIGEN_MIN_LENGTH_COVERAGE)
     return dict(
         vhh_identity=float(vhh),
         cdr_h3_identity=float(cdr_id),
@@ -610,34 +616,54 @@ def main():
         cluster_map={str(k).lower():str(v) for k,v in raw_clusters.items()}
         if any(not key or not value for key,value in cluster_map.items()):
             raise ValueError('--cluster-map contains empty PDB or cluster identifiers')
+    expected_protocol=dict(vhh_identity_threshold=VHH_IDENTITY_THRESHOLD,
+        cdr_h3_identity_threshold=CDR_H3_IDENTITY_THRESHOLD,
+        antigen_identity_threshold=ANTIGEN_IDENTITY_THRESHOLD,
+        antigen_min_length_coverage=ANTIGEN_MIN_LENGTH_COVERAGE,
+        interface_label_cutoff_angstrom=INTERFACE_LABEL_CUTOFF_ANGSTROM,
+        intra_chain_ca_cutoff_angstrom=INTRA_CHAIN_CA_CUTOFF_ANGSTROM,
+        cross_partner_knn_k=CROSS_PARTNER_KNN_K,
+        min_interface_residues=MIN_INTERFACE_RESIDUES,graph_version=VERSION)
+    # Everything a resumed build must share with the interrupted/failed one.
+    # Written to run_summary.json up front (see below), so a build that failed
+    # part-way can still be resumed instead of always looking "different".
+    resume_identity=dict(no_cap=bool(args.no_cap),target_hard=(None if args.no_cap else args.target_hard),
+        graph_protocol=expected_protocol,family_cluster_map_sha256=cluster_map_sha256,
+        partition_seed=(args.partition_seed if args.partition_seed is not None else SEED))
     if RESUME:
         prior=json.loads((output/'run_summary.json').read_text(encoding='utf-8'))
-        if prior.get('no_cap',False)!=args.no_cap or (not args.no_cap and prior.get('target_hard')!=args.target_hard):
-            raise ValueError('Resume target differs or is unknown; choose a fresh output directory')
-        expected_protocol=dict(vhh_identity_threshold=VHH_IDENTITY_THRESHOLD,
-            cdr_h3_identity_threshold=CDR_H3_IDENTITY_THRESHOLD,
-            antigen_identity_threshold=ANTIGEN_IDENTITY_THRESHOLD,
-            antigen_min_length_coverage=ANTIGEN_MIN_LENGTH_COVERAGE,
-            interface_label_cutoff_angstrom=INTERFACE_LABEL_CUTOFF_ANGSTROM,
-            intra_chain_ca_cutoff_angstrom=INTRA_CHAIN_CA_CUTOFF_ANGSTROM,
-            cross_partner_knn_k=CROSS_PARTNER_KNN_K,
-            min_interface_residues=MIN_INTERFACE_RESIDUES,graph_version=VERSION)
-        if prior.get('graph_protocol')!=expected_protocol:
-            raise ValueError('Resume graph protocol differs; choose a fresh output directory')
-        prior_cluster_sha=(prior.get('validation',{}) or {}).get('family_cluster_map_sha256')
-        if prior_cluster_sha != cluster_map_sha256:
-            raise ValueError(
-                f'Resume family/structure cluster map differs: prior={prior_cluster_sha}, '
-                f'current={cluster_map_sha256}; choose a fresh output directory'
-            )
+        prior_identity=prior.get('resume_identity')
+        if prior_identity is not None:
+            if prior_identity!=json.loads(json.dumps(resume_identity)):
+                raise ValueError(
+                    f'Resume identity differs (target/protocol/cluster map): prior={prior_identity}, '
+                    f'current={resume_identity}; choose a fresh output directory')
+        else:
+            # Legacy summaries (written only by completed builds).
+            if prior.get('no_cap',False)!=args.no_cap or (not args.no_cap and prior.get('target_hard')!=args.target_hard):
+                raise ValueError('Resume target differs or is unknown; choose a fresh output directory')
+            if prior.get('graph_protocol')!=expected_protocol:
+                raise ValueError('Resume graph protocol differs; choose a fresh output directory')
+            prior_cluster_sha=(prior.get('validation',{}) or {}).get('family_cluster_map_sha256')
+            if prior_cluster_sha != cluster_map_sha256:
+                raise ValueError(
+                    f'Resume family/structure cluster map differs: prior={prior_cluster_sha}, '
+                    f'current={cluster_map_sha256}; choose a fresh output directory'
+                )
     if any((output/'graphs').rglob('*.pt')) and not RESUME:raise FileExistsError('Output already contains graphs; choose a fresh --out directory or explicit --resume')
     for split in ['train','test_db55','test_snac_hard']:(output/'graphs'/split).mkdir(parents=True,exist_ok=True)
     torch.set_num_threads(1);start=time.time();manifest=[];exclusions=[];failures=[];summary={};complete=False;previous_elapsed=0
+    summary['resume_identity']=resume_identity
     try:
         rows,pairs,input_hashes=load_inputs(args.audit_dir);audit.load_annotations(args.data_root)
         if RESUME:
             previous=json.loads((output/'run_summary.json').read_text(encoding='utf-8'))
-            if previous.get('input_sha256')!=input_hashes:raise ValueError('Resume audit input hashes differ')
+            if 'input_sha256' in previous:
+                if previous['input_sha256']!=input_hashes:raise ValueError('Resume audit input hashes differ')
+            elif any((output/'graphs').rglob('*.pt')):
+                # A build that failed before recording its inputs cannot have
+                # produced graphs; if graphs exist their provenance is unknown.
+                raise ValueError('Resume summary lacks audit input hashes but graphs exist; choose a fresh output directory')
             previous_elapsed=previous.get('elapsed_seconds',0)
             PEAK_RSS=max(PEAK_RSS,previous.get('sampled_peak_rss_bytes',0))
         partition_seed=args.partition_seed if args.partition_seed is not None else SEED

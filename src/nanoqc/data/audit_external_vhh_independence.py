@@ -17,7 +17,7 @@ import gemmi
 import torch
 from nanoqc.common.repo_io import sha256_file as sha256
 from nanoqc.data.safe_graph_load import load_graph
-from nanoqc.data.sequence_identity import nw_identity, length_coverage
+from nanoqc.data.sequence_identity import nw_identity, length_coverage, partner_orientations, partner_roles_anchored
 
 AA_ORDER="ACDEFGHIKLMNPQRSTVWY"
 
@@ -58,7 +58,12 @@ def verified_graph_identity(graph: object, path: Path, *, require_cdr: bool = Fa
     if not vhh or not antigen or getattr(graph,"vhh_sequences",None)!=vhh or getattr(graph,"antigen_sequences",None)!=antigen:
         raise ValueError(f"{path}: partner sequences disagree with encoded chains")
     cdr=str(getattr(graph,"cdr3_seq","") or "")
-    if (require_cdr and not cdr) or (cdr and not any(cdr in sequence for sequence in vhh)):
+    # External graphs (require_cdr=True) are bound to their raw structure, so
+    # their CDR-H3 must be an exact substring of the encoded VHH chain.
+    # Training graphs are hash-bound to this run's frozen manifest; their
+    # annotated CDR-H3 may legitimately contain residues that are unmodeled in
+    # the structure, so it is kept as annotated instead of aborting the audit.
+    if require_cdr and (not cdr or not any(cdr in sequence for sequence in vhh)):
         raise ValueError(f"{path}: CDR-H3 sequence is absent from encoded VHH chains")
     if int(getattr(graph,"cdr3_len",-1))!=len(cdr):
         raise ValueError(f"{path}: CDR-H3 length disagrees with sequence")
@@ -152,6 +157,7 @@ def graph_sequences(path: Path, source_dir: Path | None = None) -> dict:
     return dict(
         **identity_fields,
         graph_version=str(getattr(graph,"graph_version","")),
+        subset_source=str(getattr(graph,"subset_source","") or ""),
         sha256=digest,
         source_structure=(None if source is None else str(source.resolve())),
         source_structure_sha256=(None if source is None else sha256(source)),
@@ -236,13 +242,19 @@ def main() -> int:
             raise ValueError(f"Cluster map missing external PDB {pdb}")
         max_vhh=0.0;max_cdr=0.0;max_ag=0.0;ag_cov=0.0
         for tr in train:
-            value,_=side_max(ext["vhh"],tr["vhh"])
-            max_vhh=max(max_vhh,value)
+            # External roles are verified (CDR-H3 inside the encoded VHH chain);
+            # training complexes without anchored roles are also compared with
+            # their partners swapped (see sequence_identity.partner_orientations).
+            for ev,tv,ea,ta in partner_orientations(
+                    ext["vhh"],ext["antigen"],True,
+                    tr["vhh"],tr["antigen"],partner_roles_anchored(tr["subset_source"])):
+                value,_=side_max(ev,tv)
+                max_vhh=max(max_vhh,value)
+                value,cov=side_max(ea,ta,args.antigen_min_length_coverage)
+                if value>max_ag:
+                    max_ag=value;ag_cov=cov
             value,_=identity(ext["cdr_h3"],tr["cdr_h3"]) if ext["cdr_h3"] and tr["cdr_h3"] else (0.0,0.0)
             max_cdr=max(max_cdr,value)
-            value,cov=side_max(ext["antigen"],tr["antigen"],args.antigen_min_length_coverage)
-            if value>max_ag:
-                max_ag=value;ag_cov=cov
         family_overlap=cluster_map[pdb] in train_clusters
         audits.append(dict(
             pdb_id=pdb,

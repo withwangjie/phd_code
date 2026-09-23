@@ -1929,6 +1929,8 @@ class AllAtomInterfaceQUBOBuilder:
         self.solvent_model=str(solvent_model).lower()
         if self.solvent_model not in ("vacuum","gbn2"):
             raise ValueError("solvent_model must be vacuum or gbn2")
+        # Only the vacuum model is exactly pair-decomposable; see build().
+        self.pair_decomposition_exact=self.solvent_model=="vacuum"
         if chi1_angles is not None:
             chi1_angles=tuple(float(a) for a in chi1_angles)
             if not 2 <= len(chi1_angles) <= 6 or not np.isfinite(chi1_angles).all():
@@ -2260,15 +2262,26 @@ class AllAtomInterfaceQUBOBuilder:
             __import__("gemmi").find_tabulated_residue(c["residue_name"]).one_letter_code,
             list(self.site_to_variables[c["site"]]).index(v),c["angle"],1/len(self.site_to_variables[c["site"]]),float(singles[v]))
             for v,c in enumerate(self.candidates))
-        rng=np.random.default_rng(918); max_error=0.
+        # Vacuum/NoCutoff Amber14 is exactly pair-decomposable over side-chain
+        # choices, so the QUBO must reproduce the full energy (1e-4 kcal/mol).
+        # Implicit-solvent GBN2 is not: Born radii depend on every atom, so the
+        # same inclusion-exclusion expansion is a pairwise approximation. Its
+        # error is measured on the same sampled assignments and recorded, and
+        # every structure is still relaxed/scored with the full GBN2 energy.
+        exact=self.pair_decomposition_exact
+        rng=np.random.default_rng(918); max_error=0.; squared_errors=[]
         for _ in range(12):
             selected=[int(rng.choice(g)) for g in self.site_to_variables.values()]
             x=np.zeros(count); x[selected]=1
             actual=self.energy(self.positions_for_variables(selected))
             predicted=baseline+singles@x+x@pairs@x
+            if not (math.isfinite(actual) and math.isfinite(predicted)):
+                raise FloatingPointError("Non-finite all-atom energy during decomposition check")
             max_error=max(max_error,abs(actual-predicted))
-            if not np.isclose(actual,predicted,atol=1e-4,rtol=1e-9):
+            squared_errors.append((actual-predicted)**2)
+            if exact and not np.isclose(actual,predicted,atol=1e-4,rtol=1e-9):
                 raise ValueError("Force field is not pair-decomposable at required precision")
+        rms_error=float(math.sqrt(sum(squared_errors)/len(squared_errors)))
         offset=baseline+penalty*len(self.site_to_variables)
         h,j,ising_offset=qubo_to_ising(q,offset)
         roundoff_bound=max(1e-9,32*np.finfo(float).eps*(abs(offset)+np.abs(q).sum()+1))
@@ -2278,10 +2291,14 @@ class AllAtomInterfaceQUBOBuilder:
         return QUBOResult(q,records,self.site_to_variables,penalty,penalty,offset,singles,pairs,
             dict(model="Amber14 all-atom fixed-backbone chi1 grid",energy_unit="kcal/mol",
                 physical_constant_offset=baseline,all_atom_equivalence_max_error=max_error,
+                all_atom_equivalence_rms_error=rms_error,all_atom_equivalence_samples=12,
+                pair_decomposition=("exact" if exact else "pairwise_approximation"),
                 candidate_relax_iterations=self.candidate_relax_iterations,
                 decomposition_anchor_variables=anchors,ising_equivalence_max_error=ising_error,
                 ising_roundoff_tolerance=roundoff_bound,
-                atom_count=len(self.base_positions),forcefield=["amber14-all.xml","amber14/tip3p.xml"],
+                atom_count=len(self.base_positions),
+                forcefield=(["amber14-all.xml"] if self.solvent_model=="vacuum"
+                            else ["amber14-all.xml","implicit/gbn2.xml"]),
                 solvent=("vacuum; NoCutoff" if self.solvent_model=="vacuum" else "implicit GBN2; NoCutoff"),
                 solvent_model=self.solvent_model,
                 raw_rotamer_pool_sizes=self.raw_rotamer_pool_sizes,

@@ -97,3 +97,20 @@ def test_external_graph_rejects_pickle_global(tmp_path) -> None:
     with pytest.raises(Exception):
         load_graph(path)
     assert not marker.exists()
+
+
+def test_training_cdr_with_unmodeled_residues_does_not_abort_audit(tmp_path) -> None:
+    # Annotated CDR-H3 "AXW" is not a substring of the modeled VHH chain "AC":
+    # acceptable for a hash-bound training graph, rejected for an external one.
+    path=tmp_path/"graph.pt"
+    features=torch.zeros((2,21))
+    features[0,0]=1;features[1,1]=1;features[1,20]=1
+    graph=Data(x=features,node_chain_id=torch.tensor([0,1]))
+    graph.pdb_id="1ABC"
+    graph.chain_sequences=["A","C"];graph.chain_groups=[0,1]
+    graph.vhh_sequences=["A"];graph.antigen_sequences=["C"]
+    graph.cdr3_seq="AXW";graph.cdr3_len=3
+    torch.save(graph,path)
+    assert graph_sequences(path)["cdr_h3"]=="AXW"
+    with pytest.raises(ValueError,match="CDR-H3 sequence"):
+        graph_sequences(path,tmp_path)

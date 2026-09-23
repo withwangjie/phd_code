@@ -104,8 +104,11 @@ class _StageHarness:
     def _validate_completed_stage_artifacts(self,stage,*,require_results_manifest=True):
         return True,"ok"
 
-    def _write_stage_results_manifest(self,stage,result,validation_detail):
+    def _write_stage_results_manifest(self,stage,result,validation_detail,upstream=None):
         self.saved.append(("results_manifest",stage,result.status))
+
+    def _upstream_fingerprints(self,prerequisites):
+        return {name:None for name in prerequisites}
 
 
 def test_only_smoke_skip_is_optional_prerequisite() -> None:

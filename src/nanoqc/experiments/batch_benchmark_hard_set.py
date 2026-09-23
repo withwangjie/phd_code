@@ -2185,8 +2185,17 @@ def _allatom_experiment_main(argv: Optional[Sequence[str]] = None) -> int:
                     bitstring_entropy_upper_bound=float(np.log(args.outputs)),
                     low_energy_fraction=sum(c for b,c in counts.items() if energies[b]<=truth.energy+2.)/args.outputs)
                 expected=energies[selected]+qubo.metadata["physical_constant_offset"]
-                if not np.isclose(expected,relaxation["discrete_energy_kcal"],atol=1e-4,rtol=1e-9):
-                    raise AssertionError("Selected structure and QUBO energy disagree")
+                qubo_energy_discrepancy=float(relaxation["discrete_energy_kcal"]-expected)
+                if qubo.metadata.get("pair_decomposition","exact")=="exact":
+                    if not np.isclose(expected,relaxation["discrete_energy_kcal"],atol=1e-4,rtol=1e-9):
+                        raise AssertionError("Selected structure and QUBO energy disagree")
+                elif not math.isfinite(qubo_energy_discrepancy):
+                    raise FloatingPointError("Non-finite full-energy/QUBO discrepancy")
+                # Pairwise-approximate models (GBN2): the full-energy minus QUBO
+                # energy of the selected structure is recorded, never hidden.
+                relaxation=dict(relaxation,qubo_energy_kcal=float(expected),
+                    qubo_energy_discrepancy_kcal=qubo_energy_discrepancy,
+                    pair_decomposition=qubo.metadata.get("pair_decomposition","exact"))
                 before=evaluate(prediction.with_name(prediction.stem+"_discrete.cif")) if reference else None
                 after=evaluate(prediction) if reference else None
                 result=dict(**budget_metrics,method=method,protocol=case["protocol"],selected_bits=list(selected),
