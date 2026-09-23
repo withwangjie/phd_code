@@ -271,6 +271,10 @@ quantum_protocol:
     restarts: [1, 4]
 
   development_sensitivity:
+    depths: [1, 2, 3]
+    max_evals: [90, 180, 300]
+    eval_shots: [200, 500, 1000]
+    cvar_alpha: [0.05, 0.10, 0.25, 0.50, 1.0]
 
 # ---------------------------------------------------------------------------
 # Stage 4: quantum-vs-classical coarse-grained benchmark
@@ -366,10 +370,6 @@ qc_benchmark:
     active_sites: 6  # development-only hyperparameter sensitivity at the primary size
     outputs: 300
     repeats: 3
-    depths: [1, 2, 3]
-    max_evals: [90, 180, 300]
-    eval_shots: [200, 500, 1000]
-    cvar_alpha: [0.05, 0.10, 0.25, 0.50, 1.0]
     rotamer_resolution:
       active_sites: [4, 5]
       states_per_site: [3, 4, 5, 6]
