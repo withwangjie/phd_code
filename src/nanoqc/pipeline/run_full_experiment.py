@@ -3246,16 +3246,11 @@ class Orchestrator:
                                     self.config.get("statistics",{}).get("primary_pruning","egnn")),
                                 "--primary-radius",str(
                                     self.config.get("statistics",{}).get("primary_radius",6.0)),
-                                "--primary-depth",str(
-                                    self.config.get("statistics",{}).get("primary_depth",2)),
-                                "--primary-max-evals",str(
-                                    self.config.get("statistics",{}).get("primary_max_evals",90)),
-                                "--primary-outputs",str(
-                                    self.config.get("statistics",{}).get("primary_outputs",1000)),
-                                "--primary-objective",str(
-                                    self.config.get("statistics",{}).get("primary_objective","cvar")),
-                                "--primary-restarts",str(
-                                    self.config.get("statistics",{}).get("primary_restarts",4)),
+                                "--primary-depth",str(qprimary.get("depth",2)),
+                                "--primary-max-evals",str(qprimary.get("max_evals",90)),
+                                "--primary-outputs",str(qprimary.get("output_shots",1000)),
+                                "--primary-objective",str(qprimary.get("objective","cvar")),
+                                "--primary-restarts",str(qprimary.get("restarts",4)),
                                 "--primary-active-sites",str(
                                     self.config.get("statistics",{}).get("primary_active_sites",6)),
                             ]
