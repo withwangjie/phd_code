@@ -1271,7 +1271,18 @@ def _ablation_run_case(data: Any, scorer: Any, config: dict, args: Any, artifact
         },
     }
     _ablation_atomic_json(artifact, dict(config=config, metrics=records, counts=raw,
-        quantum_instance=quantum_instance.manifest(),
+        quantum_instance={
+            **quantum_instance.manifest(),
+            "Q":quantum_instance.Q.tolist(),
+            "physical_self":quantum_instance.physical_self.tolist(),
+            "physical_pair":quantum_instance.physical_pair.tolist(),
+            "site_to_variables":{
+                str(site):list(variables)
+                for site,variables in quantum_instance.site_to_variables.items()
+            },
+            "ising_h":quantum_instance.ising_h.tolist(),
+            "ising_J":quantum_instance.ising_J.tolist(),
+        },
         quantum_benchmark=quantum_benchmark_contract,
         optimization=last_optimization, optimizations=optimizations,
         active_residue_ids=[data.residue_ids[i] for i in active.tolist()],
