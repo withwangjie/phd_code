@@ -79,6 +79,7 @@ def extract_source(source_id: str, data_root: Path, destination: Path) -> Path:
 def replay(args: argparse.Namespace, output: Path) -> tuple[Path, list[str], list[str], str, dict[str, Any]]:
     """Recover actual QUBO Active residues and CDR sequence from the trained pipeline."""
     import torch
+    from nanoqc.data.safe_graph_load import load_graph
     from nanoqc.model.model_egnn_pruning import load_interface_scorer
     from nanoqc.model.model_egnn_pruning import extract_top_interface_subgraph
     from nanoqc.qubo.subgraph_to_qubo import InterfaceQUBOBuilder
@@ -104,7 +105,7 @@ def replay(args: argparse.Namespace, output: Path) -> tuple[Path, list[str], lis
     for filename in ('model_egnn_pruning.py', 'subgraph_to_qubo.py', 'batch_benchmark_hard_set.py'):
         if manifest.get(filename) != sha256(repo_path(filename)):
             raise ValueError(f'{filename} differs from the benchmark; use matching project code.')
-    graph = torch.load(graph_path, map_location='cpu', weights_only=False)
+    graph = load_graph(graph_path)
     scorer, info = load_interface_scorer(checkpoint, torch_device=torch.device('cpu'), seed=42)
     if info.status != 'checkpoint_loaded':
         raise ValueError(f'Cannot render benchmark Active set with untrained weights: {info}')

@@ -24,7 +24,17 @@ def validate_prediction_contract(case: Mapping[str, Any], manifest_directory: Pa
         raise ValueError('Prediction cannot use the reference for inputs or active selection')
     if case['degrees_of_freedom'] != 'fixed_backbone_sidechains':
         raise ValueError('Current all-atom engine supports fixed_backbone_sidechains only')
-    path = (manifest_directory / case['independence_audit']).resolve()
+    root = Path(manifest_directory).resolve()
+
+    def confined(relative: Any, label: str) -> Path:
+        if not isinstance(relative, str) or not relative or Path(relative).is_absolute():
+            raise ValueError(f'{label} must be a relative path inside the manifest directory')
+        candidate = (root / relative).resolve()
+        if not candidate.is_relative_to(root):
+            raise ValueError(f'{label} escapes the manifest directory')
+        return candidate
+
+    path = confined(case['independence_audit'], 'independence_audit')
     if hashlib.sha256(path.read_bytes()).hexdigest() != case['independence_audit_sha256']:
         raise ValueError('Independence audit hash mismatch')
     audit = json.loads(path.read_text(encoding='utf-8'))
@@ -37,5 +47,6 @@ def validate_prediction_contract(case: Mapping[str, Any], manifest_directory: Pa
     if not audit.get('method') or not audit.get('evidence_files'):
         raise ValueError('Split audit must include method and hashed evidence files')
     for relative, digest in audit['evidence_files'].items():
-        if hashlib.sha256((path.parent / relative).read_bytes()).hexdigest() != digest:
+        evidence = confined(relative, f'evidence file {relative!r}')
+        if hashlib.sha256(evidence.read_bytes()).hexdigest() != digest:
             raise ValueError(f'Split evidence changed: {relative}')

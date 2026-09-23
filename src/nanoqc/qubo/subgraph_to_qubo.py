@@ -43,6 +43,7 @@ import numpy as np
 import torch
 from torch_geometric.data import Data
 from nanoqc.structure.residue_tables import SIDECHAIN_HEAVY_ATOMS, SYMMETRIC_SWAPS
+from nanoqc.data.safe_graph_load import load_graph
 
 
 # Real-atom validation is separate from the coarse-grained QUBO force field.
@@ -2484,7 +2485,7 @@ if __name__ == "__main__":
     else:
         # torch.load uses pickle for PyG Data. Only load files generated locally
         # or obtained from a trusted source.
-        example = torch.load(arguments.graph, map_location="cpu", weights_only=False)
+        example = load_graph(arguments.graph)
 
     builder = InterfaceQUBOBuilder()
     result = builder.build(example)

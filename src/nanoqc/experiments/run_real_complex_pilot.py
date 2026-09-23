@@ -22,6 +22,7 @@ from nanoqc.reporting.generate_figure1_pymol_script import extract_source
 from nanoqc.qubo.subgraph_to_qubo import read_atomistic_structure, _SIDECHAIN_NAMES, AllAtomInterfaceQUBOBuilder
 from nanoqc.common.seed_streams import derive_streams, derive_child_seed, save_stream_map, DEFAULT_MASTER_SEED
 from nanoqc.data.sequence_identity import nw_identity, length_coverage
+from nanoqc.data.safe_graph_load import load_graph
 
 
 def identity_detail(a: str, b: str, threshold: float = .4) -> dict:
@@ -467,7 +468,7 @@ def main(argv=None) -> int:
                 path=args.dataset/Path(row["path"].replace("\\","/"))
                 if _ablation_digest(path)!=row["sha256"]:
                     raise ValueError(f"Training graph hash mismatch {path}")
-                data=torch.load(path,map_location="cpu",weights_only=False)
+                data=load_graph(path)
                 for seq in getattr(data,"vhh_sequences",[]):
                     sequence_inventory["vhh"].setdefault(seq,[]).append(row["pdb_id"])
                 for seq in getattr(data,"antigen_sequences",[]):
@@ -518,7 +519,7 @@ def main(argv=None) -> int:
                         raise ValueError(f"Family/structure cluster overlap: {family_cluster}")
                 path=args.dataset/Path(row["path"].replace("\\","/"))
                 if _ablation_digest(path)!=row["sha256"]: raise ValueError("Test graph hash mismatch")
-                graph=torch.load(path,map_location="cpu",weights_only=False)
+                graph=load_graph(path)
                 raw=extract_source(graph.source_id,args.data_root,work/"raw.pdb")
                 frozen_pool=(
                     set(frozen_target_metadata.get(pdb,{}).get("eligibility_compatible_residues",[]))

@@ -31,6 +31,7 @@ from nanoqc.qubo.subgraph_to_qubo import (
     InterfaceQUBOBuilder,
 )
 from nanoqc.common.repo_io import sha256_file as sha256
+from nanoqc.data.safe_graph_load import load_graph
 
 
 def assignment_components(qubo, selected: list[int]) -> tuple[float,float,float,float]:
@@ -249,7 +250,7 @@ def main() -> int:
                 family_cluster=(cluster_map[pdb] if cluster_map is not None else pdb)
                 if sha256(graph_path)!=row["sha256"]:
                     raise ValueError("Training graph SHA256 mismatch")
-                data=torch.load(graph_path,map_location="cpu",weights_only=False)
+                data=load_graph(graph_path)
                 if args.selection_mode=="egnn":
                     from nanoqc.model.model_egnn_pruning import assert_checkpoint_graph_compatible
                     assert_checkpoint_graph_compatible(
