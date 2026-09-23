@@ -72,6 +72,34 @@ def test_all_restarts_failed_is_excluded_from_paired_inference(tmp_path: Path) -
     assert payload["effects"]==[]
 
 
+def test_paired_denominator_gate_covers_all_exclusion_reasons() -> None:
+    from nanoqc.inference.paired_statistics import paired_denominator_failures
+
+    output_reasons = {
+        "sa:unequal_outputs": 1,
+        "uniform:gap:nonfinite": 1,
+        "greedy:entropy:nonfinite": 1,
+        "sa_time:overrun": 1,
+    }
+    assert paired_denominator_failures(output_reasons,"outputs") == {
+        "sa:unequal_outputs": 1,
+        "uniform:gap:nonfinite": 1,
+        "greedy:entropy:nonfinite": 1,
+    }
+    time_reasons = {
+        "sa_time:overrun": 2,
+        "uniform_time:invalid_budget": 1,
+        "greedy_time:hit:nonfinite": 1,
+        # Time analysis intentionally does not test same-output diversity metrics.
+        "sa_time:entropy:nonfinite": 1,
+    }
+    assert paired_denominator_failures(time_reasons,"time") == {
+        "sa_time:overrun": 2,
+        "uniform_time:invalid_budget": 1,
+        "greedy_time:hit:nonfinite": 1,
+    }
+
+
 def test_dev_subruns_are_single_target_and_emit_root_summary() -> None:
     source=inspect.getsource(Orchestrator.stage_structure_experiment)
     assert '"--targets", "1"' in source
@@ -222,6 +250,28 @@ def test_statistics_resume_checks_statistics_subdirectory(tmp_path: Path) -> Non
         Dummy(),"statistics",require_results_manifest=False)
     assert ok is False
     assert "denominator is incomplete" in detail
+
+    for mode,reason in (
+        ("outputs","sa:unequal_outputs"),
+        ("outputs","sa:gap:nonfinite"),
+        ("time","sa_time:overrun"),
+        ("time","sa_time:invalid_budget"),
+        ("time","sa_time:hit:nonfinite"),
+    ):
+        for valid_mode,valid_baseline in (("outputs","sa"),("time","sa_time")):
+            (qc/f"statistics_{valid_mode}.json").write_text(json.dumps({
+                "effects":[{"baseline":valid_baseline,"metric":"gap","n_clusters":10}],
+                "exclusions":{},
+            }),encoding="utf-8")
+        (qc/f"statistics_{mode}.json").write_text(json.dumps({
+            "effects":[{"baseline":"sa" if mode=="outputs" else "sa_time",
+                        "metric":"gap","n_clusters":10}],
+            "exclusions":{reason:1},
+        }),encoding="utf-8")
+        ok,detail=Orchestrator._validate_completed_stage_artifacts(
+            Dummy(),"statistics",require_results_manifest=False)
+        assert ok is False, (mode,reason,detail)
+        assert reason in detail
 
 
 

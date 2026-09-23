@@ -985,7 +985,11 @@ from collections import Counter
 from nanoqc.model.model_egnn_pruning import select_ablation_active, build_ablation_subgraph
 import hashlib
 from nanoqc.common.repo_io import sha256_file as _ablation_digest, atomic_write_json_fsync as _ablation_atomic_json, repo_path
-from nanoqc.inference.paired_statistics import paired_effect as _paired_effect, holm_adjust as _holm_adjust
+from nanoqc.inference.paired_statistics import (
+    paired_effect as _paired_effect,
+    holm_adjust as _holm_adjust,
+    paired_denominator_failures,
+)
 
 def _ablation_classical_counts(sampler: Any, reads: int, seed: int,
                      greedy: bool, max_passes: int) -> tuple[dict, int]:
@@ -1885,6 +1889,7 @@ def _paired_statistics_main(argv: Optional[Sequence[str]] = None) -> int:
         primary_restarts=args.primary_restarts, primary_active_sites=args.primary_active_sites,
         cluster_unit="provided family clusters" if cluster_map is not None else "PDB (homology dependence unresolved)",
         effects=effects,cluster_differences=cluster_values,paired_cases=dict(pair_count),exclusions=dict(skipped),
+        denominator_failures=paired_denominator_failures(dict(skipped),args.budget_mode),
         source_sha256={p.name:_ablation_digest(p) for p in paths},
         cluster_map_sha256=_ablation_digest(args.cluster_map) if args.cluster_map else None,
         max_time_overrun_fraction=args.max_time_overrun_fraction,

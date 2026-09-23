@@ -83,6 +83,7 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from nanoqc.common.seed_streams import derive_streams, derive_child_seed, save_stream_map, verify_stream_map, DEFAULT_MASTER_SEED  # noqa: E402
 from nanoqc.common.repo_io import sha256_file as sha256_of, repo_path, module_name, DOCS_DIR, CONFIGS_DIR  # noqa: E402
+from nanoqc.inference.paired_statistics import paired_denominator_failures  # noqa: E402
 
 
 # Detail prefix of the failure recorded when a stage is refused because a
@@ -1255,11 +1256,10 @@ class Orchestrator:
                 paired,error=read_json(root/f"statistics_{mode}.json")
                 if error:return False,error
                 exclusions=paired.get("exclusions") or {}
-                if (int(exclusions.get("qaoa:all_restarts_failed",0) or 0)>0
-                        or int(exclusions.get("missing_or_ambiguous_primary_contrast",0) or 0)>0
-                        or any(int(value or 0)>0 for key,value in exclusions.items()
-                               if str(key).endswith(":missing_pair"))):
-                    return False,f"{mode} primary paired-statistics denominator is incomplete"
+                denominator_failures=paired_denominator_failures(exclusions,mode)
+                if denominator_failures:
+                    return False,(f"{mode} primary paired-statistics denominator is incomplete: "
+                                  f"{denominator_failures}")
                 effect=next((entry for entry in paired.get("effects",[])
                              if entry.get("baseline")==primary_qc_effect_name(
                                  cfg.get("primary_qc_baseline","sa"),mode)
@@ -3058,21 +3058,12 @@ class Orchestrator:
                             else:
                                 stats_payload=json.loads(stats_json.read_text(encoding="utf-8"))
                                 ext_exclusions=stats_payload.get("exclusions",{}) or {}
-                                if int(ext_exclusions.get("qaoa:all_restarts_failed",0) or 0):
+                                ext_denominator_failures=paired_denominator_failures(
+                                    ext_exclusions,"outputs")
+                                if ext_denominator_failures:
                                     failures.append(
-                                        "External VHH primary QAOA contains all-restarts-failed cases; "
-                                        "refusing denominator shrinkage")
-                                if int(ext_exclusions.get("missing_or_ambiguous_primary_contrast",0) or 0):
-                                    failures.append(
-                                        "External VHH statistics lack an unambiguous primary QAOA contrast")
-                                external_missing_pairs=sum(
-                                    int(v or 0) for k,v in ext_exclusions.items()
-                                    if str(k).endswith(":missing_pair")
-                                )
-                                if external_missing_pairs:
-                                    failures.append(
-                                        f"External VHH statistics have {external_missing_pairs} missing "
-                                        "primary matched solver pairs; refusing denominator shrinkage")
+                                        "External VHH paired-statistics denominator is incomplete: "
+                                        f"{ext_denominator_failures}")
                                 sa_gap=next(
                                     (e for e in stats_payload.get("effects",[])
                                      if e.get("baseline")=="sa" and e.get("metric")=="gap"),
@@ -3225,24 +3216,11 @@ class Orchestrator:
                 else:
                     stats_payload=json.loads(expected[0].read_text(encoding="utf-8"))
                     exclusions=stats_payload.get("exclusions",{}) or {}
-                    primary_failures=int(exclusions.get("qaoa:all_restarts_failed",0) or 0)
-                    ambiguous=int(exclusions.get("missing_or_ambiguous_primary_contrast",0) or 0)
-                    missing_pairs=sum(
-                        int(v or 0) for k,v in exclusions.items()
-                        if str(k).endswith(":missing_pair")
-                    )
-                    if primary_failures:
+                    denominator_failures=paired_denominator_failures(exclusions,budget_mode)
+                    if denominator_failures:
                         failures.append(
-                            f"{results_dir.name}/{budget_mode}: {primary_failures} primary QAOA cases "
-                            "had all restarts fail; confirmatory denominator must not shrink")
-                    if ambiguous:
-                        failures.append(
-                            f"{results_dir.name}/{budget_mode}: {ambiguous} cases lack an unambiguous "
-                            "frozen primary QAOA contrast")
-                    if missing_pairs:
-                        failures.append(
-                            f"{results_dir.name}/{budget_mode}: {missing_pairs} primary matched solver "
-                            "pairs are missing")
+                            f"{results_dir.name}/{budget_mode}: paired-statistics denominator "
+                            f"is incomplete: {denominator_failures}")
                     primary_effect=next(
                         (e for e in stats_payload.get("effects",[])
                          if e.get("baseline")==primary_qc_effect_name(

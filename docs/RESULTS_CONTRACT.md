@@ -195,10 +195,14 @@ fraction, and zero failed targets in the formal validation queue.
 The primary coarse solver inference is restricted to the frozen primary pruning path,
 radius, QAOA depth, optimization-evaluation budget, active-site size, output budget,
 QAOA objective/restarts, and requires the configured minimum independent clusters.
-The exploratory paired-statistics command counts and excludes
-`all_restarts_failed` cases; the formal orchestrator rejects any such primary
-case so its confirmatory denominator cannot shrink. Scaling inference also
-rejects an incomplete primary denominator.
+The paired-statistics output records all exclusion counts and a separate
+`denominator_failures` summary. Formal stage completion and resume validation
+reject any excluded case in the paired QAOA-vs-classical contrasts: failed
+QAOA restarts, missing/ambiguous contrasts or pairs, unequal output counts,
+invalid time budgets, excessive time overruns, or nonfinite analyzed metrics.
+Time-mode diversity metrics are intentionally not analyzed, so their
+nonfinite values are not denominator failures. Scaling inference also rejects
+an incomplete primary denominator.
 Scaling inference uses the pre-declared active-site levels under the same frozen primary
 radius/depth/evaluation budget and a cluster-aware within-PDB slope analysis with
 log10(feasible configuration count) as the primary complexity axis.

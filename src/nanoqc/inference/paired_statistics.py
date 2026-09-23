@@ -21,6 +21,48 @@ import numpy as np
 
 SIGN_FLIP_EXACT_MAX_CLUSTERS = 16
 
+PAIRED_OUTPUT_METRICS = (
+    "gap", "hit", "ground_probability", "low_energy_mass",
+    "low_energy_coverage", "entropy",
+)
+
+
+def paired_denominator_failures(exclusions: dict, budget_mode: str) -> dict[str, int]:
+    """Return paired-case exclusions that invalidate formal inference.
+
+    All reported QAOA-vs-classical contrasts are part of the paired-statistics
+    family. In time mode only gap/hit are analyzed; same-output diversity
+    metrics are intentionally omitted and therefore are not denominator losses.
+    """
+    if budget_mode not in ("outputs", "time"):
+        raise ValueError("budget_mode must be 'outputs' or 'time'")
+    exclusions = exclusions if isinstance(exclusions, dict) else {}
+    invalid: dict[str, int] = {}
+
+    def add(key: str) -> None:
+        try:
+            count = int(exclusions.get(key, 0) or 0)
+        except (TypeError, ValueError):
+            count = 1
+        if count > 0:
+            invalid[key] = count
+
+    add("qaoa:all_restarts_failed")
+    add("missing_or_ambiguous_primary_contrast")
+    for baseline in ("sa", "uniform", "greedy"):
+        name = baseline + ("_time" if budget_mode == "time" else "")
+        add(name + ":missing_pair")
+        if budget_mode == "outputs":
+            add(name + ":unequal_outputs")
+            metrics = PAIRED_OUTPUT_METRICS
+        else:
+            add(name + ":invalid_budget")
+            add(name + ":overrun")
+            metrics = ("gap", "hit")
+        for metric in metrics:
+            add(name + ":" + metric + ":nonfinite")
+    return invalid
+
 
 def _sign_flip_pvalue(d: np.ndarray, rng: np.random.Generator, resamples: int) -> float:
     """Shared two-sided sign-flip kernel for independent cluster differences."""
