@@ -194,7 +194,7 @@ log "Formal preflight gate passed."
 # ---------------------------------------------------------------------------
 LAUNCH_LOG="$RUN_DIR/logs/launch_${SESSION_STAMP}.log"
 
-echo $ > "$LOCK_FILE"
+printf '%s\n' "$BASHPID" > "$LOCK_FILE"
 if [ "$FRESH_RUN" -eq 1 ]; then
     nohup python -u -m nanoqc.pipeline.run_full_experiment --config "$RESOLVED_CONFIG" \
         --run-dir "$RUN_DIR" "$@" > "$LAUNCH_LOG" 2>&1 &
