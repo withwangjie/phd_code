@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Sequence,Optional
 import numpy as np
 from nanoqc.common.repo_io import sha256_file as sha256
+from nanoqc.common.seed_streams import DEFAULT_MASTER_SEED
 from nanoqc.inference.paired_statistics import bootstrap_sign_flip
 
 def _slope(xs:list[float],ys:list[float]) -> Optional[float]:
@@ -78,7 +79,7 @@ def main(argv:Optional[Sequence[str]]=None)->int:
     p.add_argument("--baseline",choices=("sa","uniform","greedy"),default="sa")
     p.add_argument("--active-sites",type=int,nargs="+",required=True)
     p.add_argument("--resamples",type=int,default=10000)
-    p.add_argument("--seed",type=int,default=20260917)
+    p.add_argument("--seed",type=int,default=DEFAULT_MASTER_SEED)
     args=p.parse_args(argv)
     if args.resamples<1000:
         p.error("--resamples must be >=1000")

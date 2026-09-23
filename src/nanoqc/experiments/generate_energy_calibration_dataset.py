@@ -32,6 +32,7 @@ from nanoqc.qubo.subgraph_to_qubo import (
     InterfaceQUBOBuilder,
 )
 from nanoqc.common.repo_io import sha256_file as sha256
+from nanoqc.common.seed_streams import DEFAULT_MASTER_SEED
 from nanoqc.data.safe_graph_load import load_graph
 
 
@@ -156,7 +157,7 @@ def main() -> int:
     parser.add_argument("--assignments-per-complex",type=int,default=64)
     parser.add_argument("--active-sites",type=int,default=6)
     parser.add_argument("--radius",type=float,default=6.0)
-    parser.add_argument("--seed",type=int,default=20260917)
+    parser.add_argument("--seed",type=int,default=DEFAULT_MASTER_SEED)
     parser.add_argument("--antigen-proximity-scale",type=float,default=6.0)
     parser.add_argument("--contact-ca-cutoff",type=float,default=8.0)
     parser.add_argument("--nonbonded-cutoff",type=float,default=8.0)
@@ -253,6 +254,10 @@ def main() -> int:
         writer=csv.DictWriter(handle,fieldnames=fieldnames)
         writer.writeheader()
         for row in train:
+            # Buffer one complex at a time. A failed complex must contribute
+            # zero rows; otherwise low-energy assignments written before the
+            # exception would bias the calibration fit.
+            complex_rows=[]
             pdb=str(row.get("pdb_id","")).lower()
             graph_path=_manifest_graph_path(args.dataset, row.get("path"))
             try:
@@ -275,11 +280,12 @@ def main() -> int:
                 )
                 sub=build_ablation_subgraph(data,active,args.radius)
                 coarse=InterfaceQUBOBuilder(
-                    min_variables=3*args.active_sites,max_variables=30,max_sites=args.active_sites,
+                    min_variables=3*args.active_sites,max_variables=3*args.active_sites,max_sites=args.active_sites,
                     force_field=force_field,rotamer_mode="dunbrack2010",
                     rotamer_library_path=args.rotamer_library,
                     rotamer_probability_floor=args.rotamer_probability_floor,
                     rotamer_sigma_offsets=args.rotamer_sigma_offsets,
+                    fixed_chi1_wells=True,fixed_states_per_site=3,
                     energy_calibration=EnergyCalibration(),
                 ).build(sub)
                 active_residues=[]
@@ -332,7 +338,7 @@ def main() -> int:
                         components=np.asarray(assignment_components(coarse,selected),dtype=float)-anchor_components
                         angles=chi_assignment(coarse,selected)
                         amber=atomistic.energy_for_chi_assignment(angles)-anchor_amber
-                        writer.writerow(dict(
+                        complex_rows.append(dict(
                             pdb_id=pdb,family_cluster=family_cluster,split="train",assignment_index=index,
                             prior_energy=components[0],
                             vhh_environment_energy=components[1],
@@ -344,6 +350,8 @@ def main() -> int:
                             chi_assignment=json.dumps(angles,separators=(",",":"),sort_keys=True),
                             graph_sha256=row["sha256"],source_id=data.source_id,
                         ))
+                    for output_row in complex_rows:
+                        writer.writerow(output_row)
                         written+=1
                     del atomistic
             except Exception as exc:
@@ -371,6 +379,7 @@ def main() -> int:
             "exact feasible-space ranking; lowest-energy half plus unique uniform legal samples; "
             "anchor is exact coarse physical ground state"
         ),
+        rotamer_state_policy="fixed_three_chi1_wells; exactly three retained states per site, one per chi1 well, matching the formal scaling benchmark",
         active_sites=args.active_sites,radius=args.radius,
         solvent_model=args.solvent_model,
         assignments_per_complex=args.assignments_per_complex,

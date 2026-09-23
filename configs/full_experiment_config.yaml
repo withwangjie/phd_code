@@ -48,7 +48,7 @@ paths:
 # ---------------------------------------------------------------------------
 stages:
   env_check: true
-  smoke_check: false
+  smoke_check: true
   data_audit: true
   queue_freeze: true          # dataset split (no-cap) + validation-queue selection
   graph_build: true           # produced as part of queue_freeze (build_final_pyg_dataset.py)
@@ -325,8 +325,8 @@ qc_benchmark:
     dielectric_slope: 2.0
     thermal_energy_kcal: 0.593
   # Side-chain search: full Dunbrack chi1..chiN states; coarse pseudo-atoms
-  # remain chi1-oriented, while complete chi states are retained for Amber
-  # calibration/reconstruction -> 3-6 states/site -> <=30 variables
+  # remain chi1-oriented. Formal scaling and calibration retain exactly three
+  # states/site, one per chi1 well; resolution sensitivity separately tests 3-6.
   outputs: [10, 30, 100, 300, 1000]  # the output-budget curve
   qaoa_objective: ["mean", "cvar"]  # CVaR variational optimization is literature-supported [R8]
   qaoa_restarts: [1, 4]  # 1 = single-start, 4 = multi-start

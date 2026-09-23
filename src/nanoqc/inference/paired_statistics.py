@@ -17,6 +17,7 @@ import itertools
 from typing import Optional, Sequence, Tuple
 
 import numpy as np
+from nanoqc.common.seed_streams import DEFAULT_MASTER_SEED
 
 
 SIGN_FLIP_EXACT_MAX_CLUSTERS = 16
@@ -137,7 +138,7 @@ def holm_step_down(pvalues: Sequence[float]) -> list[float]:
 # Call-site wrappers (formerly batch_benchmark_hard_set._paired_effect /
 # _holm_adjust, which remain importable there under their old names).
 
-def paired_effect(values: Sequence[float], seed: int = 20260917,
+def paired_effect(values: Sequence[float], seed: int = DEFAULT_MASTER_SEED,
                    resamples: int = 10000) -> dict:
     """Mean paired cluster difference, percentile CI, two-sided sign-flip test.
 

@@ -29,6 +29,47 @@ def cif_to_pdb(source: Path, destination: Path) -> None:
     structure.write_pdb(str(destination))
 
 
+def restrict_sidechain_packing(
+    input_pdb: Path, packed_pdb: Path, destination: Path, active_residues: list[str]
+) -> None:
+    """Keep FASPR changes only on the declared Active side chains.
+
+    FASPR repacks every eligible residue by default. The formal comparison in
+    this project optimizes only Active side chains, so backbone atoms and all
+    non-Active side-chain atoms are restored from the identical perturbed
+    input before scoring.
+    """
+    source = gemmi.read_structure(str(input_pdb))
+    packed = gemmi.read_structure(str(packed_pdb))
+    if len(source) != 1 or len(packed) != 1:
+        raise ValueError("Active-only FASPR restriction requires one-model structures")
+    active = {str(rid) for rid in active_residues}
+    backbone = {"N", "CA", "C", "O"}
+    source_atoms = {}
+    for chain in source[0]:
+        for residue in chain:
+            rid = f"{chain.name}:{residue.seqid}"
+            source_atoms[rid] = {str(atom.name).strip(): atom for atom in residue}
+    for chain in packed[0]:
+        for residue in chain:
+            rid = f"{chain.name}:{residue.seqid}"
+            reference = source_atoms.get(rid)
+            if reference is None:
+                raise ValueError(f"FASPR output residue is absent from input: {rid}")
+            keep_sidechain = rid in active
+            for atom in residue:
+                name = str(atom.name).strip()
+                if name in backbone or not keep_sidechain:
+                    original = reference.get(name)
+                    if original is None:
+                        raise ValueError(f"Input is missing atom {rid}:{name}")
+                    atom.pos = original.pos
+                    atom.occ = original.occ
+                    atom.b_iso = original.b_iso
+                    atom.altloc = original.altloc
+    packed.make_mmcif_document().write_file(str(destination))
+
+
 def run_checked(argv: list[str], *, timeout: int = 1800) -> subprocess.CompletedProcess[str]:
     result=subprocess.run(argv,capture_output=True,text=True,timeout=timeout)
     if result.returncode!=0:
@@ -149,13 +190,18 @@ def main() -> int:
                 )
                 if not prediction_pdb.is_file() or prediction_pdb.stat().st_size==0:
                     raise RuntimeError("FASPR did not produce a nonempty prediction")
+                active_only_prediction=out_case/"faspr_active_only.cif"
+                restrict_sidechain_packing(
+                    input_pdb,prediction_pdb,active_only_prediction,active
+                )
                 row=evaluated_row(
-                    target=target,seed=seed,method="faspr",
-                    reference=native,prediction=prediction_pdb,
+                    target=target,seed=seed,method="faspr_active_only",
+                    reference=native,prediction=active_only_prediction,
                     active=active,alignment=alignment,partners=partners,
                     phenix_executable=args.phenix_clashscore,
                 )
                 row["faspr_executable_sha256"]=sha256(args.faspr)
+                row["packing_scope"]="active_sidechains_only"
                 rows.append(row)
 
                 # Apply the same evaluator and standard clashscore to the
@@ -186,11 +232,12 @@ def main() -> int:
     with (args.out_dir/"external_baseline_metrics.csv").open("w",newline="",encoding="utf-8") as handle:
         writer=csv.DictWriter(handle,fieldnames=fields);writer.writeheader();writer.writerows(rows)
     provenance=dict(
-        scope="frozen validation structural-quality benchmark: FASPR plus common evaluation/clashscore for internal methods; FASPR is not a matched-compute solver baseline",
+        scope="frozen validation structural-quality benchmark: Active-only FASPR packing plus common evaluation/clashscore for internal methods",
         faspr=str(args.faspr),faspr_sha256=sha256(args.faspr),
         phenix_clashscore=(None if args.phenix_clashscore is None else str(args.phenix_clashscore)),
         failures=failures,rows=len(rows),targets=len({r["target"] for r in rows}),
         expected_seeds=[int(v) for v in args.expected_seeds],
+        packing_scope="active_sidechains_only; backbone and non-Active sidechains restored from perturbed input before scoring",
     )
     (args.out_dir/"run_summary.json").write_text(
         json.dumps(provenance,indent=2,sort_keys=True)+"\n",encoding="utf-8")

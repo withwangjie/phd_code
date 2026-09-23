@@ -23,6 +23,7 @@ import numpy as np
 from scipy.stats import spearmanr
 from nanoqc.common.repo_io import sha256_file as sha256
 from nanoqc.inference.paired_statistics import holm_step_down, sign_flip_pvalue
+from nanoqc.common.seed_streams import DEFAULT_MASTER_SEED
 
 
 def percentile_ci(values: list[float], rng: np.random.Generator, resamples: int) -> tuple[float|None,float|None]:
@@ -294,7 +295,7 @@ def main() -> int:
     parser.add_argument("--primary-contrast",default="qaoa_vs_sa",
         choices=("qaoa_vs_sa","qaoa_vs_greedy","qaoa_vs_uniform"))
     parser.add_argument("--resamples",type=int,default=10000)
-    parser.add_argument("--seed",type=int,default=20260917)
+    parser.add_argument("--seed",type=int,default=DEFAULT_MASTER_SEED)
     parser.add_argument("--expected-targets-file",type=Path,
         help="Frozen selected_targets.json; when supplied, structural rows must close exactly against it.")
     parser.add_argument("--expected-seeds",type=int,nargs="+",

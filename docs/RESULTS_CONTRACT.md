@@ -207,6 +207,16 @@ Scaling inference uses the pre-declared active-site levels under the same frozen
 radius/depth/evaluation budget and a cluster-aware within-PDB slope analysis with
 log10(feasible configuration count) as the primary complexity axis.
 
+The matched-output QC effects and the primary scaling slope form one Holm-adjusted
+inferential family; raw and adjusted p values are both retained. Structural primary
+and RQ5 tests retain their separate two-test Holm family.
+
+The external FASPR comparison uses an Active-only packing scope: backbone and
+non-Active side-chain coordinates are restored from the perturbed input before
+scoring. Energy-calibration rows are buffered per training complex and committed
+only after that complex completes; calibration uses the same fixed three-chi1-well
+state policy as the formal scaling benchmark.
+
 The resolved DDP rank count is a result-affecting runtime parameter: rank seeds
 and sampler partitions can change the EGNN checkpoint even at fixed global
 batch size. `runtime_resolution.ddp_ranks` and the resolved-config hash bind

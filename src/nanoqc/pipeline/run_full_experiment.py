@@ -83,7 +83,7 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from nanoqc.common.seed_streams import derive_streams, derive_child_seed, save_stream_map, verify_stream_map, DEFAULT_MASTER_SEED  # noqa: E402
 from nanoqc.common.repo_io import sha256_file as sha256_of, repo_path, module_name, DOCS_DIR, CONFIGS_DIR  # noqa: E402
-from nanoqc.inference.paired_statistics import paired_denominator_failures  # noqa: E402
+from nanoqc.inference.paired_statistics import paired_denominator_failures, holm_step_down  # noqa: E402
 
 
 # Detail prefix of the failure recorded when a stage is refused because a
@@ -1394,6 +1394,17 @@ class Orchestrator:
         smoke_dir = self.run_dir / "smoke_check"
         smoke_dir.mkdir(parents=True, exist_ok=True)
         checks: List[tuple[str, List[str]]] = []
+        smoke_rotamer_library = resolve_path(
+            self.config,
+            (self.config.get("qc_benchmark", {}).get("rotamer_model", {}) or {}).get(
+                "library_path", "data/rotamer/ALL.bbdep.rotamers.lib"
+            ),
+        )
+        if not smoke_rotamer_library.is_file():
+            return StageResult(
+                "smoke_check", "failed", started, utc_timestamp(), None,
+                f"Required Dunbrack library missing: {smoke_rotamer_library}",
+            )
 
         smoke_input_dir = self.dataset_dir() / self.config["qc_benchmark"]["input_dir"]
         if smoke_input_dir.is_dir() and any(smoke_input_dir.glob("*.pt")):
@@ -1412,6 +1423,8 @@ class Orchestrator:
                 "--outputs", "20",
                 "--sa-passes", "5",
                 "--greedy-passes", "5",
+                "--rotamer-mode", "dunbrack2010",
+                "--rotamer-library", str(smoke_rotamer_library),
             ]))
         else:
             print("[smoke_check] qc_benchmark input_dir not yet built; skipping that sub-check "
@@ -1427,6 +1440,8 @@ class Orchestrator:
             "--max-evals", str(smoke_cfg.get("recovery_pilot_max_evals", 12)),
             "--outputs", str(smoke_cfg.get("recovery_pilot_outputs", 20)),
             "--pruning", "contact",  # avoid requiring a trained checkpoint for the smoke check
+            "--rotamer-mode", "dunbrack2010",
+            "--rotamer-library", str(smoke_rotamer_library),
         ]
         if smoke_target:
             smoke_argv += ["--pdb-id", str(smoke_target)]
@@ -3271,6 +3286,35 @@ class Orchestrator:
                     failures.append(
                         f"Scaling inference has {scaling_clusters} independent clusters; "
                         f"requires >= {min_scaling}")
+                # Put the scaling slope in the same matched-output inferential
+                # family as the QC effects. This prevents the scaling result
+                # from being presented as an unadjusted confirmatory test.
+                output_stats_path=self.run_dir / "qc_benchmark" / "statistics_outputs.json"
+                if output_stats_path.is_file():
+                    output_payload=json.loads(output_stats_path.read_text(encoding="utf-8"))
+                    p_entries=[]
+                    for effect in output_payload.get("effects",[]):
+                        value=effect.get("p_value")
+                        if value is not None and math.isfinite(float(value)):
+                            p_entries.append(("qc:"+str(effect.get("baseline"))+":"+str(effect.get("metric")),effect))
+                    scaling_primary=scaling_payload.get("primary",{}) or {}
+                    scaling_p=scaling_primary.get("p_value")
+                    if scaling_p is not None and math.isfinite(float(scaling_p)):
+                        p_entries.append(("scaling:primary",scaling_primary))
+                    if p_entries:
+                        adjusted=holm_step_down([float(item[1].get("p_value")) for item in p_entries])
+                        for (_, target), value in zip(p_entries, adjusted):
+                            target["p_holm_global_qc_scaling"]=value
+                        output_payload["multiplicity_family"]="matched-output QC effects plus primary scaling slope"
+                        output_payload["multiplicity_n_tests"]=len(p_entries)
+                        output_stats_path.write_text(json.dumps(output_payload,indent=2,sort_keys=True)+"\n",encoding="utf-8")
+                        scaling_payload["multiplicity_family"]="matched-output QC effects plus primary scaling slope"
+                        scaling_payload["multiplicity_n_tests"]=len(p_entries)
+                        scaling_payload["primary"]=scaling_primary
+                        scaling_json.write_text(json.dumps(scaling_payload,indent=2,sort_keys=True)+"\n",encoding="utf-8")
+                        scaling_md.write_text(scaling_md.read_text(encoding="utf-8")+
+                            f"\nHolm family: matched-output QC effects plus primary scaling slope (n={len(p_entries)}); "
+                            f"adjusted scaling p={scaling_primary.get('p_holm_global_qc_scaling')}.\n",encoding="utf-8")
         else:
             failures.append(f"Quantum scaling statistics require run-local cluster map: {cluster_path}")
 

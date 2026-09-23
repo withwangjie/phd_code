@@ -504,7 +504,8 @@ def section_search_performance(ctx: ReportContext) -> List[str]:
             f"mean within-PDB/cluster slope={_fmt(primary_scaling.get('mean_slope'))}; "
             f"95% cluster-bootstrap CI=[{_fmt(primary_scaling.get('ci_low'))}, "
             f"{_fmt(primary_scaling.get('ci_high'))}]; "
-            f"sign-flip p={_fmt(primary_scaling.get('p_value'))}."
+            f"raw sign-flip p={_fmt(primary_scaling.get('p_value'))}; "
+            f"Holm-adjusted p={_fmt(primary_scaling.get('p_holm_global_qc_scaling'))}."
         )
         lines.append(
             "Negative slope means the QAOA-minus-classical energy-gap difference becomes more favorable "
@@ -587,8 +588,8 @@ def section_search_performance(ctx: ReportContext) -> List[str]:
             f"restarts={payload.get('primary_restarts')}; "
             f"cluster unit: {payload.get('cluster_unit','n/a')}.")
         lines.append("")
-        lines.append("| Baseline | Metric | Clusters | Mean QAOA-classical difference | 95% CI | p | Holm p |")
-        lines.append("|---|---|---:|---:|---|---:|---:|")
+        lines.append("| Baseline | Metric | Clusters | Mean QAOA-classical difference | 95% CI | p | Holm p (QC family) | Holm p (QC+scaling) |")
+        lines.append("|---|---|---:|---:|---|---:|---:|---:|")
         effects=payload.get("effects") or []
         if effects:
             for effect in effects:
@@ -596,9 +597,10 @@ def section_search_performance(ctx: ReportContext) -> List[str]:
                     f"| {effect.get('baseline')} | {effect.get('metric')} | {effect.get('n_clusters',0)} | "
                     f"{_fmt(effect.get('mean_difference'))} | "
                     f"{_fmt(effect.get('ci_low'))}, {_fmt(effect.get('ci_high'))} | "
-                    f"{_fmt(effect.get('p_value'))} | {_fmt(effect.get('p_holm'))} |")
+                    f"{_fmt(effect.get('p_value'))} | {_fmt(effect.get('p_holm'))} | "
+                    f"{_fmt(effect.get('p_holm_global_qc_scaling'))} |")
         else:
-            lines.append("| — | — | 0 | n/a | n/a | n/a | n/a |")
+            lines.append("| — | — | 0 | n/a | n/a | n/a | n/a | n/a |")
         lines.append("")
         lines.append(f"Paired-case counts: `{json.dumps(payload.get('paired_cases',{}),sort_keys=True)}`.")
         lines.append(f"Exclusions: `{json.dumps(payload.get('exclusions',{}),sort_keys=True)}`.")
@@ -694,12 +696,14 @@ def section_structural_benefit(ctx: ReportContext) -> List[str]:
             f"- Primary endpoint: {primary.get('endpoint')}; contrast: {primary.get('contrast')}; "
             f"clusters={primary.get('n_clusters')}; mean difference={_fmt(primary.get('mean_difference'))}; "
             f"95% cluster-bootstrap CI=[{_fmt(primary.get('ci_low'))}, {_fmt(primary.get('ci_high'))}]; "
-            f"sign-flip p={_fmt(primary.get('p_value'))}."
+            f"raw sign-flip p={_fmt(primary.get('p_value'))}; "
+            f"Holm-adjusted p={_fmt(primary.get('p_holm_confirmatory_family'))}."
         )
         lines.append(
             f"- RQ5 energy-to-structure transfer: Spearman rho={_fmt(rq5.get('spearman_rho'))}; "
             f"95% cluster-bootstrap CI=[{_fmt(rq5.get('ci_low'))}, {_fmt(rq5.get('ci_high'))}]; "
-            f"cluster-aware permutation p={_fmt(rq5.get('p_value'))}."
+            f"raw cluster-aware permutation p={_fmt(rq5.get('p_value'))}; "
+            f"Holm-adjusted p={_fmt(rq5.get('p_holm_confirmatory_family'))}."
         )
         lines.append(
             "- These are the only inferential structural results. Additional method/metric tables below "
@@ -808,7 +812,8 @@ def section_external_and_robustness(ctx: ReportContext) -> List[str]:
             )
         lines.append("")
         lines.append(
-            "- FASPR is a mature biological packing baseline, not a matched-compute solver baseline. "
+            "- FASPR is run through the same Active-only packing scope as the internal methods: its "
+            "backbone and non-Active side chains are restored from the perturbed input before scoring. "
             "Phenix clashscore and the common structural evaluator are applied to FASPR and to the final "
             "QAOA/SA/uniform/greedy structures on the same target/seed inputs; solver inference remains separate."
         )

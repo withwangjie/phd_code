@@ -301,6 +301,22 @@ def test_primary_statistics_filter_active_site_scale() -> None:
     assert "primary_active_sites=args.primary_active_sites" in source
 
 
+def test_smoke_passes_dunbrack_library_to_both_entrypoints() -> None:
+    source=inspect.getsource(Orchestrator.stage_smoke_check)
+    assert '"--rotamer-library", str(smoke_rotamer_library)' in source
+    assert '"--rotamer-mode", "dunbrack2010"' in source
+
+
+def test_calibration_is_fixed_three_well_and_buffers_complex_rows() -> None:
+    source=inspect.getsource(__import__(
+        "nanoqc.experiments.generate_energy_calibration_dataset",
+        fromlist=["main"],
+    ).main)
+    assert "complex_rows=[]" in source
+    assert "fixed_chi1_wells=True,fixed_states_per_site=3" in source
+    assert "for output_row in complex_rows" in source
+
+
 
 def test_methods_evidence_register_covers_formal_design() -> None:
     source=(REPO/"docs"/"METHODS_EVIDENCE.md").read_text(encoding="utf-8")
