@@ -183,6 +183,33 @@ def test_rigid_environment_excludes_antigen_nodes() -> None:
 
 def _minimal_scientific_config() -> Dict[str, Any]:
     return {
+        "quantum_protocol": {
+            "algorithm": "xy_qaoa",
+            "encoding": "one_hot_rotamer_registers",
+            "mixer": "local_xy",
+            "initial_state": "local_w_state",
+            "simulation_scope": "exact_feasible_subspace_classical_simulation",
+            "primary": {
+                "depth": 2,
+                "max_evals": 90,
+                "objective": "cvar",
+                "restarts": 4,
+                "cvar_alpha": 0.10,
+                "eval_shots": 500,
+                "output_shots": 1000,
+                "parameter_scale": "max_coefficient",
+            },
+            "benchmark_ablation": {
+                "objectives": ["mean", "cvar"],
+                "restarts": [1, 4],
+            },
+            "development_sensitivity": {
+                "depths": [1, 2, 3],
+                "max_evals": [90, 180, 300],
+                "eval_shots": [200, 500, 1000],
+                "cvar_alpha": [0.05, 0.10, 0.25, 0.50, 1.0],
+            },
+        },
         "queue_freeze": {
             "homology_isolation": {
                 "vhh_full_chain_identity": 0.80,
