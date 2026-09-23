@@ -1116,7 +1116,8 @@ def _ablation_run_case(data: Any, scorer: Any, config: dict, args: Any, artifact
     # used if a call site ever omits an explicit override.
     sampler = XYMixerQAOASampler.from_instance(
         quantum_instance,p=config["depth"],seed=optimize_seed,
-        shots=args.outputs[0],simulation_mode="subspace",device_name="default.qubit")
+        shots=args.outputs[0],initial_state="wstate",
+        simulation_mode="subspace",device_name="default.qubit")
     built = time.perf_counter()
     truth = sampler.enumerate_ground_states()
     energies = sampler.feasible_energy_map()
@@ -2180,7 +2181,7 @@ def _allatom_experiment_main(argv: Optional[Sequence[str]] = None) -> int:
         quantum_instance=qubo.to_quantum_instance()
         sampler=XYMixerQAOASampler.from_instance(
             quantum_instance,simulation_mode="subspace",p=args.qaoa_depth,
-            seed=optimize_seed,shots=args.outputs)
+            seed=optimize_seed,shots=args.outputs,initial_state="wstate")
         truth=sampler.enumerate_ground_states();energies=sampler.feasible_energy_map()
         records=[]
         def evaluate(path):
