@@ -87,6 +87,12 @@ The formal pipeline separates **configurable experimental parameters** from
 
 Configurable in `configs/full_experiment_config.yaml`:
 
+- Frozen quantum protocol: XY-QAOA encoding/mixer semantics, primary depth,
+  finite-shot objective/budgets, benchmark objective/restart ablations, and
+  development-only QAOA sensitivity are centralized under `quantum_protocol`.
+  Downstream benchmark, structural, external-validation and statistical stages
+  read this single source of truth; duplicated QAOA settings in stage-specific
+  blocks are rejected.
 - Dataset/graph protocol: sequence identity threshold, heavy-atom interface
   label cutoff, intra-chain CA radius, cross-partner KNN degree, and minimum
   interface-residue count.
@@ -95,8 +101,9 @@ Configurable in `configs/full_experiment_config.yaml`:
   radius.
 - Coarse interaction model: non-bonded cutoff, soft-core delta, hard-core
   fraction/penalty, LJ caps, Coulomb cap, dielectric model parameters, and kT.
-- Solver budgets: QAOA depth, objectives, restarts, finite shots, evaluation
-  budgets, SA/greedy passes, output budgets, and low-energy window.
+- Benchmark resources: classical baseline budgets, matched-output curves and
+  low-energy windows remain under `qc_benchmark`; QAOA-specific budgets live
+  only under `quantum_protocol`.
 - Structural experiment budgets: perturbation range, local/final relaxation
   iterations, output shots, and optimization budget.
 
