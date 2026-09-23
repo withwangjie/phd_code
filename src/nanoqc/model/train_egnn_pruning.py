@@ -50,7 +50,7 @@ from nanoqc.common.repo_io import sha256_file as _file_sha256
 from nanoqc.data.sequence_identity import nw_identity, length_coverage, partner_orientations, partner_roles_anchored
 
 
-SEED = 20260917
+SEED = 4050350448
 
 
 @dataclass(frozen=True)
@@ -1075,7 +1075,7 @@ def _parser() -> argparse.ArgumentParser:
         type=int,
         default=SEED,
         help="Overrides the module-level SEED constant (default: the project's master seed, "
-             "20260917) for weight init, loader shuffling and DDP-rank seed offsets; pass an "
+             "4050350448) for weight init, loader shuffling and DDP-rank seed offsets; pass an "
              "independently-derived train-stream seed here rather than reusing the bare master seed.",
     )
     return parser

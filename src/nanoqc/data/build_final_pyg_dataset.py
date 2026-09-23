@@ -34,7 +34,7 @@ from nanoqc.data.sequence_identity import nw_identity, length_coverage, partner_
 BASE = REPO_ROOT  # standalone-run defaults (data/, outputs) are relative to the checkout root
 AA = 'ACDEFGHIKLMNPQRSTVWY'
 AA_INDEX = {a:i for i,a in enumerate(AA)}
-SEED = 20260917
+SEED = 4050350448
 VHH_IDENTITY_THRESHOLD = 0.80
 CDR_H3_IDENTITY_THRESHOLD = 0.50
 ANTIGEN_IDENTITY_THRESHOLD = 0.30

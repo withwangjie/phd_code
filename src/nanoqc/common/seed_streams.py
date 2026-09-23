@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """seed_streams.py -- master-seed -> independent, saved, reproducible random streams.
 
-Single source of truth for turning ONE master seed (20260917 by default, the
-same literal value ``build_final_pyg_dataset.py`` and ``train_egnn_pruning.py``
-already hardcode) into independent, named sub-seeds for every stage of
+Single source of truth for turning ONE master seed (4050350448 by default)
+into independent, named sub-seeds for every stage of
 ``run_full_experiment.py`` that consumes randomness on its own: dataset
 PARTITION (train/test_snac_hard cluster split and shuffle order), EGNN TRAIN
 (weight init, loader shuffling, DDP-rank offsets), structural PERTURB (chi1
@@ -28,8 +27,8 @@ reproducible and auditable without re-deriving anything.
 Usage as a library (from ``run_full_experiment.py``)::
 
     from seed_streams import derive_streams, derive_child_seed, save_stream_map
-    streams = derive_streams(20260917)
-    save_stream_map(run_dir / "seed_streams.json", 20260917, streams)
+    streams = derive_streams(4050350448)
+    save_stream_map(run_dir / "seed_streams.json", 4050350448, streams)
     partition_seed = streams["partition"]
     # A per-target, per-purpose sub-seed (e.g. one perturbation seed per
     # validation-queue target), independent across targets/purposes too:
@@ -37,7 +36,7 @@ Usage as a library (from ``run_full_experiment.py``)::
 
 Usage from the command line (inspect/regenerate a mapping standalone)::
 
-    python -m nanoqc.common.seed_streams --master-seed 20260917 --out seed_streams.json
+    python -m nanoqc.common.seed_streams --master-seed 4050350448 --out seed_streams.json
 """
 from __future__ import annotations
 
@@ -60,10 +59,10 @@ import numpy as np
 # appended at the end instead.
 STREAM_NAMES: List[str] = ["partition", "train", "perturb", "optimize", "measurement", "sample"]
 
-# The literal value already hardcoded (as SEED = 20260917) in
-# build_final_pyg_dataset.py and train_egnn_pruning.py before this module
-# existed. Kept here as the documented default, never silently changed.
-DEFAULT_MASTER_SEED = 20260917
+# Selected independently using Python's OS-backed secrets generator on
+# 2026-09-23, before the next experiment, then frozen in the run config.
+# The previous default (20260917) was inherited from legacy module constants.
+DEFAULT_MASTER_SEED = 4050350448
 
 _UINT32_MAX = 2**32 - 1
 

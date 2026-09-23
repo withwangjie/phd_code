@@ -14,7 +14,7 @@
 # ---------------------------------------------------------------------------
 # Identity / reproducibility
 # ---------------------------------------------------------------------------
-master_seed: 20260917  # Derives independent partition/train/perturb/optimize/sample
+master_seed: 4050350448  # Independently drawn before the run; frozen for reproducibility
                         # streams via seed_streams.py -- never used bare anywhere.
 
 # ---------------------------------------------------------------------------
