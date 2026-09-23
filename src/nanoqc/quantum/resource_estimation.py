@@ -65,8 +65,9 @@ def estimate_qaoa_resources(
         if value is not None and (isinstance(value,bool) or int(value) != value or int(value) <= 0):
             raise ValueError(f"{name} must be a positive integer when supplied")
 
-    linear=int(np.count_nonzero(np.abs(instance.ising_h) > coefficient_tolerance))
-    upper=np.triu(instance.ising_J,1)
+    physical_h,physical_j,_=instance.physical_ising()
+    linear=int(np.count_nonzero(np.abs(physical_h) > coefficient_tolerance))
+    upper=np.triu(physical_j,1)
     pair=int(np.count_nonzero(np.abs(upper) > coefficient_tolerance))
     mixer=int(sum(len(group)*(len(group)-1)//2 for group in instance.site_to_variables.values()))
 
