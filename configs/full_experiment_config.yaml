@@ -243,6 +243,36 @@ egnn_train:
   num_workers: 8  # runtime fallback; auto-resolved
 
 # ---------------------------------------------------------------------------
+# Frozen quantum protocol (single source of truth for every formal QAOA run).
+# QAOA follows Farhi et al. [R7]; feasibility-preserving alternating-operator
+# mixers follow Hadfield et al. [R28]; finite-shot CVaR follows [R8].
+# Exact numerical budgets remain preregistered study choices, not literature
+# optima. Validation/test results must never be used to retune this block.
+# ---------------------------------------------------------------------------
+quantum_protocol:
+  algorithm: "xy_qaoa"
+  encoding: "one_hot_rotamer_registers"
+  mixer: "local_xy"
+  initial_state: "local_w_state"
+  simulation_scope: "exact_feasible_subspace_classical_simulation"
+
+  primary:
+    depth: 2
+    max_evals: 90
+    objective: "cvar"
+    restarts: 4
+    cvar_alpha: 0.10
+    eval_shots: 500
+    output_shots: 1000
+    parameter_scale: "max_coefficient"
+
+  benchmark_ablation:
+    objectives: ["mean", "cvar"]
+    restarts: [1, 4]
+
+  development_sensitivity:
+
+# ---------------------------------------------------------------------------
 # Stage 4: quantum-vs-classical coarse-grained benchmark
 # (batch_benchmark_hard_set.py --research-ablation). This is the ablation
 # sweep: five pruning strategies x output-budget curve x QAOA objective x
@@ -264,9 +294,7 @@ qc_benchmark:
   max_failure_fraction: 0.0  # formal benchmark is fail-closed by default
   pruning: ["egnn", "contact", "distance", "cdr", "random"]
   radii: [6.0]
-  # QAOA itself follows Farhi et al. [R7]. p=2 is a preregistered primary depth, not a literature optimum; p=1/2/3 are checked development-only [R9].
-  depths: [2]
-  max_evals: [90]
+  # QAOA depth/evaluation budgets are read only from quantum_protocol.
   # Active-site scaling axis for the quantum-vs-classical benchmark. Every
   # scaling case uses three states/site, one from each chi1 well (12/18/24/30
   # bits); cases lacking all three wells fail instead of changing resolution.
@@ -327,12 +355,7 @@ qc_benchmark:
   # Side-chain search: full Dunbrack chi1..chiN states; coarse pseudo-atoms
   # remain chi1-oriented. Formal scaling and calibration retain exactly three
   # states/site, one per chi1 well; resolution sensitivity separately tests 3-6.
-  outputs: [10, 30, 100, 300, 1000]  # the output-budget curve
-  qaoa_objective: ["mean", "cvar"]  # CVaR variational optimization is literature-supported [R8]
-  qaoa_restarts: [1, 4]  # 1 = single-start, 4 = multi-start
-  cvar_alpha: 0.1  # literature-supported empirical setting: R8 evaluates alpha=0.10 and recommends roughly 0.1-0.25; still preregistered/sensitivity-tested here
-  eval_shots: 500
-  parameter_scale: "max_coefficient"
+  outputs: [10, 30, 100, 300, 1000]  # matched-output curve; primary output_shots is frozen in quantum_protocol
   time_baselines: true
   sa_passes: 100  # SA baseline method is literature-established [R13]; pass count is a preregistered compute budget
   greedy_passes: 50
@@ -377,9 +400,6 @@ structure_experiment:
   # (target pdb, each seed here) -- see requirement #2 -- so these values
   # are never reused directly as the QAOA search or final-sampling seed.
   seeds: [42, 43, 44, 45, 46]
-  outputs: 1000
-  max_evals: 90
-  qaoa_depth: 2
   relax_iterations: 200
   candidate_relax_iterations: 100
   antigen_guidance_weight: 0.25
@@ -393,12 +413,9 @@ structure_experiment:
   # Formal all-atom search uses complete Dunbrack chi1..chiN states and
   # multi-chi perturbation/recovery; 3-6 states/site -> <=30 variables.
   loop_relax_iterations: 100
-  eval_shots: 500
   robust_qaoa: true
-  qaoa_restarts: 4
-  qaoa_objective: "cvar"
-  cvar_alpha: 0.1
-  parameter_scale: "max_coefficient"
+  # QAOA depth, budgets, objective, restarts, shots and parameter scaling are
+  # inherited verbatim from quantum_protocol.primary.
   perturbation_mode: "multi_chi"
   solvent_model: "vacuum"  # frozen primary structural protocol
   solvent_sensitivity: ["vacuum", "gbn2"]  # development queue only
@@ -442,11 +459,8 @@ statistics:
   budget_modes: ["outputs", "time"]
   primary_pruning: "egnn"  # confirmatory solver/scaling inference uses the main EGNN-pruned problem only
   primary_radius: 6.0
-  primary_depth: 2
-  primary_max_evals: 90
-  primary_outputs: 1000
-  primary_objective: "cvar"
-  primary_restarts: 4
+  # QAOA primary depth/evaluation/output/objective/restart settings are read
+  # exclusively from quantum_protocol.primary.
   primary_active_sites: 6  # preregistered confirmatory size; not a literature-defined optimum
   primary_structural_endpoint: "final_rmsd"
   primary_structural_contrast: "qaoa_vs_sa"
