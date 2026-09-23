@@ -52,7 +52,16 @@ def estimate_qaoa_resources(
     output_shots: Optional[int] = None,
     restarts: Optional[int] = None,
 ) -> QAOAResourceEstimate:
-    """Estimate logical pre-transpilation resources for the implemented XY-QAOA.\n\n    The count is exact for gates emitted by the implemented cost and XY-mixer\n    layers at the supplied coefficient tolerance. It deliberately excludes\n    decomposition of local W-state StatePrep, routing/SWAPs, error-correction\n    overhead, and backend-native transpilation. These fields therefore support\n    algorithmic scaling and benchmark transparency rather than a hardware-\n    resource or quantum-advantage claim.\n    """\n    if p < 1:
+    """Estimate logical pre-transpilation resources for the implemented XY-QAOA.
+
+    The count is exact for gates emitted by the implemented cost and XY-mixer
+    layers at the supplied coefficient tolerance. It deliberately excludes
+    decomposition of local W-state StatePrep, routing/SWAPs, error-correction
+    overhead, and backend-native transpilation. These fields therefore support
+    algorithmic scaling and benchmark transparency rather than a hardware-
+    resource or quantum-advantage claim.
+    """
+    if p < 1:
         raise ValueError("p must be positive")
     if coefficient_tolerance < 0 or not math.isfinite(float(coefficient_tolerance)):
         raise ValueError("coefficient_tolerance must be finite and nonnegative")
