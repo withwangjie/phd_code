@@ -1,5 +1,4 @@
-# Runtime dependencies of the formal pipeline (Python >= 3.11 is required:
-# the code uses hashlib.file_digest).
+# Runtime dependencies of the formal pipeline (Python >= 3.10 is required).
 #
 # These are NOT pinned. The formal environment on the server is the source of
 # truth: every run already archives it as provenance/pip_freeze.txt, and

@@ -3483,7 +3483,7 @@ def write_run_inventory(run_dir: Path, results: Dict[str, StageResult]) -> None:
     for path in sorted(p for p in run_dir.rglob("*") if p.is_file()):
         if path in (inventory_path,summary_path):
             continue
-        rel=str(path.relative_to(run_dir))
+        rel=path.relative_to(run_dir).as_posix()
         size=path.stat().st_size
         item={"path":rel,"size_bytes":size}
         if size <= 64*1024*1024:

@@ -333,6 +333,15 @@ def test_sha256_file_matches_streamed_reference(tmp_path):
         assert sha256_file(str(path)) == _ref_chunked_sha256(path)
 
 
+def test_sha256_file_without_python_311_file_digest(tmp_path, monkeypatch):
+    from nanoqc.common.repo_io import sha256_file
+
+    monkeypatch.delattr(hashlib, "file_digest", raising=False)
+    path = tmp_path / "python310.bin"
+    path.write_bytes(b"Python 3.10 compatibility\x00")
+    assert sha256_file(path) == hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def test_atomic_json_fsync_format_unchanged(tmp_path):
     import json
     from nanoqc.common.repo_io import atomic_write_json_fsync

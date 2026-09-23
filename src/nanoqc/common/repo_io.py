@@ -73,8 +73,11 @@ def module_name(name: str) -> str:
 
 def sha256_file(path: PathLike) -> str:
     """Hex SHA-256 of a file's bytes, streamed (never loads the file whole)."""
+    digest = hashlib.sha256()
     with Path(path).open("rb") as handle:
-        return hashlib.file_digest(handle, "sha256").hexdigest()
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def atomic_write_json_fsync(path: Path, value: Any) -> None:
