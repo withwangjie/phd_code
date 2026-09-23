@@ -50,6 +50,7 @@ from nanoqc.model.model_egnn_pruning import (  # re-exported: historical import 
 )
 from nanoqc.solvers.qaoa_interface_sampler import XYMixerQAOASampler
 from nanoqc.qubo.subgraph_to_qubo import InterfaceQUBOBuilder, ForceFieldConfig, EnergyCalibration
+from nanoqc.quantum.resource_estimation import estimate_qaoa_resources
 
 
 CSV_FILENAME = "snac_hard_qaoa_vs_sa_metrics.csv"
@@ -1097,6 +1098,7 @@ def _ablation_run_case(data: Any, scorer: Any, config: dict, args: Any, artifact
         raise ValueError(
             f"Requested {active_sites} active sites but QUBO contains "
             f"{len(qubo.site_to_variables)} rotamer sites; refusing a mislabeled scaling case")
+    quantum_instance=qubo.to_quantum_instance()
     # Independent optimize/sample seeds (never the shared perturb/input seed
     # config["seed"] above, and never each other): derived per-case, before
     # this function is ever called, from the master-seed optimize/sample
@@ -1112,9 +1114,10 @@ def _ablation_run_case(data: Any, scorer: Any, config: dict, args: Any, artifact
     # measurement_seed/sample_seed overrides directly, so a second instance
     # is not needed -- the base constructor seed below is only the fallback
     # used if a call site ever omits an explicit override.
-    sampler = XYMixerQAOASampler(qubo.physical_self, qubo.physical_pair,
-        qubo.site_to_variables, p=config["depth"], seed=optimize_seed, shots=args.outputs[0],
-        simulation_mode="subspace", device_name="default.qubit")
+    sampler = XYMixerQAOASampler(
+        quantum_instance.physical_self, quantum_instance.physical_pair,
+        quantum_instance.site_to_variables, p=config["depth"], seed=optimize_seed,
+        shots=args.outputs[0], simulation_mode="subspace", device_name="default.qubit")
     built = time.perf_counter()
     truth = sampler.enumerate_ground_states()
     energies = sampler.feasible_energy_map()
@@ -1153,10 +1156,23 @@ def _ablation_run_case(data: Any, scorer: Any, config: dict, args: Any, artifact
                         raise AssertionError("Sample count or local one-hot constraint violated.")
                     metrics = _ablation_summarize(counts, energies, truth.energy, args.energy_window)
                     # metrics owns outputs: it is the verified measured count.
+                    resources=estimate_qaoa_resources(
+                        quantum_instance,p=config["depth"],
+                        eval_shots=args.eval_shots,max_evals=config["max_evals"],
+                        output_shots=outputs,restarts=qaoa_restarts,
+                    )
                     records.append(dict(config, solver=solver,
+                        method_role="proposed_quantum_method",
                         qaoa_objective=qaoa_objective, qaoa_restarts=qaoa_restarts, eval_shots=args.eval_shots,
-                        **metrics, num_bits=len(qubo.physical_self),
-                        configuration_count=truth.configuration_count, solver_seconds=elapsed,
+                        **metrics, num_bits=quantum_instance.num_qubits,
+                        configuration_count=truth.configuration_count,
+                        qaoa_parameter_count=resources.parameter_count,
+                        qaoa_rz_gates=resources.rz_gates_total,
+                        qaoa_zz_gates=resources.zz_gates_total,
+                        qaoa_xy_gates=resources.xy_gates_total,
+                        qaoa_two_qubit_gates=resources.two_qubit_gates_total,
+                        qaoa_max_measurement_shots=resources.max_measurement_shots,
+                        solver_seconds=elapsed,
                         optimization_seconds=optimization_seconds,
                         sampling_seconds=sampling_seconds,
                         optimization_reused=(outputs != args.outputs[0]),
@@ -1194,8 +1210,9 @@ def _ablation_run_case(data: Any, scorer: Any, config: dict, args: Any, artifact
                 metrics = _ablation_summarize(counts, energies, truth.energy, args.energy_window)
                 # Do not pass outputs twice; _ablation_summarize supplies it.
                 records.append(dict(config, solver=solver,
+                    method_role="classical_baseline",
                     qaoa_objective=None, qaoa_restarts=None, eval_shots=None,
-                    **metrics, num_bits=len(qubo.physical_self),
+                    **metrics, num_bits=quantum_instance.num_qubits,
                     configuration_count=truth.configuration_count, solver_seconds=elapsed,
                     optimization_seconds=None, sampling_seconds=None, optimization_reused=None,
                     build_seconds=built-begin, oracle_seconds=oracle_seconds,
@@ -1224,7 +1241,8 @@ def _ablation_run_case(data: Any, scorer: Any, config: dict, args: Any, artifact
                         sample_seed+10001, args.sa_passes, args.greedy_passes)
                     metrics = _ablation_summarize(counts, energies, truth.energy, args.energy_window)
                     row = dict(donor_row)
-                    row.update(metrics, solver=method+"_time", reference_outputs=outputs, solver_seconds=elapsed,
+                    row.update(metrics, solver=method+"_time", method_role="classical_baseline",
+                        reference_outputs=outputs, solver_seconds=elapsed,
                         single_state_energy_queries=queries, optimizer_success=None,
                         optimizer_evaluations=None, termination_reason=None,
                         optimization_energy_start=None, optimization_energy_end=None,
@@ -1233,7 +1251,25 @@ def _ablation_run_case(data: Any, scorer: Any, config: dict, args: Any, artifact
                         budget_seconds=budget, budget_overrun_seconds=max(0., elapsed-budget))
                     records.append(row)
                     raw[f"{method}_time_outputs{outputs}"] = [{"bits":"".join(map(str,b)), "count":c} for b,c in sorted(counts.items())]
+    quantum_benchmark_contract={
+        "schema":"quantum_classical_benchmark_v1",
+        "proposed_method":{
+            "name":"xy_qaoa",
+            "role":"proposed_quantum_method",
+            "simulation_scope":"exact feasible-subspace classical simulation with finite-shot objectives",
+        },
+        "classical_baselines":["simulated_annealing","greedy","uniform_feasible_sampling"],
+        "oracle":{
+            "name":"exact_feasible_enumeration",
+            "role":"retrospective_ground_truth_only",
+            "energy":truth.energy,
+            "configuration_count":truth.configuration_count,
+            "oracle_seconds":oracle_seconds,
+        },
+    }
     _ablation_atomic_json(artifact, dict(config=config, metrics=records, counts=raw,
+        quantum_instance=quantum_instance.manifest(),
+        quantum_benchmark=quantum_benchmark_contract,
         optimization=last_optimization, optimizations=optimizations,
         active_residue_ids=[data.residue_ids[i] for i in active.tolist()],
         frozen_residue_ids=[sub.residue_ids[i] for i in range(sub.num_nodes) if sub.is_frozen_environment[i]],
