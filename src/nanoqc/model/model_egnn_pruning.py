@@ -561,10 +561,14 @@ def select_ablation_active(data: Any, method: str, k: int, seed: int,
         ids = np.random.default_rng(seed).choice(candidates.numpy(), k, replace=False)
         return torch.tensor(sorted(ids), dtype=torch.long)
     elif method == "cdr":
-        # Prioritize observed CDR-H3, then contact degree within each tier.
+        # Prioritize observed CDR-H3, then rank by antigen CA contact degree
+        # within both the CDR and non-CDR tiers. Never use native labels.
+        scores[candidates] = (distances < float(contact_ca_cutoff)).sum(1).float()
         cdr_allowed = [i for i in _ablation_cdr_indices(data) if i in set(candidates.tolist())]
         if cdr_allowed:
-            scores[cdr_allowed] += float(scores.max()) + 1
+            # The offset guarantees every allowed CDR residue outranks every
+            # non-CDR candidate while preserving contact-degree ordering.
+            scores[cdr_allowed] += float(scores[candidates].max()) + 1.0
     else:
         raise ValueError(method)
     order = sorted(candidates.tolist(), key=lambda i: (-float(scores[i]), i))

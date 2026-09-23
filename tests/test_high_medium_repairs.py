@@ -377,13 +377,24 @@ def test_scaling_cases_require_exact_requested_rotamer_site_count() -> None:
     selector=inspect.getsource(__import__("nanoqc.model.model_egnn_pruning", fromlist=["_"]).select_ablation_active)
     assert "backbone_phi" in selector and "backbone_psi" in selector
     assert 'aa not in {"A", "G", "P", "C"} and backbone_ok' in selector
+    assert "scores[candidates] = (distances < float(contact_ca_cutoff)).sum(1).float()" in selector
+    assert "scores[cdr_allowed] += float(scores[candidates].max()) + 1.0" in selector
+
+
+def test_structural_statistics_use_shared_sign_flip_protocol() -> None:
+    import nanoqc.inference.analyze_structure_recovery as structure
+    from nanoqc.inference import paired_statistics
+    source=inspect.getsource(structure.sign_flip_p)
+    assert "sign_flip_pvalue" in source
+    assert "200000" not in source
+    assert paired_statistics.SIGN_FLIP_EXACT_MAX_CLUSTERS == 16
 
 
 def test_formal_statistics_require_scaling_outputs() -> None:
     source=inspect.getsource(full.Orchestrator._validate_completed_stage_artifacts)
     assert "quantum_scaling_statistics.json" in source
     assert "quantum_scaling_statistics.md" in source
-    assert "min_scaling_clusters" in inspect.getsource(full.validate_config)
+    assert "min_scaling_clusters" in inspect.getsource(full._validate_scientific_config)
 
 
 def test_partial_only_run_cannot_pass_global_audit_without_prior_results(tmp_path: Path) -> None:
