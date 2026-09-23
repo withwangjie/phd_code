@@ -1254,9 +1254,10 @@ class Orchestrator:
         if stage=="method_sensitivity":
             qc=self.config.get("qc_benchmark",{}) or {}
             cfg=qc.get("sensitivity",{}) or {}
+            qsensitivity=quantum_development_sensitivity(self.config)
             missing=[]
-            for shots in cfg.get("eval_shots",[200,500,1000]):
-                for alpha in cfg.get("cvar_alpha",[0.05,0.1,0.25,0.5,1.0]):
+            for shots in qsensitivity.get("eval_shots",[200,500,1000]):
+                for alpha in qsensitivity.get("cvar_alpha",[0.05,0.1,0.25,0.5,1.0]):
                     sub=self.run_dir/"method_sensitivity"/f"shots_{shots}_alpha_{str(alpha).replace('.','p')}"
                     required=[
                         sub/"run_manifest.json",sub/"run_summary.json",sub/"metrics.csv",
