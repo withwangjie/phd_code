@@ -358,6 +358,11 @@ def _validate_scientific_config(config: Dict[str, Any]) -> None:
         raise ValueError("qc_benchmark.max_failure_fraction must be in [0,1)")
 
     stats=config.get("statistics",{}) or {}
+    if stats.get("cluster_map") not in (None, ""):
+        raise ValueError(
+            "statistics.cluster_map is obsolete: formal statistics must reuse the "
+            "run-local frozen cluster map produced by queue_freeze; remove the key"
+        )
     if stats.get("primary_structural_endpoint","final_rmsd") not in (
         "final_rmsd","improvement_vs_input","improvement_vs_relax_only"
     ):
@@ -3250,11 +3255,11 @@ class Orchestrator:
         # scaling, and structural recovery -- three nominally-independent
         # confirmatory analyses -- never silently share one RNG stream.
         streams = derive_streams(self.config["master_seed"])
-        cfg_probe = self.config["statistics"]
-        statistics_cluster_path = (
-            resolve_path(self.config, str(cfg_probe["cluster_map"]))
-            if cfg_probe.get("cluster_map") else self.frozen_cluster_map_path()
-        )
+        # Statistical independence units must be identical to the cluster map
+        # frozen by queue_freeze for this exact run.  Never resolve a second
+        # repository-level statistics.cluster_map: that could make split
+        # isolation and inferential clustering use different partitions.
+        statistics_cluster_path = self.frozen_cluster_map_path()
         results_dirs = [self.run_dir / "qc_benchmark"]
         logs, argvs, failures = [], [], []
         qc_cfg = self.config["qc_benchmark"]
