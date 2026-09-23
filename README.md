@@ -56,16 +56,22 @@ prediction.
 
 ## Central research questions
 
-- Does EGNN retain useful interface-selection ability after homology isolation
-  and topology-leakage control?
-- Does adaptive 3--6-state modeling improve coverage over fixed low-state
-  discretization?
-- How do XY-QAOA and classical solvers differ in energy gap, low-energy
-  coverage, sampling diversity, and budget efficiency?
-- Does CVaR emphasize useful low-energy conformations better than mean-energy
-  optimization?
-- Most importantly, do solver-level discrete energy gains propagate to
-  all-atom structural improvements?
+1. How faithfully can the constrained rotamer-assignment problem be encoded as
+   an auditable one-hot QUBO/Ising instance for gate-based quantum optimization?
+2. How does feasibility-preserving XY-QAOA compare with classical baselines in
+   energy gap, low-energy coverage, sampling diversity, and resource use under
+   matched-output and matched-time protocols?
+3. How does the QAOA-versus-classical performance difference change as feasible
+   configuration count, logical qubit count, and logical two-qubit-gate count
+   grow across the preregistered problem-size axis?
+4. Does finite-shot CVaR improve the low-energy sampling behavior of the
+   variational quantum solver relative to mean-energy optimization?
+5. Do solver-level discrete energy gains propagate to all-atom structural
+   improvements after reconstruction/relaxation?
+6. Supporting problem-reduction questions ask whether EGNN interface selection
+   remains useful after homology/topology-leakage control and whether adaptive
+   rotamer discretization preserves adequate state coverage. These are enabling
+   components, not the primary research object.
 
 ## Interpretation limits
 
