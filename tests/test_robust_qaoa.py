@@ -3,9 +3,24 @@ honest convergence reporting, and the finite-shot measurement ledger."""
 import unittest
 import numpy as np
 from nanoqc.solvers.qaoa_interface_sampler import XYMixerQAOASampler, lower_tail_cvar, finite_shot_cvar
+from nanoqc.quantum.instance import QuantumOptimizationInstance
 
 
 class RobustQAOATests(unittest.TestCase):
+    def test_sampler_constructs_from_quantum_instance(self):
+        instance=QuantumOptimizationInstance(
+            Q=np.zeros((4,4)),constant_offset=0.0,
+            physical_self=np.array([0.,2.,0.,5.]),
+            physical_pair=np.zeros((4,4)),
+            site_to_variables={0:[0,1],1:[2,3]},
+            ising_h=np.zeros(4),ising_J=np.zeros((4,4)),ising_offset=0.0,
+        )
+        sampler=XYMixerQAOASampler.from_instance(
+            instance,p=2,simulation_mode="subspace",seed=42)
+        self.assertEqual(sampler.num_variables,instance.num_qubits)
+        self.assertEqual(sampler.feasible_configuration_count,instance.feasible_configuration_count)
+        np.testing.assert_array_equal(sampler.physical_self,instance.physical_self)
+
     def test_fractional_quantile(self):
         e=np.array([10.,0.,2.]); p=np.array([.5,.2,.3])
         self.assertAlmostEqual(lower_tail_cvar(e,p,.4),1.)
