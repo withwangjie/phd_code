@@ -253,7 +253,7 @@ quantum_protocol:
   algorithm: "xy_qaoa"
   encoding: "one_hot_rotamer_registers"
   mixer: "local_xy"
-  initial_state: "local_w_state"
+  initial_state: "wstate"  # product of local one-hot W states; matches solver implementation [R30]
   simulation_scope: "exact_feasible_subspace_classical_simulation"
 
   primary:
