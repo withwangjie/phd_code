@@ -88,6 +88,27 @@ class QuantumOptimizationInstance:
         """Product-space size under exactly-one-state-per-register feasibility."""
         return int(math.prod(self.register_sizes))
 
+    def physical_ising(self) -> Tuple[np.ndarray, np.ndarray, float]:
+        """Return the Ising form of the penalty-free feasible-subspace objective.
+
+        This is the Hamiltonian actually used by XY-QAOA. One-hot penalties in
+        the full QUBO are unnecessary because the local XY mixer preserves
+        Hamming weight one in every register.
+        """
+        n=self.num_qubits
+        h=-0.5*self.physical_self.astype(float,copy=True)
+        j=np.zeros((n,n),dtype=float)
+        offset=0.5*float(self.physical_self.sum())
+        for left in range(n):
+            for right in range(left+1,n):
+                coefficient=float(self.physical_pair[left,right])
+                if coefficient:
+                    j[left,right]=0.25*coefficient
+                    h[left]-=0.25*coefficient
+                    h[right]-=0.25*coefficient
+                    offset+=0.25*coefficient
+        return h,j,float(offset)
+
     def manifest(self) -> Dict[str, Any]:
         """JSON-friendly quantum-instance contract."""
         return {
