@@ -4,6 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import yaml
 
 from nanoqc.quantum.instance import QuantumOptimizationInstance
 from nanoqc.quantum.resource_estimation import estimate_qaoa_resources
@@ -88,3 +89,39 @@ def test_qubo_result_exports_quantum_instance_contract() -> None:
     source=(REPO/"src/nanoqc/qubo/subgraph_to_qubo.py").read_text(encoding="utf-8")
     assert "def to_quantum_instance(self)" in source
     assert '"quantum_instance": quantum_path' in source
+
+
+def test_quantum_protocol_is_single_source_of_truth() -> None:
+    config=yaml.safe_load((REPO/"configs/full_experiment_config.yaml").read_text(encoding="utf-8"))
+    qp=config["quantum_protocol"]
+    assert qp["algorithm"]=="xy_qaoa"
+    assert qp["mixer"]=="local_xy"
+    assert qp["primary"]["depth"]==2
+    assert qp["primary"]["objective"]=="cvar"
+    forbidden={"depths","max_evals","qaoa_objective","qaoa_restarts","cvar_alpha","eval_shots","parameter_scale"}
+    assert not (forbidden & set(config["qc_benchmark"]))
+    assert not ({"outputs","max_evals","qaoa_depth","eval_shots","qaoa_restarts","qaoa_objective","cvar_alpha","parameter_scale"} & set(config["structure_experiment"]))
+    assert not ({"primary_depth","primary_max_evals","primary_outputs","primary_objective","primary_restarts"} & set(config["statistics"]))
+
+
+def test_scaling_reports_quantum_resource_axes_without_new_primary_tests() -> None:
+    source=(REPO/"src/nanoqc/inference/analyze_quantum_scaling.py").read_text(encoding="utf-8")
+    assert '"num_qubits","qaoa_two_qubit_gates","qaoa_xy_gates","qaoa_zz_gates"' in source
+    assert "mean_qaoa_two_qubit_gates" in source
+    assert 'primary_predictor="log10_configuration_count"' in source
+    assert "descriptive_resource_axes" in source
+
+
+def test_final_report_is_quantum_first() -> None:
+    source=(REPO/"src/nanoqc/reporting/generate_final_research_report.py").read_text(encoding="utf-8")
+    compile_block=source[source.index("def compile_report"):]
+    order=[
+        "section_quantum_problem_encoding(ctx)",
+        "section_quantum_protocol(ctx)",
+        "section_search_performance(ctx)",
+        "section_structural_benefit(ctx)",
+        "section_data_reliability(ctx)",
+        "section_pruning_contribution(ctx)",
+    ]
+    positions=[compile_block.index(item) for item in order]
+    assert positions==sorted(positions)
