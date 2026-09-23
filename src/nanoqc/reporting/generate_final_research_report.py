@@ -92,6 +92,10 @@ def _primary_pruning(ctx: "ReportContext") -> str:
     return str(((ctx.frozen_config.get("statistics",{}) or {}).get("primary_pruning","egnn")))
 
 
+def _quantum_primary(ctx: "ReportContext") -> Dict[str, Any]:
+    return dict((((ctx.frozen_config.get("quantum_protocol",{}) or {}).get("primary",{}) or {})))
+
+
 def _fmt(value: Any, digits: int = 4) -> str:
     if value is None:
         return "n/a"
@@ -176,13 +180,13 @@ def stage_ok(ctx: ReportContext, stage: str) -> bool:
 # ---------------------------------------------------------------------------
 
 def section_data_reliability(ctx: ReportContext) -> List[str]:
-    lines = ["## 1. Data reliability", ""]
+    lines = ["## 5. Data reliability and problem preparation", ""]
     if not stage_ok(ctx, "data_audit"):
         lines += ["Data audit stage did not complete; no data-reliability numbers are reported here.", ""]
         return lines
 
     inventory = _read_json(ctx.run_dir / "audit" / "data_audit_inventory.json") or {}
-    lines.append("### 1.1 Raw structure audit (audit_all_datasets.py)")
+    lines.append("### 5.1 Raw structure audit (audit_all_datasets.py)")
     lines.append("")
     if inventory:
         lines.append(f"Audit inventory recorded (see `data_audit_report.md` for full per-reason breakdown, "
@@ -207,7 +211,7 @@ def section_data_reliability(ctx: ReportContext) -> List[str]:
     vhh_threshold = float(homology.get("vhh_full_chain_identity", 0.80))
     antigen_threshold = float(homology.get("antigen_identity", 0.30))
     antigen_coverage = float(homology.get("antigen_min_length_coverage", 0.70))
-    lines.append("### 1.2 Deduplication, isolation, and split (build_final_pyg_dataset.py --no-cap)")
+    lines.append("### 5.2 Deduplication, isolation, and split (build_final_pyg_dataset.py --no-cap)")
     lines.append("")
     lines.append(f"- Cap removed (requirement #1): `no_cap` semantics used; "
                   f"`target_hard` field in run_summary.json is informational only when uncapped.")
@@ -239,7 +243,7 @@ def section_data_reliability(ctx: ReportContext) -> List[str]:
     selected = _read_json(freeze_dir / "selected_targets.json") or []
     excluded = [d for d in eligibility if d.get("status") == "excluded"]
     dev_pdb = ((ctx.frozen_config.get("queue_freeze", {}) or {}).get("dev_queue", {}) or {}).get("excluded_pdb", [])
-    lines.append("### 1.3 Frozen, blind validation-target queue (requirement #2)")
+    lines.append("### 5.3 Frozen, blind validation-target queue (requirement #2)")
     lines.append("")
     lines.append(f"- Historical development targets permanently excluded from this queue: {dev_pdb}.")
     lines.append(f"- Candidates examined: {len(eligibility)}; selected (frozen): {len(selected)}; "
@@ -300,13 +304,13 @@ def section_data_reliability(ctx: ReportContext) -> List[str]:
 # ---------------------------------------------------------------------------
 
 def section_pruning_contribution(ctx: ReportContext) -> List[str]:
-    lines = ["## 2. EGNN pruning contribution", ""]
+    lines = ["## 6. Quantum problem reduction: EGNN pruning contribution", ""]
     checkpoint_dir = ctx.run_dir / str((ctx.frozen_config.get("paths", {}) or {}).get("checkpoint_dir", "checkpoints"))
     geometry_path = checkpoint_dir / "geometry_baseline.json"
     training_summary = _read_json(checkpoint_dir / "training_summary.json") or {}
     geometry = _read_json(geometry_path) or {}
     if geometry:
-        lines.append("### 2.1 Leakage-controlled node-classification validation")
+        lines.append("### 6.1 Leakage-controlled node-classification validation")
         lines.append("")
         lines.append("| Model | Validation ROC-AUC | Validation PR-AUC |")
         lines.append("|---|---:|---:|")
@@ -327,7 +331,7 @@ def section_pruning_contribution(ctx: ReportContext) -> List[str]:
             "whether EGNN performance exceeds a low-capacity geometry shortcut rather than merely distance."
         )
         lines.append("")
-    lines.append("### 2.2 Downstream pruning ablation")
+    lines.append("### 6.2 Downstream pruning ablation")
     lines.append("")
     if not stage_ok(ctx, "qc_benchmark"):
         lines += ["qc_benchmark stage did not complete; no pruning-ablation numbers are reported.", ""]
@@ -370,6 +374,56 @@ def section_pruning_contribution(ctx: ReportContext) -> List[str]:
 # Section 3: search performance (budget curve, objective ablation)
 # ---------------------------------------------------------------------------
 
+def section_quantum_problem_encoding(ctx: ReportContext) -> List[str]:
+    lines=["## 1. Quantum problem encoding",""]
+    case_paths=sorted((ctx.run_dir/"qc_benchmark"/"cases").glob("*.json"))
+    payloads=[]
+    for path in case_paths:
+        data=_read_json(path) or {}
+        instance=data.get("quantum_instance")
+        if isinstance(instance,dict) and instance.get("schema")=="quantum_optimization_instance_v1":
+            payloads.append(instance)
+    if not payloads:
+        lines += ["No completed self-contained quantum-instance artifacts were found.",""]
+        return lines
+    qubits=[int(p.get("num_qubits",0) or 0) for p in payloads]
+    configs=[int(p.get("feasible_configuration_count",0) or 0) for p in payloads]
+    lines += [
+        f"- Self-contained quantum instances: {len(payloads)} case artifacts.",
+        f"- Encoding: one-hot rotamer registers; logical qubits range {min(qubits)}--{max(qubits)}.",
+        f"- Feasible-state counts range {min(configs)}--{max(configs)}.",
+        "- Each case stores the full penalized QUBO/Ising representation and the penalty-free physical "
+        "Hamiltonian terms used by the feasibility-preserving XY-QAOA solver.",
+        "- Exact feasible enumeration is retained only as a retrospective oracle, not as part of the proposed solver.",
+        "",
+    ]
+    return lines
+
+
+def section_quantum_protocol(ctx: ReportContext) -> List[str]:
+    lines=["## 2. Frozen QAOA protocol and logical resources",""]
+    qp=ctx.frozen_config.get("quantum_protocol",{}) or {}
+    primary=qp.get("primary",{}) or {}
+    ablation=qp.get("benchmark_ablation",{}) or {}
+    sensitivity=qp.get("development_sensitivity",{}) or {}
+    lines += [
+        f"- Algorithm={qp.get('algorithm')}; encoding={qp.get('encoding')}; mixer={qp.get('mixer')}; initial_state={qp.get('initial_state')}.",
+        f"- Primary protocol: p={primary.get('depth')}, max_evals={primary.get('max_evals')}, "
+        f"objective={primary.get('objective')}, CVaR alpha={primary.get('cvar_alpha')}, "
+        f"restarts={primary.get('restarts')}, eval_shots={primary.get('eval_shots')}, "
+        f"output_shots={primary.get('output_shots')}.",
+        f"- Predeclared benchmark ablation: objectives={ablation.get('objectives')}, restarts={ablation.get('restarts')}.",
+        f"- Development-only sensitivity: p={sensitivity.get('depths')}, max_evals={sensitivity.get('max_evals')}, "
+        f"eval_shots={sensitivity.get('eval_shots')}, CVaR alpha={sensitivity.get('cvar_alpha')}.",
+        "- QAOA follows Farhi et al. [R7]; feasibility-preserving alternating-operator mixers follow "
+        "Hadfield et al. [R28]; finite-shot CVaR follows Barkoutsos et al. [R8].",
+        "- Logical qubit and gate counts are pre-transpilation algorithmic resources, not hardware-native "
+        "counts; reporting solution quality together with resource use follows quantum-optimization benchmarking guidance [R20,R29].",
+        "",
+    ]
+    return lines
+
+
 def section_search_performance(ctx: ReportContext) -> List[str]:
     lines = ["## 3. Quantum-classical search performance and scaling", ""]
     if not stage_ok(ctx, "qc_benchmark"):
@@ -382,9 +436,10 @@ def section_search_performance(ctx: ReportContext) -> List[str]:
     primary_sites=_primary_active_sites(ctx)
     primary_pruning=_primary_pruning(ctx)
     stats_cfg=ctx.frozen_config.get("statistics",{}) or {}
+    qprimary=_quantum_primary(ctx)
     primary_radius=float(stats_cfg.get("primary_radius",6.0))
-    primary_depth=int(stats_cfg.get("primary_depth",2))
-    primary_max_evals=int(stats_cfg.get("primary_max_evals",90))
+    primary_depth=int(qprimary.get("depth",2))
+    primary_max_evals=int(qprimary.get("max_evals",90))
     rows=[
         r for r in _filter_qc_rows(all_rows,"matched_outputs")
         if int(float(r.get("active_sites",primary_sites)))==primary_sites
@@ -443,9 +498,9 @@ def section_search_performance(ctx: ReportContext) -> List[str]:
 
     lines.append("### 3.2 Active-site scaling analysis")
     lines.append("")
-    primary_outputs=int(stats_cfg.get("primary_outputs",1000))
-    primary_objective=str(stats_cfg.get("primary_objective","cvar"))
-    primary_restarts=int(stats_cfg.get("primary_restarts",4))
+    primary_outputs=int(qprimary.get("output_shots",1000))
+    primary_objective=str(qprimary.get("objective","cvar"))
+    primary_restarts=int(qprimary.get("restarts",4))
     scaling_rows=[
         r for r in _filter_qc_rows(all_rows,"matched_outputs")
         if int(float(r.get("outputs",0) or 0))==primary_outputs
@@ -464,8 +519,8 @@ def section_search_performance(ctx: ReportContext) -> List[str]:
         f"objective={primary_objective}, restarts={primary_restarts}; classical solvers use their matched-output rows."
     )
     lines.append("")
-    lines.append("| Active sites | Solver | Rows | Mean QUBO bits | Mean feasible configurations | Mean hit | Mean gap |")
-    lines.append("|---:|---|---:|---:|---:|---:|---:|")
+    lines.append("| Active sites | Solver | Rows | Mean logical qubits | Mean 2q gates | Mean feasible configurations | Mean hit | Mean gap |")
+    lines.append("|---:|---|---:|---:|---:|---:|---:|---:|")
     for sites in site_values:
         for solver in ("qaoa","sa","uniform","greedy"):
             group=[
@@ -483,6 +538,7 @@ def section_search_performance(ctx: ReportContext) -> List[str]:
                 return sum(values)/len(values) if values else None
             lines.append(
                 f"| {sites} | {solver} | {len(group)} | {_fmt(scale_mean('num_bits'))} | "
+                f"{_fmt(scale_mean('qaoa_two_qubit_gates') if solver=='qaoa' else None)} | "
                 f"{_fmt(scale_mean('configuration_count'))} | {_fmt(scale_mean('hit'))} | "
                 f"{_fmt(scale_mean('gap'))} |"
             )
@@ -758,13 +814,13 @@ def section_structural_benefit(ctx: ReportContext) -> List[str]:
 # ---------------------------------------------------------------------------
 
 def section_external_and_robustness(ctx: ReportContext) -> List[str]:
-    lines=["## 5. External validation and robustness", ""]
+    lines=["## 7. External validation and robustness", ""]
 
     # External VHH coarse benchmark.
     ext_metrics=ctx.run_dir/"external_validation"/"vhh_coarse"/"metrics.csv"
     if ext_metrics.is_file():
         rows=_read_csv_rows(ext_metrics)
-        lines.append("### 5.1 External VHH benchmark")
+        lines.append("### 7.1 External VHH benchmark")
         lines.append("")
         lines.append(
             f"- External graph rows recorded: {len(rows)}; target set is required to pass the frozen "
@@ -786,7 +842,7 @@ def section_external_and_robustness(ctx: ReportContext) -> List[str]:
             )
         lines.append("")
     else:
-        lines.append("### 5.1 External VHH benchmark")
+        lines.append("### 7.1 External VHH benchmark")
         lines.append("")
         lines.append("No completed external VHH metrics were found for this run.")
         lines.append("")
@@ -795,7 +851,7 @@ def section_external_and_robustness(ctx: ReportContext) -> List[str]:
     baseline_path=ctx.run_dir/"external_validation"/"structural_baselines"/"external_baseline_metrics.csv"
     if baseline_path.is_file():
         rows=_read_csv_rows(baseline_path)
-        lines.append("### 5.2 FASPR / standard clashscore baseline")
+        lines.append("### 7.2 FASPR / standard clashscore baseline")
         lines.append("")
         lines.append("| Method | Rows | Targets | Mean RMSD | Mean χ1 recovery | Mean all-χ recovery | Mean contact F1 | Mean Phenix clashscore |")
         lines.append("|---|---:|---:|---:|---:|---:|---:|---:|")
@@ -819,14 +875,14 @@ def section_external_and_robustness(ctx: ReportContext) -> List[str]:
         )
         lines.append("")
     else:
-        lines.append("### 5.2 FASPR / standard clashscore baseline")
+        lines.append("### 7.2 FASPR / standard clashscore baseline")
         lines.append("")
         lines.append("No completed external structural-baseline metrics were found for this run.")
         lines.append("")
 
     # Development-only solvent sensitivity.
     sensitivity_dirs=sorted(ctx.run_dir.glob("dev_queue_solvent_*"))
-    lines.append("### 5.3 Development-only solvent-model sensitivity")
+    lines.append("### 7.3 Development-only solvent-model sensitivity")
     lines.append("")
     if sensitivity_dirs:
         lines.append("| Solvent model | Rows | Mean final RMSD | Mean improvement vs input |")
@@ -858,7 +914,7 @@ def section_external_and_robustness(ctx: ReportContext) -> List[str]:
 # ---------------------------------------------------------------------------
 
 def section_cost(ctx: ReportContext) -> List[str]:
-    lines = ["## 6. Cost", ""]
+    lines = ["## 8. Computational cost and resource accounting", ""]
     if stage_ok(ctx, "qc_benchmark"):
         all_rows = _read_csv_rows(ctx.run_dir / "qc_benchmark" / "metrics.csv")
         rows = _filter_qc_rows(all_rows, "matched_outputs")
@@ -869,7 +925,7 @@ def section_cost(ctx: ReportContext) -> List[str]:
                 if r.get("solver_seconds") not in (None,"","None"):
                     sites=int(float(r.get("active_sites",_primary_active_sites(ctx))))
                     by_size_solver.setdefault((sites,solver),[]).append(float(r["solver_seconds"]))
-            lines.append("### 5.1 Coarse-grained matched-output solver cost (seconds, mean per row)")
+            lines.append("### 8.1 Coarse-grained matched-output solver cost (seconds, mean per row)")
             lines.append("")
             lines.append("| Active sites | Solver | Cases | Mean solver_seconds |")
             lines.append("|---:|---|---:|---:|")
@@ -906,7 +962,7 @@ def section_cost(ctx: ReportContext) -> List[str]:
 # ---------------------------------------------------------------------------
 
 def section_failures_and_incomplete(ctx: ReportContext) -> List[str]:
-    lines = ["## 7. Failures and incomplete work", "",
+    lines = ["## 9. Failures and incomplete work", "",
         "Every number below comes from a stage's own planned/completed/failed reconciliation "
         "(`run_summary.json`), never inferred from a subprocess return code or from a single "
         "artifact's mere existence -- `closed` requires `completed + failed == planned`, and a "
@@ -959,7 +1015,7 @@ def section_failures_and_incomplete(ctx: ReportContext) -> List[str]:
 # ---------------------------------------------------------------------------
 
 def section_applicability_boundary(ctx: ReportContext) -> List[str]:
-    lines = ["## 8. Applicability boundary", "",
+    lines = ["## 10. Applicability boundary", "",
         "- Fixed backbone, known binding pose, local side-chain optimization only. Not blind docking, not "
         "CDR-H3 backbone prediction, not de novo complex structure prediction.",
         "- 4S10/8YVO/9GCN remain development-only regression targets (selection order: ascending structure "
@@ -1009,7 +1065,7 @@ def section_applicability_boundary(ctx: ReportContext) -> List[str]:
 
 def section_literature_basis() -> List[str]:
     evidence_path=REPO_ROOT/"docs"/"METHODS_EVIDENCE.md"
-    lines=["## 9. Methodological literature basis",""]
+    lines=["## 11. Methodological literature basis",""]
     if not evidence_path.is_file():
         lines += ["`METHODS_EVIDENCE.md` is missing; formal literature traceability is unavailable.",""]
         return lines
@@ -1048,10 +1104,12 @@ def compile_report(run_dir: Path) -> str:
     ]
     lines += section_stage_table(ctx)
     lines += [""]
-    lines += section_data_reliability(ctx)
-    lines += section_pruning_contribution(ctx)
+    lines += section_quantum_problem_encoding(ctx)
+    lines += section_quantum_protocol(ctx)
     lines += section_search_performance(ctx)
     lines += section_structural_benefit(ctx)
+    lines += section_data_reliability(ctx)
+    lines += section_pruning_contribution(ctx)
     lines += section_external_and_robustness(ctx)
     lines += section_cost(ctx)
     lines += section_failures_and_incomplete(ctx)
