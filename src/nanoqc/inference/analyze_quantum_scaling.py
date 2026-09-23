@@ -132,8 +132,16 @@ def main(argv:Optional[Sequence[str]]=None)->int:
             failures.append(f"{path.name}: cluster map missing {pdb}");continue
         config_count=int(q.get("configuration_count",0) or 0)
         num_bits=int(q.get("num_bits",0) or 0)
+        qaoa_parameter_count=int(q.get("qaoa_parameter_count",0) or 0)
+        qaoa_xy_gates=int(q.get("qaoa_xy_gates",0) or 0)
+        qaoa_zz_gates=int(q.get("qaoa_zz_gates",0) or 0)
+        qaoa_two_qubit_gates=int(q.get("qaoa_two_qubit_gates",0) or 0)
         if config_count<=0 or num_bits<=0:
             failures.append(f"{path.name}: invalid complexity metadata");continue
+        if qaoa_parameter_count<=0 or qaoa_xy_gates<=0 or qaoa_two_qubit_gates<=0:
+            failures.append(f"{path.name}: missing/invalid QAOA logical-resource metadata");continue
+        if qaoa_two_qubit_gates != qaoa_xy_gates + qaoa_zz_gates:
+            failures.append(f"{path.name}: inconsistent QAOA two-qubit gate accounting");continue
         if config_count != 3 ** int(cfg["active_sites"]):
             failures.append(f"{path.name}: feasible configuration count is not 3^active_sites");continue
         try:
@@ -142,9 +150,13 @@ def main(argv:Optional[Sequence[str]]=None)->int:
             failures.append(f"{path.name}: {exc}");continue
         observations.append(dict(
             pdb_id=pdb,cluster=cluster_map[pdb],seed=int(cfg.get("seed",0)),
-            active_sites=int(cfg["active_sites"]),num_bits=num_bits,
+            active_sites=int(cfg["active_sites"]),num_bits=num_bits,num_qubits=num_bits,
             configuration_count=config_count,
             log10_configuration_count=math.log10(config_count),
+            qaoa_parameter_count=qaoa_parameter_count,
+            qaoa_xy_gates=qaoa_xy_gates,
+            qaoa_zz_gates=qaoa_zz_gates,
+            qaoa_two_qubit_gates=qaoa_two_qubit_gates,
             qaoa_gap=float(q["gap"]),baseline_gap=float(b["gap"]),
             delta_gap=float(q["gap"])-float(b["gap"]),
             qaoa_hit=float(q["hit"]),baseline_hit=float(b["hit"]),
@@ -171,7 +183,12 @@ def main(argv:Optional[Sequence[str]]=None)->int:
             points.append(dict(
                 active_sites=size,
                 num_bits=float(np.mean([r["num_bits"] for r in group])),
+                num_qubits=float(np.mean([r["num_qubits"] for r in group])),
                 log10_configuration_count=float(np.mean([r["log10_configuration_count"] for r in group])),
+                qaoa_parameter_count=float(np.mean([r["qaoa_parameter_count"] for r in group])),
+                qaoa_xy_gates=float(np.mean([r["qaoa_xy_gates"] for r in group])),
+                qaoa_zz_gates=float(np.mean([r["qaoa_zz_gates"] for r in group])),
+                qaoa_two_qubit_gates=float(np.mean([r["qaoa_two_qubit_gates"] for r in group])),
                 delta_gap=float(np.mean([r["delta_gap"] for r in group])),
                 delta_hit=float(np.mean([r["delta_hit"] for r in group])),
                 repeats=len(group),
@@ -182,6 +199,9 @@ def main(argv:Optional[Sequence[str]]=None)->int:
                 [x["log10_configuration_count"] for x in points],
                 [x["delta_gap"] for x in points]),
             slope_num_bits=_slope([x["num_bits"] for x in points],[x["delta_gap"] for x in points]),
+            slope_num_qubits=_slope([x["num_qubits"] for x in points],[x["delta_gap"] for x in points]),
+            slope_two_qubit_gates=_slope(
+                [x["qaoa_two_qubit_gates"] for x in points],[x["delta_gap"] for x in points]),
             slope_active_sites=_slope([x["active_sites"] for x in points],[x["delta_gap"] for x in points]),
         ))
     if any(row["slope_log10_configuration_count"] is None for row in per_pdb):
@@ -206,8 +226,13 @@ def main(argv:Optional[Sequence[str]]=None)->int:
         size_summary.append(dict(
             active_sites=size,n_rows=len(rows),n_pdb=len({r["pdb_id"] for r in rows}),
             mean_num_bits=float(np.mean([r["num_bits"] for r in rows])),
+            mean_num_qubits=float(np.mean([r["num_qubits"] for r in rows])),
             mean_states_per_site=float(np.mean([r["num_bits"] / size for r in rows])),
             mean_log10_configuration_count=float(np.mean([r["log10_configuration_count"] for r in rows])),
+            mean_qaoa_parameter_count=float(np.mean([r["qaoa_parameter_count"] for r in rows])),
+            mean_qaoa_xy_gates=float(np.mean([r["qaoa_xy_gates"] for r in rows])),
+            mean_qaoa_zz_gates=float(np.mean([r["qaoa_zz_gates"] for r in rows])),
+            mean_qaoa_two_qubit_gates=float(np.mean([r["qaoa_two_qubit_gates"] for r in rows])),
             mean_delta_gap=float(np.mean([r["delta_gap"] for r in rows])),
             mean_delta_hit=float(np.mean([r["delta_hit"] for r in rows])),
         ))
@@ -216,6 +241,13 @@ def main(argv:Optional[Sequence[str]]=None)->int:
         sign_interpretation="negative slope means QAOA relative gap improves versus the classical baseline as complexity increases",
         simulator_scope="classical exact-subspace finite-shot QAOA; not hardware quantum speedup",
         primary_predictor="log10_configuration_count",
+        descriptive_resource_axes=[
+            "num_qubits","qaoa_two_qubit_gates","qaoa_xy_gates","qaoa_zz_gates",
+        ],
+        resource_accounting=(
+            "logical pre-transpilation gates for the implemented penalty-free cost "
+            "Hamiltonian plus local XY mixer; W-state StatePrep decomposition excluded"
+        ),
         primary_response=f"qaoa_gap_minus_{args.baseline}_gap",
         primary_pruning=args.primary_pruning,baseline=args.baseline,
         primary_outputs=args.primary_outputs,primary_objective=args.primary_objective,
@@ -235,22 +267,26 @@ def main(argv:Optional[Sequence[str]]=None)->int:
         f"Primary pruning: {args.primary_pruning}; baseline: {args.baseline}; p={args.primary_depth}; "
         f"outputs={args.primary_outputs}; objective={args.primary_objective}; restarts={args.primary_restarts}.",
         f"Primary predictor: log10(feasible configuration count). Active-site levels: {sizes}.",
+        "Descriptive quantum-resource axes: logical qubits and pre-transpilation two-qubit "
+        "gates (ZZ cost + XY mixer); W-state StatePrep decomposition is excluded.",
         "Negative slope means QAOA's energy-gap difference relative to the classical baseline becomes more favorable as complexity increases.",
         "",
         f"Independent family/structure clusters: {primary['n_clusters']}; mean cluster slope: {primary['mean_slope']}; "
         f"95% bootstrap CI: [{primary['ci_low']}, {primary['ci_high']}]; sign-flip p={primary['p_value']}.",
         "",
-        "| Active sites | Rows | PDBs | Mean QUBO bits | Mean states/site | Mean log10(|Omega|) | Mean QAOA-baseline gap | Mean QAOA-baseline hit |",
-        "|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| Active sites | Rows | PDBs | Mean logical qubits | Mean 2q gates | Mean XY gates | Mean ZZ gates | Mean log10(|Omega|) | Mean QAOA-baseline gap | Mean QAOA-baseline hit |",
+        "|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for row in size_summary:
         lines.append(
             f"| {row['active_sites']} | {row['n_rows']} | {row['n_pdb']} | "
-            f"{row['mean_num_bits']:.6g} | {row['mean_states_per_site']:.6g} | {row['mean_log10_configuration_count']:.6g} | "
+            f"{row['mean_num_qubits']:.6g} | {row['mean_qaoa_two_qubit_gates']:.6g} | "
+            f"{row['mean_qaoa_xy_gates']:.6g} | {row['mean_qaoa_zz_gates']:.6g} | "
+            f"{row['mean_log10_configuration_count']:.6g} | "
             f"{row['mean_delta_gap']:.6g} | {row['mean_delta_hit']:.6g} |"
         )
     lines += ["",
-        "Every size uses exactly three rotamer states per site, with one representative from each chi1 well. The configuration count therefore changes with site count at fixed state resolution. QAOA depth and optimizer evaluations remain fixed across sizes, so this estimates fixed-resource scaling rather than equal-compute scaling.",
+        "Every size uses exactly three rotamer states per site, with one representative from each chi1 well. The configuration count therefore changes with site count at fixed state resolution. QAOA depth and optimizer evaluations remain fixed across sizes. Logical qubit and two-qubit-gate counts are reported as descriptive implementation resources rather than additional confirmatory hypotheses, so this remains a single preregistered primary scaling test.",
         "This is a fixed-resource shallow-QAOA scaling analysis; it does not establish hardware quantum advantage or computational speedup.",
     ]
     args.out_md.write_text("\n".join(lines)+"\n",encoding="utf-8")
