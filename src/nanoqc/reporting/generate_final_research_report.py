@@ -12,11 +12,12 @@ happened; recomputation from raw records is the only way "budget exhaustion
 was reported as convergence" or "process startup was reported as
 experiment completion" cannot slip through.
 
-Organized in exactly the order requested: data reliability -> pruning
-contribution -> search performance -> structural benefit -> cost ->
-applicability boundary, plus a stage-by-stage completed/failed/incomplete
-count table up front so a reader immediately knows which sections rest on
-complete data and which do not.
+Organized around the quantum-computing research object: quantum-instance
+encoding -> frozen QAOA protocol/resources -> quantum-classical benchmark and
+scaling -> structural/physical validation -> data reliability and problem
+reduction -> robustness/cost/applicability. A stage-by-stage
+completed/failed/incomplete count table remains up front so every claim is
+traceable to completed run artifacts.
 
 Usage:
     python -m nanoqc.reporting.generate_final_research_report --run-dir experiments_full_run_20260920_010203
@@ -1122,7 +1123,7 @@ def section_literature_basis() -> List[str]:
 def compile_report(run_dir: Path) -> str:
     ctx = ReportContext(run_dir)
     lines: List[str] = [
-        "# Final Research Report", "",
+        "# Final Quantum Optimization Research Report", "",
         f"Run directory: `{run_dir}`",
         f"Master seed: {ctx.frozen_config.get('master_seed', 'n/a')} "
         f"(derived streams: {ctx.seed_streams.get('streams', {})})",
