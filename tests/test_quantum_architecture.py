@@ -96,6 +96,7 @@ def test_quantum_protocol_is_single_source_of_truth() -> None:
     qp=config["quantum_protocol"]
     assert qp["algorithm"]=="xy_qaoa"
     assert qp["mixer"]=="local_xy"
+    assert qp["initial_state"]=="wstate"
     assert qp["primary"]["depth"]==2
     assert qp["primary"]["objective"]=="cvar"
     forbidden={"depths","max_evals","qaoa_objective","qaoa_restarts","cvar_alpha","eval_shots","parameter_scale"}
