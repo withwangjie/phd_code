@@ -64,17 +64,23 @@ def test_statistics_fails_closed_when_qc_dir_missing(tmp_path: Path) -> None:
         venv_python="python"
         config={
             "master_seed":20260917,
+            "quantum_protocol":{
+                "primary":{
+                    "depth":2,"max_evals":90,"output_shots":1000,
+                    "objective":"cvar","restarts":4,
+                },
+                "benchmark_ablation":{
+                    "objectives":["mean","cvar"],"restarts":[1,4],
+                },
+            },
             "qc_benchmark":{
                 "outputs":[10,30,100,300,1000],
-                "qaoa_objective":["mean","cvar"],
-                "qaoa_restarts":[1,4],
+                "active_sites":[6],
             },
             "statistics":{
                 "resamples":100,
                 "budget_modes":["outputs","time"],
-                "primary_outputs":1000,
-                "primary_objective":"cvar",
-                "primary_restarts":4,
+                "primary_active_sites":6,
                 "max_time_overrun_fraction":0.1,
                 "cluster_map":None,
                 "min_primary_clusters":2,
