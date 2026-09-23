@@ -31,6 +31,7 @@ from pennylane import numpy as pnp
 from scipy.optimize import minimize
 
 from nanoqc.qubo.subgraph_to_qubo import InterfaceQUBOBuilder, _virtual_pruned_graph, qubo_to_ising
+from nanoqc.quantum.instance import QuantumOptimizationInstance
 
 
 BitString = Tuple[int, ...]
@@ -290,6 +291,33 @@ class XYMixerQAOASampler:
         self._hamiltonian = self._build_cost_hamiltonian()
         self._assert_xy_number_conservation()
         self._energy_qnode = self._make_energy_qnode()
+
+    @classmethod
+    def from_instance(
+        cls,
+        instance: QuantumOptimizationInstance,
+        *,
+        p: int = 2,
+        shots: int = 1024,
+        initial_state: str = "wstate",
+        device_name: str = "default.qubit",
+        seed: int = 7,
+        coefficient_tolerance: float = 1e-10,
+        simulation_mode: str = "pennylane",
+    ) -> "XYMixerQAOASampler":
+        """Construct the solver strictly from the frozen quantum-instance contract."""
+        return cls(
+            instance.physical_self,
+            instance.physical_pair,
+            instance.site_to_variables,
+            p=p,
+            shots=shots,
+            initial_state=initial_state,
+            device_name=device_name,
+            seed=seed,
+            coefficient_tolerance=coefficient_tolerance,
+            simulation_mode=simulation_mode,
+        )
 
     def _validate_inputs(self) -> None:
         """Validate shape, one-hot partition, and NISQ-size assumptions."""
