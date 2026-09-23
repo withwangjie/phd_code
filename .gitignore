@@ -1,0 +1,20 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Per-server runtime resolution written by run_full_experiment.sh / formal_preflight.sh
+.runtime/
+
+# Virtual environment (deploy_launch.sh symlinks the shared server venv here)
+.venv
+
+# Local tooling caches
+.pytest_cache/
+
+# Launch locks written at the repository root by scripts/run_full_experiment.sh
+.run_full_experiment.lock
+.launch.guard
+
+# Packaging artefacts (pip install -e .)
+*.egg-info/
+build/
