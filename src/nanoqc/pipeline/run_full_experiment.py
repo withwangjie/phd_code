@@ -2265,6 +2265,8 @@ class Orchestrator:
         started=utc_timestamp()
         qc=self.config["qc_benchmark"]
         cfg=qc.get("sensitivity", {}) or {}
+        qprimary=quantum_primary(self.config)
+        qsensitivity=quantum_development_sensitivity(self.config)
         homology=self.config["queue_freeze"]["homology_isolation"]
         rot=qc.get("rotamer_model", {}) or {}
         ff=qc.get("coarse_force_field", {}) or {}
@@ -2281,8 +2283,8 @@ class Orchestrator:
         # eval_shots and CVaR alpha are separate axes; batch driver accepts one
         # of each per invocation, so run a frozen Cartesian set of sub-runs.
         failures=[];logs=[];argvs=[]
-        for shots in cfg.get("eval_shots",[200,500,1000]):
-            for alpha in cfg.get("cvar_alpha",[0.05,0.1,0.25,0.5,1.0]):
+        for shots in qsensitivity.get("eval_shots",[200,500,1000]):
+            for alpha in qsensitivity.get("cvar_alpha",[0.05,0.1,0.25,0.5,1.0]):
                 sub=out/f"shots_{shots}_alpha_{str(alpha).replace('.','p')}"
                 argv=[
                     self.venv_python,"-m", module_name("batch_benchmark_hard_set.py"),"--research-ablation",
@@ -2290,8 +2292,8 @@ class Orchestrator:
                     "--checkpoint",str(self.checkpoint_dir()/qc.get("checkpoint","best_egnn_pruning.pt")),
                     "--out-dir",str(sub),"--pruning","egnn",
                     "--radii",str(qc.get("radii",[6.0])[0]),
-                    "--depths",*[str(v) for v in cfg.get("depths",[1,2,3])],
-                    "--max-evals",*[str(v) for v in cfg.get("max_evals",[90,180,300])],
+                    "--depths",*[str(v) for v in qsensitivity.get("depths",[1,2,3])],
+                    "--max-evals",*[str(v) for v in qsensitivity.get("max_evals",[90,180,300])],
                     "--active-sites",str(cfg.get("active_sites",
                         self.config.get("statistics",{}).get("primary_active_sites",6))),
                     "--vhh-identity-threshold",str(homology.get("vhh_full_chain_identity",0.80)),
@@ -2317,8 +2319,9 @@ class Orchestrator:
                     "--rotamer-sigma-offsets",*[str(v) for v in rot.get("sigma_offsets",[-1,0,1])],
                     "--energy-calibration-file",str(calibration),"--require-calibrated-energy",
                     "--outputs",str(cfg.get("outputs",300)),"--qaoa-objective","cvar",
-                    "--qaoa-restarts","4","--cvar-alpha",str(alpha),"--eval-shots",str(shots),
-                    "--parameter-scale",str(qc.get("parameter_scale","max_coefficient")),
+                    "--qaoa-restarts",str(qprimary.get("restarts",4)),
+                    "--cvar-alpha",str(alpha),"--eval-shots",str(shots),
+                    "--parameter-scale",str(qprimary.get("parameter_scale","max_coefficient")),
                     "--sa-passes",str(qc.get("sa_passes",100)),
                     "--greedy-passes",str(qc.get("greedy_passes",50)),
                     "--energy-window",str(qc.get("energy_window",2.0)),
@@ -2350,8 +2353,8 @@ class Orchestrator:
                         f"shots={shots}, alpha={alpha}, failures_total="
                         f"{summary.get('failures_total')}")
         aggregate_rows=[]
-        for shots in cfg.get("eval_shots",[200,500,1000]):
-            for alpha in cfg.get("cvar_alpha",[0.05,0.1,0.25,0.5,1.0]):
+        for shots in qsensitivity.get("eval_shots",[200,500,1000]):
+            for alpha in qsensitivity.get("cvar_alpha",[0.05,0.1,0.25,0.5,1.0]):
                 sub=out/f"shots_{shots}_alpha_{str(alpha).replace('.','p')}"
                 metrics=sub/"metrics.csv"
                 if not metrics.is_file():
@@ -2403,10 +2406,10 @@ class Orchestrator:
                             ("--out-dir",[str(sub)]),
                             ("--active-sites",[str(sites)]),
                             ("--states-per-site",[str(states)]),
-                            ("--depths",[str(self.config.get("statistics",{}).get("primary_depth",2))]),
-                            ("--max-evals",[str(self.config.get("statistics",{}).get("primary_max_evals",90))]),
-                            ("--eval-shots",[str(qc.get("eval_shots",500))]),
-                            ("--cvar-alpha",[str(qc.get("cvar_alpha",0.1))]),
+                            ("--depths",[str(qprimary.get("depth",2))]),
+                            ("--max-evals",[str(qprimary.get("max_evals",90))]),
+                            ("--eval-shots",[str(qprimary.get("eval_shots",500))]),
+                            ("--cvar-alpha",[str(qprimary.get("cvar_alpha",0.1))]),
                         ):
                             command=replace_option(command,name,values)
                         rc,log=self._run_subprocess(f"rotamer_resolution_{sites}_{states}",command)
@@ -2500,7 +2503,7 @@ class Orchestrator:
         atomic_write_json(out/"sensitivity_summary.json",{
             "scope":"development-only",
             "primary_protocol_unchanged":True,
-            "subruns_planned":len(cfg.get("eval_shots",[200,500,1000]))*len(cfg.get("cvar_alpha",[0.05,0.1,0.25,0.5,1.0])),
+            "subruns_planned":len(qsensitivity.get("eval_shots",[200,500,1000]))*len(qsensitivity.get("cvar_alpha",[0.05,0.1,0.25,0.5,1.0])),
             "subruns_summarized":len(aggregate_rows),
             "failures":failures,
             "rows":aggregate_rows,
@@ -2525,6 +2528,8 @@ class Orchestrator:
     def stage_qc_benchmark(self) -> StageResult:
         started = utc_timestamp()
         cfg = self.config["qc_benchmark"]
+        qprimary=quantum_primary(self.config)
+        qablation=quantum_benchmark_ablation(self.config)
         out_dir = self.run_dir / "qc_benchmark"
         # (requirement #2) --seeds are the shared repeat/perturb identities
         # (site-selection input, shared by all four solvers within a case) --
@@ -2544,8 +2549,8 @@ class Orchestrator:
             "--master-seed", str(self.config["master_seed"]),
             "--pruning", *cfg.get("pruning", ["egnn", "contact", "distance", "cdr", "random"]),
             "--radii", *[str(r) for r in cfg.get("radii", [6.0, 10.0])],
-            "--depths", *[str(d) for d in cfg.get("depths", [1, 2, 3])],
-            "--max-evals", *[str(m) for m in cfg.get("max_evals", [90, 300])],
+            "--depths", str(qprimary.get("depth",2)),
+            "--max-evals", str(qprimary.get("max_evals",90)),
             "--active-sites", *[str(v) for v in cfg.get("active_sites", [6])],
             "--states-per-site", "3",
             "--vhh-identity-threshold", str(self.config["queue_freeze"]["homology_isolation"].get("vhh_full_chain_identity", 0.80)),
@@ -2570,18 +2575,16 @@ class Orchestrator:
             "--rotamer-probability-floor", str(cfg.get("rotamer_model", {}).get("probability_floor", 1e-4)),
             "--rotamer-sigma-offsets", *[str(v) for v in cfg.get("rotamer_model", {}).get("sigma_offsets", [-1.0,0.0,1.0])],
             "--outputs", *[str(o) for o in cfg.get("outputs", [10, 30, 100, 300, 1000])],
-            "--qaoa-objective", *cfg.get("qaoa_objective", ["mean", "cvar"]),
-            "--qaoa-restarts", *[str(r) for r in cfg.get("qaoa_restarts", [1, 4])],
-            "--cvar-alpha", str(cfg.get("cvar_alpha", 0.1)),
-            "--eval-shots", str(cfg.get("eval_shots", 500)),
-            "--parameter-scale", cfg.get("parameter_scale", "max_coefficient"),
+            "--qaoa-objective", *[str(v) for v in qablation.get("objectives",["mean","cvar"])],
+            "--qaoa-restarts", *[str(r) for r in qablation.get("restarts",[1,4])],
+            "--cvar-alpha", str(qprimary.get("cvar_alpha",0.1)),
+            "--eval-shots", str(qprimary.get("eval_shots",500)),
+            "--parameter-scale", str(qprimary.get("parameter_scale","max_coefficient")),
             "--sa-passes", str(cfg.get("sa_passes", 100)),
             "--greedy-passes", str(cfg.get("greedy_passes", 50)),
             "--energy-window", str(cfg.get("energy_window", 2.0)),
-            "--time-donor-objective", str(
-                self.config.get("statistics", {}).get("primary_objective", "cvar")),
-            "--time-donor-restarts", str(
-                self.config.get("statistics", {}).get("primary_restarts", 4)),
+            "--time-donor-objective", str(qprimary.get("objective","cvar")),
+            "--time-donor-restarts", str(qprimary.get("restarts",4)),
             "--max-targets", str(cfg.get("max_targets", 0)),
             "--workers", str(cfg.get("workers", 1)),
             "--omp-threads", str(self.config.get("hardware", {}).get("cpu_threads_per_process", 2)),
