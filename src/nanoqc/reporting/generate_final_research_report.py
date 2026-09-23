@@ -939,6 +939,36 @@ def section_cost(ctx: ReportContext) -> List[str]:
                           "the incremental wall-clock time of each cached row. Oracle/exact-landscape preprocessing "
                           "(`oracle_seconds`/`build_seconds`) is excluded.")
             lines.append("")
+            qprimary=_quantum_primary(ctx)
+            qrows=[
+                r for r in rows
+                if r.get("solver")=="qaoa"
+                and r.get("qaoa_objective")==str(qprimary.get("objective","cvar"))
+                and int(float(r.get("qaoa_restarts",0) or 0))==int(qprimary.get("restarts",4))
+                and int(float(r.get("outputs",0) or 0))==int(qprimary.get("output_shots",1000))
+            ]
+            if qrows:
+                lines.append("### 8.2 Logical QAOA resources (pre-transpilation)")
+                lines.append("")
+                lines.append("| Active sites | Cases | Mean qubits | Mean 2q gates | Mean XY | Mean ZZ | Mean total measurement shots |")
+                lines.append("|---:|---:|---:|---:|---:|---:|---:|")
+                for sites in sorted({int(float(r["active_sites"])) for r in qrows}):
+                    group=[r for r in qrows if int(float(r["active_sites"]))==sites]
+                    def qmean(field: str) -> Optional[float]:
+                        values=[float(r[field]) for r in group if r.get(field) not in (None,"","None")]
+                        return sum(values)/len(values) if values else None
+                    lines.append(
+                        f"| {sites} | {len(group)} | {_fmt(qmean('num_bits'))} | "
+                        f"{_fmt(qmean('qaoa_two_qubit_gates'))} | {_fmt(qmean('qaoa_xy_gates'))} | "
+                        f"{_fmt(qmean('qaoa_zz_gates'))} | {_fmt(qmean('qaoa_total_measurement_shots'))} |"
+                    )
+                lines.append("")
+                lines.append(
+                    "These are logical, pre-transpilation counts for the implemented cost and XY-mixer layers; "
+                    "they are not hardware-native gate counts and exclude decomposition of local W-state StatePrep. "
+                    "This separation follows resource-transparent quantum-optimization benchmarking guidance [R20,R29]."
+                )
+                lines.append("")
     for label, directory in (("dev queue", ctx.run_dir / "dev_queue"), ("validation queue", ctx.run_dir / "validation_queue")):
         rows = _load_recovery_rows(directory)
         if not rows:
