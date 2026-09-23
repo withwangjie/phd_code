@@ -1114,10 +1114,9 @@ def _ablation_run_case(data: Any, scorer: Any, config: dict, args: Any, artifact
     # measurement_seed/sample_seed overrides directly, so a second instance
     # is not needed -- the base constructor seed below is only the fallback
     # used if a call site ever omits an explicit override.
-    sampler = XYMixerQAOASampler(
-        quantum_instance.physical_self, quantum_instance.physical_pair,
-        quantum_instance.site_to_variables, p=config["depth"], seed=optimize_seed,
-        shots=args.outputs[0], simulation_mode="subspace", device_name="default.qubit")
+    sampler = XYMixerQAOASampler.from_instance(
+        quantum_instance,p=config["depth"],seed=optimize_seed,
+        shots=args.outputs[0],simulation_mode="subspace",device_name="default.qubit")
     built = time.perf_counter()
     truth = sampler.enumerate_ground_states()
     energies = sampler.feasible_energy_map()
