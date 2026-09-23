@@ -31,6 +31,7 @@ site-variable diagonal, ``+2*lambda`` between rotamers of the same site, and
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -45,6 +46,20 @@ from torch_geometric.data import Data
 from nanoqc.structure.residue_tables import SIDECHAIN_HEAVY_ATOMS, SYMMETRIC_SWAPS
 from nanoqc.quantum.instance import QuantumOptimizationInstance
 from nanoqc.data.safe_graph_load import load_graph
+
+
+def _sha256_path(path: Optional[Path]) -> Optional[str]:
+    """Return a content hash for an external scientific input file."""
+    if path is None:
+        return None
+    resolved=Path(path)
+    if not resolved.is_file():
+        return None
+    digest=hashlib.sha256()
+    with resolved.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024*1024),b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 # Real-atom validation is separate from the coarse-grained QUBO force field.
@@ -716,6 +731,8 @@ class QUBOResult:
                 "source_model": self.metadata.get("model"),
                 "pdb_id": self.metadata.get("pdb_id"),
                 "state_policy": self.metadata.get("state_policy"),
+                "rotamer_library_path": self.metadata.get("rotamer_library_path"),
+                "rotamer_library_sha256": self.metadata.get("rotamer_library_sha256"),
                 "lambda_value": self.lambda_value,
                 "lambda_lower_bound": self.lambda_lower_bound,
                 "ising_energy_equivalence_max_error": self.metadata.get(
@@ -1709,6 +1726,7 @@ class InterfaceQUBOBuilder:
             "state_policy": (f"fixed_{self.fixed_states_per_site}_chi1_coverage" if self.fixed_chi1_wells and self.fixed_states_per_site != 3
                              else "fixed_three_chi1_wells" if self.fixed_chi1_wells else "adaptive_3_to_6"),
             "rotamer_library_path": (None if self.rotamer_library_path is None else str(self.rotamer_library_path)),
+            "rotamer_library_sha256": _sha256_path(self.rotamer_library_path),
             "rotamer_probability_floor": self.rotamer_probability_floor,
             "rotamer_sigma_offsets": list(self.rotamer_sigma_offsets),
             "energy_calibration": asdict(cal),
@@ -2362,6 +2380,7 @@ class AllAtomInterfaceQUBOBuilder:
                 candidate_chi_degrees=[list(candidate.get("chi_degrees",(candidate["angle"],))) for candidate in self.candidates],
                 rotamer_state_policy=(f"{self.rotamer_mode} full side-chain rotamer states (chi1..chiN) -> 3--6 retained under <=30 variables" if self.rotamer_mode=="dunbrack2010" and self.chi1_angles_override is None else "explicit legacy chi1 angle override"),
                 rotamer_library_path=(None if self.rotamer_library_path is None else str(self.rotamer_library_path)),
+                rotamer_library_sha256=_sha256_path(self.rotamer_library_path),
                 candidate_scope=("Dunbrack full side-chain chi state; Amber14 single-candidate prescreen, no affinity claim"
                     if self.rotamer_mode=="dunbrack2010" and self.chi1_angles_override is None
                     else "legacy chi1-only candidate; no affinity claim")))
