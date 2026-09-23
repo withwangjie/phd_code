@@ -451,9 +451,9 @@ statistics:
   primary_structural_endpoint: "final_rmsd"
   primary_structural_contrast: "qaoa_vs_sa"
   max_time_overrun_fraction: 0.10
-  # By default the same required family/domain/structure cluster map used for
-  # queue isolation is reused here; override only with an equivalently frozen map.
-  cluster_map: "data/independence/pdb_family_clusters.json"
+  # Statistics always reuse the exact run-local family/structure cluster map
+  # frozen by queue_freeze. A separate statistics.cluster_map override is
+  # intentionally forbidden to prevent split/statistics cluster drift.
 
 # ---------------------------------------------------------------------------
 # Stage 7: final report (generate_final_research_report.py)
