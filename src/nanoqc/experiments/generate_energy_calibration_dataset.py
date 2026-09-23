@@ -34,6 +34,16 @@ from nanoqc.common.repo_io import sha256_file as sha256
 from nanoqc.data.safe_graph_load import load_graph
 
 
+def _manifest_graph_path(root: Path, relative: object) -> Path:
+    if not isinstance(relative, str) or not relative or Path(relative).is_absolute():
+        raise ValueError("Graph manifest path must be relative")
+    base = root.resolve()
+    path = (base / relative.replace("\\", "/")).resolve()
+    if not path.is_relative_to(base) or not path.is_file():
+        raise ValueError(f"Graph manifest path escapes dataset or is missing: {relative}")
+    return path
+
+
 def assignment_components(qubo, selected: list[int]) -> tuple[float,float,float,float]:
     meta=qubo.metadata
     prior=np.asarray(meta["raw_prior_energy"],dtype=float)
@@ -243,7 +253,7 @@ def main() -> int:
         writer.writeheader()
         for row in train:
             pdb=str(row.get("pdb_id","")).lower()
-            graph_path=args.dataset/Path(row["path"].replace("\\","/"))
+            graph_path=_manifest_graph_path(args.dataset, row.get("path"))
             try:
                 if cluster_map is not None and pdb not in cluster_map:
                     raise ValueError(f"Calibration cluster map missing training PDB {pdb}")

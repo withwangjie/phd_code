@@ -35,6 +35,8 @@ def validate_prediction_contract(case: Mapping[str, Any], manifest_directory: Pa
         return candidate
 
     path = confined(case['independence_audit'], 'independence_audit')
+    if not path.is_file():
+        raise ValueError('independence_audit file does not exist')
     if hashlib.sha256(path.read_bytes()).hexdigest() != case['independence_audit_sha256']:
         raise ValueError('Independence audit hash mismatch')
     audit = json.loads(path.read_text(encoding='utf-8'))
@@ -48,5 +50,7 @@ def validate_prediction_contract(case: Mapping[str, Any], manifest_directory: Pa
         raise ValueError('Split audit must include method and hashed evidence files')
     for relative, digest in audit['evidence_files'].items():
         evidence = confined(relative, f'evidence file {relative!r}')
+        if not evidence.is_file():
+            raise ValueError(f'Split evidence file does not exist: {relative}')
         if hashlib.sha256(evidence.read_bytes()).hexdigest() != digest:
             raise ValueError(f'Split evidence changed: {relative}')

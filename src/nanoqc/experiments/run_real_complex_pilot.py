@@ -25,6 +25,17 @@ from nanoqc.data.sequence_identity import nw_identity, length_coverage
 from nanoqc.data.safe_graph_load import load_graph
 
 
+def _manifest_graph_path(root: Path, relative: object) -> Path:
+    """Resolve a graph-manifest path without permitting directory escape."""
+    if not isinstance(relative, str) or not relative or Path(relative).is_absolute():
+        raise ValueError("Graph manifest path must be relative")
+    base = root.resolve()
+    path = (base / relative.replace("\\", "/")).resolve()
+    if not path.is_relative_to(base) or not path.is_file():
+        raise ValueError(f"Graph manifest path escapes dataset or is missing: {relative}")
+    return path
+
+
 def identity_detail(a: str, b: str, threshold: float = .4) -> dict:
     """Global identity plus the length-ratio coverage gate, as an auditable record.
 
@@ -465,7 +476,7 @@ def main(argv=None) -> int:
         else:
             sequence_inventory={"vhh": {}, "antigen": {}}
             for row in tqdm(training,desc="Training sequence inventory"):
-                path=args.dataset/Path(row["path"].replace("\\","/"))
+                path=_manifest_graph_path(args.dataset, row.get("path"))
                 if _ablation_digest(path)!=row["sha256"]:
                     raise ValueError(f"Training graph hash mismatch {path}")
                 data=load_graph(path)
@@ -517,7 +528,7 @@ def main(argv=None) -> int:
                     if family_cluster in train_clusters or family_cluster in selected_clusters:
                         independence_status="excluded_family_cluster_overlap"
                         raise ValueError(f"Family/structure cluster overlap: {family_cluster}")
-                path=args.dataset/Path(row["path"].replace("\\","/"))
+                path=_manifest_graph_path(args.dataset, row.get("path"))
                 if _ablation_digest(path)!=row["sha256"]: raise ValueError("Test graph hash mismatch")
                 graph=load_graph(path)
                 raw=extract_source(graph.source_id,args.data_root,work/"raw.pdb")

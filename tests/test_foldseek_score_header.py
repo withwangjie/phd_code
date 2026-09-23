@@ -59,3 +59,17 @@ def test_foldseek_rejects_invalid_pdb_identifier(tmp_path):
             assert "invalid four-character PDB identifier" in str(exc)
         else:
             raise AssertionError("Invalid PDB identifier was accepted")
+
+
+def test_foldseek_does_not_truncate_pdb_identifier(tmp_path):
+    pairs=tmp_path/"pairs.tsv"
+    pairs.write_text("query\ttarget\tqtmscore\n1abc_extra\t2def\t0.8\n",encoding="utf-8")
+    argv=["cluster-map","--pairs",str(pairs),"--out-json",str(tmp_path/"map.json"),
+          "--min-score","0.5","--score-semantics","qtmscore"]
+    with patch.object(sys,"argv",argv):
+        try:
+            main()
+        except ValueError as exc:
+            assert "Invalid PDB identifier" in str(exc)
+        else:
+            raise AssertionError("Malformed PDB identifier was silently truncated")

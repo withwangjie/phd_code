@@ -25,7 +25,12 @@ def norm_id(value: str) -> str:
         if value.lower().endswith(suffix):
             value = value[: -len(suffix)]
             break
-    return value[:4].lower() if len(value) >= 4 else value.lower()
+    normalized = value.lower()
+    if re.fullmatch(r"[a-z0-9]{4}", normalized):
+        return normalized
+    if re.fullmatch(r"[a-z0-9]{4}_assembly[0-9]+", normalized):
+        return normalized[:4]
+    raise ValueError(f"Invalid PDB identifier or structure filename: {value!r}")
 
 
 class DSU:

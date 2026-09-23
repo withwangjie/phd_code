@@ -201,7 +201,13 @@ def main() -> int:
     train=[]
     train_pdb=set()
     for row in train_rows:
-        path=args.training_dataset/Path(str(row["path"]).replace("\\","/"))
+        relative=row.get("path")
+        if not isinstance(relative,str) or not relative or Path(relative).is_absolute():
+            raise ValueError(f"Training graph manifest path must be relative: {relative!r}")
+        root=args.training_dataset.resolve()
+        path=(root/relative.replace("\\","/")).resolve()
+        if not path.is_relative_to(root):
+            raise ValueError(f"Training graph manifest path escapes dataset: {relative}")
         if not path.is_file() or sha256(path)!=row["sha256"]:
             raise ValueError(f"Training graph missing/hash mismatch: {path}")
         item=graph_sequences(path)

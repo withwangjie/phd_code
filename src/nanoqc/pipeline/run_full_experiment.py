@@ -3,12 +3,10 @@
 nanobody-interface quantum/classical benchmark research pipeline.
 
 This is an ORCHESTRATOR, not a reimplementation: every stage below shells
-out to an existing, already-implemented, already-documented module in this
-repository (audit_all_datasets.py, build_final_pyg_dataset.py,
+out to an existing, already-implemented module in this repository
+(audit_all_datasets.py, build_final_pyg_dataset.py,
 train_egnn_pruning.py, batch_benchmark_hard_set.py, run_real_complex_pilot.py,
-generate_final_research_report.py) via subprocess, exactly as
-RESEARCH_EXPERIMENTS_README.md / REAL_COMPLEX_EXPERIMENT_PROTOCOL.md already
-document running them by hand, one command at a time. This script's only job
+generate_final_research_report.py) via subprocess. This script's only job
 is to chain them safely, unattended, with provenance, resumability, and
 honest failure reporting -- it contains no scientific logic of its own.
 
