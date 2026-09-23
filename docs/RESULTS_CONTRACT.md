@@ -173,6 +173,12 @@ External structural baseline requires:
 - `structural_baselines/external_baseline_report.md`
 
 ### statistics
+
+All statistical analyses must consume the exact run-local
+`independence/pdb_family_clusters.json` frozen by `queue_freeze`. A separate
+repository-level `statistics.cluster_map` override is forbidden, because
+train/test isolation and cluster-level inference must use the same partition.
+
 Required:
 - `qc_benchmark/statistics_outputs.json`
 - `qc_benchmark/statistics_outputs.md`
