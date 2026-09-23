@@ -372,11 +372,14 @@ def section_pruning_contribution(ctx: ReportContext) -> List[str]:
 
 
 # ---------------------------------------------------------------------------
-# Section 3: search performance (budget curve, objective ablation)
+# Sections 1-3: quantum encoding, frozen protocol, and search/scaling performance
 # ---------------------------------------------------------------------------
 
 def section_quantum_problem_encoding(ctx: ReportContext) -> List[str]:
     lines=["## 1. Quantum problem encoding",""]
+    if not stage_ok(ctx,"qc_benchmark"):
+        lines += ["qc_benchmark did not complete; no formal quantum-instance summary is reported.",""]
+        return lines
     case_paths=sorted((ctx.run_dir/"qc_benchmark"/"cases").glob("*.json"))
     payloads=[]
     for path in case_paths:
@@ -941,9 +944,14 @@ def section_cost(ctx: ReportContext) -> List[str]:
                           "(`oracle_seconds`/`build_seconds`) is excluded.")
             lines.append("")
             qprimary=_quantum_primary(ctx)
+            stats_cfg=ctx.frozen_config.get("statistics",{}) or {}
+            primary_pruning=str(stats_cfg.get("primary_pruning","egnn"))
+            primary_radius=float(stats_cfg.get("primary_radius",6.0))
             qrows=[
                 r for r in rows
                 if r.get("solver")=="qaoa"
+                and str(r.get("pruning",""))==primary_pruning
+                and abs(float(r.get("radius",primary_radius))-primary_radius)<=1e-12
                 and r.get("qaoa_objective")==str(qprimary.get("objective","cvar"))
                 and int(float(r.get("qaoa_restarts",0) or 0))==int(qprimary.get("restarts",4))
                 and int(float(r.get("outputs",0) or 0))==int(qprimary.get("output_shots",1000))
