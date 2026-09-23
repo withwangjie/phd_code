@@ -1,17 +1,15 @@
-"""Cluster-level paired inference kernels shared by the QC statistics stages.
+"""Cluster-level paired inference kernels shared by formal statistics stages.
 
-``bootstrap_sign_flip`` is the exact algorithm formerly copied into
-``batch_benchmark_hard_set._paired_effect`` (now :func:`paired_effect`) and
-``analyze_quantum_scaling._cluster_effect`` (same RNG, same draw order, same
-batching of 256, same tolerance), so both wrappers produce bit-identical
-results. ``holm_step_down`` is the Holm adjustment shared by
-:func:`holm_adjust` (formerly ``batch_benchmark_hard_set._holm_adjust``) and
-``analyze_structure_recovery.holm_adjust_named``.
+The QC/scaling and structural analyses use the same two-sided sign-flip test:
+exact enumeration for at most 16 independent clusters, otherwise the caller's
+configured Monte-Carlo resample count, with the same numerical tolerance and
+finite-sample correction. QC/scaling keeps its historical RNG draw order so
+existing benchmark results remain reproducible.
 
-``analyze_structure_recovery.percentile_ci`` / ``sign_flip_p`` are NOT routed
-through here: they implement a different resampling scheme (per-draw
-``rng.choice``, exact enumeration up to 20 clusters, 200 000 Monte-Carlo
-trials, tolerance 1e-15), and merging them would change reported numbers.
+Structural percentile bootstrap confidence intervals remain a separate
+resampling operation; only the sign-flip hypothesis-test kernel is shared.
+``holm_step_down`` is the Holm adjustment shared by QC and structural
+confirmatory analyses.
 """
 from __future__ import annotations
 
@@ -19,6 +17,42 @@ import itertools
 from typing import Optional, Sequence, Tuple
 
 import numpy as np
+
+
+SIGN_FLIP_EXACT_MAX_CLUSTERS = 16
+
+
+def _sign_flip_pvalue(d: np.ndarray, rng: np.random.Generator, resamples: int) -> float:
+    """Shared two-sided sign-flip kernel for independent cluster differences."""
+    observed = abs(float(d.mean()))
+    tolerance = 1e-12 * max(1.0, observed)
+    if len(d) <= SIGN_FLIP_EXACT_MAX_CLUSTERS:
+        extreme = sum(
+            abs(float(np.dot(signs, d) / len(d))) >= observed - tolerance
+            for signs in itertools.product((-1, 1), repeat=len(d))
+        )
+        return float(extreme / (2 ** len(d)))
+
+    extreme = 0
+    for start in range(0, resamples, 256):
+        size = min(256, resamples - start)
+        signs = rng.choice([-1.0, 1.0], size=(size, len(d)))
+        extreme += int(
+            np.count_nonzero(np.abs(signs @ d / len(d)) >= observed - tolerance)
+        )
+    return float((extreme + 1) / (resamples + 1))
+
+
+def sign_flip_pvalue(values: Sequence[float], seed: int, resamples: int) -> Optional[float]:
+    """Two-sided cluster sign-flip p-value under the shared formal protocol."""
+    d = np.asarray(values, dtype=float)
+    if d.ndim != 1 or not np.isfinite(d).all():
+        raise ValueError("sign-flip values must be a finite 1-D sequence")
+    if len(d) < 2:
+        return None
+    if resamples < 1:
+        raise ValueError("resamples must be positive")
+    return _sign_flip_pvalue(d, np.random.default_rng(seed), resamples)
 
 
 def bootstrap_sign_flip(d: np.ndarray, seed: int, resamples: int
@@ -38,20 +72,8 @@ def bootstrap_sign_flip(d: np.ndarray, seed: int, resamples: int
         size = min(256, resamples-start)
         boot.extend(d[rng.integers(0, len(d), (size, len(d)))].mean(axis=1))
     ci_low, ci_high = float(np.quantile(boot, .025)), float(np.quantile(boot, .975))
-    observed = abs(float(d.mean()))
-    tolerance = 1e-12*max(1., observed)
-    if len(d) <= 16:
-        extreme = sum(abs(float(np.dot(signs, d)/len(d))) >= observed-tolerance
-                      for signs in itertools.product((-1, 1), repeat=len(d)))
-        pvalue = extreme/(2**len(d))
-    else:
-        extreme = 0
-        for start in range(0, resamples, 256):
-            size = min(256, resamples-start)
-            signs = rng.choice([-1., 1.], size=(size, len(d)))
-            extreme += int(np.count_nonzero(np.abs(signs@d/len(d)) >= observed-tolerance))
-        pvalue = (extreme+1)/(resamples+1)
-    return ci_low, ci_high, float(pvalue)
+    pvalue = _sign_flip_pvalue(d, rng, resamples)
+    return ci_low, ci_high, pvalue
 
 
 def holm_step_down(pvalues: Sequence[float]) -> list[float]:
