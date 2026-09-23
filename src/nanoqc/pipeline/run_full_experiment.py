@@ -312,8 +312,10 @@ def _validate_scientific_config(config: Dict[str, Any]) -> None:
         raise ValueError("quantum_protocol.encoding must be one_hot_rotamer_registers")
     if str(qproto.get("mixer","")) != "local_xy":
         raise ValueError("quantum_protocol.mixer must be local_xy")
-    if str(qproto.get("initial_state","")) != "local_w_state":
-        raise ValueError("quantum_protocol.initial_state must be local_w_state")
+    if str(qproto.get("initial_state","")) != "wstate":
+        raise ValueError(
+            "quantum_protocol.initial_state must be wstate (product of local one-hot W states)"
+        )
     if str(qproto.get("simulation_scope","")) != "exact_feasible_subspace_classical_simulation":
         raise ValueError(
             "quantum_protocol.simulation_scope must explicitly identify exact feasible-subspace classical simulation"
