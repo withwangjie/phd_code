@@ -416,6 +416,7 @@ external_validation:
   external_vhh:
     required: true
     graph_dir: "data/external_vhh/graphs"
+    source_structure_dir: "data/external_vhh/structures"  # trusted raw <pdb>.pdb/.cif/.mmcif files used to verify graph residues and CA coordinates
     independence_manifest: "data/external_vhh/independence_manifest.json"
     max_targets: 0
     repeats: 10

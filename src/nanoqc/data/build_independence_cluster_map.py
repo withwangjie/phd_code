@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 from pathlib import Path
 from nanoqc.common.repo_io import sha256_file as sha256
 
@@ -104,19 +105,16 @@ def main() -> int:
             need = max(args.query_column, args.target_column,
                        args.score_column if args.min_score is not None else 0)
             if len(fields) <= need:
-                skipped_rows += 1
-                continue
+                raise ValueError(f"Pair row {total_rows} lacks a configured column")
             q = norm_id(fields[args.query_column])
             t = norm_id(fields[args.target_column])
-            if not q or not t:
-                skipped_rows += 1
-                continue
+            if not re.fullmatch(r"[a-z0-9]{4}",q) or not re.fullmatch(r"[a-z0-9]{4}",t):
+                raise ValueError(f"Pair row {total_rows} has an invalid four-character PDB identifier")
             if args.min_score is not None:
                 try:
                     score = float(fields[args.score_column])
-                except ValueError:
-                    skipped_rows += 1
-                    continue
+                except ValueError as exc:
+                    raise ValueError(f"Pair row {total_rows} has a nonnumeric {score_field}") from exc
                 if not math.isfinite(score) or not 0 <= score <= 1:
                     raise ValueError(f"Invalid {score_field} value on pair row {total_rows}")
                 if score < args.min_score:
@@ -131,6 +129,8 @@ def main() -> int:
             parser.error("--universe file not found")
         universe = [norm_id(line) for line in args.universe.read_text(encoding="utf-8").splitlines()
                     if line.strip()]
+        if any(not re.fullmatch(r"[a-z0-9]{4}",pdb) for pdb in universe):
+            raise ValueError("Clustering universe contains an invalid four-character PDB identifier")
         for pdb in universe:
             dsu.add(pdb)
 

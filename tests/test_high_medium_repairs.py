@@ -170,28 +170,48 @@ def test_statistics_resume_checks_statistics_subdirectory(tmp_path: Path) -> Non
 
     qc=tmp_path/"qc_benchmark"
     qc.mkdir()
+    paired={"effects":[{"baseline":"sa","metric":"gap","n_clusters":10}],"exclusions":{}}
     for mode in ("outputs","time"):
-        (qc/f"statistics_{mode}.json").write_text("{}",encoding="utf-8")
+        (qc/f"statistics_{mode}.json").write_text(json.dumps(paired),encoding="utf-8")
         (qc/f"statistics_{mode}.md").write_text("ok",encoding="utf-8")
     stats=tmp_path/"statistics"
     stats.mkdir()
-    (stats/"quantum_scaling_statistics.json").write_text("{}",encoding="utf-8")
+    (stats/"quantum_scaling_statistics.json").write_text(
+        json.dumps({"primary":{"n_clusters":10}}),encoding="utf-8")
     (stats/"quantum_scaling_statistics.md").write_text("ok",encoding="utf-8")
     valid_rq5={"n_clusters":10,"spearman_rho":0.4,"p_value":0.03,
                "ci_low":0.1,"ci_high":0.7,"p_holm_confirmatory_family":0.06}
     (stats/"structure_statistics.json").write_text(
-        json.dumps({"rq5":valid_rq5}),encoding="utf-8")
+        json.dumps({"primary":{"n_clusters":10},"rq5":valid_rq5}),encoding="utf-8")
     (stats/"structure_statistics.md").write_text("ok",encoding="utf-8")
     ok,detail=Orchestrator._validate_completed_stage_artifacts(
         Dummy(),"statistics",require_results_manifest=False)
     assert ok is True, detail
 
     (stats/"structure_statistics.json").write_text(
-        json.dumps({"rq5":{**valid_rq5,"spearman_rho":None}}),encoding="utf-8")
+        json.dumps({"primary":{"n_clusters":10},"rq5":{**valid_rq5,"spearman_rho":None}}),encoding="utf-8")
     ok,detail=Orchestrator._validate_completed_stage_artifacts(
         Dummy(),"statistics",require_results_manifest=False)
     assert ok is False
     assert "spearman_rho" in detail
+
+    (stats/"structure_statistics.json").write_text(
+        json.dumps({"primary":{"n_clusters":10},"rq5":valid_rq5}),encoding="utf-8")
+    (stats/"quantum_scaling_statistics.json").write_text(
+        json.dumps({"primary":{"n_clusters":0}}),encoding="utf-8")
+    ok,detail=Orchestrator._validate_completed_stage_artifacts(
+        Dummy(),"statistics",require_results_manifest=False)
+    assert ok is False
+    assert "Scaling inference" in detail
+
+    (stats/"quantum_scaling_statistics.json").write_text(
+        json.dumps({"primary":{"n_clusters":10}}),encoding="utf-8")
+    (qc/"statistics_outputs.json").write_text(json.dumps({
+        **paired,"exclusions":{"qaoa:all_restarts_failed":1}}),encoding="utf-8")
+    ok,detail=Orchestrator._validate_completed_stage_artifacts(
+        Dummy(),"statistics",require_results_manifest=False)
+    assert ok is False
+    assert "denominator is incomplete" in detail
 
 
 

@@ -139,6 +139,13 @@ def resolve(scientific: dict[str,Any], server: dict[str,Any]) -> tuple[dict[str,
     out["paths"]["data_root"]=data_root
     out["paths"]["run_root"]=run_root
 
+    external_source=os.environ.get("QP_EXTERNAL_VHH_SOURCE_DIR") or (
+        (server.get("paths") or {}).get("external_vhh_source_dir")
+    )
+    if external_source and external_source!="auto":
+        out.setdefault("external_validation",{}).setdefault("external_vhh",{})[
+            "source_structure_dir"]=str(Path(str(external_source)).expanduser().resolve())
+
     out.setdefault("data_audit",{})["workers"]=workers
     out.setdefault("queue_freeze",{}).setdefault("graph_build",{})["workers"]=graph_workers
     out.setdefault("egnn_train",{})["nproc_per_node"]=ranks
@@ -173,6 +180,8 @@ def resolve(scientific: dict[str,Any], server: dict[str,Any]) -> tuple[dict[str,
         "venv":_resolve_venv(server),
         "data_root":data_root,
         "run_root":run_root,
+        "external_vhh_source_dir":out.get("external_validation",{}).get(
+            "external_vhh",{}).get("source_structure_dir"),
         "cpu_physical_cores":cpu,
         "ram_gb":ram,
         "cuda_gpus":gpus,

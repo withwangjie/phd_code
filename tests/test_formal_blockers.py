@@ -96,6 +96,74 @@ def test_statistics_fails_closed_when_qc_dir_missing(tmp_path: Path) -> None:
     assert "input directory is missing" in result.detail
 
 
+def test_qc_resume_rechecks_failure_fraction(tmp_path: Path) -> None:
+    class Dummy:
+        run_dir=tmp_path
+        config={"qc_benchmark":{"max_failure_fraction":0.0}}
+        _artifacts_present=staticmethod(Orchestrator._artifacts_present)
+
+    root=tmp_path/"qc_benchmark"
+    (root/"cases").mkdir(parents=True)
+    for name in ("run_manifest.json","metrics.csv","summary.md",
+                 "failed_case_keys.json","seed_streams.json"):
+        (root/name).write_text("x",encoding="utf-8")
+    (root/"cases"/"case.json").write_text("{}",encoding="utf-8")
+    (root/"run_summary.json").write_text(json.dumps({
+        "closed":True,"cases_completed_total":1,"total_cases_planned":2,
+        "failures_total":1}),encoding="utf-8")
+    ok,detail=Orchestrator._validate_completed_stage_artifacts(
+        Dummy(),"qc_benchmark",require_results_manifest=False)
+    assert ok is False
+    assert "failure fraction" in detail
+
+
+def test_structure_resume_rejects_failed_validation_target(tmp_path: Path) -> None:
+    class Dummy:
+        run_dir=tmp_path
+        config={}
+        _artifacts_present=staticmethod(Orchestrator._artifacts_present)
+
+    for label in ("dev_queue","validation_queue"):
+        root=tmp_path/label
+        root.mkdir()
+        for name in ("run_manifest.json","seed_streams.json","eligibility.json",
+                     "selected_targets.json","real_complex_metrics.csv","real_complex_report.md"):
+            (root/name).write_text("x",encoding="utf-8")
+    (tmp_path/"dev_queue"/"run_summary.json").write_text(
+        json.dumps({"closed":True}),encoding="utf-8")
+    (tmp_path/"validation_queue"/"run_summary.json").write_text(json.dumps({
+        "closed":True,"frozen_set_accounting_ok":True,
+        "structure_experiment_failed_targets":["1abc"]}),encoding="utf-8")
+    ok,detail=Orchestrator._validate_completed_stage_artifacts(
+        Dummy(),"structure_experiment",require_results_manifest=False)
+    assert ok is False
+    assert "failed targets" in detail
+
+
+def test_results_manifest_detects_same_size_artifact_change(tmp_path: Path) -> None:
+    import hashlib
+
+    class Dummy:
+        run_dir=tmp_path
+        results_manifest_dir=tmp_path/"results_manifests"
+        _artifacts_present=staticmethod(Orchestrator._artifacts_present)
+
+    artifact=tmp_path/"env_check.json"
+    artifact.write_text('{"ok":1}',encoding="utf-8")
+    Dummy.results_manifest_dir.mkdir()
+    (Dummy.results_manifest_dir/"env_check.json").write_text(json.dumps({
+        "stage":"env_check","status":"completed","artifact_count":1,
+        "artifacts":[{"path":"env_check.json","size_bytes":artifact.stat().st_size,
+                      "sha256":hashlib.sha256(artifact.read_bytes()).hexdigest()}],
+    }),encoding="utf-8")
+    ok,detail=Orchestrator._validate_completed_stage_artifacts(Dummy(),"env_check")
+    assert ok is True,detail
+    artifact.write_text('{"ok":2}',encoding="utf-8")
+    ok,detail=Orchestrator._validate_completed_stage_artifacts(Dummy(),"env_check")
+    assert ok is False
+    assert "sha256 mismatch" in detail
+
+
 def test_validation_freeze_requires_exact_graph_identity_and_frozen_accounting() -> None:
     source=inspect.getsource(pilot.main)
     for token in ("source_id","graph_path","graph_sha256","frozen_set_accounting_ok"):

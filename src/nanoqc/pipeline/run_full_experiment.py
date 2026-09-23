@@ -348,6 +348,8 @@ def _validate_scientific_config(config: Dict[str, Any]) -> None:
         structural=external.get("structural_baselines",{}) or {}
         if ext.get("required",False) and not ext.get("graph_dir"):
             raise ValueError("external_validation.external_vhh.graph_dir is required")
+        if ext.get("required",False) and not ext.get("source_structure_dir"):
+            raise ValueError("external_validation.external_vhh.source_structure_dir is required")
         if ext.get("required",False) and not ext.get("independence_manifest"):
             raise ValueError("external_validation.external_vhh.independence_manifest is required")
         if structural.get("required",False):
@@ -800,6 +802,31 @@ class Orchestrator:
             if error:return False,error
             if manifest.get("stage")!=stage or manifest.get("status") not in ("completed","completed_with_failures"):
                 return False,f"Invalid results manifest status for {stage}: {manifest.get('status')}"
+            artifacts=manifest.get("artifacts")
+            if (not isinstance(artifacts,list) or not artifacts
+                    or manifest.get("artifact_count")!=len(artifacts)):
+                return False,f"Invalid or empty results manifest artifact list for {stage}"
+            seen_paths=set()
+            run_root=self.run_dir.resolve()
+            for entry in artifacts:
+                if not isinstance(entry,dict) or not isinstance(entry.get("path"),str):
+                    return False,f"Malformed results manifest artifact for {stage}"
+                rel=Path(entry["path"])
+                if rel.is_absolute() or entry["path"] in seen_paths:
+                    return False,f"Unsafe or duplicate results manifest path for {stage}: {rel}"
+                seen_paths.add(entry["path"])
+                path=(run_root/rel).resolve()
+                if not path.is_relative_to(run_root) or not path.is_file():
+                    return False,f"Results manifest artifact missing/outside run: {rel}"
+                expected_size=entry.get("size_bytes")
+                if type(expected_size) is not int or path.stat().st_size!=expected_size:
+                    return False,f"Results manifest artifact size mismatch: {rel}"
+                expected_sha=entry.get("sha256")
+                if expected_sha is not None:
+                    if not isinstance(expected_sha,str) or sha256_of(path)!=expected_sha:
+                        return False,f"Results manifest artifact sha256 mismatch: {rel}"
+                elif expected_size<=64*1024*1024:
+                    return False,f"Results manifest lacks sha256 for small artifact: {rel}"
 
         if stage=="smoke_check":
             summary=self.run_dir/"smoke_check"/"smoke_summary.json"
@@ -885,6 +912,11 @@ class Orchestrator:
                 expected_prov=freeze_manifest.get("cluster_map_provenance_sha256")
                 if not cluster_provenance.is_file() or expected_prov!=sha256_of(cluster_provenance):
                     return False,"Frozen cluster-map provenance sha256 mismatch"
+                if ((self.config.get("queue_freeze",{}) or {}).get("independence_clustering",{}) or {}).get("pair_tsv"):
+                    provenance,error=read_json(cluster_provenance)
+                    if error:return False,error
+                    if int(provenance.get("skipped_rows",-1))!=0:
+                        return False,"Frozen cluster-map provenance reports malformed pair rows"
                 universe=self.run_dir/"audit"/"cluster_universe.txt"
                 expected_universe=freeze_manifest.get("cluster_universe_sha256")
                 if not universe.is_file() or expected_universe!=sha256_of(universe):
@@ -1012,6 +1044,13 @@ class Orchestrator:
             if error:return False,error
             if not summary.get("closed") or int(summary.get("cases_completed_total",0) or 0)<=0:
                 return False,"qc_benchmark run_summary.json is not closed with completed cases"
+            failed=int(summary.get("failures_total",0) or 0)
+            planned=int(summary.get("total_cases_planned",0) or 0)
+            allowed=float((self.config.get("qc_benchmark",{}) or {}).get("max_failure_fraction",0.0))
+            if planned<=0 or failed<0 or failed/planned>allowed:
+                return False,(
+                    f"qc_benchmark failure fraction {failed}/{planned} exceeds "
+                    f"max_failure_fraction={allowed}")
             case_count=len(list((root/"cases").glob("*.json")))
             if case_count!=int(summary.get("cases_completed_total",0) or 0):
                 return False,f"qc_benchmark case artifact count mismatch: files={case_count}, summary={summary.get('cases_completed_total')}"
@@ -1039,6 +1078,8 @@ class Orchestrator:
                 return False,"dev_queue run_summary.json is not closed"
             if not val_summary.get("closed") or val_summary.get("frozen_set_accounting_ok") is not True:
                 return False,"validation execution is not closed against frozen denominator"
+            if val_summary.get("structure_experiment_failed_targets"):
+                return False,"validation execution has failed targets in the confirmatory queue"
             expected_seeds={str(int(v)) for v in self.config.get("structure_experiment",{}).get(
                 "seeds",[42,43,44,45,46])}
             expected_methods={"qaoa","sa","uniform","greedy"}
@@ -1120,7 +1161,8 @@ class Orchestrator:
             return True,"external validation raw/aggregate/statistical artifacts verified"
         if stage=="statistics":
             root=self.run_dir/"qc_benchmark"
-            modes=(self.config.get("statistics",{}) or {}).get("budget_modes",["outputs","time"])
+            cfg=self.config.get("statistics",{}) or {}
+            modes=cfg.get("budget_modes",["outputs","time"])
             paths=[
                 root/f"statistics_{mode}.{suffix}"
                 for mode in modes for suffix in ("json","md")
@@ -1133,12 +1175,35 @@ class Orchestrator:
             ]
             ok,detail=require(paths)
             if not ok:return ok,detail
+            for mode in modes:
+                paired,error=read_json(root/f"statistics_{mode}.json")
+                if error:return False,error
+                exclusions=paired.get("exclusions") or {}
+                if (int(exclusions.get("qaoa:all_restarts_failed",0) or 0)>0
+                        or int(exclusions.get("missing_or_ambiguous_primary_contrast",0) or 0)>0
+                        or any(int(value or 0)>0 for key,value in exclusions.items()
+                               if str(key).endswith(":missing_pair"))):
+                    return False,f"{mode} primary paired-statistics denominator is incomplete"
+                effect=next((entry for entry in paired.get("effects",[])
+                             if entry.get("baseline")==str(cfg.get("primary_qc_baseline","sa"))
+                             and entry.get("metric")==str(cfg.get("primary_qc_metric","gap"))),None)
+                clusters=0 if effect is None else int(effect.get("n_clusters",0) or 0)
+                if clusters<int(cfg.get("min_qc_clusters",10)):
+                    return False,f"{mode} primary coarse contrast has insufficient clusters: {clusters}"
+            scaling,error=read_json(self.run_dir/"statistics"/"quantum_scaling_statistics.json")
+            if error:return False,error
+            scaling_clusters=int((scaling.get("primary") or {}).get("n_clusters",0) or 0)
+            if scaling_clusters<int(cfg.get("min_scaling_clusters",10)):
+                return False,f"Scaling inference has insufficient clusters: {scaling_clusters}"
             structure,error=read_json(self.run_dir/"statistics"/"structure_statistics.json")
             if error:return False,error
-            min_rq5=int((self.config.get("statistics",{}) or {}).get("min_rq5_clusters",10))
+            primary_clusters=int((structure.get("primary") or {}).get("n_clusters",0) or 0)
+            if primary_clusters<int(cfg.get("min_primary_clusters",10)):
+                return False,f"Primary structural inference has insufficient clusters: {primary_clusters}"
+            min_rq5=int(cfg.get("min_rq5_clusters",10))
             failures=rq5_inference_failures(structure.get("rq5") or {},min_rq5)
             if failures:return False,"; ".join(failures)
-            return True,"statistics artifacts and RQ5 inference verified"
+            return True,"statistics artifacts and all formal inference gates verified"
         if stage=="final_report":
             filename=(self.config.get("final_report",{}) or {}).get(
                 "filename","FINAL_RESEARCH_REPORT.md")
@@ -1186,9 +1251,11 @@ class Orchestrator:
             ext=external.get("external_vhh", {}) or {}
             if ext.get("required",False):
                 graph_dir=resolve_path(self.config,ext.get("graph_dir",""))
+                source_dir=resolve_path(self.config,ext.get("source_structure_dir",""))
                 manifest=resolve_path(self.config,ext.get("independence_manifest",""))
                 graph_ok=graph_dir.is_dir() and any(graph_dir.glob("*.pt"))
                 checks["external_vhh_graphs"]=graph_ok
+                checks["external_vhh_raw_structures"]=source_dir.is_dir()
                 # The independence manifest is deliberately generated later,
                 # after this run has frozen its own training dataset/cluster
                 # map. A pre-existing manifest is accepted but not required
@@ -1198,6 +1265,8 @@ class Orchestrator:
                 checks["external_vhh_independence_manifest_generated_later"]=not manifest.is_file()
                 if not graph_ok:
                     missing_resources.append(str(graph_dir))
+                if not source_dir.is_dir():
+                    missing_resources.append(str(source_dir))
             structural=external.get("structural_baselines", {}) or {}
             if structural.get("required",False):
                 faspr=Path(structural.get("faspr_executable",""))
@@ -1396,15 +1465,19 @@ class Orchestrator:
             external_cfg=(self.config.get("external_validation",{}) or {}).get("external_vhh",{}) or {}
             if external_cfg.get("required",False):
                 external_graph_dir=resolve_path(self.config,external_cfg.get("graph_dir",""))
+                external_source_dir=resolve_path(self.config,external_cfg.get("source_structure_dir",""))
                 if not external_graph_dir.is_dir():
                     return StageResult(
                         "queue_freeze","failed",started,utc_timestamp(),None,
                         f"External VHH graph directory required for frozen clustering universe: {external_graph_dir}")
-                from nanoqc.data.safe_graph_load import load_graph
+                if not external_source_dir.is_dir():
+                    return StageResult(
+                        "queue_freeze","failed",started,utc_timestamp(),None,
+                        f"External VHH raw-structure directory required: {external_source_dir}")
+                from nanoqc.data.audit_external_vhh_independence import graph_sequences
                 external_ids=set()
                 for graph_path in sorted(external_graph_dir.glob("*.pt")):
-                    graph=load_graph(graph_path)
-                    pdb=str(getattr(graph,"pdb_id",graph_path.stem)).strip().lower()
+                    pdb=graph_sequences(graph_path,external_source_dir)["pdb_id"]
                     if not pdb:
                         return StageResult(
                             "queue_freeze","failed",started,utc_timestamp(),None,
@@ -1522,6 +1595,11 @@ class Orchestrator:
                 return StageResult(
                     "queue_freeze","failed",started,utc_timestamp(),None,
                     "Cluster-map provenance lacks a validated TM-score column header"
+                )
+            if int(cluster_prov.get("skipped_rows",-1)) != 0:
+                return StageResult(
+                    "queue_freeze","failed",started,utc_timestamp(),None,
+                    "Cluster-map provenance reports malformed pair rows"
                 )
             if universe_path.is_file():
                 universe_sha=sha256_of(universe_path)
@@ -2653,11 +2731,14 @@ class Orchestrator:
         ext=cfg.get("external_vhh", {}) or {}
         if ext.get("required", False):
             graph_dir=resolve_path(self.config,ext.get("graph_dir",""))
+            source_dir=resolve_path(self.config,ext.get("source_structure_dir",""))
             independence=resolve_path(self.config,ext.get("independence_manifest",""))
             ext_failures=[]
             if not graph_dir.is_dir() or not any(graph_dir.glob("*.pt")):
                 ext_failures.append(f"Required external VHH graph set missing/empty: {graph_dir}")
-            if not independence.is_file() and graph_dir.is_dir() and any(graph_dir.glob("*.pt")):
+            if not source_dir.is_dir():
+                ext_failures.append(f"Required external VHH raw structures missing: {source_dir}")
+            if not independence.is_file() and graph_dir.is_dir() and source_dir.is_dir() and any(graph_dir.glob("*.pt")):
                 cluster_path=self.frozen_cluster_map_path()
                 if cluster_path is None or not cluster_path.is_file():
                     ext_failures.append(
@@ -2669,6 +2750,7 @@ class Orchestrator:
                         self.venv_python,"-m", module_name("audit_external_vhh_independence.py"),
                         "--training-dataset",str(self.dataset_dir()),
                         "--external-graph-dir",str(graph_dir),
+                        "--external-source-dir",str(source_dir),
                         "--cluster-map",str(cluster_path),
                         "--out",str(independence),
                         "--vhh-threshold",str(homology.get("vhh_full_chain_identity",0.80)),
@@ -2717,13 +2799,28 @@ class Orchestrator:
                     ext_failures.append(
                         "External independence manifest is not bound to the current training graph manifest"
                     )
-                audit_hashes={
+                from nanoqc.data.audit_external_vhh_independence import graph_sequences
+                current_external_records=[
+                    graph_sequences(path,source_dir) for path in sorted(graph_dir.glob("*.pt"))
+                ]
+                audit_hashes=sorted(
                     str(row.get("graph_sha256",""))
                     for row in (manifest.get("targets") or [])
                     if row.get("graph_sha256")
-                }
-                current_external_hashes={sha256_of(path) for path in graph_dir.glob("*.pt")}
-                if audit_hashes != current_external_hashes:
+                )
+                current_external_hashes=sorted(row["sha256"] for row in current_external_records)
+                audit_bindings=sorted(
+                    (str(row.get("pdb_id","")).lower(),str(row.get("graph_sha256","")),
+                     str(row.get("source_structure_sha256","")))
+                    for row in (manifest.get("targets") or [])
+                )
+                current_bindings=sorted(
+                    (row["pdb_id"],row["sha256"],row["source_structure_sha256"])
+                    for row in current_external_records
+                )
+                if (audit_hashes != current_external_hashes
+                        or audit_bindings != current_bindings
+                        or manifest.get("target_count") != len(current_external_hashes)):
                     ext_failures.append(
                         "External graph files do not match the graph hashes certified by independence manifest"
                     )
@@ -2743,9 +2840,14 @@ class Orchestrator:
                 if not isinstance(audits,list) or not audits:
                     ext_failures.append("External independence manifest requires nonempty per-target audits")
                 else:
+                    from nanoqc.data.audit_external_vhh_independence import source_structure_for_pdb
                     for audit in audits:
                         try:
                             pdb=str(audit["pdb_id"]).lower()
+                            source=source_structure_for_pdb(source_dir,pdb)
+                            if (audit.get("source_structure")!=str(source.resolve())
+                                    or audit.get("source_structure_sha256")!=sha256_of(source)):
+                                ext_failures.append(f"{pdb}: raw structure provenance mismatch")
                             if float(audit["max_vhh_identity"]) >= expected_homology["vhh_full_chain_identity"]:
                                 ext_failures.append(f"{pdb}: VHH identity overlap")
                             if float(audit["max_cdr_h3_identity"]) >= expected_homology["cdr_h3_identity"]:

@@ -13,9 +13,112 @@ import argparse
 import json
 from pathlib import Path
 
+import gemmi
+import torch
 from nanoqc.common.repo_io import sha256_file as sha256
 from nanoqc.data.safe_graph_load import load_graph
 from nanoqc.data.sequence_identity import nw_identity, length_coverage
+
+AA_ORDER="ACDEFGHIKLMNPQRSTVWY"
+
+
+def verified_graph_identity(graph: object, path: Path, *, require_cdr: bool = False) -> dict:
+    """Cross-check sequence metadata against the graph's encoded residues."""
+    pdb=str(getattr(graph,"pdb_id","")).strip().lower()
+    if len(pdb)!=4 or not pdb.isalnum():
+        raise ValueError(f"{path}: graph lacks a valid four-character PDB ID")
+    x=getattr(graph,"x",None)
+    chain_index=getattr(graph,"node_chain_id",None)
+    chains=getattr(graph,"chain_sequences",None)
+    groups=getattr(graph,"chain_groups",None)
+    if (not isinstance(x,torch.Tensor) or x.ndim!=2 or x.shape[1]!=21
+            or not isinstance(chain_index,torch.Tensor) or chain_index.ndim!=1
+            or len(chain_index)!=len(x) or not isinstance(chains,list)
+            or not isinstance(groups,list) or len(chains)!=len(groups) or not chains):
+        raise ValueError(f"{path}: graph lacks the v1.6 residue/chain identity fields")
+    if not torch.isfinite(x).all() or not torch.all((x[:,:20]==0)|(x[:,:20]==1)):
+        raise ValueError(f"{path}: invalid amino-acid one-hot node features")
+    if not torch.all(x[:,:20].sum(dim=1)==1):
+        raise ValueError(f"{path}: amino-acid node features are not one-hot")
+    if not torch.all((x[:,20]==0)|(x[:,20]==1)):
+        raise ValueError(f"{path}: invalid partner-group node features")
+    if chain_index.dtype not in (torch.int32,torch.int64):
+        raise ValueError(f"{path}: chain indices must be integers")
+    if sorted(set(chain_index.tolist()))!=list(range(len(chains))):
+        raise ValueError(f"{path}: chain indices do not match chain sequences")
+    for index,(sequence,group) in enumerate(zip(chains,groups)):
+        if type(sequence) is not str or group not in (0,1):
+            raise ValueError(f"{path}: invalid chain sequence or partner group")
+        nodes=x[chain_index==index]
+        observed="".join(AA_ORDER[i] for i in nodes[:,:20].argmax(dim=1).tolist())
+        if not observed or observed!=sequence or not torch.all(nodes[:,20]==group):
+            raise ValueError(f"{path}: chain {index} metadata disagrees with encoded residues")
+    vhh=[sequence for sequence,group in zip(chains,groups) if group==0]
+    antigen=[sequence for sequence,group in zip(chains,groups) if group==1]
+    if not vhh or not antigen or getattr(graph,"vhh_sequences",None)!=vhh or getattr(graph,"antigen_sequences",None)!=antigen:
+        raise ValueError(f"{path}: partner sequences disagree with encoded chains")
+    cdr=str(getattr(graph,"cdr3_seq","") or "")
+    if (require_cdr and not cdr) or (cdr and not any(cdr in sequence for sequence in vhh)):
+        raise ValueError(f"{path}: CDR-H3 sequence is absent from encoded VHH chains")
+    if int(getattr(graph,"cdr3_len",-1))!=len(cdr):
+        raise ValueError(f"{path}: CDR-H3 length disagrees with sequence")
+    return dict(pdb_id=pdb,vhh=vhh,antigen=antigen,cdr_h3=cdr)
+
+
+def source_structure_for_pdb(source_dir: Path, pdb: str) -> Path:
+    suffixes=(".cif.gz",".pdb.gz",".mmcif",".cif",".pdb")
+    matches=[]
+    for path in source_dir.rglob("*"):
+        if not path.is_file():
+            continue
+        name=path.name.lower()
+        if any(name==pdb+suffix for suffix in suffixes):
+            matches.append(path)
+    if len(matches)!=1:
+        raise ValueError(f"Expected exactly one raw PDB/mmCIF structure for {pdb} in {source_dir}; found {len(matches)}")
+    return matches[0]
+
+
+def verify_graph_against_source(graph: object, source: Path) -> None:
+    """Bind every encoded residue and CA position to an independent raw file."""
+    structure=gemmi.read_structure(str(source))
+    if not len(structure):
+        raise ValueError(f"Raw structure has no model: {source}")
+    residues={}
+    for chain in structure[0]:
+        for residue in chain:
+            info=gemmi.find_tabulated_residue(residue.name)
+            if not info.is_amino_acid():
+                continue
+            atoms={}
+            for atom in residue:
+                if atom.occ>0 and not atom.element.is_hydrogen:
+                    if atom.name not in atoms or atom.occ>atoms[atom.name].occ:
+                        atoms[atom.name]=atom
+            if "CA" not in atoms:
+                continue
+            aa=info.one_letter_code.upper()
+            key=f"{chain.name}:{residue.seqid}"
+            if key in residues:
+                raise ValueError(f"Duplicate raw residue identity {key}: {source}")
+            residues[key]=(aa,atoms["CA"].pos)
+    ids=getattr(graph,"residue_ids",None)
+    positions=getattr(graph,"pos",None)
+    if (not isinstance(ids,list) or not isinstance(positions,torch.Tensor)
+            or len(ids)!=len(graph.x) or tuple(positions.shape)!=(len(ids),3)
+            or len(set(ids))!=len(ids)):
+        raise ValueError(f"Graph lacks unique residue IDs/CA positions: {source}")
+    if not torch.isfinite(positions).all():
+        raise ValueError(f"Graph has nonfinite CA coordinates: {source}")
+    for index,key in enumerate(ids):
+        if key not in residues:
+            raise ValueError(f"Graph residue {key} absent from raw structure: {source}")
+        aa,ca=residues[key]
+        if aa not in AA_ORDER or AA_ORDER.index(aa)!=int(graph.x[index,:20].argmax()):
+            raise ValueError(f"Graph residue {key} disagrees with raw structure sequence: {source}")
+        observed=positions[index].tolist()
+        if max(abs(observed[i]-getattr(ca,"xyz"[i])) for i in range(3))>1e-3:
+            raise ValueError(f"Graph residue {key} CA coordinate disagrees with raw structure: {source}")
 
 
 def identity(a: str, b: str, min_length_coverage: float = 0.0) -> tuple[float,float]:
@@ -38,16 +141,20 @@ def side_max(left: list[str], right: list[str], coverage: float = 0.0) -> tuple[
     return best
 
 
-def graph_sequences(path: Path) -> dict:
+def graph_sequences(path: Path, source_dir: Path | None = None) -> dict:
     digest=sha256(path)
     graph=load_graph(path)
+    identity_fields=verified_graph_identity(graph,path,require_cdr=source_dir is not None)
+    source=None
+    if source_dir is not None:
+        source=source_structure_for_pdb(source_dir,identity_fields["pdb_id"])
+        verify_graph_against_source(graph,source)
     return dict(
-        pdb_id=str(getattr(graph,"pdb_id",path.stem)).lower(),
+        **identity_fields,
         graph_version=str(getattr(graph,"graph_version","")),
-        vhh=[str(x) for x in getattr(graph,"vhh_sequences",[]) if str(x)],
-        antigen=[str(x) for x in getattr(graph,"antigen_sequences",[]) if str(x)],
-        cdr_h3=str(getattr(graph,"cdr3_seq","") or ""),
         sha256=digest,
+        source_structure=(None if source is None else str(source.resolve())),
+        source_structure_sha256=(None if source is None else sha256(source)),
     )
 
 
@@ -56,6 +163,8 @@ def main() -> int:
     parser.add_argument("--training-dataset",type=Path,required=True,
         help="Frozen dataset directory containing graph_manifest.json and graphs/train.")
     parser.add_argument("--external-graph-dir",type=Path,required=True)
+    parser.add_argument("--external-source-dir",type=Path,required=True,
+        help="Trusted raw PDB/mmCIF files named by their four-character PDB IDs.")
     parser.add_argument("--cluster-map",type=Path,required=True)
     parser.add_argument("--out",type=Path,required=True)
     parser.add_argument("--vhh-threshold",type=float,default=0.80)
@@ -75,6 +184,8 @@ def main() -> int:
         parser.error("Training graph_manifest.json not found")
     if not args.external_graph_dir.is_dir():
         parser.error("External graph directory not found")
+    if not args.external_source_dir.is_dir():
+        parser.error("External raw-structure directory not found")
     if not args.cluster_map.is_file():
         parser.error("Cluster map not found")
 
@@ -94,6 +205,8 @@ def main() -> int:
         if not path.is_file() or sha256(path)!=row["sha256"]:
             raise ValueError(f"Training graph missing/hash mismatch: {path}")
         item=graph_sequences(path)
+        if item["pdb_id"]!=str(row.get("pdb_id","")).lower():
+            raise ValueError(f"Training graph PDB ID differs from frozen manifest: {path}")
         train.append(item);train_pdb.add(item["pdb_id"])
     missing_train=sorted(train_pdb-set(cluster_map))
     if missing_train:
@@ -105,10 +218,14 @@ def main() -> int:
         raise ValueError("No external .pt graphs")
     audits=[]
     graph_versions=set()
+    external_pdbs=set()
     for path in external_paths:
-        ext=graph_sequences(path)
+        ext=graph_sequences(path,args.external_source_dir)
         graph_versions.add(ext["graph_version"])
         pdb=ext["pdb_id"]
+        if pdb in external_pdbs:
+            raise ValueError(f"Duplicate external PDB ID {pdb}: {path}")
+        external_pdbs.add(pdb)
         if pdb not in cluster_map:
             raise ValueError(f"Cluster map missing external PDB {pdb}")
         max_vhh=0.0;max_cdr=0.0;max_ag=0.0;ag_cov=0.0
@@ -124,6 +241,8 @@ def main() -> int:
         audits.append(dict(
             pdb_id=pdb,
             graph_sha256=ext["sha256"],
+            source_structure=ext["source_structure"],
+            source_structure_sha256=ext["source_structure_sha256"],
             family_cluster=cluster_map[pdb],
             family_cluster_overlap=family_overlap,
             max_vhh_identity=max_vhh,

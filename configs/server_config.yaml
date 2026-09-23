@@ -15,6 +15,9 @@ paths:
   # searches common local/server locations; run_root defaults beside data_root.
   data_root: "auto"
   run_root: "auto"
+  # Set QP_EXTERNAL_VHH_SOURCE_DIR or an absolute directory here for the
+  # trusted raw PDB/mmCIF files that accompany external VHH graphs.
+  external_vhh_source_dir: "auto"
 
 tools:
   # "auto" honors QP_FASPR / QP_PHENIX_CLASHSCORE and then searches PATH/common paths.
