@@ -74,8 +74,8 @@ def test_qaoa_resource_estimate_matches_implemented_xy_ansatz() -> None:
 
 def test_benchmark_contract_separates_proposed_baselines_and_oracle() -> None:
     source=(REPO/"src/nanoqc/experiments/batch_benchmark_hard_set.py").read_text(encoding="utf-8")
-    assert '"method_role":"proposed_quantum_method"' in source
-    assert '"method_role":"classical_baseline"' in source
+    assert 'method_role="proposed_quantum_method"' in source
+    assert 'method_role="classical_baseline"' in source
     assert '"schema":"quantum_classical_benchmark_v1"' in source
     assert '"role":"retrospective_ground_truth_only"' in source
     assert "quantum_instance=quantum_instance.manifest()" in source
