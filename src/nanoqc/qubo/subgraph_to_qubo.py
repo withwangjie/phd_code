@@ -43,6 +43,7 @@ import numpy as np
 import torch
 from torch_geometric.data import Data
 from nanoqc.structure.residue_tables import SIDECHAIN_HEAVY_ATOMS, SYMMETRIC_SWAPS
+from nanoqc.quantum.instance import QuantumOptimizationInstance
 from nanoqc.data.safe_graph_load import load_graph
 
 
@@ -695,6 +696,33 @@ class QUBOResult:
         """Return JSON/CSV-friendly variable mapping rows."""
 
         return [asdict(record) for record in self.variable_map]
+
+    def to_quantum_instance(self) -> QuantumOptimizationInstance:
+        """Freeze this protein-derived QUBO behind the solver-facing quantum contract."""
+        ising_h,ising_J,ising_offset=qubo_to_ising(self.Q,self.constant_offset)
+        validate_qubo_ising_equivalence(
+            self.Q,self.constant_offset,ising_h,ising_J,ising_offset
+        )
+        return QuantumOptimizationInstance(
+            Q=self.Q,
+            constant_offset=self.constant_offset,
+            physical_self=self.physical_self,
+            physical_pair=self.physical_pair,
+            site_to_variables=self.site_to_variables,
+            ising_h=ising_h,
+            ising_J=ising_J,
+            ising_offset=ising_offset,
+            metadata={
+                "source_model": self.metadata.get("model"),
+                "pdb_id": self.metadata.get("pdb_id"),
+                "state_policy": self.metadata.get("state_policy"),
+                "lambda_value": self.lambda_value,
+                "lambda_lower_bound": self.lambda_lower_bound,
+                "ising_energy_equivalence_max_error": self.metadata.get(
+                    "ising_energy_equivalence_max_error"
+                ),
+            },
+        )
 
     def export(self, output_dir: Path, stem: str = "interface") -> Dict[str, Path]:
         """Persist matrix components and a human-readable mapping manifest.
