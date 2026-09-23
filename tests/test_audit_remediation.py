@@ -187,7 +187,7 @@ def _minimal_scientific_config() -> Dict[str, Any]:
             "algorithm": "xy_qaoa",
             "encoding": "one_hot_rotamer_registers",
             "mixer": "local_xy",
-            "initial_state": "local_w_state",
+            "initial_state": "wstate",
             "simulation_scope": "exact_feasible_subspace_classical_simulation",
             "primary": {
                 "depth": 2,
