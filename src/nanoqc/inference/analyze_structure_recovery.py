@@ -22,7 +22,7 @@ from pathlib import Path
 import numpy as np
 from scipy.stats import spearmanr
 from nanoqc.common.repo_io import sha256_file as sha256
-from nanoqc.inference.paired_statistics import holm_step_down
+from nanoqc.inference.paired_statistics import holm_step_down, sign_flip_pvalue
 
 
 def percentile_ci(values: list[float], rng: np.random.Generator, resamples: int) -> tuple[float|None,float|None]:
@@ -35,25 +35,9 @@ def percentile_ci(values: list[float], rng: np.random.Generator, resamples: int)
     return float(np.percentile(draws,2.5)),float(np.percentile(draws,97.5))
 
 
-def sign_flip_p(values: list[float], seed: int) -> float|None:
-    d=np.asarray(values,float)
-    if len(d)<2:
-        return None
-    observed=abs(float(np.mean(d)))
-    if len(d)<=20:
-        total=1<<len(d);extreme=0
-        for mask in range(total):
-            signs=np.asarray([1.0 if (mask>>i)&1 else -1.0 for i in range(len(d))])
-            if abs(float(np.mean(signs*d)))>=observed-1e-15:
-                extreme+=1
-        return extreme/total
-    rng=np.random.default_rng(seed)
-    trials=200000
-    extreme=0
-    for _ in range(trials):
-        signs=rng.choice((-1.0,1.0),size=len(d))
-        extreme+=abs(float(np.mean(signs*d)))>=observed-1e-15
-    return (extreme+1)/(trials+1)
+def sign_flip_p(values: list[float], seed: int, resamples: int) -> float|None:
+    """Compatibility wrapper around the shared formal sign-flip kernel."""
+    return sign_flip_pvalue(values, seed, resamples)
 
 
 def holm_adjust_named(pvalues: dict[str,float|None]) -> dict[str,float|None]:
@@ -150,7 +134,7 @@ def grouped_primary(
         paired_seed_count=int(paired_seed_count),
         incomplete_seed_count=int(incomplete_seed_count),
         mean_difference=(None if not cluster_values else float(np.mean(cluster_values))),
-        ci_low=low,ci_high=high,p_value=sign_flip_p(cluster_values,seed),
+        ci_low=low,ci_high=high,p_value=sign_flip_p(cluster_values,seed,resamples),
         excluded_targets=excluded_targets,
         target_details=target_details,
     )
