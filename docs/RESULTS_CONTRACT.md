@@ -101,6 +101,13 @@ Aggregate sensitivity outputs:
 - `method_sensitivity/sensitivity_summary.md`
 
 ### qc_benchmark
+
+The frozen QAOA protocol is read exclusively from top-level `quantum_protocol`.
+Stage-local duplicates of depth, objective, restarts, evaluation budget, CVaR
+alpha, evaluation shots, output shots or parameter scaling are invalid. This
+prevents benchmark, structural validation and inference from silently using
+different QAOA definitions.
+
 Required:
 - `qc_benchmark/run_manifest.json`
 - `qc_benchmark/run_summary.json`
@@ -110,7 +117,7 @@ Required:
 - `qc_benchmark/seed_streams.json`
 - raw `qc_benchmark/cases/*.json`
 
-The raw case count must equal `cases_completed_total`. Each raw case JSON also carries a self-contained `quantum_instance` contract (full QUBO/Ising representation, penalty-free physical terms, one-hot register map and feasible-space metadata), a `quantum_benchmark` contract that separates the proposed XY-QAOA method from classical baselines and the retrospective exact oracle, and QAOA logical resource fields for quantum rows. The existing flat `metrics.csv` remains the compatibility surface for statistical analysis.
+The raw case count must equal `cases_completed_total`. Each raw case JSON also carries a self-contained `quantum_instance` contract (full QUBO/Ising representation, penalty-free physical terms, one-hot register map and feasible-space metadata), a `quantum_benchmark` contract that separates the proposed XY-QAOA method from classical baselines and the retrospective exact oracle, and QAOA logical resource fields for quantum rows. Quantum rows must report logical qubits, variational-parameter count, logical RZ/ZZ/XY counts, total two-qubit gates, and shot accounting. Gate counts are explicitly pre-transpilation and exclude W-state StatePrep decomposition; they are not hardware-native resource claims. The existing flat `metrics.csv` remains the compatibility surface for statistical analysis.
 Every scaling case must contain exactly the requested number of Dunbrack-compatible rotamer sites; a mislabeled requested-site condition is a failed case, never silently accepted.
 Scaling cases also require exactly three retained states per site, one in each
 chi1 well. The statistics stage rejects older adaptive-allocation cases. A
