@@ -311,7 +311,7 @@ def extract(row, pair=None):
     if {c['group'] for c in chains}!={0,1}:raise ValueError('both interaction partners required')
     return chains
 
-def make_graph(row, split, pair=None):
+def make_graph(row, split, pair=None, family_structure_cluster=''):
     chains=extract(row,pair);memory_sample()
     nodes=[];groups=[];chainidx=[];heavy={0:[],1:[]};owners={0:[],1:[]}
     for i,c in enumerate(chains):
@@ -399,6 +399,9 @@ def make_graph(row, split, pair=None):
     gnotes={json.dumps(note,sort_keys=True) for chain in chains for note in chain.get('identity_resolutions',[])}
     graph.residue_identity_resolutions=json.dumps([json.loads(s) for s in sorted(gnotes)])
     graph.num_nodes=n
+    # Formal train/hard graphs must carry their frozen family/structure cluster
+    # before validation; validate_graph() requires it for those splits.
+    graph.family_structure_cluster=str(family_structure_cluster or '')
     validate_graph(graph)
     memory_sample()
     return graph
@@ -455,8 +458,7 @@ def save_graph(row, split, output, pair=None, cluster_id='', family_structure_cl
                 g.residue_identity_resolutions='[]'
                 torch.save(g,path)
         else:
-            g=make_graph(row,split,pair)
-            g.family_structure_cluster=str(family_structure_cluster or '')
+            g=make_graph(row,split,pair,family_structure_cluster=family_structure_cluster)
             torch.save(g,path)
         # Read-back validation ensures these are actual loadable PyG Data objects.
         loaded=torch.load(path,map_location='cpu',weights_only=False);validate_graph(loaded)

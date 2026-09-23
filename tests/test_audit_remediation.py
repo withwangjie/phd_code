@@ -200,7 +200,7 @@ def _minimal_scientific_config() -> Dict[str, Any]:
         },
         "egnn_train": {},
         "qc_benchmark": {
-            "active_sites": 6,
+            "active_sites": [6],
             "antigen_guidance_weight": 0.25,
             "antigen_proximity_scale_angstrom": 6.0,
             "contact_ca_cutoff_angstrom": 8.0,
@@ -471,7 +471,9 @@ def test_calibration_reports_grouped_cv_statistics(tmp_path: Path) -> None:
                 writer.writerow([pdb,"train",value,0.5*value,0.25*value,0.1*value,
                                  1.0+2.0*value+shift])
     result=bbh.fit_energy_calibration_csv(csv_path,tmp_path/"fit.json",0.1)
-    assert result["cv_scheme"].startswith("deterministic PDB-grouped")
+    # No family_cluster column: the folds are grouped by PDB ID.
+    assert result["cv_grouping"]=="pdb_id"
+    assert result["cv_scheme"].startswith("deterministic pdb_id-grouped")
     assert "cv_r2" in result and "cv_spearman" in result
     assert result["n_train_complexes"]==5
     assert "uncalibrated_rmse_kcal" in result

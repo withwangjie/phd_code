@@ -48,6 +48,7 @@ import json
 import math
 import os
 import platform
+import re
 import shutil
 import signal
 import subprocess
@@ -81,6 +82,16 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from nanoqc.common.seed_streams import derive_streams, derive_child_seed, save_stream_map, verify_stream_map, DEFAULT_MASTER_SEED  # noqa: E402
 from nanoqc.common.repo_io import sha256_file as sha256_of, repo_path, module_name, DOCS_DIR, CONFIGS_DIR  # noqa: E402
+
+
+def primary_qc_effect_name(baseline: str, budget_mode: str) -> str:
+    """Effect name written by batch_benchmark_hard_set --paired-statistics.
+
+    Matched-output contrasts are named after the baseline (``sa``); matched-time
+    contrasts carry a ``_time`` suffix (``sa_time``). Keep in sync with
+    ``_paired_statistics_main``.
+    """
+    return str(baseline) if budget_mode == "outputs" else f"{baseline}_time"
 
 
 def rq5_inference_failures(rq5: dict, min_clusters: int) -> list[str]:
@@ -870,6 +881,20 @@ class Orchestrator:
             if error:return False,error
             if not summary.get("complete"):
                 return False,"dataset run_summary.json is not complete"
+            # Verify frozen-input hashes before trusting the contents of
+            # selected_targets.json (a tampered file must report provenance
+            # mismatch, not whatever its forged targets happen to lack).
+            freeze_manifest,error=read_json(freeze/"freeze_manifest.json")
+            if error:return False,error
+            expected_pairs={
+                "selected_targets_sha256": freeze/"selected_targets.json",
+                "eligibility_sha256": freeze/"eligibility.json",
+                "graph_manifest_sha256": dataset/"graph_manifest.csv",
+            }
+            for key,path in expected_pairs.items():
+                expected=freeze_manifest.get(key)
+                if not expected or sha256_of(path)!=expected:
+                    return False,f"Frozen validation provenance mismatch for {key}: {path}"
             try:
                 frozen=json.loads((freeze/"selected_targets.json").read_text(encoding="utf-8"))
             except Exception as exc:
@@ -887,17 +912,6 @@ class Orchestrator:
                 ok,detail=require([recovery_manifest])
                 if not ok:
                     return False,f"Frozen target {pdb} lacks recovery_manifest.json: {detail}"
-            freeze_manifest,error=read_json(freeze/"freeze_manifest.json")
-            if error:return False,error
-            expected_pairs={
-                "selected_targets_sha256": freeze/"selected_targets.json",
-                "eligibility_sha256": freeze/"eligibility.json",
-                "graph_manifest_sha256": dataset/"graph_manifest.csv",
-            }
-            for key,path in expected_pairs.items():
-                expected=freeze_manifest.get(key)
-                if not expected or sha256_of(path)!=expected:
-                    return False,f"Frozen validation provenance mismatch for {key}: {path}"
             cluster_setting=((self.config.get("queue_freeze",{}) or {}).get("independence_clustering",{}) or {}).get("cluster_map")
             expected_cluster=freeze_manifest.get("cluster_map_sha256")
             if cluster_setting:
@@ -1183,7 +1197,8 @@ class Orchestrator:
                                if str(key).endswith(":missing_pair"))):
                     return False,f"{mode} primary paired-statistics denominator is incomplete"
                 effect=next((entry for entry in paired.get("effects",[])
-                             if entry.get("baseline")==str(cfg.get("primary_qc_baseline","sa"))
+                             if entry.get("baseline")==primary_qc_effect_name(
+                                 cfg.get("primary_qc_baseline","sa"),mode)
                              and entry.get("metric")==str(cfg.get("primary_qc_metric","gap"))),None)
                 clusters=0 if effect is None else int(effect.get("n_clusters",0) or 0)
                 if clusters<int(cfg.get("min_qc_clusters",10)):
@@ -1455,7 +1470,10 @@ class Orchestrator:
                 except json.JSONDecodeError:
                     continue
                 pdb=str(row.get("pdb_id","")).strip().lower()
-                if pdb:
+                # Only real four-character PDB IDs can be structurally clustered;
+                # audited non-PDB files (e.g. CAPRI models named "T37_...") fall
+                # back to name[:4] in the audit and are never study graphs.
+                if re.fullmatch(r"[a-z0-9]{4}",pdb):
                     ids.add(pdb)
             # External VHH structures are part of the SAME frozen structural
             # similarity universe. They must not be appended as untracked
@@ -2165,9 +2183,20 @@ class Orchestrator:
                                 mean_gap=sum(float(row["gap"]) for row in selected)/len(selected),
                                 mean_solver_seconds=sum(float(row["solver_seconds"]) for row in selected)/len(selected)))
                         oracle_times=[]
-                        for case_path in (sub/"cases").glob("*.json"):
+                        for case_path in sorted((sub/"cases").glob("*.json")):
                             case=json.loads(case_path.read_text(encoding="utf-8"))
-                            oracle_times.append(float(case["oracle_seconds"]))
+                            # The exact-oracle time is measured once per case and
+                            # repeated on every metrics row of that case.
+                            case_oracle={float(row["oracle_seconds"])
+                                         for row in (case.get("metrics") or [])
+                                         if row.get("oracle_seconds") not in (None,"")}
+                            if len(case_oracle)!=1:
+                                failures.append(
+                                    f"rotamer resolution {sites}/{states} case {case_path.name} "
+                                    "lacks one consistent exact-oracle timing")
+                                oracle_times=[]
+                                break
+                            oracle_times.append(case_oracle.pop())
                         if not oracle_times:
                             failures.append(f"rotamer resolution {sites}/{states} lacks exact-oracle timing")
                         else:
@@ -3155,7 +3184,8 @@ class Orchestrator:
                             "pairs are missing")
                     primary_effect=next(
                         (e for e in stats_payload.get("effects",[])
-                         if e.get("baseline")==str(cfg.get("primary_qc_baseline","sa"))
+                         if e.get("baseline")==primary_qc_effect_name(
+                             cfg.get("primary_qc_baseline","sa"),budget_mode)
                          and e.get("metric")==str(cfg.get("primary_qc_metric","gap"))),
                         None,
                     )

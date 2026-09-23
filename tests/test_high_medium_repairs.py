@@ -52,7 +52,10 @@ def test_all_restarts_failed_is_excluded_from_paired_inference(tmp_path: Path) -
         _metric("sa"),_metric("uniform"),_metric("greedy"),
     ]
     (cases/"case.json").write_text(
-        json.dumps({"config":{"pdb_id":"1abc"},"metrics":rows}),
+        # Frozen primary dimensions (the defaults of --paired-statistics), so the
+        # case reaches the all-restarts-failed check instead of being filtered.
+        json.dumps({"config":{"pdb_id":"1abc","pruning":"egnn","radius":6.0,"depth":2,
+                              "max_evals":90,"active_sites":6},"metrics":rows}),
         encoding="utf-8",
     )
     rc=bbh._paired_statistics_main([
@@ -98,8 +101,11 @@ class _StageHarness:
     def _save_stage_status(self,result):
         self.saved.append(result)
 
-    def _validate_completed_stage_artifacts(self,stage):
+    def _validate_completed_stage_artifacts(self,stage,*,require_results_manifest=True):
         return True,"ok"
+
+    def _write_stage_results_manifest(self,stage,result,validation_detail):
+        self.saved.append(("results_manifest",stage,result.status))
 
 
 def test_only_smoke_skip_is_optional_prerequisite() -> None:
@@ -170,8 +176,9 @@ def test_statistics_resume_checks_statistics_subdirectory(tmp_path: Path) -> Non
 
     qc=tmp_path/"qc_benchmark"
     qc.mkdir()
-    paired={"effects":[{"baseline":"sa","metric":"gap","n_clusters":10}],"exclusions":{}}
-    for mode in ("outputs","time"):
+    # batch_benchmark_hard_set names matched-time effects "<baseline>_time".
+    for mode,baseline in (("outputs","sa"),("time","sa_time")):
+        paired={"effects":[{"baseline":baseline,"metric":"gap","n_clusters":10}],"exclusions":{}}
         (qc/f"statistics_{mode}.json").write_text(json.dumps(paired),encoding="utf-8")
         (qc/f"statistics_{mode}.md").write_text("ok",encoding="utf-8")
     stats=tmp_path/"statistics"
@@ -303,6 +310,9 @@ def test_unified_run_directory_inventory_and_summary(tmp_path: Path) -> None:
     (run/"logs").mkdir()
     (run/"logs"/"x.log").write_text("ok",encoding="utf-8")
     results={"env_check": full.StageResult("env_check","completed","a","b",0,"ok")}
+    # RUN_SUMMARY is "completed" only when the global results audit passed.
+    (run/"EXPERIMENT_RESULTS_AUDIT.json").write_text(
+        json.dumps({"all_required_results_present":True}),encoding="utf-8")
     full.write_run_inventory(run,results)
     inventory=json.loads((run/"artifact_inventory.json").read_text(encoding="utf-8"))
     summary=json.loads((run/"RUN_SUMMARY.json").read_text(encoding="utf-8"))

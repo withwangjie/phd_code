@@ -86,6 +86,9 @@ def test_statistics_fails_closed_when_qc_dir_missing(tmp_path: Path) -> None:
         def _run_subprocess(self,stage,argv):
             raise AssertionError("subprocess must not run when qc_benchmark is missing")
 
+        def frozen_cluster_map_path(self):
+            return tmp_path/"independence"/"pdb_family_clusters.json"
+
         @staticmethod
         def _artifacts_present(paths):
             return Orchestrator._artifacts_present(paths)

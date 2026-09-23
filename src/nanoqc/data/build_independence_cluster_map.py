@@ -19,18 +19,41 @@ from pathlib import Path
 from nanoqc.common.repo_io import sha256_file as sha256
 
 
-def norm_id(value: str) -> str:
-    value = Path(str(value).strip()).name
-    for suffix in (".cif.gz", ".pdb.gz", ".cif", ".pdb", ".mmcif"):
+_STRUCTURE_SUFFIXES = (".cif.gz", ".pdb.gz", ".mmcif", ".cif", ".pdb")
+# Foldseek appends "_<chain>" to entries from multi-chain structures
+# (default --chain-name-mode), e.g. "1abc.cif.gz_A" or "1abc_B".
+_CHAIN_SUFFIX = re.compile(r"(.+?)_([A-Za-z0-9]{1,4})")
+
+
+def _strip_structure_suffix(value: str) -> str:
+    for suffix in _STRUCTURE_SUFFIXES:
         if value.lower().endswith(suffix):
-            value = value[: -len(suffix)]
-            break
-    normalized = value.lower()
-    if re.fullmatch(r"[a-z0-9]{4}", normalized):
-        return normalized
-    if re.fullmatch(r"[a-z0-9]{4}_assembly[0-9]+", normalized):
-        return normalized[:4]
-    raise ValueError(f"Invalid PDB identifier or structure filename: {value!r}")
+            return value[: -len(suffix)]
+    return value
+
+
+def norm_id(value: str) -> str:
+    """Map a PDB ID, structure filename or Foldseek entry name to a 4-char PDB ID.
+
+    Accepted: ``1abc``, ``1abc.cif.gz``, ``1abc_assembly1``, and the same with a
+    Foldseek chain suffix (``1abc.cif.gz_A``, ``1abc_B``). Anything else raises;
+    names are never silently truncated (``1abc_extra`` is rejected).
+    """
+    raw = Path(str(value).strip()).name
+    stem = _strip_structure_suffix(raw)
+    candidates = [stem]
+    chain = _CHAIN_SUFFIX.fullmatch(stem)
+    if chain:
+        candidates.append(_strip_structure_suffix(chain.group(1)))
+    for candidate in candidates:
+        normalized = candidate.lower()
+        if re.fullmatch(r"[a-z0-9]{4}", normalized):
+            return normalized
+        if re.fullmatch(r"[a-z0-9]{4}_assembly[0-9]+", normalized):
+            return normalized[:4]
+    raise ValueError(
+        f"Invalid PDB identifier: {raw!r} is an invalid four-character PDB identifier "
+        "or structure filename")
 
 
 class DSU:
