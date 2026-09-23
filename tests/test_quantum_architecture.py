@@ -127,3 +127,10 @@ def test_final_report_is_quantum_first() -> None:
     ]
     positions=[compile_block.index(item) for item in order]
     assert positions==sorted(positions)
+
+
+def test_formal_preflight_reuses_exact_scientific_resource_gate() -> None:
+    source=(REPO/"scripts/formal_preflight.sh").read_text(encoding="utf-8")
+    assert "_validate_scientific_config(config)" in source
+    assert "orchestrator.stage_env_check()" in source
+    assert "Formal environment/resource gate failed" in source
