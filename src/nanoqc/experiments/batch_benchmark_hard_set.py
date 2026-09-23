@@ -2177,8 +2177,10 @@ def _allatom_experiment_main(argv: Optional[Sequence[str]] = None) -> int:
         # ONE sampler instance: XYMixerQAOASampler.optimize_robust/.sample/
         # .simulated_annealing already accept explicit optimize_seed/
         # measurement_seed/sample_seed overrides directly.
-        sampler=XYMixerQAOASampler(qubo.physical_self,qubo.physical_pair,qubo.site_to_variables,
-            simulation_mode="subspace",p=args.qaoa_depth,seed=optimize_seed,shots=args.outputs)
+        quantum_instance=qubo.to_quantum_instance()
+        sampler=XYMixerQAOASampler.from_instance(
+            quantum_instance,simulation_mode="subspace",p=args.qaoa_depth,
+            seed=optimize_seed,shots=args.outputs)
         truth=sampler.enumerate_ground_states();energies=sampler.feasible_energy_map()
         records=[]
         def evaluate(path):
