@@ -1026,6 +1026,14 @@ def _nonbonded_energy(
 class InterfaceQUBOBuilder:
     """Build a NISQ-sized rotamer QUBO from a pruned interface subgraph.
 
+    COARSE geometry model: rotamer states here are generated from a local
+    frame built by ``_local_frame`` (nearest same-chain CA neighbors plus the
+    nearest ligand atom), NOT a real N-CA-CB-CG dihedral. This builder's
+    rotamer angles are therefore NOT directly comparable to, or
+    interchangeable with, ``AllAtomInterfaceQUBOBuilder``'s all-atom chi1
+    angles (real N-CA-CB-CG dihedral) -- do not feed one model's solved
+    angles into the other's ``chi1_angles`` override.
+
     Args:
         min_variables: Minimum bit count after adaptive 3--6-state allocation.
         max_variables: Hard QUBO dimension limit; must not exceed 30.
@@ -1239,7 +1247,14 @@ class InterfaceQUBOBuilder:
         x: np.ndarray,
         chain_ids: np.ndarray,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Build a right-handed local frame from CA and interface directions."""
+        """Build a right-handed local frame from CA and interface directions.
+
+        This is a COARSE geometric approximation (nearest same-chain CA
+        neighbors plus nearest ligand atom), not a real N-CA-CB-CG sidechain
+        dihedral frame. See the AllAtomInterfaceQUBOBuilder docstring for the
+        physically-real chi1 frame used in all-atom validation; the two are
+        not interchangeable.
+        """
 
         center = pos[node_index]
         same_chain = np.flatnonzero(
@@ -1896,7 +1911,13 @@ class AllAtomInterfaceQUBOBuilder:
     rotamer's statistical means. Amber14 single-candidate energies pre-screen
     the pool; 3--6 states/site are retained under a global <=30-variable budget.
     An explicit chi1_angles sequence remains available only as a legacy
-    controlled-ablation override.
+    controlled-ablation override, fed only from an explicit
+    ``case["chi1_angles"]`` JSON manifest field -- never auto-populated from
+    a coarse ``InterfaceQUBOBuilder`` solve. The coarse builder's rotamer
+    angles come from an approximate local frame (nearest same-chain CA
+    neighbors plus nearest ligand atom, see ``_local_frame``), not a real
+    N-CA-CB-CG dihedral, so they are not physically meaningful chi1 values
+    here and must never be passed as this override.
 
     No native/reference structure is accepted by this builder. Missing heavy atoms and unsupported templates
     fail rather than inventing atoms. The primary protocol uses vacuum NoCutoff; optional GBN2 is a
@@ -1904,7 +1925,8 @@ class AllAtomInterfaceQUBOBuilder:
     """
 
     def __init__(self, structure_path: Path, active_residues: Sequence[str], *,
-                 chi1_angles: Optional[Sequence[float]] = None,
+                 chi1_angles: Optional[Sequence[float]] = None,  # legacy ablation override only;
+                 # real N-CA-CB-CG dihedral degrees -- never a coarse InterfaceQUBOBuilder solve
                  site_scores: Optional[Sequence[float]] = None, seed: int = 42,
                  candidate_relax_iterations: int = 0,
                  rotamer_mode: str = "legacy",

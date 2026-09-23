@@ -23,7 +23,7 @@ import numpy as np
 from scipy.stats import spearmanr
 from nanoqc.common.repo_io import sha256_file as sha256
 from nanoqc.inference.paired_statistics import holm_step_down, sign_flip_pvalue
-from nanoqc.common.seed_streams import DEFAULT_MASTER_SEED
+from nanoqc.common.seed_streams import DEFAULT_MASTER_SEED, derive_child_seed
 
 
 def percentile_ci(values: list[float], rng: np.random.Generator, resamples: int) -> tuple[float|None,float|None]:
@@ -124,7 +124,12 @@ def grouped_primary(
         ))
 
     cluster_values=[float(np.mean(values)) for _,values in sorted(by_cluster.items())]
-    rng=np.random.default_rng(seed)
+    # The CI resample draw and the sign-flip p-value draw are nominally
+    # independent procedures; deriving separate child seeds keeps them from
+    # silently sharing one RNG stream (see seed_streams.py docstring).
+    ci_seed=derive_child_seed(seed,"primary_ci")
+    p_seed=derive_child_seed(seed,"primary_sign_flip")
+    rng=np.random.default_rng(ci_seed)
     low,high=percentile_ci(cluster_values,rng,resamples)
     return dict(
         endpoint=endpoint,
@@ -135,7 +140,7 @@ def grouped_primary(
         paired_seed_count=int(paired_seed_count),
         incomplete_seed_count=int(incomplete_seed_count),
         mean_difference=(None if not cluster_values else float(np.mean(cluster_values))),
-        ci_low=low,ci_high=high,p_value=sign_flip_p(cluster_values,seed,resamples),
+        ci_low=low,ci_high=high,p_value=sign_flip_p(cluster_values,p_seed,resamples),
         excluded_targets=excluded_targets,
         target_details=target_details,
     )
@@ -343,9 +348,14 @@ def main() -> int:
         denominator_sha256=sha256(args.expected_targets_file)
     raw=json.loads(args.cluster_map.read_text(encoding="utf-8"))
     cluster_map={str(k).lower():str(v) for k,v in raw.items()}
-    primary=grouped_primary(rows,cluster_map,args.primary_endpoint,args.primary_contrast,args.resamples,args.seed)
+    # Primary structural contrast and RQ5 are separate confirmatory-family
+    # members (Holm-adjusted together below); derive independent child seeds
+    # so they never draw correlated resamples from one shared literal seed.
+    primary_seed=derive_child_seed(args.seed,"primary")
+    rq5_seed=derive_child_seed(args.seed,"rq5")
+    primary=grouped_primary(rows,cluster_map,args.primary_endpoint,args.primary_contrast,args.resamples,primary_seed)
     rq5=rq5_energy_structure(
-        rows,cluster_map,args.primary_contrast,args.resamples,args.seed
+        rows,cluster_map,args.primary_contrast,args.resamples,rq5_seed
     )
     adjusted=holm_adjust_named({
         "primary_structural_contrast":primary.get("p_value"),
@@ -355,6 +365,7 @@ def main() -> int:
     rq5["p_holm_confirmatory_family"]=adjusted["rq5_energy_structure"]
     payload=dict(
         primary=primary,rq5=rq5,resamples=args.resamples,seed=args.seed,
+        derived_seeds=dict(primary=primary_seed,rq5=rq5_seed),
         metrics_sha256=sha256(args.metrics),cluster_map_sha256=sha256(args.cluster_map),
         expected_targets_sha256=denominator_sha256,
         expected_target_count=(None if expected_targets is None else len(expected_targets)),

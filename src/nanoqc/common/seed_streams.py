@@ -11,9 +11,14 @@ optimizer/OPTIMIZE (QAOA parameter initialization / COBYLA restart starting
 points), in-search MEASUREMENT (the finite-shot CVaR/mean draws
 ``optimize_robust`` takes WHILE searching, to score each candidate parameter
 point -- independent of both the search's own initialization/restart RNG
-and the final output draw below), and final-output SAMPLE (the finite-shot
+and the final output draw below), final-output SAMPLE (the finite-shot
 bitstring draw actually reported as each method's output, and every
-classical baseline's own RNG).
+classical baseline's own RNG), and INFERENCE (every stage_statistics
+subprocess -- paired-statistics per budget mode, quantum-scaling, structural
+recovery -- each gets its own child seed derived from this stream via
+``derive_child_seed``, so nominally-independent confirmatory analyses, e.g.
+the primary structural contrast and RQ5 in ``analyze_structure_recovery.py``,
+never silently share a literal seed and draw correlated resamples).
 
 Before this module, ``build_final_pyg_dataset.py`` and ``train_egnn_pruning.py``
 both consumed the bare literal ``20260917`` directly -- i.e. partition and
@@ -57,7 +62,13 @@ import numpy as np
 # any pipeline execution occurred this session, so no already-produced
 # results were invalidated by the reordering; any future addition must be
 # appended at the end instead.
-STREAM_NAMES: List[str] = ["partition", "train", "perturb", "optimize", "measurement", "sample"]
+# "inference" was appended after "sample" for the same reason: stage_statistics
+# previously passed the bare master seed directly to every subprocess
+# (paired-statistics, quantum-scaling, structural recovery), coupling
+# nominally-independent confirmatory analyses onto identical RNG streams --
+# this stream lets each derive its own child seed instead. Appended at the
+# end only, so no already-produced results are invalidated.
+STREAM_NAMES: List[str] = ["partition", "train", "perturb", "optimize", "measurement", "sample", "inference"]
 
 # Selected independently using Python's OS-backed secrets generator on
 # 2026-09-23, before the next experiment, then frozen in the run config.

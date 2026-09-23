@@ -183,6 +183,30 @@ STAGE_ORDER: List[str] = [
     "final_report",
 ]
 
+# Single source of truth for the stage dependency DAG. Previously this list
+# was duplicated inline at every run_stage(...) call site in run_all() below,
+# which made it easy for a resume/staleness check to walk only the direct
+# prerequisite (one hop) and silently miss a staleness two hops away (e.g.
+# data_audit changing without queue_freeze being re-run would not be caught
+# when validating egnn_train, since egnn_train's only recorded prerequisite
+# is queue_freeze). _validate_upstream_chain_fresh below walks this dict
+# recursively instead.
+STAGE_PREREQUISITES: Dict[str, List[str]] = {
+    "env_check": [],
+    "smoke_check": ["env_check"],
+    "data_audit": ["env_check", "smoke_check"],
+    "queue_freeze": ["data_audit"],
+    "egnn_train": ["queue_freeze"],
+    "energy_calibration": ["queue_freeze", "egnn_train"],
+    "method_sensitivity": ["egnn_train", "energy_calibration"],
+    "qc_benchmark": ["egnn_train", "energy_calibration", "method_sensitivity"],
+    "structure_experiment": ["queue_freeze", "egnn_train"],
+    "external_validation": ["qc_benchmark", "structure_experiment"],
+    "statistics": ["qc_benchmark", "structure_experiment", "external_validation"],
+    "final_report": ["statistics"],
+}
+assert list(STAGE_PREREQUISITES) == STAGE_ORDER
+
 
 # ---------------------------------------------------------------------------
 # Small, dependency-free helpers (mirroring the atomic-write / hashing
@@ -693,6 +717,54 @@ class Orchestrator:
             fingerprints[prereq]=hashlib.sha256(content.encode("utf-8")).hexdigest()
         return fingerprints
 
+    def _validate_upstream_chain_fresh(
+        self, stage: str, _seen: Optional[set] = None
+    ) -> tuple[bool, str]:
+        """Recursively confirm every ancestor of ``stage`` is still fresh.
+
+        ``run_stage``'s existing resume check only compares ``stage``'s own
+        direct prerequisites' fingerprints against what was recorded when
+        ``stage`` completed -- a re-run of a stage TWO OR MORE hops upstream
+        (e.g. data_audit re-run, invalidating queue_freeze's inputs, without
+        queue_freeze itself being re-run) would leave queue_freeze's own
+        recorded fingerprint of data_audit unchanged only if queue_freeze
+        also re-ran; if it did not, queue_freeze's manifest is now stale but
+        the direct one-hop check on egnn_train (whose only recorded
+        prerequisite is queue_freeze) would not catch it. This walks the
+        full ancestor chain via STAGE_PREREQUISITES instead.
+
+        Returns ``(True, "")`` for a stage name not present in
+        STAGE_PREREQUISITES (nothing to check) or with no completed manifest
+        yet (nothing to compare against -- run_stage's own prerequisite loop
+        already enforces the prerequisite has completed before this runs).
+        """
+        seen = _seen if _seen is not None else set()
+        if stage in seen:
+            return True, ""
+        seen.add(stage)
+        if stage not in STAGE_PREREQUISITES:
+            return True, ""
+        manifest_path = self.results_manifest_dir / f"{stage}.json"
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.is_file() else None
+        except (OSError, json.JSONDecodeError):
+            manifest = None
+        if not isinstance(manifest, dict):
+            return True, ""
+        recorded_upstream = manifest.get("upstream_results_manifest_sha256") or {}
+        prereqs = STAGE_PREREQUISITES[stage]
+        current_upstream = self._upstream_fingerprints(prereqs)
+        if recorded_upstream != current_upstream:
+            changed = sorted(
+                name for name in set(current_upstream) | set(recorded_upstream)
+                if recorded_upstream.get(name) != current_upstream.get(name))
+            return False, f"stage '{stage}' upstream changed: {', '.join(changed) or 'unrecorded upstream binding'}"
+        for prereq in prereqs:
+            ok, detail = self._validate_upstream_chain_fresh(prereq, seen)
+            if not ok:
+                return False, detail
+        return True, ""
+
     def _write_stage_results_manifest(self, stage: str, result: StageResult,
                                       validation_detail: str,
                                       upstream: Optional[Dict[str, Optional[str]]] = None) -> Path:
@@ -767,6 +839,14 @@ class Orchestrator:
                         stage,"failed",utc_timestamp(),utc_timestamp(),1,
                         f"Prerequisite stage '{prereq}' has a completed marker but failed artifact "
                         f"verification: {prereq_detail}")
+                    self._save_stage_status(result)
+                    return result
+                chain_ok,chain_detail=self._validate_upstream_chain_fresh(prereq)
+                if not chain_ok:
+                    result=StageResult(
+                        stage,"failed",utc_timestamp(),utc_timestamp(),1,
+                        f"Prerequisite stage '{prereq}' has a completed marker and intact artifacts, "
+                        f"but its upstream chain is stale: {chain_detail}")
                     self._save_stage_status(result)
                     return result
         existing = self._load_stage_status(stage)
@@ -3163,6 +3243,18 @@ class Orchestrator:
         # analysis is handled separately by analyze_structure_recovery.py
         # using the pre-registered primary endpoint/contrast and cluster-aware
         # energy-to-structure inference.
+        #
+        # Each subprocess below gets its own child seed derived from the
+        # "inference" stream (see seed_streams.py) instead of the bare
+        # master seed, so paired-statistics per budget mode, quantum
+        # scaling, and structural recovery -- three nominally-independent
+        # confirmatory analyses -- never silently share one RNG stream.
+        streams = derive_streams(self.config["master_seed"])
+        cfg_probe = self.config["statistics"]
+        statistics_cluster_path = (
+            resolve_path(self.config, str(cfg_probe["cluster_map"]))
+            if cfg_probe.get("cluster_map") else self.frozen_cluster_map_path()
+        )
         results_dirs = [self.run_dir / "qc_benchmark"]
         logs, argvs, failures = [], [], []
         qc_cfg = self.config["qc_benchmark"]
@@ -3198,7 +3290,7 @@ class Orchestrator:
                     self.venv_python, "-m", module_name("batch_benchmark_hard_set.py"), "--paired-statistics",
                     "--results-dir", str(results_dir),
                     "--resamples", str(cfg.get("resamples", 10000)),
-                    "--seed", str(self.config["master_seed"]),
+                    "--seed", str(derive_child_seed(streams["inference"], "paired_statistics", budget_mode)),
                     "--budget-mode", budget_mode,
                     "--primary-pruning", primary_pruning,
                     "--primary-radius", str(primary_radius),
@@ -3210,7 +3302,7 @@ class Orchestrator:
                     "--primary-active-sites", str(primary_active_sites),
                     "--max-time-overrun-fraction", str(cfg.get("max_time_overrun_fraction", 0.10)),
                 ]
-                cluster_path=self.frozen_cluster_map_path()
+                cluster_path=statistics_cluster_path
                 if not cluster_path.is_file():
                     failures.append(f"Missing required run-local cluster map for statistics: {cluster_path}")
                     continue
@@ -3255,7 +3347,7 @@ class Orchestrator:
         scaling_json=self.run_dir/"statistics"/"quantum_scaling_statistics.json"
         scaling_md=self.run_dir/"statistics"/"quantum_scaling_statistics.md"
         scaling_json.parent.mkdir(parents=True,exist_ok=True)
-        cluster_path=self.frozen_cluster_map_path()
+        cluster_path=statistics_cluster_path
         if cluster_path.is_file():
             scaling_argv=[
                 self.venv_python,"-m", module_name("analyze_quantum_scaling.py"),
@@ -3273,7 +3365,7 @@ class Orchestrator:
                 "--baseline",str(cfg.get("primary_qc_baseline","sa")),
                 "--active-sites",*[str(v) for v in qc_cfg.get("active_sites",[4,6,8,10])],
                 "--resamples",str(cfg.get("resamples",10000)),
-                "--seed",str(self.config["master_seed"]),
+                "--seed",str(derive_child_seed(streams["inference"], "quantum_scaling")),
             ]
             scaling_rc,scaling_log=self._run_subprocess("quantum_scaling_statistics",scaling_argv)
             logs.append(str(scaling_log));argvs.append(scaling_argv)
@@ -3320,7 +3412,7 @@ class Orchestrator:
             failures.append(f"Quantum scaling statistics require run-local cluster map: {cluster_path}")
 
         validation_metrics = self.run_dir / "validation_queue" / "real_complex_metrics.csv"
-        cluster_path=self.frozen_cluster_map_path()
+        cluster_path=statistics_cluster_path
         if validation_metrics.is_file() and cluster_path.is_file():
             structure_json = self.run_dir / "statistics" / "structure_statistics.json"
             structure_md = self.run_dir / "statistics" / "structure_statistics.md"
@@ -3334,7 +3426,7 @@ class Orchestrator:
                 "--primary-endpoint", str(cfg.get("primary_structural_endpoint", "final_rmsd")),
                 "--primary-contrast", str(cfg.get("primary_structural_contrast", "qaoa_vs_sa")),
                 "--resamples", str(cfg.get("resamples", 10000)),
-                "--seed", str(self.config["master_seed"]),
+                "--seed", str(derive_child_seed(streams["inference"], "structure_recovery")),
                 "--expected-targets-file", str(
                     self.run_dir/"validation_queue"/"freeze"/"selected_targets.json"),
                 "--expected-seeds", *[
@@ -3392,27 +3484,11 @@ class Orchestrator:
     # ================================================================
     def run_all(self) -> Dict[str, StageResult]:
         results: Dict[str, StageResult] = {}
-        results["env_check"] = self.run_stage("env_check", [], self.stage_env_check)
-        results["smoke_check"] = self.run_stage("smoke_check", ["env_check"], self.stage_smoke_check)
-        if self.smoke_only:
-            return results
-        results["data_audit"] = self.run_stage("data_audit", ["env_check", "smoke_check"], self.stage_data_audit)
-        results["queue_freeze"] = self.run_stage("queue_freeze", ["data_audit"], self.stage_queue_freeze)
-        results["egnn_train"] = self.run_stage("egnn_train", ["queue_freeze"], self.stage_egnn_train)
-        results["energy_calibration"] = self.run_stage(
-            "energy_calibration", ["queue_freeze", "egnn_train"], self.stage_energy_calibration)
-        results["method_sensitivity"] = self.run_stage(
-            "method_sensitivity", ["egnn_train", "energy_calibration"], self.stage_method_sensitivity)
-        results["qc_benchmark"] = self.run_stage(
-            "qc_benchmark", ["egnn_train", "energy_calibration", "method_sensitivity"], self.stage_qc_benchmark)
-        results["structure_experiment"] = self.run_stage(
-            "structure_experiment", ["queue_freeze", "egnn_train"], self.stage_structure_experiment)
-        results["external_validation"] = self.run_stage(
-            "external_validation", ["qc_benchmark", "structure_experiment"], self.stage_external_validation)
-        results["statistics"] = self.run_stage(
-            "statistics", ["qc_benchmark", "structure_experiment", "external_validation"], self.stage_statistics)
-        results["final_report"] = self.run_stage(
-            "final_report", ["statistics"], self.stage_final_report)
+        for stage in STAGE_ORDER:
+            results[stage] = self.run_stage(
+                stage, STAGE_PREREQUISITES[stage], getattr(self, f"stage_{stage}"))
+            if stage == "smoke_check" and self.smoke_only:
+                return results
         return results
 
 
@@ -3531,6 +3607,10 @@ def audit_experiment_results(
             continue
         if result.status in ("completed","completed_with_failures"):
             ok,detail=orchestrator._validate_completed_stage_artifacts(stage)
+            if ok:
+                chain_ok,chain_detail=orchestrator._validate_upstream_chain_fresh(stage)
+                if not chain_ok:
+                    ok,detail=False,"artifacts intact but upstream chain is stale: "+chain_detail
         elif result.status=="skipped":
             existing=orchestrator._load_stage_status(stage)
             protocol_disabled=not orchestrator.config.get("stages",{}).get(stage,True)
@@ -3538,6 +3618,10 @@ def audit_experiment_results(
             if existing and existing.get("status") in ("completed","completed_with_failures"):
                 ok,detail=orchestrator._validate_completed_stage_artifacts(stage)
                 detail="skipped this invocation; existing completed artifacts revalidated: "+detail
+                if ok:
+                    chain_ok,chain_detail=orchestrator._validate_upstream_chain_fresh(stage)
+                    if not chain_ok:
+                        ok,detail=False,"artifacts intact but upstream chain is stale: "+chain_detail
             elif protocol_disabled or optional_smoke:
                 ok,detail=True,"stage skipped by frozen protocol as optional/disabled"
             else:

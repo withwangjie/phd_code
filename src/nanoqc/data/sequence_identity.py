@@ -57,12 +57,23 @@ def partner_orientations(left_vhh, left_antigen, left_anchored: bool,
     are not anchored, the orientation with *that* complex's partners swapped
     is tested too, so a nanobody stored in the "antigen" slot is still
     compared with the other complex's nanobody under the VHH threshold (and
-    its true antigen under the antigen threshold). Swapping both complexes at
-    once is the same relative orientation as the labelled one and is not
-    repeated; this only ever adds exclusions.
+    its true antigen under the antigen threshold).
+
+    Swapping BOTH complexes at once is NOT redundant with the labelled
+    orientation when neither side is role-anchored: VHH and antigen use
+    asymmetric homology thresholds (VHH >=0.80 identity with no coverage
+    requirement; antigen >=0.30 identity AND >=0.70 length coverage), so a
+    pair that fails the labelled orientation's antigen-vs-antigen comparison
+    can still pass once both sides are swapped and compared under the (looser,
+    no-coverage) VHH criterion instead. Omitting this orientation silently
+    under-detects homology for non-role-anchored subsets (train_rcsb,
+    extra_*), so it is tested explicitly below whenever both sides are
+    unanchored.
     """
     yield left_vhh, right_vhh, left_antigen, right_antigen
     if not left_anchored:
         yield left_antigen, right_vhh, left_vhh, right_antigen
     if not right_anchored:
         yield left_vhh, right_antigen, left_antigen, right_vhh
+    if not left_anchored and not right_anchored:
+        yield left_antigen, right_antigen, left_vhh, right_vhh
