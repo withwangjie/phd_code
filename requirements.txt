@@ -1,0 +1,32 @@
+# Runtime dependencies of the formal pipeline (Python >= 3.11 is required:
+# the code uses hashlib.file_digest).
+#
+# These are NOT pinned. The formal environment on the server is the source of
+# truth: every run already archives it as provenance/pip_freeze.txt, and
+# env_check records the imported versions in env_check.json. To reproduce a
+# run elsewhere, install from that run's pip_freeze.txt, or export the current
+# server environment and commit it next to this file:
+#
+#     source /data/quantum-protein/.venv/bin/activate
+#     pip freeze > requirements.lock.txt
+#
+# torch / torch_geometric must be installed with the wheel matching the
+# server's CUDA version (see https://pytorch.org and the PyG install guide).
+
+numpy
+scipy
+pyyaml
+psutil
+filelock
+tqdm
+torch
+torch_geometric
+pennylane
+pennylane-lightning
+gemmi          # evaluate_complex_metrics.py expects gemmi==0.7.5
+openmm
+pdbfixer       # conda-forge is the usual source for openmm/pdbfixer
+parasail
+
+# Test runner used by formal_preflight.sh
+pytest

@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nanoqc"
+version = "0.1.0"
+description = "Quantum-classical VHH-antigen interface side-chain reconstruction benchmark"
+readme = "README.md"
+requires-python = ">=3.11"
+# Runtime dependencies are listed (unpinned) in requirements.txt; the formal
+# server environment is the source of truth and is archived per run as
+# provenance/pip_freeze.txt. They are deliberately not duplicated here.
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

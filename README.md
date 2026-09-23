@@ -81,7 +81,7 @@ prediction.
 The formal pipeline separates **configurable experimental parameters** from
 **fixed model-definition constants**.
 
-Configurable in `full_experiment_config.yaml`:
+Configurable in `configs/full_experiment_config.yaml`:
 
 - Dataset/graph protocol: sequence identity threshold, heavy-atom interface
   label cutoff, intra-chain CA radius, cross-partner KNN degree, and minimum
@@ -188,37 +188,52 @@ The primary all-atom protocol uses vacuum/NoCutoff Amber14 packing energy.
 A pre-declared GBN2 sensitivity run is performed on development targets only;
 the validation queue never chooses its solvent model after inspecting results.
 
-## Main entry points
+## Repository layout
 
-- `run_full_experiment.py`: end-to-end orchestrator.
-- `build_final_pyg_dataset.py`: audited graph construction.
-- `build_independence_cluster_map.py`: frozen family/structure cluster-map construction.
-- `audit_external_vhh_independence.py`: external VHH train-overlap audit.
-- `generate_energy_calibration_dataset.py`: training-only multi-chi coarse/Amber calibration rows.
-- `train_egnn_pruning.py`: leakage-controlled EGNN training.
-- `model_egnn_pruning.py`: interface scoring and Active-site selection.
-- `subgraph_to_qubo.py`: coarse/all-atom adaptive side-chain QUBO builders.
-- `qaoa_interface_sampler.py`: XY-mixer QAOA.
-- `batch_benchmark_hard_set.py`: matched quantum/classical benchmark.
-- `run_real_complex_pilot.py`: all-atom retrospective recovery experiment.
-- `evaluate_complex_metrics.py`: structure-level evaluation.
-- `analyze_structure_recovery.py`: pre-registered structural endpoint and RQ5 inference.
-- `run_external_structure_baselines.py`: FASPR and Phenix clashscore baselines.
+```text
+configs/   full_experiment_config.yaml (frozen scientific protocol), server_config.yaml (infrastructure only)
+docs/      METHODS_EVIDENCE.md (design-to-literature register), RESULTS_CONTRACT.md (required outputs)
+scripts/   deploy_launch.sh, run_full_experiment.sh, formal_preflight.sh, check_status.sh, repair_openmm_cuda.sh
+src/nanoqc/
+  pipeline/     run_full_experiment.py (end-to-end orchestrator), resolve_server_config.py
+  data/         audit_all_datasets.py, build_final_pyg_dataset.py (audited graphs + split),
+                build_independence_cluster_map.py, audit_external_vhh_independence.py, sequence_identity.py
+  model/        model_egnn_pruning.py (interface scoring, Active-site selection, checkpoint loading),
+                train_egnn_pruning.py (leakage-controlled training)
+  qubo/         subgraph_to_qubo.py (coarse / all-atom adaptive side-chain QUBO builders)
+  solvers/      qaoa_interface_sampler.py (XY-mixer QAOA)
+  experiments/  batch_benchmark_hard_set.py (matched quantum/classical benchmark),
+                run_real_complex_pilot.py (all-atom retrospective recovery),
+                generate_energy_calibration_dataset.py, run_external_structure_baselines.py (FASPR / Phenix)
+  structure/    evaluate_complex_metrics.py, structural_quality.py, residue_tables.py
+  inference/    paired_statistics.py, analyze_quantum_scaling.py, analyze_structure_recovery.py (RQ5)
+  reporting/    generate_final_research_report.py, generate_figure1_pymol_script.py
+  common/       repo_io.py (hashing, layout), seed_streams.py, prediction_contract.py
+tests/     regression suite run by formal_preflight.sh (`python -m pytest tests`)
+```
+
+Every stage runs as `python -m nanoqc.<package>.<module>` from the repository
+root with `src/` on `PYTHONPATH`; the scripts in `scripts/` set this up. Run
+manifests keep fingerprinting modules under their bare file names
+(`code_sha256["subgraph_to_qubo.py"]`), resolved through
+`nanoqc.common.repo_io.MODULE_LAYOUT`. `tests/test_refactor_equivalence.py`
+checks the shared helpers against the implementations they replaced.
 
 
 ## Literature basis
 
-The authoritative design-to-literature mapping is maintained in `METHODS_EVIDENCE.md`. Reference labels [R1]–[R21] in this README refer to that file. The register explicitly separates direct literature support from literature-informed preregistration and study-specific preregistration so that exact numerical choices are never misrepresented as published standards.
+The authoritative design-to-literature mapping is maintained in `docs/METHODS_EVIDENCE.md`. Reference labels [R1]–[R21] in this README refer to that file. The register explicitly separates direct literature support from literature-informed preregistration and study-specific preregistration so that exact numerical choices are never misrepresented as published standards.
 
 
 ## Portable server runtime configuration
 
 Scientific protocol and server infrastructure are intentionally separated.
 
-- `full_experiment_config.yaml` contains the frozen scientific protocol.
-- `server_config.yaml` contains server paths, resource policy, external-tool locations, and operational resource gates.
-- `resolve_server_config.py` detects CPU/GPU/RAM and resolves paths/tools before formal preflight, then writes `.runtime/resolved_runtime_config.yaml` and `.runtime/server_resolution.json`.
-- `run_full_experiment.sh` uses the same resolved runtime config for both preflight and the formal run.
+- `configs/full_experiment_config.yaml` contains the frozen scientific protocol.
+- `configs/server_config.yaml` contains server paths, resource policy, external-tool locations, and operational resource gates.
+- `nanoqc.pipeline.resolve_server_config` detects CPU/GPU/RAM and resolves paths/tools before formal preflight, then writes `.runtime/resolved_runtime_config.yaml` and `.runtime/server_resolution.json`.
+- `scripts/run_full_experiment.sh` uses the same resolved runtime config for both preflight and the formal run.
+- `requirements.txt` lists the runtime dependencies (unpinned, Python >= 3.11). The exact installed versions of each run are archived in `provenance/pip_freeze.txt`.
 
 Portable overrides can be supplied without editing the scientific protocol:
 
@@ -228,7 +243,7 @@ export QP_DATA_ROOT=/path/to/data
 export QP_RUN_ROOT=/path/to/runs
 export QP_FASPR=/path/to/FASPR
 export QP_PHENIX_CLASHSCORE=/path/to/phenix.clashscore
-./deploy_launch.sh
+./scripts/deploy_launch.sh
 ```
 
 In auto mode the resolver chooses DDP ranks from available GPUs while preserving the configured target global batch size, derives CPU worker counts from available physical cores, selects the OpenMM platform from available hardware, and records every resolved value in the run configuration/provenance. Scientific thresholds, QAOA protocol values, data-split rules, endpoints, and statistical choices are never hardware-auto-tuned.
@@ -239,7 +254,7 @@ In auto mode the resolver chooses DDP ranks from available GPUs while preserving
 A formal experiment is launched with one command:
 
 ```bash
-./deploy_launch.sh
+./scripts/deploy_launch.sh
 ```
 
 The launcher resolves the current server, creates exactly one timestamped run directory before preflight, and stores the complete experiment archive under that directory. A fresh run contains:
@@ -284,7 +299,7 @@ The formal manuscript/analysis should treat one run directory as the atomic repr
 
 ## Mandatory experiment-result audit
 
-The formal output requirements are defined in `RESULTS_CONTRACT.md`. A zero subprocess return code is never sufficient to mark an experimental stage complete.
+The formal output requirements are defined in `docs/RESULTS_CONTRACT.md`. A zero subprocess return code is never sufficient to mark an experimental stage complete.
 
 For every executed stage, the orchestrator validates its mandatory raw/aggregate result files and writes:
 
