@@ -110,7 +110,8 @@ Required:
 - `qc_benchmark/seed_streams.json`
 - raw `qc_benchmark/cases/*.json`
 
-The raw case count must equal `cases_completed_total`. Every scaling case must contain exactly the requested number of Dunbrack-compatible rotamer sites; a mislabeled requested-site condition is a failed case, never silently accepted.
+The raw case count must equal `cases_completed_total`. Each raw case JSON also carries a self-contained `quantum_instance` contract (full QUBO/Ising representation, penalty-free physical terms, one-hot register map and feasible-space metadata), a `quantum_benchmark` contract that separates the proposed XY-QAOA method from classical baselines and the retrospective exact oracle, and QAOA logical resource fields for quantum rows. The existing flat `metrics.csv` remains the compatibility surface for statistical analysis.
+Every scaling case must contain exactly the requested number of Dunbrack-compatible rotamer sites; a mislabeled requested-site condition is a failed case, never silently accepted.
 Scaling cases also require exactly three retained states per site, one in each
 chi1 well. The statistics stage rejects older adaptive-allocation cases. A
 fresh benchmark output directory is required after this protocol change.
