@@ -59,7 +59,16 @@ elif [ -f "${REPO_ROOT}/.venv/Scripts/activate" ]; then
     # shellcheck disable=SC1091
     source "${REPO_ROOT}/.venv/Scripts/activate"
 else
-    fail "No virtual environment found at .venv/bin/activate or .venv/Scripts/activate. Create one first (python -m venv .venv) and install this project's dependencies (requirements.txt) before launching."
+    SHARED_VENV="${QP_VENV:-/data/quantum-protein/.venv}"
+    if [ -f "${SHARED_VENV}/bin/activate" ]; then
+        # shellcheck disable=SC1091
+        source "${SHARED_VENV}/bin/activate"
+    elif [ -f "${SHARED_VENV}/Scripts/activate" ]; then
+        # shellcheck disable=SC1091
+        source "${SHARED_VENV}/Scripts/activate"
+    else
+        fail "No usable virtual environment found. Set QP_VENV or provide ${REPO_ROOT}/.venv."
+    fi
 fi
 log "Activated virtual environment: $(command -v python)"
 python --version
