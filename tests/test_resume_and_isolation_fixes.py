@@ -5,6 +5,8 @@ import inspect
 import json
 from pathlib import Path
 
+import numpy as np
+
 import nanoqc.data.audit_external_vhh_independence as external_audit
 import nanoqc.data.build_final_pyg_dataset as dataset_builder
 import nanoqc.experiments.batch_benchmark_hard_set as bbh
@@ -228,3 +230,60 @@ def test_external_independence_manifest_is_run_local_and_regenerated():
         assert "independence_manifest is obsolete" in str(exc)
     else:
         raise AssertionError("a repo-level independence manifest must be rejected")
+
+
+# ------------------------------------------- full-complex antigen environment
+def _graph_with_antigen_outside_radius():
+    import torch
+    data = qubo._virtual_pruned_graph(5)
+    extra_x = torch.zeros((1, 21))
+    extra_x[0, qubo.AA_INDEX["K"]] = 1.0
+    extra_x[0, -1] = 1.0
+    # Charged antigen residue whose CA is > 6 A from every Active CA (so the
+    # 6 A environment radius drops it) but well inside cutoff + side-chain reach.
+    data.x = torch.cat([data.x, extra_x])
+    data.pos = torch.cat([data.pos, torch.tensor([[-4.3, -4.6, 0.0]])])
+    distances = torch.cdist(data.pos, data.pos)
+    data.edge_index = ((distances < 8.0) & (distances > 0)).nonzero().t().long()
+    data.node_chain_id = torch.cat([data.node_chain_id, torch.tensor([1])])
+    data.interface_score = torch.cat([data.interface_score, torch.tensor([0.05])])
+    data.residue_ids = [*data.residue_ids, "A:99"]
+    for name in ("is_active", "is_frozen_environment", "selected_vhh_mask", "original_node_index"):
+        delattr(data, name)
+    return data, data.num_nodes - 1
+
+
+def _coarse_builder():
+    return qubo.InterfaceQUBOBuilder(min_variables=15, max_variables=30, max_sites=5)
+
+
+def test_antigen_environment_uses_full_complex_not_the_environment_radius():
+    import copy
+    import torch
+    from nanoqc.model.model_egnn_pruning import build_ablation_subgraph
+    data, far = _graph_with_antigen_outside_radius()
+    active = torch.arange(5)
+    assert torch.cdist(data.pos[far:far + 1], data.pos[active]).min() > 6.0
+    sub = build_ablation_subgraph(data, active, 6.0)
+    assert far not in sub.original_node_index.tolist()
+    assert len(sub.antigen_context_pos) == int((data.x[:, -1] == 1).sum())
+
+    full = _coarse_builder().build(sub)
+    truncated_sub = copy.copy(sub)
+    del truncated_sub.antigen_context_pos, truncated_sub.antigen_context_x
+    truncated = _coarse_builder().build(truncated_sub)
+    assert full.metadata["antigen_environment_scope"] == "full_complex_antigen"
+    assert truncated.metadata["antigen_environment_scope"] == "graph_antigen_nodes"
+    assert not np.allclose(full.metadata["raw_antigen_energy"], truncated.metadata["raw_antigen_energy"])
+
+
+def test_antigen_neighbour_prefilter_is_exact(monkeypatch):
+    import torch
+    from nanoqc.model.model_egnn_pruning import build_ablation_subgraph
+    data, _ = _graph_with_antigen_outside_radius()
+    sub = build_ablation_subgraph(data, torch.arange(5), 6.0)
+    filtered = _coarse_builder().build(sub).metadata["raw_antigen_energy"]
+    monkeypatch.setattr(qubo, "_MAX_PSEUDO_ATOM_OFFSET", 1.0e6)
+    unfiltered = _coarse_builder().build(sub).metadata["raw_antigen_energy"]
+    # Same atom pairs are scored; only float summation order differs.
+    assert np.allclose(filtered, unfiltered, rtol=0.0, atol=1e-12)

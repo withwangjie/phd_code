@@ -33,7 +33,10 @@ prediction.
      2010 rotamer states [R2] (chi1..chiN) queried from residue phi/psi context.
      Legacy hand-written chi1 priors are debug/compatibility only.
    - Candidate pre-screening uses local environment / antigen-conditioned
-     interaction scoring (coarse model) or Amber14 single-candidate energy
+     interaction scoring (coarse model; the antigen term sees every antigen
+     residue of the full complex, limited only by the 8 A atom-pair cutoff,
+     while the environment radius defines only the frozen VHH background
+     [R31,R32]) or Amber14 single-candidate energy
      (all-atom validation). Coarse prior/VHH/antigen/pair terms may be linearly
      calibrated to Amber delta-E using training complexes only, with frozen
      coefficients for validation/test.

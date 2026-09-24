@@ -1016,6 +1016,19 @@ def _terminal_spec(amino_acid: str) -> list[Tuple[str, float]]:
     return [("C", _NET_CHARGE.get(amino_acid, 0.0))]
 
 
+# Lateral spacing between terminal pseudo-atoms (see _generate_rotamer).
+_TERMINAL_SPREAD_ANGSTROM = 0.38
+# Largest distance of any candidate pseudo-atom from its own CA: the 1.53 A
+# CB-like atom, or a terminal atom at ``reach`` along ``direction`` plus an
+# orthogonal lateral spread. Used for an exact antigen neighbour pre-filter.
+_MAX_PSEUDO_ATOM_OFFSET = max(
+    [1.53] + [
+        math.hypot(reach, 0.5 * (len(_terminal_spec(aa)) - 1) * _TERMINAL_SPREAD_ANGSTROM)
+        for aa, reach in _SIDECHAIN_REACH.items()
+    ]
+) + 1e-6
+
+
 def _nonbonded_energy(
     positions_a: np.ndarray,
     sigma_a: np.ndarray,
@@ -1300,6 +1313,7 @@ class InterfaceQUBOBuilder:
         pos: np.ndarray,
         x: np.ndarray,
         chain_ids: np.ndarray,
+        antigen_pos: Optional[np.ndarray] = None,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Build a right-handed local frame from CA and interface directions.
 
@@ -1316,7 +1330,7 @@ class InterfaceQUBOBuilder:
             & np.isclose(x[:, -1], 0.0)
             & (np.arange(len(pos)) != node_index)
         )
-        ligand = np.flatnonzero(np.isclose(x[:, -1], 1.0))
+        ligand_pos = (pos[np.isclose(x[:, -1], 1.0)] if antigen_pos is None else antigen_pos)
 
         if len(same_chain):
             distances = np.linalg.norm(pos[same_chain] - center, axis=1)
@@ -1325,17 +1339,17 @@ class InterfaceQUBOBuilder:
                 tangent_raw = pos[nearest[1]] - pos[nearest[0]]
             else:
                 tangent_raw = pos[nearest[0]] - center
-        elif len(ligand):
-            nearest_ligand = ligand[np.argmin(np.linalg.norm(pos[ligand] - center, axis=1))]
-            tangent_raw = pos[nearest_ligand] - center
+        elif len(ligand_pos):
+            nearest_ligand = ligand_pos[np.argmin(np.linalg.norm(ligand_pos - center, axis=1))]
+            tangent_raw = nearest_ligand - center
         else:
             tangent_raw = np.array([1.0, 0.0, 0.0])
         tangent = _normalize(tangent_raw)
 
         candidates: list[np.ndarray] = []
-        if len(ligand):
-            nearest_ligand = ligand[np.argmin(np.linalg.norm(pos[ligand] - center, axis=1))]
-            candidates.append(pos[nearest_ligand] - center)
+        if len(ligand_pos):
+            nearest_ligand = ligand_pos[np.argmin(np.linalg.norm(ligand_pos - center, axis=1))]
+            candidates.append(nearest_ligand - center)
         if len(same_chain):
             candidates.extend(pos[index] - center for index in same_chain[:3])
         candidates.extend(
@@ -1363,11 +1377,12 @@ class InterfaceQUBOBuilder:
         x: np.ndarray,
         chain_ids: np.ndarray,
         rotamer_index: int,
+        antigen_pos: Optional[np.ndarray] = None,
     ) -> RotamerState:
         """Attach residue-specific pseudo-atoms in a local chi1 orientation."""
 
         tangent, normal, binormal = self._local_frame(
-            node_index, pos, x, chain_ids
+            node_index, pos, x, chain_ids, antigen_pos
         )
         angle = math.radians(template.chi1_degrees)
         radial = math.cos(angle) * normal + math.sin(angle) * binormal
@@ -1381,7 +1396,7 @@ class InterfaceQUBOBuilder:
         charges = [0.0]
         terminal = _terminal_spec(amino_acid)
         for terminal_index, (kind, charge) in enumerate(terminal):
-            spread = (terminal_index - 0.5 * (len(terminal) - 1)) * 0.38
+            spread = (terminal_index - 0.5 * (len(terminal) - 1)) * _TERMINAL_SPREAD_ANGSTROM
             positions.append(center + reach * direction + spread * lateral)
             kinds.append(kind)
             charges.append(charge)
@@ -1433,29 +1448,33 @@ class InterfaceQUBOBuilder:
 
     def _antigen_environment(
         self,
-        pos: np.ndarray,
-        x: np.ndarray,
-        amino_acids: Sequence[str],
-        node_index: int,
+        antigen_pos: np.ndarray,
+        antigen_amino_acids: Sequence[str],
+        center: np.ndarray,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """Return a coarse antigen-only environment for candidate guidance."""
+        """Coarse antigen environment limited only by the atom-pair cutoff.
 
-        antigen = np.flatnonzero(np.isclose(x[:, -1], 1.0))
-        if not len(antigen):
+        A candidate pseudo-atom lies at most ``_MAX_PSEUDO_ATOM_OFFSET`` from
+        its CA, so an antigen bead can reach any pseudo-atom within the
+        non-bonded cutoff only if its CA-CA distance is below
+        cutoff + that offset. This neighbour pre-filter is therefore exact:
+        it never drops a pair that ``_nonbonded_energy`` would score.
+        """
+
+        if not len(antigen_pos):
             return (
                 np.empty((0, 3), dtype=np.float64),
                 np.empty(0, dtype=np.float64),
                 np.empty(0, dtype=np.float64),
                 np.empty(0, dtype=np.float64),
             )
-        center = pos[int(node_index)]
-        distances = np.linalg.norm(pos[antigen] - center, axis=1)
-        antigen = antigen[distances <= self.force_field.cutoff_angstrom]
-        env_pos = pos[antigen]
-        env_sigma = np.full(len(antigen), 3.50, dtype=np.float64)
-        env_epsilon = np.full(len(antigen), 0.06, dtype=np.float64)
+        reach = self.force_field.cutoff_angstrom + _MAX_PSEUDO_ATOM_OFFSET
+        keep = np.flatnonzero(np.linalg.norm(antigen_pos - center, axis=1) < reach)
+        env_pos = antigen_pos[keep]
+        env_sigma = np.full(len(keep), 3.50, dtype=np.float64)
+        env_epsilon = np.full(len(keep), 0.06, dtype=np.float64)
         env_charge = np.asarray(
-            [_NET_CHARGE.get(amino_acids[int(index)], 0.0) for index in antigen],
+            [_NET_CHARGE.get(antigen_amino_acids[int(index)], 0.0) for index in keep],
             dtype=np.float64,
         )
         return env_pos, env_sigma, env_epsilon, env_charge
@@ -1540,9 +1559,21 @@ class InterfaceQUBOBuilder:
             )
             for node_index in site_nodes
         }
+        if hasattr(data, "antigen_context_pos") and hasattr(data, "antigen_context_x"):
+            antigen_pos = data.antigen_context_pos.detach().cpu().numpy().astype(np.float64)
+            antigen_amino_acids = _decode_amino_acids(
+                data.antigen_context_x.detach().cpu().numpy().astype(np.float64))
+            if antigen_pos.shape != (len(antigen_amino_acids), 3) or not np.isfinite(antigen_pos).all():
+                raise ValueError("antigen_context_pos must be finite [M, 3] aligned with antigen_context_x")
+            antigen_scope = "full_complex_antigen"
+        else:
+            antigen_mask = np.isclose(x[:, -1], 1.0)
+            antigen_pos = pos[antigen_mask]
+            antigen_amino_acids = [aa for aa, keep in zip(amino_acids, antigen_mask) if keep]
+            antigen_scope = "graph_antigen_nodes"
         antigen_environments = {
             int(node_index): self._antigen_environment(
-                pos, x, amino_acids, int(node_index)
+                antigen_pos, antigen_amino_acids, pos[int(node_index)]
             )
             for node_index in site_nodes
         }
@@ -1589,6 +1620,7 @@ class InterfaceQUBOBuilder:
                     x,
                     chain_ids,
                     template_index,
+                    antigen_pos,
                 )
                 state.prior_energy = -self.force_field.thermal_energy_kcal * math.log(
                     template.prior_probability / best_probability
@@ -1726,6 +1758,13 @@ class InterfaceQUBOBuilder:
                 else "legacy 6/9/12 raw chi1 sub-rotamers by flexibility; retain 3--6 states/site under <=30 variables"
             ),
             "candidate_guidance": "pre-screen by rotamer prior + VHH-only fixed-environment energy + antigen interaction energy; antigen counted once",
+            "antigen_environment_scope": antigen_scope,
+            "antigen_environment_rule": (
+                "every antigen residue of the source complex, limited only by the "
+                "coarse atom-pair non-bonded cutoff; the environment radius applies "
+                "to the frozen VHH background only"
+                if antigen_scope == "full_complex_antigen"
+                else "antigen nodes present in the supplied graph"),
             "rotamer_model": self.rotamer_mode,
             "state_policy": (f"fixed_{self.fixed_states_per_site}_chi1_coverage" if self.fixed_chi1_wells and self.fixed_states_per_site != 3
                              else "fixed_three_chi1_wells" if self.fixed_chi1_wells else "adaptive_3_to_6"),
