@@ -53,10 +53,13 @@ PDB_ID = re.compile(r"[a-z0-9]{4}")
 
 
 def load_config(path: Optional[Path]) -> dict:
+    """Load preprocessing config without silently reusing stale runtime state."""
     if path is None:
-        resolved = REPO_ROOT / ".runtime" / "resolved_runtime_config.yaml"
-        path = resolved if resolved.is_file() else REPO_ROOT / "configs" / "full_experiment_config.yaml"
+        path = REPO_ROOT / "configs" / "full_experiment_config.yaml"
+    path = path.expanduser().resolve()
     config = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(config, dict):
+        raise SystemExit(f"Expected YAML mapping: {path}")
     config["_source"] = str(path)
     return config
 
@@ -268,7 +271,7 @@ def cmd_pass2(args, config, s) -> int:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", type=Path, default=None,
-                        help="Default: .runtime/resolved_runtime_config.yaml, else configs/full_experiment_config.yaml")
+                        help="Default: current configs/full_experiment_config.yaml; pass a resolved config explicitly only when intended.")
     parser.add_argument("--prep-dir", type=Path, default=None, help="Default: data/external_vhh/prep")
     sub = parser.add_subparsers(dest="command", required=True)
     audit = sub.add_parser("audit", help="Standalone data audit -> study_pdb_ids.txt")
