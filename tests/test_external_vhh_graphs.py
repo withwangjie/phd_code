@@ -415,3 +415,36 @@ def test_foldseek_inputs_keep_annotated_antigens_and_skip_unreadable_files(tmp_p
     assert sources == {"7bad": []}
     none, rec = fp.antigen_structure("7bad", sources["7bad"], [], 20)
     assert none is None and rec["chains"] == []
+
+
+def test_an_unannotated_fab_in_the_entry_rejects_it(tmp_path, monkeypatch):
+    """A single-domain SAbDab export cannot show a Fab; the structure must."""
+    import sys
+    monkeypatch.setitem(sys.modules, "anarci", None)
+    antigen = "MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQ"
+    lines, serial = [], 0
+    for chain, sequence, z in (("H", VHH, 0.0), ("A", antigen, 4.5), ("B", OTHER_VHH, 30.0)):
+        more, serial = _atoms(chain, sequence, 0.0, z, serial)
+        lines += more + ["TER"]
+    head = ["REMARK   2 RESOLUTION.    2.00 ANGSTROMS.",
+            "REMARK 350 BIOMOLECULE: 1",
+            "REMARK 350 AUTHOR DETERMINED BIOLOGICAL UNIT: TRIMERIC",
+            "REMARK 350 APPLY THE FOLLOWING TO CHAINS: H, A, B",
+            "REMARK 350   BIOMT1   1  1.000000  0.000000  0.000000        0.00000",
+            "REMARK 350   BIOMT2   1  0.000000  1.000000  0.000000        0.00000",
+            "REMARK 350   BIOMT3   1  0.000000  0.000000  1.000000        0.00000"]
+    source = tmp_path / "9fab.pdb"
+    source.write_text("\n".join(head + lines + ["END"]) + "\n")
+
+    # Chain B is an Ig V-domain that SAbDab annotates neither as VHH nor as antigen.
+    prepared = ext.prepare_external_complex(source, "H", (), ["A"])
+    assert [c["chain"] for c in prepared["unannotated_antibody_chains"]] == ["B"]
+    assert "B" not in prepared["antigen_chains"]
+    _, attempts = sel.choose_vhh(source, ["H"], ["A"])
+    assert "contains_unannotated_antibody_chain" in attempts[0]["reasons"]
+
+    # Annotated as the antigen (anti-idiotype): kept, and the entry is not rejected.
+    as_antigen = ext.prepare_external_complex(source, "H", (), ["A", "B"])
+    assert as_antigen["unannotated_antibody_chains"] == []
+    _, attempts = sel.choose_vhh(source, ["H"], ["A", "B"])
+    assert "contains_unannotated_antibody_chain" not in attempts[0]["reasons"]

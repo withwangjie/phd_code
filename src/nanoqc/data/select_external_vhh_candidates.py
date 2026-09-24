@@ -5,6 +5,11 @@ Input is the SAbDab summary table (e.g. the nanobody summary
 ``sabdab_nano_summary_all.tsv``; several files may be given). Each PDB entry
 passes these gates in order:
 
+A single-domain SAbDab export lists only single-domain chains, so a Fab in
+the same entry leaves no trace in the metadata. Such chains are found in the
+structure instead (step 2), and the entry is rejected as in the training
+audit.
+
 1. Metadata (same rules as the training ``sabdab_vhh`` subset):
    - released after ``--released-after``, and absent from ``--exclude-pdbs``
      (the study's audited PDB universe);
@@ -14,7 +19,9 @@ passes these gates in order:
 2. Structure: builds the biological assembly, annotates the CDRs, keeps the
    antigen chains within 7.5 A of the paratope, and applies the audit's
    interface quality gates and minimum interface size
-   (``build_external_vhh_graphs.prepare_external_complex``).
+   (``build_external_vhh_graphs.prepare_external_complex``). An Ig variable
+   domain that SAbDab annotates neither as this entry's VHH nor as its
+   antigen rejects the entry.
    Each graph is one VHH-antigen complex, as in the SNAC-DB per-VHH complexes
    behind the training and hard test sets. Entries with several nanobodies
    give one complex per PDB: the passing VHH chain with the largest interface
@@ -143,13 +150,14 @@ def fetch_structure(pdb: str, directory: Path, download: bool) -> Optional[Path]
     return path
 
 
-def choose_vhh(source: Path, vhh_chains: Sequence[str]) -> tuple[Optional[dict], list[dict]]:
+def choose_vhh(source: Path, vhh_chains: Sequence[str],
+               annotated_antigen_chains: Sequence[str] = ()) -> tuple[Optional[dict], list[dict]]:
     """Prepare every annotated VHH chain; keep the passing one with the largest interface."""
     attempts, passing = [], []
     for chain in vhh_chains:
         others = [c for c in vhh_chains if c != chain]
         try:
-            prepared = prepare_external_complex(source, chain, others)
+            prepared = prepare_external_complex(source, chain, others, annotated_antigen_chains)
         except Exception as exc:
             attempts.append(dict(vhh_chain=chain, reasons=[f"structure_{type(exc).__name__}: {exc}"]))
             continue
@@ -157,6 +165,10 @@ def choose_vhh(source: Path, vhh_chains: Sequence[str]) -> tuple[Optional[dict],
         reasons = list(quality["structure_quality_reasons"])
         if quality["interface_residues"] < builder.MIN_INTERFACE_RESIDUES:
             reasons.append("weak_interface")
+        # Entry-level rule, as in the training audit: a complex that also holds
+        # a VH/VL antibody is not a single-VHH entry, whatever the metadata says.
+        if prepared["unannotated_antibody_chains"]:
+            reasons.append("contains_unannotated_antibody_chain")
         attempts.append(dict(vhh_chain=chain, interface_residues=quality["interface_residues"], reasons=reasons))
         if not reasons:
             passing.append((-quality["interface_residues"], chain, dict(prepared, vhh_chain=chain)))
@@ -261,7 +273,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 entry["reasons"].append("raw_structure_missing")
                 continue
             entry.update(source_structure=str(source.resolve()), source_structure_sha256=sha256(source))
-            prepared, attempts = choose_vhh(source, entry["vhh_chains"])
+            prepared, attempts = choose_vhh(source, entry["vhh_chains"], entry["sabdab_antigen_chains"])
         except Exception as exc:
             entry["reasons"].append(f"structure_{type(exc).__name__}: {exc}")
             continue
@@ -276,6 +288,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                      antigen_chains=prepared["antigen_chains"], cdr3=prepared["cdrs"]["cdr3"],
                      cdr_annotation_method=prepared["cdrs"]["method"],
                      antigen_contact_basis=prepared["meta"]["antigen_contact_basis"],
+                     unannotated_antibody_chains=prepared["unannotated_antibody_chains"],
                      interface_residues=quality["interface_residues"], quality=quality)
         if train:
             from nanoqc.data.audit_external_vhh_independence import max_training_identities

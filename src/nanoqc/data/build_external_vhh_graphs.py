@@ -184,8 +184,30 @@ def interface_quality(model, vhh_name: str, antigen_names: Sequence[str], resolu
                 structure_quality_reasons=reasons)
 
 
+def unannotated_antibody_chains(chains: list, known: Sequence[str], annotated_antigen: Sequence[str]) -> list[dict]:
+    """Ig variable domains that SAbDab annotates neither as this entry's VHH nor as its antigen.
+
+    A single-domain SAbDab export lists only single-domain chains, so a Fab in
+    the same entry leaves no trace in the metadata. Such a chain is found here
+    instead, with the same detector the clustering input uses. An antibody
+    that SAbDab annotates as the antigen (anti-idiotype complexes) is not one.
+    """
+    from nanoqc.data.build_foldseek_pairs import ig_variable_domain
+    known_names, antigen_names = set(known), set(annotated_antigen)
+    found = []
+    for chain in chains:
+        author = _author_chain(chain["name"])
+        if author in known_names or author in antigen_names:
+            continue
+        is_ig, method = ig_variable_domain("".join(node["aa"] for node in chain["nodes"]))
+        if is_ig:
+            found.append(dict(chain=chain["name"], method=method))
+    return found
+
+
 def prepare_external_complex(structure_path: Path, vhh_chain: str,
-                             other_antibody_chains: Sequence[str] = ()) -> dict:
+                             other_antibody_chains: Sequence[str] = (),
+                             annotated_antigen_chains: Sequence[str] = ()) -> dict:
     """Assembly, partner chains, CDRs and quality for one external complex."""
     st = gemmi.read_structure(str(structure_path))
     if not len(st):
@@ -203,13 +225,17 @@ def prepare_external_complex(structure_path: Path, vhh_chain: str,
         chain["group"] = 0 if chain["name"] == vhh_chain else 1
     vhh_sequence = "".join(node["aa"] for node in anchors[0]["nodes"])
     cdrs = annotate_cdrs(vhh_sequence)
+    extra_antibody = unannotated_antibody_chains(
+        chains, [vhh_chain, *other_antibody_chains], annotated_antigen_chains)
     meta = dict(structure_source=str(dict(st.info)[audit.STRUCTURE_SOURCE_KEY]))
-    kept, meta = contacting_antigen_chains(chains, cdrs, meta, other_antibody_chains)
+    kept, meta = contacting_antigen_chains(
+        chains, cdrs, meta, [*other_antibody_chains, *(c["chain"] for c in extra_antibody)])
     for chain in kept:
         chain["complex_meta"] = meta
     antigen_names = [c["name"] for c in kept if c["group"] == 1]
     quality = interface_quality(st[0], vhh_chain, antigen_names, resolution)
     return dict(chains=kept, meta=meta, cdrs=cdrs, quality=quality, vhh_sequence=vhh_sequence,
+                unannotated_antibody_chains=extra_antibody,
                 antigen_sequences=["".join(n["aa"] for n in c["nodes"]) for c in kept if c["group"] == 1],
                 antigen_chains=antigen_names)
 
@@ -257,7 +283,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             source = source_structure_for_pdb(args.structures_dir, pdb)
             if row.get("source_structure_sha256") and sha256(source) != row["source_structure_sha256"]:
                 raise ValueError("raw structure changed since candidate selection")
-            prepared = prepare_external_complex(source, row["vhh_chain"], row.get("other_antibody_chains", []))
+            prepared = prepare_external_complex(source, row["vhh_chain"], row.get("other_antibody_chains", []),
+                                                row.get("sabdab_antigen_chains", []))
             graph = build_graph(prepared, pdb, source)
             path = args.out_dir / f"{SUBSET}__{pdb.upper()}.pt"
             torch.save(graph, path)
