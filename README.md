@@ -250,11 +250,17 @@ python -m nanoqc.data.build_external_vhh_graphs \
     --structures-dir data/external_vhh/structures --out-dir data/external_vhh/graphs
 ```
 
-Selection applies the training `sabdab_vhh` rules: exactly one VHH chain, no
-VH/VL chain, a protein or peptide antigen, resolution <= 3.0 A, and the
-audit's interface quality gates. It then groups the complexes by the layered
+Each graph is one VHH-antigen complex, as in the SNAC-DB per-VHH complexes
+behind the training and hard test sets. Entries with several nanobodies give
+one complex per PDB: the VHH with the largest passing interface. Other
+antibody chains are never antigen, and entries with a VH/VL chain are
+excluded. Selection also requires a protein or peptide antigen, resolution
+<= 3.0 A, and the audit's interface quality gates. It then groups the complexes by the layered
 homology rule and reports whether `min_clusters` independent groups exist.
-CDRs use ANARCI IMGT numbering when ANARCI is installed. Otherwise CDR-H3 is
+CDR-H3 follows IMGT (105-117), like the training SNAC `Region_Split_VH.cdr3`;
+with `--training-dataset` the report states how often the external CDR-H3
+rule reproduces the training annotation. CDRs use ANARCI IMGT numbering when
+ANARCI is installed. Otherwise CDR-H3 is
 located between the IMGT 104 cysteine and 118 tryptophan motifs, and the
 paratope falls back to the whole VHH chain. Every formal run re-certifies
 independence against its own frozen training set and cluster map.

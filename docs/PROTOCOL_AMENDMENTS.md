@@ -30,6 +30,7 @@ formal run is required.
 | A5 | Outcome-free cluster adequacy gate at queue freeze | queue_freeze (gate only) | not applicable |
 | A6 | Development-only EGNN training-seed sensitivity | egnn_train (descriptive) | not applicable |
 | A7 | Quantum-intrinsic primary endpoint; `quantum_exploration` stage | qc_benchmark, statistics, quantum_exploration, final_report | to be completed |
+| A8 | Construction rules for the external VHH set | external_validation (input set) | not applicable (no external set existed) |
 
 ## A1. Primary coarse solver endpoint: resource-normalized time-to-solution
 
@@ -174,3 +175,37 @@ they were logged later.
 - **Affected results:** qc_benchmark (new row fields and transfer rows),
   statistics (primary family), new quantum_exploration stage, final report.
 - **Results inspected before this amendment:** _to be completed by the investigator_.
+
+## A8. Construction rules for the external VHH set
+
+- **Before:** the protocol required an external VHH graph set but defined
+  neither how its complexes are selected nor how graphs are built. No
+  external set existed.
+- **After:** `select_external_vhh_candidates.py` and
+  `build_external_vhh_graphs.py` define it.
+  - **Source:** SAbDab entries released after a declared cutoff and absent
+    from the study's audited PDB universe.
+  - **Complex:** one VHH-antigen complex per entry, matching the SNAC-DB
+    per-VHH complexes that supply training and the hard test set [R34]. When
+    an entry has several nanobodies, the VHH with the largest passing
+    interface is chosen; this depends only on structure. Other antibody chains
+    are never antigen, and entries with a VH/VL chain are excluded (as in the
+    training audit).
+  - **Graphs:** the graph-v1.8 definition (biological assembly, 7.5 A antigen
+    rule [R33], 5 A labels) and the audit's quality gates.
+  - **CDR-H3:** IMGT 105-117, like the training SNAC annotation. ANARCI is
+    used when installed; otherwise CDR-H3 comes from the IMGT 104/118 anchor
+    motifs, and its agreement with the training annotation is reported.
+  - **Adequacy:** the number of independent groups is checked against
+    `min_clusters` before any run.
+  - The formal external audit now verifies assembly-built graphs against the
+    rebuilt assembly.
+- **Why:** the external stage tests the frozen pipeline on independent
+  complexes, so each external graph must be the same kind of object as the
+  training and hard test graphs. The `sabdab_vhh` rule (one VHH in the entry)
+  concerned an unambiguous anchor from annotations. SAbDab annotates each VHH
+  chain, so that rule is not needed here, and it would remove most recent
+  complexes.
+- **Affected results:** external_validation.
+- **Results inspected before this amendment:** not applicable (no external set or result existed).
+

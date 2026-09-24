@@ -9,12 +9,17 @@ passes these gates in order:
    - released after ``--released-after``, and absent from ``--exclude-pdbs``
      (the study's audited PDB universe);
    - protein or peptide antigen, no scFv;
-   - exactly one VHH chain and no VH/VL antibody chain in the entry;
+   - at least one VHH chain and no VH/VL antibody chain in the entry;
    - numeric resolution <= the audit limit.
 2. Structure: builds the biological assembly, annotates the CDRs, keeps the
    antigen chains within 7.5 A of the paratope, and applies the audit's
    interface quality gates and minimum interface size
    (``build_external_vhh_graphs.prepare_external_complex``).
+   Each graph is one VHH-antigen complex, as in the SNAC-DB per-VHH complexes
+   behind the training and hard test sets. Entries with several nanobodies
+   give one complex per PDB: the passing VHH chain with the largest interface
+   (ties broken alphabetically). The other antibody chains are never antigen.
+   This choice depends only on structure, never on any outcome.
 3. Training overlap (with ``--training-dataset``): the same layered identities
    as the formal external audit (VHH full chain, CDR-H3 loop, antigen full
    chain with coverage) against every training graph. Optionally the
@@ -83,8 +88,8 @@ def metadata_gate(pdb: str, rows: list[dict], *, released_after: dt.date, exclud
     vhh = sorted({r["Hchain"].strip() for r in rows if _present(r.get("Hchain")) and not _present(r.get("Lchain"))})
     if any(_present(r.get("Lchain")) for r in rows):
         reasons.append("contains_vh_vl_antibody")
-    if len(vhh) != 1:
-        reasons.append("vhh_chain_count_not_one")
+    if not vhh:
+        reasons.append("no_vhh_chain")
     if any(str(r.get("scfv", "")).strip().lower() == "true" for r in rows):
         reasons.append("scfv")
     antigen_rows = [r for r in rows if _present(r.get("antigen_chain"))]
@@ -110,7 +115,7 @@ def metadata_gate(pdb: str, rows: list[dict], *, released_after: dt.date, exclud
         reasons.append("unknown_resolution")
     elif resolution > max_resolution:
         reasons.append("resolution_above_limit")
-    return dict(pdb_id=pdb, vhh_chain=(vhh[0] if len(vhh) == 1 else ""),
+    return dict(pdb_id=pdb, vhh_chains=vhh, vhh_chain="",
                 sabdab_antigen_chains=sorted({c.strip() for r in antigen_rows
                                               for c in str(r["antigen_chain"]).split("|") if c.strip()}),
                 antigen_name=str((antigen_rows or rows)[0].get("antigen_name", "")),
@@ -136,6 +141,49 @@ def fetch_structure(pdb: str, directory: Path, download: bool) -> Optional[Path]
     path = directory / f"{pdb}.cif"
     path.write_bytes(response.content)
     return path
+
+
+def choose_vhh(source: Path, vhh_chains: Sequence[str]) -> tuple[Optional[dict], list[dict]]:
+    """Prepare every annotated VHH chain; keep the passing one with the largest interface."""
+    attempts, passing = [], []
+    for chain in vhh_chains:
+        others = [c for c in vhh_chains if c != chain]
+        try:
+            prepared = prepare_external_complex(source, chain, others)
+        except Exception as exc:
+            attempts.append(dict(vhh_chain=chain, reasons=[f"structure_{type(exc).__name__}: {exc}"]))
+            continue
+        quality = prepared["quality"]
+        reasons = list(quality["structure_quality_reasons"])
+        if quality["interface_residues"] < builder.MIN_INTERFACE_RESIDUES:
+            reasons.append("weak_interface")
+        attempts.append(dict(vhh_chain=chain, interface_residues=quality["interface_residues"], reasons=reasons))
+        if not reasons:
+            passing.append((-quality["interface_residues"], chain, dict(prepared, vhh_chain=chain)))
+    if not passing:
+        return None, attempts
+    return min(passing, key=lambda item: item[:2])[2], attempts
+
+
+def cdr3_method_agreement(train: list[dict]) -> dict:
+    """How often this module's CDR-H3 equals the training (SNAC IMGT) annotation."""
+    from nanoqc.data.build_external_vhh_graphs import annotate_cdrs
+    compared = agreed = 0
+    methods = set()
+    for record in train:
+        if record["subset_source"] != "snac_db" or not record["cdr_h3"] or len(record["vhh"]) != 1:
+            continue
+        if record["cdr_h3"] not in record["vhh"][0]:
+            continue  # annotation includes residues unmodelled in the structure
+        compared += 1
+        try:
+            cdrs = annotate_cdrs(record["vhh"][0])
+        except ValueError:
+            continue
+        methods.add(cdrs["method"])
+        agreed += cdrs["cdr3"] == record["cdr_h3"]
+    return dict(compared=compared, agreed=agreed, fraction=(agreed / compared if compared else None),
+                methods=sorted(methods))
 
 
 def layered_homologous(a: dict, b: dict, *, vhh: float, cdr: float, antigen: float, coverage: float) -> bool:
@@ -198,6 +246,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         from nanoqc.data.audit_external_vhh_independence import load_training_sequences
         train = load_training_sequences(args.training_dataset)
     train_clusters = {cluster_map[t["pdb_id"]] for t in train if t["pdb_id"] in cluster_map}
+    cdr_agreement = cdr3_method_agreement(train) if train else None
 
     candidates = []
     for pdb, rows in sorted(read_sabdab(args.sabdab_summary).items()):
@@ -212,19 +261,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 entry["reasons"].append("raw_structure_missing")
                 continue
             entry.update(source_structure=str(source.resolve()), source_structure_sha256=sha256(source))
-            prepared = prepare_external_complex(source, entry["vhh_chain"])
+            prepared, attempts = choose_vhh(source, entry["vhh_chains"])
         except Exception as exc:
             entry["reasons"].append(f"structure_{type(exc).__name__}: {exc}")
             continue
+        entry["vhh_attempts"] = attempts
+        if prepared is None:
+            entry["reasons"].append("no_vhh_chain_passes_structure_gates")
+            continue
         quality = prepared["quality"]
-        entry.update(vhh_sequence=prepared["vhh_sequence"], antigen_sequences=prepared["antigen_sequences"],
+        entry.update(vhh_chain=prepared["vhh_chain"],
+                     other_antibody_chains=[c for c in entry["vhh_chains"] if c != prepared["vhh_chain"]],
+                     vhh_sequence=prepared["vhh_sequence"], antigen_sequences=prepared["antigen_sequences"],
                      antigen_chains=prepared["antigen_chains"], cdr3=prepared["cdrs"]["cdr3"],
                      cdr_annotation_method=prepared["cdrs"]["method"],
                      antigen_contact_basis=prepared["meta"]["antigen_contact_basis"],
                      interface_residues=quality["interface_residues"], quality=quality)
-        entry["reasons"] += quality["structure_quality_reasons"]
-        if quality["interface_residues"] < builder.MIN_INTERFACE_RESIDUES:
-            entry["reasons"].append("weak_interface")
         if train:
             from nanoqc.data.audit_external_vhh_independence import max_training_identities
             overlap = max_training_identities(
@@ -267,6 +319,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                                 antigen_min_length_coverage=args.antigen_min_length_coverage),
         entries=len(candidates), selected=len(selected), independent_groups=n_groups,
         min_clusters=args.min_clusters, adequate=n_groups >= args.min_clusters,
+        cdr3_agreement_with_training=cdr_agreement,
         rejection_counts=dict(sorted(reason_counts.items())), candidates=candidates,
     )
     args.out_dir.mkdir(parents=True, exist_ok=True)
@@ -288,6 +341,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         f"{'adequate' if payload['adequate'] else 'NOT adequate'}).", "",
         f"Training overlap checked: {'yes, ' + str(len(train)) + ' training graphs' if train else 'no (pass --training-dataset)'}; "
         f"structure clusters: {'yes' if cluster_map else 'no (pass --cluster-map after Foldseek)'}.", "",
+        ("CDR-H3 agreement with the training SNAC IMGT annotation: "
+         + (f"{cdr_agreement['agreed']}/{cdr_agreement['compared']} "
+            f"({', '.join(cdr_agreement['methods']) or 'n/a'})" if cdr_agreement else "not checked")), "",
         "## Rejections", "", "| Reason | Entries |", "|---|---:|",
         *[f"| {k} | {v} |" for k, v in sorted(reason_counts.items(), key=lambda kv: -kv[1])], "",
         "## Selected", "", "| PDB | Group | VHH | Antigen chains | Antigen | CDR-H3 | Interface residues |",

@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Build graph-v1.8 external VHH graphs from raw PDB/mmCIF files.
 
-External complexes get exactly the training-graph definition: the first
-author-determined biological assembly, the single annotated VHH chain as
-partner 0, antigen = assembly chains with a CA/CB within 7.5 A of the VHH
-paratope (SAbDab rule [METHODS_EVIDENCE R33]; copies of the VHH are never
-antigen), heavy-atom 5 A interface labels, 8 A intra-chain CA edges and fixed
-cross-partner KNN. Labelling, edges and validation are the unchanged
+External complexes get the training-graph definition of one VHH-antigen
+complex: the first author-determined biological assembly, one annotated VHH
+chain as partner 0, antigen = assembly chains with a CA/CB within 7.5 A of
+the VHH paratope (SAbDab rule [METHODS_EVIDENCE R33]). Copies of that VHH and
+every other annotated antibody chain of the entry are never antigen, as in the
+SNAC-DB per-VHH complexes that supply the training and hard test sets. The
+graph also keeps 5 A heavy-atom interface labels, 8 A intra-chain CA edges and
+fixed cross-partner KNN. Labelling, edges and validation are the unchanged
 ``build_final_pyg_dataset.make_graph`` code; the audit's structure-quality
 gates (resolution, interface side-chain completeness, altloc, occupancy) are
 applied to the VHH-antigen interface.
@@ -103,8 +105,14 @@ def _paratope(anchor: dict, cdrs: dict) -> tuple[list, str]:
     return nodes, "whole_vhh_chain_cdr_unmapped"
 
 
-def contacting_antigen_chains(chains: list, cdrs: dict, meta: dict) -> tuple[list, dict]:
-    """SAbDab antigen rule inside the assembly; copies of the VHH are never antigen."""
+def _author_chain(name: str) -> str:
+    """Author chain of an assembly chain (symmetry copies are named ``<chain>-<operator>``)."""
+    return name.split("-", 1)[0]
+
+
+def contacting_antigen_chains(chains: list, cdrs: dict, meta: dict,
+                              other_antibody_chains: Sequence[str] = ()) -> tuple[list, dict]:
+    """SAbDab antigen rule inside the assembly; antibody chains are never antigen."""
     anchor = next(c for c in chains if c["group"] == 0)
     paratope, basis = _paratope(anchor, cdrs)
     tree = cKDTree(builder._ca_cb_coordinates(paratope))
@@ -117,6 +125,9 @@ def contacting_antigen_chains(chains: list, cdrs: dict, meta: dict) -> tuple[lis
             continue
         if "".join(node["aa"] for node in chain["nodes"]) == anchor_sequence:
             dropped.append(dict(chain=chain["name"], reason="copy_of_vhh"))
+            continue
+        if _author_chain(chain["name"]) in set(other_antibody_chains):
+            dropped.append(dict(chain=chain["name"], reason="other_antibody_chain"))
             continue
         distance = float(tree.query(builder._ca_cb_coordinates(chain["nodes"]), k=1)[0].min())
         if distance <= cutoff:
@@ -169,7 +180,8 @@ def interface_quality(model, vhh_name: str, antigen_names: Sequence[str], resolu
                 structure_quality_reasons=reasons)
 
 
-def prepare_external_complex(structure_path: Path, vhh_chain: str) -> dict:
+def prepare_external_complex(structure_path: Path, vhh_chain: str,
+                             other_antibody_chains: Sequence[str] = ()) -> dict:
     """Assembly, partner chains, CDRs and quality for one external complex."""
     st = gemmi.read_structure(str(structure_path))
     if not len(st):
@@ -188,7 +200,7 @@ def prepare_external_complex(structure_path: Path, vhh_chain: str) -> dict:
     vhh_sequence = "".join(node["aa"] for node in anchors[0]["nodes"])
     cdrs = annotate_cdrs(vhh_sequence)
     meta = dict(structure_source=str(dict(st.info)[audit.STRUCTURE_SOURCE_KEY]))
-    kept, meta = contacting_antigen_chains(chains, cdrs, meta)
+    kept, meta = contacting_antigen_chains(chains, cdrs, meta, other_antibody_chains)
     for chain in kept:
         chain["complex_meta"] = meta
     antigen_names = [c["name"] for c in kept if c["group"] == 1]
@@ -238,7 +250,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             source = source_structure_for_pdb(args.structures_dir, pdb)
             if row.get("source_structure_sha256") and sha256(source) != row["source_structure_sha256"]:
                 raise ValueError("raw structure changed since candidate selection")
-            prepared = prepare_external_complex(source, row["vhh_chain"])
+            prepared = prepare_external_complex(source, row["vhh_chain"], row.get("other_antibody_chains", []))
             graph = build_graph(prepared, pdb, source)
             path = args.out_dir / f"{SUBSET}__{pdb.upper()}.pt"
             torch.save(graph, path)
