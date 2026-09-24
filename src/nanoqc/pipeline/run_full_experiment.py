@@ -2117,7 +2117,7 @@ class Orchestrator:
                 self.venv_python, "-m", module_name("carve_holdout_clusters.py"),
                 "--dataset-dir", str(dataset_dir),
                 "--audit-dir", str(self.run_dir / "audit"),
-                "--fold", str(holdout_cfg.get("fold", 1)),
+                "--fold", str(holdout_cfg.get("fold", 1)),  # "1" or "1,2" (A13)
                 "--min-clusters", str(holdout_cfg.get("min_components", 10)),
                 "--min-train-components", str(holdout_cfg.get("min_train_components", 20)),
                 "--out-json", str(holdout_json),

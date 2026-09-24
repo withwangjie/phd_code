@@ -35,6 +35,7 @@ formal run is required.
 | A10 | External validation becomes an antigen-fold holdout | queue_freeze (split), egnn_train, energy_calibration, external_validation | not applicable (no external set or result existed) |
 | A11 | Symmetric Foldseek score; oversized components always train | queue_freeze (cluster map, split), egnn_train, external_validation | not applicable (data composition only; no split or result existed) |
 | A12 | Entry resolution from curation metadata; pipeline staging not audited | audit, dataset (admission) | not applicable (audit fields only; no graph or result existed) |
+| A13 | The antigen-fold holdout takes several folds when one is too small | queue_freeze (split), egnn_train, external_validation | not applicable (component counts only; no result existed) |
 
 ## A1. Primary coarse solver endpoint: resource-normalized time-to-solution
 
@@ -409,3 +410,38 @@ they were logged later.
   pool), everything downstream.
 - **Results inspected before this amendment:** not applicable (the dataset
   stage had produced no graph).
+
+## A13. The antigen-fold holdout takes several folds when one is too small
+
+- **Before:** A10 held out one fold (fold 1 of 5) and required at least 10
+  independent components.
+- **Measured (before any training or outcome):** the training split holds 233
+  graphs in 35 layered components, of which one component of 112 graphs (48%
+  of the pool) is pinned to training (A11). The remaining 121 graphs in 34
+  components spread over 5 folds as 6, 5, 6, 6 and 11 components; the internal
+  validation fold (0) takes the first. No single holdout fold reaches 10, so
+  the carve failed the preregistered gate, as designed.
+- **After:** the holdout may take several folds, and the rule is **the lowest
+  non-validation fold indices** (`1`, then `1,2`, ...), never the fold that
+  happens to hold the most components. Holding out every non-validation fold
+  is refused. `fold: "1,2"` gives 11 components and 45 graphs.
+- **Why this and not a lower threshold:** the confirmatory tests are two-sided
+  cluster sign-flip tests, whose smallest attainable p value is 2/2^G. G=6 is
+  the first that can reach p < 0.05 [R43], so a 5-component holdout cannot
+  support a confirmatory claim at any effect size (A10). Lowering
+  `min_components` below the fold's own count would only move the gate past
+  the arithmetic it exists to enforce.
+- **Why the rule, not a choice:** fold 4 holds 11 components and would pass on
+  its own. Selecting it would be choosing the split by its component count.
+  Taking the lowest indices in order is a rule fixed before the counts were
+  read, and the run records which folds were taken (`folds_held_out`).
+- **Limit to disclose:** with 233 training graphs, 112 of them one homologous
+  component, the holdout is 45 graphs in 11 components and the internal
+  validation fold is 17 graphs in 6 components. The manuscript must report
+  these sizes with the holdout result; they bound what any external claim can
+  assert, and the 11 components are the G of the sign-flip test.
+- **Affected results:** queue_freeze (split), egnn_train and
+  energy_calibration (smaller training pool), external_validation.
+- **Results inspected before this amendment:** not applicable (component
+  counts are data composition; no graph outcome, training run or metric
+  existed).

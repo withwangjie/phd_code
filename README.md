@@ -264,6 +264,9 @@ without an antigen chain of at least 20 residues. Scores are symmetric
 a short chain cannot join whole complexes. `--reuse-raw` rescores the previous
 search (`prep/foldseek/foldseek_raw.m8`) without running Foldseek again. A
 layered component larger than one fold's share of the pool always trains (A11).
+The holdout takes `queue_freeze.antigen_fold_holdout.fold`, one index or several
+(`"1,2"`); several are taken, lowest first, when one fold does not reach
+`min_components` (A13).
 
 To score a **genuinely external** VHH set instead, set
 `external_validation.external_vhh.graph_dir` and `source_structure_dir`, and

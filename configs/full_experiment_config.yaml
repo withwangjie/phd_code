@@ -162,7 +162,11 @@ queue_freeze:
   # validation fold, before any training or outcome exists.
   antigen_fold_holdout:
     enabled: true
-    fold: 1  # of train_egnn_pruning.SPLIT_FOLDS; the internal validation fold is 0
+    # Folds held out, of train_egnn_pruning.SPLIT_FOLDS; the internal validation
+    # fold is 0. Several folds are held out together when one does not reach
+    # min_components: the rule is the lowest non-validation folds ("1,2"), never
+    # the fold that happens to hold most components (PROTOCOL_AMENDMENTS.md A13).
+    fold: "1,2"
     min_components: 10  # preregistered adequacy gate, matching external_validation min_clusters
     min_train_components: 20
   homology_isolation:

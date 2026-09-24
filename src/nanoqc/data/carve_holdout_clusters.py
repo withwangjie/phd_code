@@ -76,20 +76,44 @@ def copy_source_structure(source: dict, pdb: str, destination: Path) -> Path:
     return out
 
 
-def select_components(components: Sequence[Sequence[Path]], fold: int,
+def parse_folds(value: str) -> list[int]:
+    """``"1"`` or ``"1,2"`` -> a sorted list of distinct fold indices."""
+    folds = sorted({int(part) for part in str(value).replace(" ", "").split(",") if part})
+    if not folds:
+        raise ValueError("no fold given")
+    return folds
+
+
+def holdout_folds(folds: int, count: int, validation_fold: int) -> list[int]:
+    """The ``count`` lowest fold indices that are not the internal validation fold.
+
+    A rule, never a search: with too few independent components in one fold,
+    the holdout takes the next fold up, not the fold that happens to hold most
+    of them (PROTOCOL_AMENDMENTS.md A13).
+    """
+    available = [f for f in range(folds) if f != validation_fold]
+    if not 1 <= count <= len(available):
+        raise ValueError(f"count must be in [1,{len(available)}]")
+    return available[:count]
+
+
+def select_components(components: Sequence[Sequence[Path]], folds: Sequence[int],
                       pool_size: Optional[int] = None) -> list[list[Path]]:
-    """Components hashed to ``fold``; a component pinned to training (A11) never is."""
+    """Components hashed to any of ``folds``; a component pinned to training (A11) never is."""
+    wanted = set(folds)
     pool = sum(len(c) for c in components) if pool_size is None else pool_size
-    return [list(component) for component in components if training.assigned_fold(component, pool) == fold]
+    return [list(component) for component in components
+            if training.assigned_fold(component, pool) in wanted]
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--dataset-dir", type=Path, required=True, help="This run's dataset directory")
     parser.add_argument("--audit-dir", type=Path, required=True, help="Directory with data_audit_details.jsonl")
-    parser.add_argument("--fold", type=int, default=1,
-                        help=f"Fold index held out, of {training.SPLIT_FOLDS} "
-                             f"(the internal validation fold is {training.VALIDATION_FOLD})")
+    parser.add_argument("--fold", default="1",
+                        help=f"Fold index, or comma-separated indices, held out of {training.SPLIT_FOLDS} "
+                             f"(the internal validation fold is {training.VALIDATION_FOLD}). Several folds "
+                             f"are held out together when one does not reach --min-clusters (A13).")
     parser.add_argument("--min-clusters", type=int, required=True,
                         help="Preregistered minimum of independent holdout components")
     parser.add_argument("--min-train-components", type=int, default=2,
@@ -97,9 +121,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--out-json", type=Path, required=True)
     args = parser.parse_args(argv)
 
-    if args.fold == training.VALIDATION_FOLD or not 0 <= args.fold < training.SPLIT_FOLDS:
+    try:
+        folds = parse_folds(args.fold)
+    except ValueError as exc:
+        parser.error(f"--fold: {exc}")
+    if any(f == training.VALIDATION_FOLD or not 0 <= f < training.SPLIT_FOLDS for f in folds):
         parser.error(f"--fold must be in [0,{training.SPLIT_FOLDS}) and differ from the internal "
                      f"validation fold {training.VALIDATION_FOLD}")
+    if len(folds) >= training.SPLIT_FOLDS - 1:
+        parser.error(f"--fold cannot hold out every fold but the internal validation one "
+                     f"({training.SPLIT_FOLDS - 1} available); training would keep only pinned components")
     train_dir = args.dataset_dir / "graphs" / "train"
     holdout_dir = args.dataset_dir / "graphs" / HOLDOUT_SPLIT
     manifest_path = args.dataset_dir / "graph_manifest.json"
@@ -113,7 +144,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if not paths:
         raise SystemExit(f"No training graphs in {train_dir}")
     components = training.layered_components(paths)
-    holdout_components = select_components(components, args.fold, len(paths))
+    holdout_components = select_components(components, folds, len(paths))
     remaining = len(components) - len(holdout_components)
     pinned = [c for c in components if training.pinned_to_training(c, len(paths))]
     # Training later splits the smaller remaining pool; the pinned set must not
@@ -132,9 +163,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                          f"{training.SPLIT_FOLDS} pin boundary. Record this and amend the pin rule.")
     if len(holdout_components) < args.min_clusters:
         raise SystemExit(
-            f"Antigen-fold holdout has {len(holdout_components)} independent component(s) at fold "
-            f"{args.fold}, below the preregistered minimum {args.min_clusters}. The training pool is too "
-            f"small or too homologous for this holdout; it is an outcome-free data-composition failure.")
+            f"Antigen-fold holdout has {len(holdout_components)} independent component(s) at fold(s) "
+            f"{','.join(map(str, folds))}, below the preregistered minimum {args.min_clusters}. The training "
+            f"pool is too small or too homologous for this holdout; it is an outcome-free data-composition "
+            f"failure. Holding out one more fold (A13) is the preregistered response.")
     if remaining < args.min_train_components:
         raise SystemExit(f"Only {remaining} component(s) would remain for training; need "
                          f"{args.min_train_components}")
@@ -178,10 +210,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     for row in moved:
         by_cluster[row["family_structure_cluster"]].append(row["pdb_id"])
     payload = dict(
-        schema="antigen_fold_holdout_v1", split=HOLDOUT_SPLIT, fold=args.fold,
+        schema="antigen_fold_holdout_v1", split=HOLDOUT_SPLIT, fold=(folds[0] if len(folds) == 1 else folds),
+        folds_held_out=folds,
         folds=training.SPLIT_FOLDS, internal_validation_fold=training.VALIDATION_FOLD,
         selection="layered isolation components whose deterministic name-hash fold equals --fold, "
-                  "except components pinned to training",
+                  "except components pinned to training; several folds when one does not reach "
+                  "min_clusters (A13)",
         criteria=dict(vhh_full_chain_identity=training.VHH_IDENTITY_THRESHOLD,
                       cdr_h3_identity=training.CDR_H3_IDENTITY_THRESHOLD,
                       antigen_identity=training.ANTIGEN_IDENTITY_THRESHOLD,

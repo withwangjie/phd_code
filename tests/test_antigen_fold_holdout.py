@@ -307,6 +307,31 @@ def test_a_component_at_the_pin_boundary_fails_the_carve(tmp_path, monkeypatch):
     paths = sorted((dataset / "graphs" / "train").glob("*.pt"))
     component = next(c for c in training.layered_components(paths) if {p.name for p in c} == giant)
     fold = next(f for f in range(1, training.SPLIT_FOLDS) if f != training.component_fold(component)
-                and carve.select_components(training.layered_components(paths), f, len(paths)))
+                and carve.select_components(training.layered_components(paths), [f], len(paths)))
     with pytest.raises(SystemExit, match="pin boundary"):
         _carve(dataset, audit, tmp_path / "holdout.json", fold=fold, min_clusters=1)
+
+
+def test_several_folds_are_held_out_together_by_rule_not_by_search():
+    """A13: the lowest non-validation folds, never the fullest one."""
+    assert carve.holdout_folds(5, 1, 0) == [1]
+    assert carve.holdout_folds(5, 2, 0) == [1, 2]
+    assert carve.parse_folds("2,1") == [1, 2]
+
+
+def test_holding_out_two_folds_moves_both_and_records_them(tmp_path):
+    dataset, audit = _dataset(tmp_path)
+    paths = sorted((dataset / "graphs" / "train").glob("*.pt"))
+    components = training.layered_components(paths)
+    expected = {p.name for c in components if training.component_fold(c) in (1, 2) for p in c}
+    payload = _carve(dataset, audit, tmp_path / "holdout.json", fold="1,2", min_clusters=1)
+    assert payload["folds_held_out"] == [1, 2] and payload["fold"] == [1, 2]
+    assert {p.name for p in (dataset / "graphs" / "holdout").glob("*.pt")} == expected
+    assert not expected & {p.name for p in (dataset / "graphs" / "train").glob("*.pt")}
+
+
+def test_the_holdout_cannot_swallow_every_non_validation_fold(tmp_path):
+    dataset, audit = _dataset(tmp_path)
+    with pytest.raises(SystemExit) as raised:  # argparse error: message goes to stderr
+        _carve(dataset, audit, tmp_path / "holdout.json", fold="1,2,3,4", min_clusters=1)
+    assert raised.value.code == 2
