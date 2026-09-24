@@ -31,5 +31,17 @@ if [ -f "${REPO_ROOT}/.venv/bin/activate" ]; then
 elif [ -f "${REPO_ROOT}/.venv/Scripts/activate" ]; then
     # shellcheck disable=SC1091
     source "${REPO_ROOT}/.venv/Scripts/activate"
+else
+    SHARED_VENV="${QP_VENV:-/data/quantum-protein/.venv}"
+    if [ -f "${SHARED_VENV}/bin/activate" ]; then
+        # shellcheck disable=SC1091
+        source "${SHARED_VENV}/bin/activate"
+    elif [ -f "${SHARED_VENV}/Scripts/activate" ]; then
+        # shellcheck disable=SC1091
+        source "${SHARED_VENV}/Scripts/activate"
+    else
+        echo "[prepare_external_vhh] ERROR: no usable virtual environment found. Set QP_VENV or create ${REPO_ROOT}/.venv." >&2
+        exit 1
+    fi
 fi
 exec python -m nanoqc.data.prepare_external_vhh "$@"
