@@ -20,8 +20,11 @@ from nanoqc.common.repo_io import sha256_file as sha256
 from nanoqc.common.seed_streams import DEFAULT_MASTER_SEED
 from nanoqc.inference.paired_statistics import bootstrap_sign_flip
 
-# Primary scaling response (see docs/PROTOCOL_AMENDMENTS.md A1).
-RESPONSE = "delta_log10_qts99"
+# Primary scaling response: QAOA's own exact ground-state amplification over
+# uniform feasible sampling (docs/PROTOCOL_AMENDMENTS.md A7). The
+# QAOA-minus-baseline queries-to-solution slopes are descriptive axes.
+RESPONSE = "qaoa_log10_amplification_exact"
+DESCRIPTIVE_RESPONSES = ("delta_log10_qts99", "delta_log10_qts99_execution")
 
 
 def _slope(xs:list[float],ys:list[float]) -> Optional[float]:
@@ -82,12 +85,16 @@ def main(argv:Optional[Sequence[str]]=None)->int:
     p.add_argument("--primary-radius",type=float,default=6.0)
     p.add_argument("--baseline",choices=("sa","uniform","greedy"),default="sa")
     p.add_argument("--active-sites",type=int,nargs="+",required=True)
+    p.add_argument("--primary-active-sites",type=int,default=6,
+        help="Preregistered size for the one-sample amplification test (must be in --active-sites)")
     p.add_argument("--resamples",type=int,default=10000)
     p.add_argument("--seed",type=int,default=DEFAULT_MASTER_SEED)
     args=p.parse_args(argv)
     if args.resamples<1000:
         p.error("--resamples must be >=1000")
     sizes=sorted(set(args.active_sites))
+    if args.primary_active_sites not in sizes:
+        p.error("--primary-active-sites must be one of --active-sites")
     if len(sizes)<3:
         p.error("Scaling inference requires at least three active-site levels")
     raw_map=json.loads(args.cluster_map.read_text(encoding="utf-8"))
@@ -143,11 +150,13 @@ def main(argv:Optional[Sequence[str]]=None)->int:
         if config_count<=0 or num_bits<=0:
             failures.append(f"{path.name}: invalid complexity metadata");continue
         try:
-            qts_values=(float(q["log10_qts99"]),float(b["log10_qts99"]))
+            qts_values=(float(q["log10_qts99"]),float(b["log10_qts99"]),
+                        float(q["log10_qts99_execution"]),float(b["log10_qts99_execution"]),
+                        float(q["log10_ground_amplification_exact"]))
         except (KeyError,TypeError,ValueError):
-            failures.append(f"{path.name}: missing log10_qts99 (re-run the benchmark with resource accounting)");continue
+            failures.append(f"{path.name}: missing quantum metrics (re-run the benchmark with resource accounting)");continue
         if not all(math.isfinite(v) for v in qts_values):
-            failures.append(f"{path.name}: nonfinite log10_qts99");continue
+            failures.append(f"{path.name}: nonfinite quantum metrics");continue
         if qaoa_parameter_count<=0 or qaoa_xy_gates<=0 or qaoa_two_qubit_gates<=0:
             failures.append(f"{path.name}: missing/invalid QAOA logical-resource metadata");continue
         if qaoa_two_qubit_gates != qaoa_xy_gates + qaoa_zz_gates:
@@ -167,6 +176,8 @@ def main(argv:Optional[Sequence[str]]=None)->int:
             qaoa_xy_gates=qaoa_xy_gates,
             qaoa_zz_gates=qaoa_zz_gates,
             qaoa_two_qubit_gates=qaoa_two_qubit_gates,
+            qaoa_log10_amplification_exact=float(q["log10_ground_amplification_exact"]),
+            delta_log10_qts99_execution=float(q["log10_qts99_execution"])-float(b["log10_qts99_execution"]),
             qaoa_log10_qts99=float(q["log10_qts99"]),baseline_log10_qts99=float(b["log10_qts99"]),
             delta_log10_qts99=float(q["log10_qts99"])-float(b["log10_qts99"]),
             qaoa_gap=float(q["gap"]),baseline_gap=float(b["gap"]),
@@ -201,6 +212,8 @@ def main(argv:Optional[Sequence[str]]=None)->int:
                 qaoa_xy_gates=float(np.mean([r["qaoa_xy_gates"] for r in group])),
                 qaoa_zz_gates=float(np.mean([r["qaoa_zz_gates"] for r in group])),
                 qaoa_two_qubit_gates=float(np.mean([r["qaoa_two_qubit_gates"] for r in group])),
+                qaoa_log10_amplification_exact=float(np.mean([r["qaoa_log10_amplification_exact"] for r in group])),
+                delta_log10_qts99_execution=float(np.mean([r["delta_log10_qts99_execution"] for r in group])),
                 delta_log10_qts99=float(np.mean([r["delta_log10_qts99"] for r in group])),
                 delta_gap=float(np.mean([r["delta_gap"] for r in group])),
                 delta_hit=float(np.mean([r["delta_hit"] for r in group])),
@@ -216,6 +229,8 @@ def main(argv:Optional[Sequence[str]]=None)->int:
             slope_two_qubit_gates=_slope(
                 [x["qaoa_two_qubit_gates"] for x in points],[x[RESPONSE] for x in points]),
             slope_active_sites=_slope([x["active_sites"] for x in points],[x[RESPONSE] for x in points]),
+            descriptive_slopes={name:_slope([x["log10_configuration_count"] for x in points],[x[name] for x in points])
+                                for name in DESCRIPTIVE_RESPONSES},
             descriptive_gap_slope_log10_configuration_count=_slope(
                 [x["log10_configuration_count"] for x in points],[x["delta_gap"] for x in points]),
         ))
@@ -235,6 +250,23 @@ def main(argv:Optional[Sequence[str]]=None)->int:
         cluster_details.append(dict(cluster=cluster,pdb_count=len(rows),mean_slope=slope))
     primary=_cluster_effect(cluster_slopes,args.seed,args.resamples)
 
+    # Primary-size amplification: is QAOA's exact ground-state probability
+    # above uniform feasible sampling (log10 amplification != 0)? One value per
+    # PDB (mean over repeats), averaged within cluster, two-sided sign flip.
+    amplification_by_cluster=defaultdict(list)
+    for pdb in pdbs:
+        group=by_pdb_size[(pdb,args.primary_active_sites)]
+        amplification_by_cluster[cluster_map[pdb]].append(
+            float(np.mean([r["qaoa_log10_amplification_exact"] for r in group])))
+    amplification_values=[float(np.mean(v)) for _,v in sorted(amplification_by_cluster.items())]
+    effect=_cluster_effect(amplification_values,args.seed+1,args.resamples)
+    amplification=dict(
+        n_clusters=effect["n_clusters"],mean_log10_amplification=effect["mean_slope"],
+        ci_low=effect["ci_low"],ci_high=effect["ci_high"],p_value=effect["p_value"],
+        active_sites=args.primary_active_sites,
+        definition="log10(exact QAOA ground-state probability / uniform feasible ground probability) at the preregistered primary size; 0 = no concentration beyond random sampling",
+    )
+
     size_summary=[]
     for size in sizes:
         rows=[r for r in observations if r["active_sites"]==size]
@@ -248,13 +280,15 @@ def main(argv:Optional[Sequence[str]]=None)->int:
             mean_qaoa_xy_gates=float(np.mean([r["qaoa_xy_gates"] for r in rows])),
             mean_qaoa_zz_gates=float(np.mean([r["qaoa_zz_gates"] for r in rows])),
             mean_qaoa_two_qubit_gates=float(np.mean([r["qaoa_two_qubit_gates"] for r in rows])),
+            mean_qaoa_log10_amplification_exact=float(np.mean([r["qaoa_log10_amplification_exact"] for r in rows])),
+            mean_delta_log10_qts99_execution=float(np.mean([r["delta_log10_qts99_execution"] for r in rows])),
             mean_delta_log10_qts99=float(np.mean([r["delta_log10_qts99"] for r in rows])),
             mean_delta_gap=float(np.mean([r["delta_gap"] for r in rows])),
             mean_delta_hit=float(np.mean([r["delta_hit"] for r in rows])),
         ))
     payload=dict(
-        definition="within-PDB slope of QAOA-minus-classical log10 queries-to-solution (99%, Ronnow et al. 2014; QAOA optimization shots included) versus log10 feasible configuration count under a fixed three-chi1-well state policy; PDB slopes averaged within family/structure cluster",
-        sign_interpretation="negative slope means QAOA's resource cost to reach the ground state grows more slowly than the classical baseline's as complexity increases",
+        definition="within-PDB slope of QAOA's exact log10 ground-state amplification over uniform feasible sampling versus log10 feasible configuration count under a fixed three-chi1-well state policy; PDB slopes averaged within family/structure cluster",
+        sign_interpretation="positive slope means QAOA concentrates relatively more probability on the ground state as the feasible space grows; negative means its advantage over random sampling shrinks",
         simulator_scope="classical exact-subspace finite-shot QAOA; not hardware quantum speedup",
         primary_predictor="log10_configuration_count",
         descriptive_resource_axes=[
@@ -264,14 +298,16 @@ def main(argv:Optional[Sequence[str]]=None)->int:
             "logical pre-transpilation gates for the implemented penalty-free cost "
             "Hamiltonian plus local XY mixer; W-state StatePrep decomposition excluded"
         ),
-        primary_response=f"qaoa_log10_qts99_minus_{args.baseline}_log10_qts99",
-        descriptive_responses=["delta_gap","delta_hit"],
+        primary_response="qaoa_log10_amplification_exact",
+        descriptive_responses=[f"qaoa_minus_{args.baseline}_log10_qts99",
+                               f"qaoa_minus_{args.baseline}_log10_qts99_execution","delta_gap","delta_hit"],
         primary_pruning=args.primary_pruning,baseline=args.baseline,
         primary_outputs=args.primary_outputs,primary_objective=args.primary_objective,
         primary_restarts=args.primary_restarts,primary_depth=args.primary_depth,
         primary_max_evals=args.primary_max_evals,primary_radius=args.primary_radius,
         active_sites=sizes,resamples=args.resamples,seed=args.seed,
-        primary=primary,size_summary=size_summary,per_pdb=per_pdb,
+        primary=primary,primary_amplification=amplification,
+        size_summary=size_summary,per_pdb=per_pdb,
         cluster_details=cluster_details,observation_count=len(observations),
         case_source_sha256={p.name:sha256(p) for p in case_paths},
         cluster_map_sha256=sha256(args.cluster_map),
@@ -286,13 +322,16 @@ def main(argv:Optional[Sequence[str]]=None)->int:
         f"Primary predictor: log10(feasible configuration count). Active-site levels: {sizes}.",
         "Descriptive quantum-resource axes: logical qubits and pre-transpilation two-qubit "
         "gates (ZZ cost + XY mixer); W-state StatePrep decomposition is excluded.",
-        "Response: QAOA minus baseline log10 queries-to-solution (99%), with QAOA optimization shots charged. Negative slope means QAOA's resource cost to reach the ground state grows more slowly than the baseline's. Best-of-N gap/hit are descriptive only because they saturate.",
+        "Response: QAOA's exact log10 ground-state amplification over uniform feasible sampling (quantum-intrinsic; simulator-level). Positive slope means relative concentration on the ground state grows with problem size. QAOA-minus-classical queries-to-solution (with and without training shots) and best-of-N gap/hit are descriptive.",
         "",
-        f"Independent family/structure clusters: {primary['n_clusters']}; mean cluster slope: {primary['mean_slope']}; "
+        f"Primary-size ({args.primary_active_sites} sites) mean log10 amplification: {amplification['mean_log10_amplification']}; "
+        f"95% bootstrap CI: [{amplification['ci_low']}, {amplification['ci_high']}]; sign-flip p={amplification['p_value']}; "
+        f"clusters={amplification['n_clusters']}.",
+        f"Scaling slope: independent family/structure clusters: {primary['n_clusters']}; mean cluster slope: {primary['mean_slope']}; "
         f"95% bootstrap CI: [{primary['ci_low']}, {primary['ci_high']}]; sign-flip p={primary['p_value']}.",
         "",
-        "| Active sites | Rows | PDBs | Mean logical qubits | Mean 2q gates | Mean XY gates | Mean ZZ gates | Mean log10(|Omega|) | Mean QAOA-baseline log10 QTS99 | Mean QAOA-baseline gap | Mean QAOA-baseline hit |",
-        "|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| Active sites | Rows | PDBs | Mean logical qubits | Mean 2q gates | Mean XY gates | Mean ZZ gates | Mean log10(|Omega|) | Mean QAOA log10 amplification (exact) | Mean QAOA-baseline log10 QTS99 (execution) | Mean QAOA-baseline log10 QTS99 (with training) | Mean QAOA-baseline gap | Mean QAOA-baseline hit |",
+        "|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for row in size_summary:
         lines.append(
@@ -300,6 +339,7 @@ def main(argv:Optional[Sequence[str]]=None)->int:
             f"{row['mean_num_qubits']:.6g} | {row['mean_qaoa_two_qubit_gates']:.6g} | "
             f"{row['mean_qaoa_xy_gates']:.6g} | {row['mean_qaoa_zz_gates']:.6g} | "
             f"{row['mean_log10_configuration_count']:.6g} | "
+            f"{row['mean_qaoa_log10_amplification_exact']:.6g} | {row['mean_delta_log10_qts99_execution']:.6g} | "
             f"{row['mean_delta_log10_qts99']:.6g} | "
             f"{row['mean_delta_gap']:.6g} | {row['mean_delta_hit']:.6g} |"
         )

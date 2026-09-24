@@ -112,6 +112,37 @@ formal run is required.
 - **Affected results:** egnn_train (additional descriptive outputs; extra compute).
 - **Results inspected before this amendment:** not applicable (development data only).
 
+## A7. Research aim is exploratory quantum computing: quantum-intrinsic primary endpoint
+
+- **Decision (investigator, 2026-09-24):** the study's main purpose is to
+  explore the quantum algorithm itself, not to show it beats classical
+  solvers. At <= 10 sites a head-to-head against SA is decided in advance
+  (SA reaches the ground state in 100% of simulated instances), and the A1
+  endpoint was dominated by QAOA training shots (log10 QTS99 ~ log10 45,000
+  at every depth in a simulation).
+- **Primary (confirmatory) family, gatekept per A4:**
+  1. mean log10 *exact* ground-state amplification of per-instance-trained
+     QAOA over uniform feasible sampling at the preregistered primary size
+     (6 sites), two-sided cluster sign-flip test against 0;
+  2. the within-PDB slope of that amplification versus log10 feasible
+     configuration count (scaling).
+  Exact subspace probabilities are a noiseless-simulator property of the
+  algorithm; the shot-based Jeffreys amplification is reported alongside.
+- **Secondary:** every QAOA-vs-classical matched-output effect, including
+  the A1 `log10_qts99` (now secondary) and a new execution-only
+  `log10_qts99_execution` that excludes training shots, separating training
+  from execution cost as in Shaydulin et al. [R45].
+- **Exploratory, descriptive (new `quantum_exploration` stage):**
+  (a) depth p in {1,2,3,4,6} with optimizer budget 20 evaluations per
+  parameter, separating depth from optimizer budget [R7,R45];
+  (b) parameter transfer: component-wise median of optimized,
+  scale-normalised angles fitted on training graphs only, applied without
+  per-instance training to the hard set [R46,R47]. Cluster-bootstrap
+  intervals, no hypothesis tests. The supported depth range is now 1..12.
+- **Affected results:** qc_benchmark (new row fields and transfer rows),
+  statistics (primary family), new quantum_exploration stage, final report.
+- **Results inspected before this amendment:** _to be completed by the investigator_.
+
 ## A3. Earlier amendments on 2026-09-24
 
 | Commit | Change | Scientific effect |

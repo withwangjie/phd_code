@@ -67,14 +67,15 @@ def _scaling_case(pdb: str, sites: int, delta: float) -> dict:
                   num_bits=3 * sites, qaoa_parameter_count=4, qaoa_xy_gates=6 * sites,
                   qaoa_zz_gates=sites, qaoa_two_qubit_gates=7 * sites, gap=0.0, hit=1)
     rows = [dict(shared, solver="qaoa", qaoa_objective="cvar", qaoa_restarts=4,
-                 termination_reason="max_evaluations_reached", log10_qts99=4.0 + delta),
-            dict(shared, solver="sa", log10_qts99=4.0)]
+                 termination_reason="max_evaluations_reached", log10_qts99=4.0 + delta,
+                 log10_qts99_execution=2.0 + delta, log10_ground_amplification_exact=1.0 + delta),
+            dict(shared, solver="sa", log10_qts99=4.0, log10_qts99_execution=2.0)]
     return dict(config=dict(pruning="egnn", active_sites=sites, depth=2, max_evals=90, radius=6.0,
                             seed=1, pdb_id=pdb, state_policy="fixed_three_chi1_wells"),
                 metrics=rows, site_to_variables=site_to_variables, variable_map=variable_map)
 
 
-def test_scaling_slope_uses_log10_queries_to_solution(tmp_path: Path):
+def test_scaling_uses_quantum_amplification_as_primary_response(tmp_path: Path):
     cases = tmp_path / "cases"
     cases.mkdir()
     slope = 0.5
@@ -93,6 +94,10 @@ def test_scaling_slope_uses_log10_queries_to_solution(tmp_path: Path):
         "--resamples", "1000",
     ]) == 0
     payload = json.loads(out_json.read_text())
-    assert payload["primary_response"] == "qaoa_log10_qts99_minus_sa_log10_qts99"
+    assert payload["primary_response"] == "qaoa_log10_amplification_exact"
     assert payload["primary"]["mean_slope"] == pytest.approx(slope)
-    assert "queries-to-solution" in out_md.read_text()
+    amplification = payload["primary_amplification"]
+    assert amplification["active_sites"] == 6
+    assert amplification["mean_log10_amplification"] == pytest.approx(1.0 + slope * math.log10(3 ** 6))
+    assert payload["per_pdb"][0]["descriptive_slopes"]["delta_log10_qts99"] == pytest.approx(slope)
+    assert "amplification" in out_md.read_text()

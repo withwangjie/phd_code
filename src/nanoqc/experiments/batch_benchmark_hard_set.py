@@ -48,7 +48,7 @@ from nanoqc.model.model_egnn_pruning import (  # re-exported: historical import 
     ModelLoadInfo, _clean_error_message, _extract_state_dict, _normalize_state_dict_keys,
     _graph_protocol_signature, assert_checkpoint_graph_compatible, load_interface_scorer,
 )
-from nanoqc.solvers.qaoa_interface_sampler import XYMixerQAOASampler, GROUND_ENERGY_TOLERANCE
+from nanoqc.solvers.qaoa_interface_sampler import XYMixerQAOASampler, GROUND_ENERGY_TOLERANCE, MAX_QAOA_DEPTH
 from nanoqc.qubo.subgraph_to_qubo import InterfaceQUBOBuilder, ForceFieldConfig, EnergyCalibration
 from nanoqc.quantum.resource_estimation import estimate_qaoa_resources
 
@@ -1035,7 +1035,8 @@ QTS_TARGET_CONFIDENCE = 0.99
 
 
 def queries_to_solution(counts: dict, energies: dict, ground: float, *,
-                        fixed_units: float, units_per_sample: float) -> dict:
+                        fixed_units: float, units_per_sample: float,
+                        configuration_count: Optional[int] = None) -> dict:
     """Resource-normalized time-to-solution in energy-query/measurement units.
 
     Following the time-to-solution definition of Ronnow et al. (Science 2014),
@@ -1054,9 +1055,58 @@ def queries_to_solution(counts: dict, energies: dict, ground: float, *,
     p = (k + 0.5) / (n + 1.0)
     repetitions = max(1.0, math.log(1.0 - QTS_TARGET_CONFIDENCE) / math.log(1.0 - p))
     total = float(fixed_units) + float(units_per_sample) * repetitions
-    return dict(ground_hits=k, success_probability_jeffreys=p,
-                resource_fixed_units=float(fixed_units), resource_units_per_sample=float(units_per_sample),
-                queries_to_solution_99=total, log10_qts99=math.log10(total))
+    execution = float(units_per_sample) * repetitions
+    result = dict(ground_hits=k, success_probability_jeffreys=p,
+                  resource_fixed_units=float(fixed_units), resource_units_per_sample=float(units_per_sample),
+                  queries_to_solution_99=total, log10_qts99=math.log10(total),
+                  # Execution-only cost: training/optimization shots excluded
+                  # (training vs execution separated as in Shaydulin et al. 2024).
+                  queries_to_solution_99_execution=execution,
+                  log10_qts99_execution=math.log10(execution))
+    if configuration_count is not None:
+        if int(configuration_count) <= 0:
+            raise ValueError("configuration_count must be positive")
+        # Ground-state probability relative to uniform feasible sampling
+        # (n_ground/|Omega|); 0 means no concentration beyond random.
+        n_ground = sum(1 for e in energies.values() if abs(e - ground) <= GROUND_ENERGY_TOLERANCE)
+        result["log10_ground_amplification"] = math.log10(p * int(configuration_count) / max(1, n_ground))
+    return result
+
+
+def load_transfer_parameters(path: Path) -> dict:
+    """Read and validate transferred QAOA angles (see fit_qaoa_transfer_parameters)."""
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    if payload.get("schema") != "qaoa_transfer_parameters_v1" or payload.get("fit_split") != "train":
+        raise ValueError("transfer parameters must be qaoa_transfer_parameters_v1 fitted on the train split")
+    for key, entry in (payload.get("entries") or {}).items():
+        depth = int(entry["depth"])
+        if len(entry["internal_gammas"]) != depth or len(entry["betas"]) != depth:
+            raise ValueError(f"transfer entry {key} has the wrong number of angles")
+        if not all(math.isfinite(float(v)) for v in [*entry["internal_gammas"], *entry["betas"]]):
+            raise ValueError(f"transfer entry {key} has non-finite angles")
+    return payload
+
+
+def transfer_key(depth: int, active_sites: int) -> str:
+    return f"p{int(depth)}_sites{int(active_sites)}"
+
+
+def _exact_ground_metrics(sampler: Any, parameters: np.ndarray, truth: Any) -> dict:
+    """Noiseless ground-state probability of the QAOA state at given angles.
+
+    Exact subspace amplitudes (a simulator-level algorithm property, not a
+    hardware-measurable quantity); amplification is relative to uniform
+    feasible sampling, whose ground probability is n_ground/|Omega|.
+    """
+    amplitudes = sampler.subspace_state(np.asarray(parameters, dtype=float))
+    probabilities = np.abs(amplitudes) ** 2
+    probabilities = probabilities / probabilities.sum()
+    energies = sampler._subspace_energies
+    ground = np.abs(energies - energies.min()) <= GROUND_ENERGY_TOLERANCE
+    exact = float(probabilities[ground].sum())
+    uniform = float(ground.sum()) / float(truth.configuration_count)
+    return dict(exact_ground_probability=exact,
+                log10_ground_amplification_exact=(math.log10(exact / uniform) if exact > 0 else float("-inf")))
 
 
 def _ablation_summarize(counts: dict, energies: dict, ground: float, window: float) -> dict:
@@ -1157,6 +1207,7 @@ def _ablation_run_case(data: Any, scorer: Any, config: dict, args: Any, artifact
     last_optimization = {}
     optimizations = {}
     qaoa_cache = {}
+    qaoa_exact = {}
     for outputs in args.outputs:
         for solver in ("qaoa", "sa", "uniform", "greedy"):
             if solver == "qaoa":
@@ -1169,11 +1220,16 @@ def _ablation_run_case(data: Any, scorer: Any, config: dict, args: Any, artifact
                             parameter_scale=args.parameter_scale, eval_shots=args.eval_shots,
                             optimize_seed=optimize_seed, measurement_seed=measurement_seed)
                         optimization_seconds=time.perf_counter()-optimize_start
+                        scale=float(opt.shot_ledger["parameter_scale"])
                         optimization=dict(success=opt.success, message=getattr(opt,"message",None),
                             evaluations=opt.evaluations, history=list(opt.history),
                             gammas=opt.gammas.tolist(), betas=opt.betas.tolist(),
+                            # Instance-independent (normalised) angles for parameter transfer.
+                            parameter_scale=scale, internal_gammas=(opt.gammas*scale).tolist(),
                             termination_reason=getattr(opt,"termination_reason",None))
                         qaoa_cache[cache_key]=(opt,optimization,optimization_seconds)
+                        qaoa_exact[cache_key]=_exact_ground_metrics(
+                            sampler, np.concatenate([opt.gammas, opt.betas]), truth)
                     opt,optimization,optimization_seconds=qaoa_cache[cache_key]
                     sample_start=time.perf_counter()
                     sampled=sampler.sample(opt,shots=outputs,ground_state=truth,sample_seed=sample_seed)
@@ -1185,7 +1241,9 @@ def _ablation_run_case(data: Any, scorer: Any, config: dict, args: Any, artifact
                         raise AssertionError("Sample count or local one-hot constraint violated.")
                     metrics = _ablation_summarize(counts, energies, truth.energy, args.energy_window)
                     metrics.update(queries_to_solution(counts, energies, truth.energy,
-                        fixed_units=float(opt.total_opt_shots), units_per_sample=1.0))
+                        fixed_units=float(opt.total_opt_shots), units_per_sample=1.0,
+                        configuration_count=truth.configuration_count))
+                    metrics.update(qaoa_exact[cache_key])
                     # metrics owns outputs: it is the verified measured count.
                     resources=estimate_qaoa_resources(
                         quantum_instance,p=config["depth"],
@@ -1243,7 +1301,8 @@ def _ablation_run_case(data: Any, scorer: Any, config: dict, args: Any, artifact
                 metrics.update(queries_to_solution(counts, energies, truth.energy,
                     # >=1 unit/sample: an unevaluated uniform draw cannot be recognised
                     # as a ground state, just as each QAOA output costs one shot.
-                    fixed_units=0.0, units_per_sample=max(1.0, float(queries)/float(outputs))))
+                    fixed_units=0.0, units_per_sample=max(1.0, float(queries)/float(outputs)),
+                    configuration_count=truth.configuration_count))
                 # Do not pass outputs twice; _ablation_summarize supplies it.
                 records.append(dict(config, solver=solver,
                     method_role="classical_baseline",
@@ -1257,6 +1316,37 @@ def _ablation_run_case(data: Any, scorer: Any, config: dict, args: Any, artifact
                     optimization_energy_start=None, optimization_energy_end=None))
                 records[-1].update(budget_mode="matched_outputs", budget_seconds=None, budget_overrun_seconds=0.0)
                 raw[f"{solver}_outputs{outputs}"] = [{"bits":"".join(map(str,s)), "count":c} for s,c in sorted(counts.items())]
+        transfer = (getattr(args, "transfer_payload", None) or {}).get("entries", {}).get(
+            transfer_key(config["depth"], active_sites))
+        if transfer is not None:
+            # Parameter transfer (Brandao et al. 2018; Galda et al. 2021): no
+            # per-instance training; angles fitted on training graphs only.
+            scale = sampler.parameter_scale(args.parameter_scale)
+            parameters = np.concatenate([np.asarray(transfer["internal_gammas"], float) / scale,
+                                         np.asarray(transfer["betas"], float)])
+            sample_start = time.perf_counter()
+            sampled = sampler.sample(parameters, shots=outputs, ground_state=truth, sample_seed=sample_seed+50001)
+            counts = dict(sampled.counts)
+            if sum(counts.values()) != outputs or any(s not in energies for s in counts):
+                raise AssertionError("Sample count or local one-hot constraint violated.")
+            metrics = _ablation_summarize(counts, energies, truth.energy, args.energy_window)
+            metrics.update(queries_to_solution(counts, energies, truth.energy, fixed_units=0.0,
+                units_per_sample=1.0, configuration_count=truth.configuration_count))
+            metrics.update(_exact_ground_metrics(sampler, parameters, truth))
+            records.append(dict(config, solver="qaoa_transfer", method_role="proposed_quantum_method_transfer",
+                qaoa_objective=args.transfer_payload.get("objective"),
+                qaoa_restarts=args.transfer_payload.get("restarts"), eval_shots=None,
+                **metrics, num_bits=quantum_instance.num_qubits,
+                configuration_count=truth.configuration_count,
+                solver_seconds=time.perf_counter()-sample_start,
+                optimization_seconds=0.0, sampling_seconds=time.perf_counter()-sample_start,
+                optimization_reused=None, build_seconds=built-begin, oracle_seconds=oracle_seconds,
+                single_state_energy_queries=None, optimizer_success=None, optimizer_evaluations=0,
+                termination_reason="transferred_parameters", total_opt_shots=0,
+                transfer_fit_instances=int(transfer.get("n_instances", 0)),
+                transfer_fit_training_shots=int(transfer.get("training_shots_total", 0)),
+                budget_mode="matched_outputs", budget_seconds=None, budget_overrun_seconds=0.0))
+            raw[f"qaoa_transfer_outputs{outputs}"] = [{"bits":"".join(map(str,b)), "count":c} for b,c in sorted(counts.items())]
         if args.time_baselines:
             qaoa_rows_this_output=[
                 r for r in records
@@ -1277,7 +1367,8 @@ def _ablation_run_case(data: Any, scorer: Any, config: dict, args: Any, artifact
                         sample_seed+10001, args.sa_passes, args.greedy_passes)
                     metrics = _ablation_summarize(counts, energies, truth.energy, args.energy_window)
                     metrics.update(queries_to_solution(counts, energies, truth.energy,
-                        fixed_units=0.0, units_per_sample=max(1.0, float(queries)/float(sum(counts.values())))))
+                        fixed_units=0.0, units_per_sample=max(1.0, float(queries)/float(sum(counts.values()))),
+                        configuration_count=truth.configuration_count))
                     row = dict(donor_row)
                     row.update(metrics, solver=method+"_time", method_role="classical_baseline",
                         reference_outputs=outputs, solver_seconds=elapsed,
@@ -1682,6 +1773,9 @@ def _ablation_main(argv: Optional[Sequence[str]] = None) -> int:
         help="Finite measurement shots per objective evaluation inside optimize_robust (never the "
              "exact analytic expectation) -- the NISQ-realistic finite-shot CVaR/mean estimate.")
     parser.add_argument("--parameter-scale", choices=("max_coefficient","feasible_iqr"), default="max_coefficient")
+    parser.add_argument("--transfer-parameters", type=Path, default=None,
+                        help="qaoa_transfer_parameters_v1 JSON fitted on TRAINING graphs; adds untrained "
+                             "'qaoa_transfer' rows sampled at the transferred angles.")
     parser.add_argument("--time-baselines", action="store_true", help="Add classical restart baselines using QAOA solver wall time; record soft-deadline overrun.")
     parser.add_argument("--time-donor-objective", choices=("mean","cvar"), default="cvar")
     parser.add_argument("--time-donor-restarts", type=int, default=4)
@@ -1734,12 +1828,17 @@ def _ablation_main(argv: Optional[Sequence[str]] = None) -> int:
         parser.error("Invalid rotamer probability floor or sigma offsets")
     if args.require_calibrated_energy and (args.energy_calibration_file is None or not args.energy_calibration_file.is_file()):
         parser.error("--require-calibrated-energy requires an existing --energy-calibration-file")
-    if any(not math.isfinite(r) or r<=0 for r in args.radii) or any(p not in (1,2,3) for p in args.depths):
-        parser.error("Require positive finite radii and depths 1/2/3.")
+    if any(not math.isfinite(r) or r<=0 for r in args.radii) or any(not 1<=p<=MAX_QAOA_DEPTH for p in args.depths):
+        parser.error(f"Require positive finite radii and depths in 1..{MAX_QAOA_DEPTH}.")
     if args.max_targets < 0 or args.energy_window < 0 or not math.isfinite(args.energy_window):
         parser.error("Invalid target limit or energy window.")
     if args.workers < 1 or args.omp_threads < 1:
         parser.error("workers and omp-threads must be positive")
+    args.transfer_payload = None
+    if args.transfer_parameters is not None:
+        args.transfer_payload = load_transfer_parameters(args.transfer_parameters)
+        if args.transfer_payload["parameter_scale_mode"] != args.parameter_scale:
+            parser.error("--transfer-parameters were fitted with a different --parameter-scale")
     for variable in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
         os.environ[variable] = str(args.omp_threads)
     torch.set_num_threads(args.omp_threads)
@@ -1762,6 +1861,7 @@ def _ablation_main(argv: Optional[Sequence[str]] = None) -> int:
                 ("model_egnn_pruning.py","subgraph_to_qubo.py","qaoa_interface_sampler.py","batch_benchmark_hard_set.py",
                  *SHARED_HELPER_MODULES)},
             checkpoint_sha256=_ablation_digest(args.checkpoint) if "egnn" in args.pruning and args.checkpoint.exists() else None,
+            transfer_parameters_sha256=(_ablation_digest(args.transfer_parameters) if args.transfer_parameters else None),
             python=sys.version, numpy=np.__version__, torch=torch.__version__, platform=platform.platform(),
             pennylane=__import__("pennylane").__version__, scipy=__import__("scipy").__version__)
         manifest = out/"run_manifest.json"

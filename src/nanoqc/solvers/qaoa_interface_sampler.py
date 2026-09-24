@@ -105,6 +105,10 @@ class OptimizationCollapseError(RuntimeError):
 # (ground-state enumeration, hit, ground-state probability), shared with the
 # coarse benchmark summaries so both report the same hit semantics.
 GROUND_ENERGY_TOLERANCE = 1e-9
+# Largest supported QAOA depth. p up to 12 has been studied for noiseless
+# QAOA scaling (Shaydulin et al., Sci. Adv. 2024); deeper circuits need
+# proportionally larger optimizer budgets (see quantum_exploration).
+MAX_QAOA_DEPTH = 12
 
 
 def lower_tail_cvar(energies: np.ndarray, probabilities: np.ndarray, alpha: float) -> float:
@@ -329,8 +333,8 @@ class XYMixerQAOASampler:
         """Validate shape, one-hot partition, and NISQ-size assumptions."""
 
         m = self.num_variables
-        if self.p not in (1, 2, 3):
-            raise ValueError("p must be one of {1, 2, 3}")
+        if isinstance(self.p, bool) or not 1 <= self.p <= MAX_QAOA_DEPTH:
+            raise ValueError(f"p must be an integer in 1..{MAX_QAOA_DEPTH}")
         if self.shots <= 0:
             raise ValueError("shots must be positive")
         if self.initial_state != "wstate":
@@ -667,6 +671,23 @@ class XYMixerQAOASampler:
 
         raise ValueError("method must be 'cobyla' or 'adam'")
 
+    def parameter_scale(self, mode: str = "max_coefficient") -> float:
+        """Gamma normalisation: physical gamma = internal gamma / scale.
+
+        ``max_coefficient`` uses the largest Ising coefficient; ``feasible_iqr``
+        the interquartile range of feasible energies (classical preprocessing).
+        Shared by ``optimize_robust`` and by parameter transfer, so transferred
+        internal angles are rescaled exactly as the optimizer scaled them.
+        """
+        if mode not in ("max_coefficient", "feasible_iqr"):
+            raise ValueError("parameter_scale must be 'max_coefficient' or 'feasible_iqr'")
+        self.subspace_state(np.zeros(2 * self.p))
+        scale = self.gamma_scale if mode == "max_coefficient" else max(
+            float(np.subtract(*np.quantile(self._subspace_energies, [.75, .25]))), 1.)
+        if not np.isfinite(scale) or scale <= 0:
+            raise ValueError("Computed parameter scale is not a positive finite number")
+        return float(scale)
+
     def optimize_robust(
         self, *, max_evals: int = 90, restarts: int = 4,
         objective: str = "cvar", cvar_alpha: float = 0.1,
@@ -845,12 +866,8 @@ class XYMixerQAOASampler:
         if parameter_scale not in ("max_coefficient", "feasible_iqr"):
             raise ValueError("parameter_scale must be 'max_coefficient' or 'feasible_iqr'")
 
-        self.subspace_state(np.zeros(2 * self.p))
+        scale = self.parameter_scale(parameter_scale)
         energies = self._subspace_energies
-        scale = self.gamma_scale if parameter_scale == "max_coefficient" else max(
-            float(np.subtract(*np.quantile(energies, [.75, .25]))), 1.)
-        if not np.isfinite(scale) or scale <= 0:
-            raise ValueError("Computed parameter scale is not a positive finite number")
         # Explicit stream overrides separate initialization from noisy objectives.
         # None preserves historical replay; callers should persist supplied seeds.
         resolved_optimize_seed = self.seed if optimize_seed is None else optimize_seed
@@ -1026,6 +1043,11 @@ class XYMixerQAOASampler:
             "optimize_seed": int(resolved_optimize_seed),
             "measurement_seed": int(resolved_measurement_seed),
             "best_point_source": "baseline" if best['evaluation'] == 1 else "search",
+            # Gamma normalisation used by the optimizer: physical gamma =
+            # internal gamma / parameter_scale. Needed to transfer parameters
+            # between instances with different energy scales.
+            "parameter_scale": float(scale),
+            "parameter_scale_mode": parameter_scale,
         }
         gamma_best = best['parameters'][: self.p].copy()
         beta_best = best['parameters'][self.p:].copy()

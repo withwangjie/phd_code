@@ -553,9 +553,26 @@ def section_search_performance(ctx: ReportContext) -> List[str]:
         "The other site counts are pre-declared scaling conditions used to assess how relative "
         "quantum-classical performance changes with QUBO/problem size; they are not pooled into the primary test."
     )
+    exploration_md=ctx.run_dir/"quantum_exploration"/"summary.md"
+    if exploration_md.is_file():
+        lines.append("### Exploratory QAOA analyses (depth, optimizer budget, parameter transfer)")
+        lines.append("")
+        lines.extend(line for line in exploration_md.read_text(encoding="utf-8").splitlines()[2:])
+        lines.append("")
     lines.append("")
     scaling_stats=_read_json(ctx.run_dir/"statistics"/"quantum_scaling_statistics.json") or {}
     if scaling_stats:
+        amplification=scaling_stats.get("primary_amplification",{}) or {}
+        if amplification:
+            lines.append(
+                f"Primary quantum-intrinsic endpoint: at {amplification.get('active_sites')} sites the mean "
+                f"log10 exact ground-state amplification of QAOA over uniform feasible sampling is "
+                f"{_fmt(amplification.get('mean_log10_amplification'))} "
+                f"(95% cluster-bootstrap CI [{_fmt(amplification.get('ci_low'))}, {_fmt(amplification.get('ci_high'))}]; "
+                f"clusters={amplification.get('n_clusters')}; raw sign-flip p={_fmt(amplification.get('p_value'))}; "
+                f"gatekeeping-adjusted p={_fmt(amplification.get('p_gatekeeping_adjusted'))}). "
+                "0 means no concentration beyond random sampling; values are noiseless-simulator properties.")
+            lines.append("")
         primary_scaling=scaling_stats.get("primary",{}) or {}
         lines.append(
             f"Formal scaling inference uses `{scaling_stats.get('primary_predictor')}` as the primary "
@@ -568,8 +585,8 @@ def section_search_performance(ctx: ReportContext) -> List[str]:
             f"gatekeeping-adjusted p (primary family)={_fmt(primary_scaling.get('p_gatekeeping_adjusted'))}."
         )
         lines.append(
-            "Negative slope means QAOA's log10 queries-to-solution grows more slowly than the classical "
-            "baseline's as the feasible configuration space grows. Every scaling size uses three states "
+            "Positive slope means QAOA concentrates relatively more probability on the ground state "
+            "(relative to uniform sampling) as the feasible configuration space grows. Every scaling size uses three states "
             "per site, one from each chi1 well; the analysis rejects cases lacking this policy. "
             "QAOA depth and optimizer evaluations stay fixed, so the slope estimates fixed-resource "
             "scaling rather than equal-compute scaling. This simulator-level analysis does "

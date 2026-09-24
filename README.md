@@ -65,14 +65,17 @@ prediction.
 
 1. How faithfully can the constrained rotamer-assignment problem be encoded as
    an auditable one-hot QUBO/Ising instance for gate-based quantum optimization?
-2. How does feasibility-preserving XY-QAOA compare with classical baselines in
-   resource-normalized time-to-solution (primary: log10 shots/energy queries to
-   reach the ground state with 99% probability, optimization shots included
-   [R37]), and secondarily in energy gap, low-energy coverage, sampling
-   diversity, and matched-output/matched-time behaviour?
-3. How does the QAOA-versus-classical difference in log10 time-to-solution
-   change as feasible configuration count, logical qubit count, and logical
-   two-qubit-gate count grow across the preregistered problem-size axis?
+2. Does feasibility-preserving XY-QAOA concentrate probability on the ground
+   state beyond uniform feasible sampling (primary: log10 exact ground-state
+   amplification at the preregistered size), and how does it compare with
+   classical baselines in resource-normalized time-to-solution with and
+   without training shots [R37,R45] (secondary)?
+3. How does QAOA's ground-state amplification change as feasible
+   configuration count, logical qubit count, and logical two-qubit-gate count
+   grow across the preregistered problem-size axis (primary scaling slope)?
+   Exploratory: how do circuit depth and optimizer budget trade off, and do
+   QAOA angles fitted on training complexes transfer to new complexes without
+   re-optimization [R46,R47]?
 4. Does finite-shot CVaR improve the low-energy sampling behavior of the
    variational quantum solver relative to mean-energy optimization?
 5. Do solver-level discrete energy gains propagate to all-atom structural
@@ -88,9 +91,11 @@ prediction.
   inspection status, in `docs/PROTOCOL_AMENDMENTS.md`.
 - Matched-time comparisons measure the classical cost of emulating QAOA, not
   quantum runtime; they are descriptive.
-- Coarse QC multiplicity uses serial gatekeeping: only the primary QC contrast
-  and primary scaling slope are confirmatory at first; secondary effects are
-  confirmatory only after both are rejected.
+- Coarse QC multiplicity uses serial gatekeeping: only QAOA's primary-size
+  ground-state amplification and its scaling slope are confirmatory at first;
+  QAOA-vs-classical effects are confirmatory only after both are rejected.
+- Depth/budget and parameter-transfer analyses (`quantum_exploration`) are
+  exploratory and descriptive.
 - Independent-cluster adequacy is checked at queue freeze, before any outcome
   (`--stop-after queue_freeze`), and EGNN training-seed variance is reported
   from development-only replicates.

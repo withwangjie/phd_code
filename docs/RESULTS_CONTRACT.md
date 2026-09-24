@@ -142,6 +142,18 @@ directory contains separate case runs plus `summary.csv`, `summary.json`, and
 `summary.md`.
 These solver metrics do not establish native chi1/chi2 or all-atom recovery.
 
+### quantum_exploration
+Exploratory and descriptive (PROTOCOL_AMENDMENTS.md A7). Required:
+- `quantum_exploration/transfer_fit/p<d>/` benchmark runs on `graphs/train`
+- `quantum_exploration/transfer_parameters/p<d>.json` (`qaoa_transfer_parameters_v1`, `fit_split: train`)
+- `quantum_exploration/hard_set/p<d>/` benchmark runs with trained `qaoa` and untrained `qaoa_transfer` rows
+- `quantum_exploration/summary.json` and `summary.md` covering exactly the configured depths
+
+Every QAOA benchmark row additionally records `exact_ground_probability`,
+`log10_ground_amplification_exact`, `log10_ground_amplification` (Jeffreys),
+`log10_qts99_execution`, and the optimization's `parameter_scale` and
+`internal_gammas`.
+
 ### structure_experiment
 Both `dev_queue/` and `validation_queue/` require:
 - `run_manifest.json`
@@ -243,9 +255,11 @@ Scaling inference uses the pre-declared active-site levels under the same frozen
 radius/depth/evaluation budget and a cluster-aware within-PDB slope analysis with
 log10(feasible configuration count) as the primary complexity axis.
 
-Coarse QC multiplicity uses serial gatekeeping (PROTOCOL_AMENDMENTS.md A4): the
-primary family {primary QC contrast, primary scaling slope} is Holm-adjusted alone;
-every other matched-output effect is secondary and gated behind it
+Coarse QC multiplicity uses serial gatekeeping (PROTOCOL_AMENDMENTS.md A4, A7): the
+primary family {primary-size QAOA exact ground-state amplification
+(`quantum_scaling_statistics.json` `primary_amplification`), amplification scaling
+slope (`primary`)} is Holm-adjusted alone; every QAOA-vs-classical matched-output
+effect is secondary and gated behind it
 (`gatekeeping_family`, `p_gatekeeping_adjusted`); raw p values are retained. Structural primary
 and RQ5 tests retain their separate two-test Holm family.
 
