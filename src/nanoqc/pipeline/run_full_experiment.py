@@ -151,23 +151,34 @@ def cluster_adequacy(config: Dict[str, Any], dataset_dir: Path, selected_targets
     def clusters(pdbs):
         missing=[p for p in pdbs if p not in cluster_map]
         return len({cluster_map[p] for p in pdbs if p in cluster_map}),missing
+    holdout_pdbs=sorted({str(r.get("pdb_id","")).lower() for r in manifest if r.get("split")=="holdout"})
     hard_clusters,hard_missing=clusters(hard_pdbs)
     validation_clusters,validation_missing=clusters(validation_pdbs)
+    holdout_clusters,holdout_missing=clusters(holdout_pdbs)
     stats=config.get("statistics",{}) or {}
+    external=((config.get("external_validation",{}) or {}).get("external_vhh",{}) or {})
     requirements=[
         ("coarse primary QC contrast (test_snac_hard)",hard_clusters,int(stats.get("min_qc_clusters",10))),
         ("scaling slope (test_snac_hard)",hard_clusters,int(stats.get("min_scaling_clusters",10))),
         ("structural primary endpoint (validation queue)",validation_clusters,int(stats.get("min_primary_clusters",10))),
         ("RQ5 (validation queue)",validation_clusters,int(stats.get("min_rq5_clusters",10))),
     ]
+    # The antigen-fold holdout is scored by the external stage, which enforces
+    # the same minimum on family/structure clusters (A5 counts it here too, so
+    # a shortfall surfaces before any training rather than at the last stage).
+    if holdout_pdbs and external.get("required",False):
+        requirements.append(("antigen-fold holdout (external_validation)",holdout_clusters,
+                             int(external.get("min_clusters",10))))
     shortfalls=[f"{name}: {have} independent clusters < required {need}"
                 for name,have,need in requirements if have<need]
-    if hard_missing or validation_missing:
-        shortfalls.append(f"cluster map lacks PDBs: {(hard_missing+validation_missing)[:20]}")
+    if hard_missing or validation_missing or holdout_missing:
+        shortfalls.append(
+            f"cluster map lacks PDBs: {(hard_missing+validation_missing+holdout_missing)[:20]}")
     return dict(
         schema="cluster_adequacy_v1",outcome_free=True,
         test_snac_hard_pdbs=len(hard_pdbs),test_snac_hard_clusters=hard_clusters,
         validation_queue_pdbs=len(validation_pdbs),validation_queue_clusters=validation_clusters,
+        holdout_pdbs=len(holdout_pdbs),holdout_clusters=holdout_clusters,
         requirements=[dict(inference=n,available=h,required=r) for n,h,r in requirements],
         adequate=not shortfalls,shortfalls=shortfalls,
     )

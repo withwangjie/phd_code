@@ -187,3 +187,33 @@ def test_foldseek_step_clusters_the_study_pdbs_alone_without_pass1(tmp_path, mon
     prep.main(["--config", str(config_path), "--prep-dir", str(prep_dir), "foldseek"])
     assert seen["argv"][seen["argv"].index("--universe") + 1] == str(prep_dir / "foldseek_universe.txt")
     assert "--external-candidates" in seen["argv"]
+
+
+def test_cluster_adequacy_counts_the_holdout_before_any_training(tmp_path):
+    from nanoqc.pipeline import run_full_experiment as full
+
+    dataset = tmp_path / "dataset"
+    dataset.mkdir()
+    manifest = ([dict(split="test_snac_hard", pdb_id=f"h{i:03d}") for i in range(12)]
+                + [dict(split="holdout", pdb_id=f"o{i:03d}") for i in range(4)]
+                + [dict(split="train", pdb_id="t001")])
+    (dataset / "graph_manifest.json").write_text(json.dumps(manifest))
+    selected = tmp_path / "selected.json"
+    selected.write_text(json.dumps([f"h{i:03d}" for i in range(12)]))
+    cluster_map = tmp_path / "clusters.json"
+    cluster_map.write_text(json.dumps({row["pdb_id"]: f"c_{row['pdb_id']}" for row in manifest}))
+    config = dict(statistics=dict(min_qc_clusters=10, min_scaling_clusters=10,
+                                  min_primary_clusters=10, min_rq5_clusters=10),
+                  external_validation=dict(external_vhh=dict(required=True, min_clusters=10)))
+
+    report = full.cluster_adequacy(config, dataset, selected, cluster_map)
+    assert report["holdout_pdbs"] == 4 and report["holdout_clusters"] == 4
+    assert not report["adequate"]
+    assert any("antigen-fold holdout" in shortfall for shortfall in report["shortfalls"])
+
+    # Enough holdout clusters: the gate passes and still reports the count.
+    manifest += [dict(split="holdout", pdb_id=f"o{i:03d}") for i in range(4, 10)]
+    (dataset / "graph_manifest.json").write_text(json.dumps(manifest))
+    cluster_map.write_text(json.dumps({row["pdb_id"]: f"c_{row['pdb_id']}" for row in manifest}))
+    ok = full.cluster_adequacy(config, dataset, selected, cluster_map)
+    assert ok["adequate"] and ok["holdout_clusters"] == 10

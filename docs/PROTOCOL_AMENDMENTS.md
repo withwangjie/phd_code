@@ -30,7 +30,7 @@ formal run is required.
 | A5 | Outcome-free cluster adequacy gate at queue freeze | queue_freeze (gate only) | not applicable |
 | A6 | Development-only EGNN training-seed sensitivity | egnn_train (descriptive) | not applicable |
 | A7 | Quantum-intrinsic primary endpoint; `quantum_exploration` stage | qc_benchmark, statistics, quantum_exploration, final_report | to be completed |
-| A8 | Construction rules for the external VHH set | external_validation (input set) | not applicable (no external set existed) |
+| A8 | Construction rules for the external VHH set (superseded as the default by A10) | external_validation (input set) | not applicable (no external set existed) |
 | A9 | Foldseek clustering input: antigen chains only | queue_freeze (cluster map, split), all cluster-level statistics | not applicable (no pair table existed) |
 | A10 | External validation becomes an antigen-fold holdout | queue_freeze (split), egnn_train, energy_calibration, external_validation | not applicable (no external set or result existed) |
 
@@ -180,6 +180,11 @@ they were logged later.
 
 ## A8. Construction rules for the external VHH set
 
+> **Superseded as the default by A10:** SAbDab cannot supply an external set
+> with enough independent clusters, so the stage scores an antigen-fold
+> holdout instead. Everything below still governs a genuinely external set
+> whenever one is configured.
+
 - **Before:** the protocol required an external VHH graph set but defined
   neither how its complexes are selected nor how graphs are built. No
   external set existed.
@@ -218,7 +223,8 @@ they were logged later.
     de-redundancy. Complexes sharing a VHH are therefore not counted as
     independent when Foldseek separates their antigens (e.g. peptides).
   - **Adequacy:** the number of independent groups is checked against
-    `min_clusters` before any run.
+    `min_clusters` before any run; with the A10 holdout the same minimum is
+    counted at `queue_freeze` by `cluster_adequacy`.
   - The formal external audit now verifies assembly-built graphs against the
     rebuilt assembly.
 - **Why:** the external stage tests the frozen pipeline on independent

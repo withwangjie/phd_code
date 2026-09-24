@@ -69,8 +69,8 @@ or outcome exists. Fewer holdout components than `min_components` fails
 
 Required outcome-free cluster adequacy check (PROTOCOL_AMENDMENTS.md A5):
 - `independence/cluster_adequacy.json` with `adequate: true` — independent
-  clusters among `test_snac_hard` graphs and the frozen validation queue meet
-  the statistics minima. It is computed before any training or outcome; a
+  clusters among `test_snac_hard` graphs, the frozen validation queue and the
+  antigen-fold holdout meet the statistics and external minima. It is computed before any training or outcome; a
   shortfall fails `queue_freeze`. `--stop-after queue_freeze` runs only up to
   this check.
 
