@@ -277,6 +277,7 @@ def package_versions(names: Sequence[str]) -> Dict[str, Optional[str]]:
     never raise -- this is a diagnostic record, not a hard gate, since
     run_full_experiment.py must not install anything itself."""
     import importlib
+    from importlib import metadata
     versions: Dict[str, Optional[str]] = {}
     for name in names:
         try:
@@ -284,7 +285,18 @@ def package_versions(names: Sequence[str]) -> Dict[str, Optional[str]]:
         except Exception:
             versions[name] = None
             continue
-        versions[name] = getattr(module, "__version__", "unknown")
+        module_version = getattr(module, "__version__", None)
+        if module_version:
+            versions[name] = str(module_version)
+            continue
+        # Some valid Python distributions, including PDBFixer, deliberately
+        # do not expose ``__version__`` from their import module.  Fall back to
+        # distribution metadata so the runtime manifest does not report an
+        # installed dependency as ``unknown``.
+        try:
+            versions[name] = metadata.version(name)
+        except metadata.PackageNotFoundError:
+            versions[name] = "unknown"
     return versions
 
 
