@@ -54,6 +54,19 @@ maps whose provenance reports skipped rows.
 
 The clustering universe contains both internal study PDBs and required external-VHH PDBs. The frozen pair table/source map must cover this complete universe. When a pair TSV is the formal structure-similarity source, every universe PDB must appear in its query or target columns; an absent PDB is treated as "not demonstrated as searched", not as an independent singleton.
 
+Required antigen-fold holdout (PROTOCOL_AMENDMENTS.md A10), when
+`queue_freeze.antigen_fold_holdout.enabled`:
+- `independence/antigen_fold_holdout.json` (`antigen_fold_holdout_v1`)
+- `dataset/graphs/holdout/*.pt`, moved out of `graphs/train` as whole layered
+  isolation components, with the graph manifest rewritten to `split: holdout`
+- `dataset/holdout_source_structures/<pdb>.<ext>`, one audited raw file per
+  holdout PDB
+
+Components are chosen by the deterministic name-hash fold that also assigns
+the internal validation fold, on a different fold index, before any training
+or outcome exists. Fewer holdout components than `min_components` fails
+`queue_freeze`.
+
 Required outcome-free cluster adequacy check (PROTOCOL_AMENDMENTS.md A5):
 - `independence/cluster_adequacy.json` with `adequate: true` — independent
   clusters among `test_snac_hard` graphs and the frozen validation queue meet
@@ -192,6 +205,15 @@ root summary, aggregate recovery metrics, and report. Formal validation must clo
 exactly against frozen target × pre-registered seed × four-method denominators.
 
 ### external_validation
+
+By default this stage scores the run's own antigen-fold holdout
+(`dataset/graphs/holdout`, A10): the frozen EGNN, calibrated coarse model and
+primary solver protocol are applied, without refitting, to antigen folds that
+training never saw. Setting `external_validation.external_vhh.graph_dir` and
+`source_structure_dir` scores a genuinely external VHH set instead. The
+independence audit, its thresholds and every check below are identical either
+way.
+
 External VHH coarse benchmark requires:
 - run-local `external_vhh_independence_manifest.json`
 - `vhh_coarse/run_manifest.json`

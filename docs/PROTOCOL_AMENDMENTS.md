@@ -32,6 +32,7 @@ formal run is required.
 | A7 | Quantum-intrinsic primary endpoint; `quantum_exploration` stage | qc_benchmark, statistics, quantum_exploration, final_report | to be completed |
 | A8 | Construction rules for the external VHH set | external_validation (input set) | not applicable (no external set existed) |
 | A9 | Foldseek clustering input: antigen chains only | queue_freeze (cluster map, split), all cluster-level statistics | not applicable (no pair table existed) |
+| A10 | External validation becomes an antigen-fold holdout | queue_freeze (split), egnn_train, energy_calibration, external_validation | not applicable (no external set or result existed) |
 
 ## A1. Primary coarse solver endpoint: resource-normalized time-to-solution
 
@@ -266,4 +267,54 @@ they were logged later.
 - **Affected results:** cluster map, train/test isolation, cluster adequacy,
   every cluster-level test.
 - **Results inspected before this amendment:** not applicable (no pair table or result existed).
+
+## A10. External validation becomes an antigen-fold holdout
+
+- **Before:** the protocol required an independently sourced external VHH
+  graph set (A8), with at least 10 independent clusters.
+- **Measured:** SAbDab cannot supply one. Of its 2429 single-domain entries,
+  2424 are already in this study's audited PDB universe; 5 remain, 1 fails the
+  structure gates, and the surviving 4 form **2** independent groups. The
+  study's own training data is drawn from the same SAbDab single-domain
+  snapshot, so the overlap is structural, not incidental. AVIDbase covers 92%
+  of the SAbDab VHH-antigen complexes [R35] and cannot close the gap, and no
+  PDB release postdates a training snapshot downloaded now, so a temporal
+  holdout is empty as well (A8).
+- **Why 2 clusters cannot be used:** the confirmatory tests are two-sided
+  cluster sign-flip tests. With G clusters the smallest attainable p value is
+  2/2^G, so G=2 gives p >= 0.5 and G=6 is the first that can reach p < 0.05.
+  This is arithmetic, not low power: at 2 clusters no effect of any size can
+  be claimed. Cluster-robust inference with few clusters is unreliable in
+  general [R43], and sign-flip/wild-bootstrap procedures are the accepted
+  remedy from roughly 6 clusters upward.
+- **After:** the stage scores an **antigen-fold holdout** carved from the
+  training split at `queue_freeze`, before any training or outcome.
+  - Complexes are grouped by the study's own layered isolation relation (VHH
+    full-chain identity, CDR-H3 loop identity, antigen full-chain identity
+    with coverage, shared frozen family/structure cluster) and **whole
+    components** are held out, so no holdout complex is homologous to any
+    training complex under any criterion.
+  - Which components go is decided by the deterministic name-hash fold that
+    already assigns the internal validation fold, on a different fold index.
+    It depends only on file names, never on an outcome. Removing whole
+    components leaves the remaining components and their folds unchanged, so
+    the internal validation split is exactly what it would have been.
+  - Graphs move to `graphs/holdout` and the manifest is rewritten, so training
+    and calibration read `graphs/train` and cannot reach the holdout. One
+    audited raw structure per holdout PDB is copied beside them, so the
+    unchanged independence audit binds every holdout graph to a raw file.
+  - `min_components` (10) is preregistered and fails `queue_freeze` when unmet.
+  - A genuinely external directory pair can still be configured; the audit and
+    every downstream check are identical.
+- **Scientific claim, and its limit:** the result supports "the frozen
+  pipeline still holds on antigen folds it never saw in training". It is a
+  cluster-level holdout of the kind current antibody benchmarks use, taken
+  from the same audited PDB snapshot, and the manuscript must call it an
+  antigen-fold holdout, never an external dataset. It does not demonstrate
+  robustness to another curation pipeline, another structure-determination
+  era, or another database's assembly conventions.
+- **Affected results:** queue_freeze (split), egnn_train and
+  energy_calibration (smaller training pool), external_validation.
+- **Results inspected before this amendment:** not applicable (no external set
+  or result existed; the counts above are data composition, not outcomes).
 

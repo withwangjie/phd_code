@@ -232,6 +232,7 @@ ORCHESTRATED_SCRIPTS: List[str] = [
     "run_real_complex_pilot.py",
     "run_external_structure_baselines.py",
     "audit_external_vhh_independence.py",
+    "carve_holdout_clusters.py",
     "generate_final_research_report.py",
     "analyze_structure_recovery.py",
     "analyze_quantum_scaling.py",
@@ -606,10 +607,12 @@ def _validate_scientific_config(config: Dict[str, Any]) -> None:
     if external.get("required",False):
         ext=external.get("external_vhh",{}) or {}
         structural=external.get("structural_baselines",{}) or {}
-        if ext.get("required",False) and not ext.get("graph_dir"):
-            raise ValueError("external_validation.external_vhh.graph_dir is required")
-        if ext.get("required",False) and not ext.get("source_structure_dir"):
-            raise ValueError("external_validation.external_vhh.source_structure_dir is required")
+        # Empty directories mean this run's own antigen-fold holdout, resolved
+        # against the run directory once the dataset exists (A10). Configuring
+        # one without the other is always a mistake.
+        if ext.get("required",False) and bool(ext.get("graph_dir")) != bool(ext.get("source_structure_dir")):
+            raise ValueError("external_validation.external_vhh.graph_dir and source_structure_dir must be "
+                             "set together, or both left empty to score this run's antigen-fold holdout")
         if ext.get("independence_manifest"):
             # The independence audit is bound to this run's frozen dataset and
             # cluster map, so it is always regenerated inside the run directory.
@@ -800,6 +803,20 @@ class Orchestrator:
         """This run's own checkpoint directory (run_dir/<paths.checkpoint_dir>);
         see dataset_dir() -- same run-isolation guarantee."""
         return self.run_dir / self.config["paths"].get("checkpoint_dir", "checkpoints")
+
+    def external_vhh_dirs(self) -> Tuple[Path, Path, bool]:
+        """Graph and raw-structure directories of the external VHH set.
+
+        Empty configuration means this run's own antigen-fold holdout (A10),
+        which lives inside the run directory and exists only after
+        queue_freeze; the third value says which of the two it is.
+        """
+        ext=(self.config.get("external_validation",{}) or {}).get("external_vhh",{}) or {}
+        if ext.get("graph_dir"):
+            return (resolve_path(self.config,ext["graph_dir"]),
+                    resolve_path(self.config,ext.get("source_structure_dir","")), False)
+        dataset=self.dataset_dir()
+        return dataset/"graphs"/"holdout", dataset/"holdout_source_structures", True
 
     def frozen_cluster_map_path(self) -> Path:
         """Run-local family/structure cluster map used by every downstream stage."""
@@ -1648,17 +1665,19 @@ class Orchestrator:
         if external.get("required",False):
             ext=external.get("external_vhh", {}) or {}
             if ext.get("required",False):
-                graph_dir=resolve_path(self.config,ext.get("graph_dir",""))
-                source_dir=resolve_path(self.config,ext.get("source_structure_dir",""))
-                graph_ok=graph_dir.is_dir() and any(graph_dir.glob("*.pt"))
+                graph_dir,source_dir,from_run=self.external_vhh_dirs()
+                # The antigen-fold holdout is produced by this run's own
+                # queue_freeze, so it cannot exist yet at env_check time.
+                graph_ok=from_run or (graph_dir.is_dir() and any(graph_dir.glob("*.pt")))
                 checks["external_vhh_graphs"]=graph_ok
-                checks["external_vhh_raw_structures"]=source_dir.is_dir()
+                checks["external_vhh_source"]=("run_antigen_fold_holdout" if from_run else str(graph_dir))
+                checks["external_vhh_raw_structures"]=from_run or source_dir.is_dir()
                 # The independence manifest is generated run-locally during
                 # external_validation, after queue_freeze has frozen this run's
                 # training dataset and cluster map; it is never read from the repo.
                 if not graph_ok:
                     missing_resources.append(str(graph_dir))
-                if not source_dir.is_dir():
+                if not from_run and not source_dir.is_dir():
                     missing_resources.append(str(source_dir))
             structural=external.get("structural_baselines", {}) or {}
             if structural.get("required",False):
@@ -1874,9 +1893,10 @@ class Orchestrator:
             # similarity universe. They must not be appended as untracked
             # singleton clusters only at external-validation time.
             external_cfg=(self.config.get("external_validation",{}) or {}).get("external_vhh",{}) or {}
-            if external_cfg.get("required",False):
-                external_graph_dir=resolve_path(self.config,external_cfg.get("graph_dir",""))
-                external_source_dir=resolve_path(self.config,external_cfg.get("source_structure_dir",""))
+            external_graph_dir,external_source_dir,external_from_run=self.external_vhh_dirs()
+            # A holdout carved from this run's own audited data is already in
+            # the universe; only a genuinely external set adds PDBs to it.
+            if external_cfg.get("required",False) and not external_from_run:
                 if not external_graph_dir.is_dir():
                     return StageResult(
                         "queue_freeze","failed",started,utc_timestamp(),None,
@@ -2057,6 +2077,29 @@ class Orchestrator:
             return StageResult("queue_freeze", "failed", started, utc_timestamp(), returncode,
                                 f"build_final_pyg_dataset.py exited {returncode}; {graph_detail} (see {graph_log})",
                                 graph_argv, str(graph_log), graph_ok)
+
+        # 3a2. Antigen-fold holdout (PROTOCOL_AMENDMENTS.md A10). Carved BEFORE
+        # the validation queue is frozen and before any training, so the queue
+        # is selected from the data the pipeline will actually train on, and
+        # held-out complexes can never reach training or calibration.
+        holdout_cfg = qf_cfg.get("antigen_fold_holdout", {}) or {}
+        holdout_json = self.run_dir / "independence" / "antigen_fold_holdout.json"
+        if holdout_cfg.get("enabled", False):
+            holdout_argv = [
+                self.venv_python, "-m", module_name("carve_holdout_clusters.py"),
+                "--dataset-dir", str(dataset_dir),
+                "--audit-dir", str(self.run_dir / "audit"),
+                "--fold", str(holdout_cfg.get("fold", 1)),
+                "--min-clusters", str(holdout_cfg.get("min_components", 10)),
+                "--min-train-components", str(holdout_cfg.get("min_train_components", 20)),
+                "--out-json", str(holdout_json),
+            ]
+            holdout_rc, holdout_log = self._run_subprocess("carve_holdout_clusters", holdout_argv)
+            if holdout_rc != 0 or not holdout_json.is_file():
+                return StageResult(
+                    "queue_freeze", "failed", started, utc_timestamp(), holdout_rc,
+                    f"Antigen-fold holdout could not be carved (exit={holdout_rc}; see {holdout_log})",
+                    holdout_argv, str(holdout_log), False)
 
         # 3b. Frozen, blind validation-target queue (explicitly excludes the
         # historical dev queue; seeded-random, never "smallest first").
@@ -3384,8 +3427,7 @@ class Orchestrator:
 
         ext=cfg.get("external_vhh", {}) or {}
         if ext.get("required", False):
-            graph_dir=resolve_path(self.config,ext.get("graph_dir",""))
-            source_dir=resolve_path(self.config,ext.get("source_structure_dir",""))
+            graph_dir,source_dir,from_run=self.external_vhh_dirs()
             run_external_root=self.run_dir/"external_validation"
             run_external_root.mkdir(parents=True,exist_ok=True)
             # Always regenerated for this run (never reused from another run or
@@ -3395,10 +3437,11 @@ class Orchestrator:
             if independence.exists():
                 independence.unlink()
             ext_failures=[]
+            label="antigen-fold holdout" if from_run else "external VHH"
             if not graph_dir.is_dir() or not any(graph_dir.glob("*.pt")):
-                ext_failures.append(f"Required external VHH graph set missing/empty: {graph_dir}")
+                ext_failures.append(f"Required {label} graph set missing/empty: {graph_dir}")
             if not source_dir.is_dir():
-                ext_failures.append(f"Required external VHH raw structures missing: {source_dir}")
+                ext_failures.append(f"Required {label} raw structures missing: {source_dir}")
             if graph_dir.is_dir() and source_dir.is_dir() and any(graph_dir.glob("*.pt")):
                 cluster_path=self.frozen_cluster_map_path()
                 if cluster_path is None or not cluster_path.is_file():

@@ -38,6 +38,7 @@ MODULE_LAYOUT = {
     "build_independence_cluster_map.py": "src/nanoqc/data/build_independence_cluster_map.py",
     "audit_external_vhh_independence.py": "src/nanoqc/data/audit_external_vhh_independence.py",
     "build_external_vhh_graphs.py": "src/nanoqc/data/build_external_vhh_graphs.py",
+    "carve_holdout_clusters.py": "src/nanoqc/data/carve_holdout_clusters.py",
     "select_external_vhh_candidates.py": "src/nanoqc/data/select_external_vhh_candidates.py",
     "prepare_external_vhh.py": "src/nanoqc/data/prepare_external_vhh.py",
     "build_foldseek_pairs.py": "src/nanoqc/data/build_foldseek_pairs.py",

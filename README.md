@@ -197,9 +197,17 @@ PDB-to-family/structure cluster map. The same cluster map is used for
 train/test exclusion, validation-queue eligibility, and cluster-level
 statistics. Missing required cluster metadata fails closed.
 
-The formal pipeline also has an external-validation stage. It requires an
-independently certified graph-v1.8 VHH dataset and runs the frozen EGNN,
-calibrated coarse model, and primary solver protocol without refitting.
+The formal pipeline also has an external-validation stage. By default it
+scores an **antigen-fold holdout** (`docs/PROTOCOL_AMENDMENTS.md` A10): whole
+layered-isolation components are carved out of the training split at
+`queue_freeze`, before any training, and the frozen EGNN, calibrated coarse
+model and primary solver protocol are applied to them without refitting. The
+claim it supports is that the frozen pipeline still holds on antigen folds
+training never saw; it is a cluster-level holdout of the same audited
+snapshot, not a separate database. Setting
+`external_validation.external_vhh.graph_dir` and `source_structure_dir`
+scores an independently certified graph-v1.8 VHH dataset instead, with the
+identical independence audit.
 FASPR is supported as a mature biological side-chain packing baseline and
 Phenix clashscore as a standard steric-quality diagnostic. These are
 scientific external dependencies: they are never substituted or fabricated

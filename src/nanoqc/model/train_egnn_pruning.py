@@ -226,9 +226,8 @@ SPLIT_FOLDS = 5
 VALIDATION_FOLD = 0
 
 
-def split_paths(paths: Sequence[Path], seed: int) -> Tuple[List[Path], List[Path]]:
-    """Layered sequence + family/structure component split; no random 90/10 partition."""
-    del seed
+def _split_records(paths: Sequence[Path]) -> List[Tuple]:
+    """Per-graph isolation fields, loaded once and shared by every consumer."""
     records = []
     for path in paths:
         data = torch.load(path, map_location="cpu", weights_only=False)
@@ -248,7 +247,11 @@ def split_paths(paths: Sequence[Path], seed: int) -> Tuple[List[Path], List[Path
             )
         anchored = partner_roles_anchored(getattr(data, "subset_source", ""))
         records.append((path, vhh, antigen, cdr3, family_cluster, anchored))
+    return records
 
+
+def _components_from_records(records: Sequence[Tuple]) -> List[List[Path]]:
+    """Union-find over the layered isolation edges between loaded records."""
     parent = list(range(len(records)))
 
     def find(index: int) -> int:
@@ -289,29 +292,47 @@ def split_paths(paths: Sequence[Path], seed: int) -> Tuple[List[Path], List[Path
         components.setdefault(find(index), []).append(index)
     if len(components) < 2:
         raise RuntimeError("Layered VHH/CDR-H3/antigen/family clustering produced fewer than two components")
+    return [[records[i][0] for i in indices]
+            for _, indices in sorted(components.items(),
+                                     key=lambda item: min(records[i][0].name for i in item[1]))]
 
+
+def layered_components(paths: Sequence[Path]) -> List[List[Path]]:
+    """Connected components of the layered isolation relation, ordered by first name.
+
+    Two complexes are joined when any criterion fires: VHH full-chain identity,
+    CDR-H3 loop identity, antigen full-chain identity with coverage, or a shared
+    frozen family/structure cluster. A component may therefore never be split
+    across train, internal validation or the antigen-fold holdout.
+    """
+    return _components_from_records(_split_records(paths))
+
+
+def component_fold(component: Sequence[Path]) -> int:
+    """Deterministic fold of a layered component, from its member file names."""
+    signature = "\n".join(sorted(path.name for path in component)).encode("utf-8")
+    return int.from_bytes(hashlib.sha256(signature).digest()[:8], "big") % SPLIT_FOLDS
+
+
+def split_paths(paths: Sequence[Path], seed: int) -> Tuple[List[Path], List[Path]]:
+    """Layered sequence + family/structure component split; no random 90/10 partition."""
+    del seed
+    records = _split_records(paths)
+    ordered_components = _components_from_records(records)
     train_paths: List[Path] = []
     validation_paths: List[Path] = []
-    ordered_components = sorted(
-        components.items(),
-        key=lambda item: min(records[i][0].name for i in item[1]),
-    )
-    for _, indices in ordered_components:
-        signature = "\n".join(sorted(records[i][0].name for i in indices)).encode("utf-8")
-        fold = int.from_bytes(hashlib.sha256(signature).digest()[:8], "big") % SPLIT_FOLDS
-        target = validation_paths if fold == VALIDATION_FOLD else train_paths
-        target.extend(records[i][0] for i in indices)
+    for component in ordered_components:
+        target = validation_paths if component_fold(component) == VALIDATION_FOLD else train_paths
+        target.extend(component)
 
     train_paths = sorted(train_paths, key=lambda path: path.name.lower())
     validation_paths = sorted(validation_paths, key=lambda path: path.name.lower())
     if not validation_paths:
-        _, indices = ordered_components[0]
-        chosen = {records[i][0] for i in indices}
+        chosen = set(ordered_components[0])
         validation_paths = sorted(chosen, key=lambda p: p.name.lower())
         train_paths = sorted([p for p in paths if p not in chosen], key=lambda p: p.name.lower())
     if not train_paths:
-        _, indices = ordered_components[-1]
-        chosen = {records[i][0] for i in indices}
+        chosen = set(ordered_components[-1])
         train_paths = sorted(chosen, key=lambda p: p.name.lower())
         validation_paths = sorted([p for p in paths if p not in chosen], key=lambda p: p.name.lower())
     if not train_paths or not validation_paths:
