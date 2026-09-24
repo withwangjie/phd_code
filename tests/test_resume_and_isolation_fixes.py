@@ -450,7 +450,7 @@ def test_structure_stage_never_accepts_stale_outputs_after_current_subprocess_fa
 def test_quantum_exploration_has_results_manifest_root(tmp_path: Path) -> None:
     orchestrator = Orchestrator.__new__(Orchestrator)
     orchestrator.run_dir = tmp_path
-    orchestrator.config = {"final_report": {}}
+    orchestrator.config = {"paths": {"dataset_dir": "dataset", "checkpoint_dir": "checkpoints"}, "final_report": {}}
     assert orchestrator._stage_result_roots("quantum_exploration") == [
         tmp_path / "quantum_exploration"
     ]
