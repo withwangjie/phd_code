@@ -296,6 +296,8 @@ def main() -> int:
                 with tempfile.TemporaryDirectory(prefix=f"cal_{pdb}_") as temp:
                     temp=Path(temp)
                     extracted=extract_source(data.source_id,args.data_root,temp/"raw_structure")
+                    from nanoqc.data.audit_all_datasets import materialize_graph_complex
+                    extracted=materialize_graph_complex(extracted,data,temp/"graph_complex.cif")
                     import gemmi
                     structure=gemmi.read_structure(str(extracted))
                     if not len(structure):

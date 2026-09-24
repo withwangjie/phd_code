@@ -22,12 +22,25 @@ import gemmi
 import numpy as np
 from scipy.spatial import cKDTree
 from nanoqc.structure.residue_tables import BACKBONE_ATOMS, SIDECHAIN_HEAVY_ATOMS
-from nanoqc.common.repo_io import REPO_ROOT
+from nanoqc.common.repo_io import REPO_ROOT, sha256_file
 
 BASE = REPO_ROOT  # standalone-run defaults (data/, outputs) are relative to the checkout root
 ANNOTATIONS = {}
 PDB_ANNOTATIONS = collections.defaultdict(list)
 CHAIN_ANNOTATIONS = {}
+# Entry-level resolution by PDB ID from curation metadata (SNAC curation
+# summaries, SAbDab summary tables). SNAC's curated complex files carry no
+# REMARK 2, so the structure file alone reports no resolution for any of them.
+RESOLUTION_BY_PDB = {}
+# Metadata files the resolution fallback read, with their hashes: the gate's
+# outcome depends on them, so a run must be able to name them afterwards.
+RESOLUTION_SOURCE_FILES = []
+# Pipeline staging under the data root, never study input: the external-VHH
+# preparation writes thousands of antigen-only structures (Foldseek input),
+# downloaded candidates and its own copies of summary tables there. They would
+# otherwise enter the audit as 'extra_external_vhh' rows and, worse, decide the
+# resolution gate from a file no study step declares.
+PIPELINE_WORK_DIRS = frozenset({'external_vhh'})
 BACKBONE = set(BACKBONE_ATOMS)
 SIDECHAIN_HEAVY = {name: set(atoms) for name, atoms in SIDECHAIN_HEAVY_ATOMS.items()}
 MAX_RESOLUTION_ANGSTROM = 3.0
@@ -43,15 +56,49 @@ def literal(s, default):
     except (ValueError, SyntaxError, TypeError):
         return default
 
+def parse_resolution(value):
+    """Worst (largest) positive number in a metadata field; None when it states none.
+
+    A SAbDab row may list one value per deposited entry ('2.5, 2.7') [R33]. The
+    gate is an upper bound, so the worst value is the conservative reading;
+    taking the first would let a field order decide admission. Fields that
+    state no resolution ('Resolution is Missing', 'NOT', 'NA') give None.
+    """
+    values = [float(m) for m in re.findall(r'\d+(?:\.\d+)?', str(value or ''))]
+    values = [v for v in values if math.isfinite(v) and v > 0]
+    return max(values) if values else None
+
+
+def _record_resolution(pdb, value, source):
+    resolution = parse_resolution(value)
+    pdb = str(pdb or '').strip().upper()
+    if resolution is not None and re.fullmatch(r'[0-9A-Z]{4}', pdb):
+        RESOLUTION_BY_PDB.setdefault(pdb, (resolution, source))
+
+
+def _staging(root, path):
+    """True for a file under a pipeline working directory (never study input)."""
+    return path.relative_to(root).parts[0] in PIPELINE_WORK_DIRS
+
+
+def _record_source_file(root, path, kind):
+    RESOLUTION_SOURCE_FILES.append(dict(path=str(path.relative_to(root)), kind=kind,
+                                        sha256=sha256_file(path)))
+
+
 def load_annotations(root):
     ANNOTATIONS.clear()
     PDB_ANNOTATIONS.clear()
     CHAIN_ANNOTATIONS.clear()
+    RESOLUTION_BY_PDB.clear()
+    RESOLUTION_SOURCE_FILES.clear()
     for path in sorted(root.rglob('*_curation_summary.csv')):
-        if path.parent.name not in ('curated_structures', 'benchmark_dataset'):
+        if path.parent.name not in ('curated_structures', 'benchmark_dataset') or _staging(root, path):
             continue
+        _record_source_file(root, path, 'snac_curation_summary')
         for row in csv.DictReader(path.open(encoding='utf-8-sig', newline='')):
             ANNOTATIONS[(str(path.parent), row['Name'])] = row
+            _record_resolution(row.get('PDB_ID'), row.get('Resolution'), 'snac_curation_summary')
             for field, old_id, typ in [('VH', 'Chain_VH_old_id', 'VHH' if path.name.startswith('nb_') else 'VH'), ('VL', 'Chain_VL_old_id', 'VL')]:
                 seq = row.get('Sequence_' + field, '')
                 if not seq or seq.lower() == 'nan':
@@ -59,9 +106,22 @@ def load_annotations(root):
                 if row.get('TCR_Chain', '').lower() == 'true':
                     typ = 'TCR'
                 regions = literal(row.get('Region_Split_' + field), {})
-                rec = dict(kind=typ, sequence=seq, cdr3=regions.get('cdr3', ''), chain=row.get(old_id, ''), source=row['Name'])
+                rec = dict(kind=typ, sequence=seq, cdr3=regions.get('cdr3', ''), cdr1=regions.get('cdr1', ''),
+                           cdr2=regions.get('cdr2', ''), chain=row.get(old_id, ''), source=row['Name'])
                 if rec not in PDB_ANNOTATIONS[row['PDB_ID'].upper()]:
                     PDB_ANNOTATIONS[row['PDB_ID'].upper()].append(rec)
+    for pattern, kind in (('*sabdab*summary*.tsv', 'sabdab_summary'),
+                          ('*entry_resolution.tsv', 'rcsb_entry_resolution')):
+        for path in sorted(root.rglob(pattern)):
+            if _staging(root, path):
+                continue
+            with path.open(encoding='utf-8-sig', newline='') as handle:
+                reader = csv.DictReader(handle, delimiter='\t')
+                if not reader.fieldnames or not {'pdb', 'resolution'} <= set(reader.fieldnames):
+                    continue
+                _record_source_file(root, path, kind)
+                for row in reader:
+                    _record_resolution(row.get('pdb'), row.get('resolution'), kind)
     for path in root.rglob('all_input_PDB_files_parsed_file_chains.csv'):
         with path.open(encoding='utf-8-sig', newline='') as handle:
             for row in csv.DictReader(handle):
@@ -93,6 +153,8 @@ def discover(root):
             ignored.append(str(path.relative_to(root)))
             continue
         parts = path.relative_to(root).parts
+        if parts[0] in PIPELINE_WORK_DIRS:
+            continue
         subset = mapping.get(parts[0], parts[0] if parts[0] in ('train_rcsb', 'sabdab_vhh', 'snac_db', 'test_db55') else 'extra_' + parts[0])
         if parts[0] == 'SNAC-DataBase':
             subset = 'snac_db' if 'curated_structures' in parts and 'nb_complexes' in parts else 'extra_SNAC_loose'
@@ -113,7 +175,131 @@ def discover(root):
             tasks.append(dict(path=str(path), member=member, subset=subset, id=str(path.relative_to(root)) + '::' + member))
     return tasks, ignored, archives
 
+# Subsets read from raw PDB entries (asymmetric unit). Following SAbDab and
+# SNAC-DB [METHODS_EVIDENCE R33,R34], their complexes are taken from the
+# biological assembly instead, so crystal-packing neighbours inside the ASU are
+# not mistaken for antigen and partners generated by symmetry are not lost.
+# snac_db files are already SNAC-DB assembly-curated complexes.
+ASSEMBLY_SUBSETS = frozenset({'sabdab_vhh', 'train_rcsb'})
+STRUCTURE_SOURCE_KEY = '_nanoqc_structure_source'
+# RCSB serves a biological assembly as its own file, named <entry>_assembly<N>
+# (also -assembly<N>, and .pdb<N> for the legacy format). Such a file already
+# holds the assembled coordinates, so it carries no pdbx_struct_assembly: that
+# record says how to BUILD an assembly from the asymmetric unit. Requiring it
+# would reject a file that is already what the rule asks for, and applying a
+# transform to it would build the assembly twice.
+_PREBUILT_ASSEMBLY = re.compile(r'[-_]assembly(\d+)\.(?:cif|pdb)(?:\.gz)?$|\.pdb(\d+)$', re.IGNORECASE)
+
+
+def prebuilt_assembly(name):
+    """The assembly number when ``name`` is an RCSB assembly file, else None."""
+    match = _PREBUILT_ASSEMBLY.search(pathlib.PurePosixPath(str(name)).name)
+    return (match.group(1) or match.group(2)) if match else None
+
+
+def biological_assembly_structure(st):
+    """Return a one-model copy of ``st`` built from its biological assembly.
+
+    Uses the first author-determined assembly (REMARK 350 /
+    pdbx_struct_assembly), falling back to the first software-determined one;
+    fails closed when the entry has no assembly annotation at all. Chains
+    produced by an identity operator keep their author names (so chain
+    annotations still match); symmetry copies are named ``<chain>-<operator>``.
+    The choice is recorded in ``st.info[STRUCTURE_SOURCE_KEY]``.
+    """
+    assemblies = list(st.assemblies)
+    if not assemblies:
+        raise ValueError('no biological assembly annotation (REMARK 350/pdbx_struct_assembly); '
+                         'cannot separate the biological complex from crystal contacts')
+    author = [a for a in assemblies if a.author_determined]
+    chosen = (author or assemblies)[0]
+    basis = 'author_determined' if author else ('software_determined' if chosen.software_determined else 'unspecified')
+    st.setup_entities()
+    source = st[0]
+    built = {}
+    for generator in chosen.generators:
+        subchains = set(generator.subchains)
+        chains = set(generator.chains)
+        for operator in generator.operators:
+            identity = operator.transform.is_identity()
+            for chain in source:
+                residues = [res for res in chain
+                            if (res.subchain in subchains if subchains else chain.name in chains)]
+                if not residues:
+                    continue
+                name = chain.name if identity else f'{chain.name}-{operator.name}'
+                target = built.setdefault(name, gemmi.Chain(name))
+                for res in residues:
+                    copy = res.clone()
+                    if not identity:
+                        for atom in copy:
+                            atom.pos = gemmi.Position(operator.transform.apply(atom.pos))
+                    target.add_residue(copy)
+    if not built:
+        raise ValueError(f'biological assembly {chosen.name} selects no chains')
+    result = st.clone()
+    while len(result):
+        del result[0]
+    model = gemmi.Model('1')
+    for chain in built.values():
+        model.add_chain(chain)
+    result.add_model(model)
+    result.setup_entities()
+    result.info[STRUCTURE_SOURCE_KEY] = f'biological_assembly:{basis}:{chosen.name}'
+    return result
+
+
+def materialize_graph_complex(source_path, graph, destination):
+    """Rebuild, from the raw source file, exactly the complex a graph encodes.
+
+    Re-applies the graph's recorded biological-assembly choice and keeps only
+    ``graph.chain_ids``, so all-atom consumers (energy calibration, validation
+    targets) score the same chains the graph and its labels were built from.
+    Returns ``source_path`` untouched when no change is needed.
+    """
+    recorded = str(getattr(graph, 'structure_source', '') or '')
+    if not recorded:
+        raise ValueError('graph lacks structure_source provenance; rebuild graphs (v1.8)')
+    st = gemmi.read_structure(str(source_path))
+    if not len(st):
+        raise ValueError('source structure has no coordinate model')
+    while len(st) > 1:
+        del st[1]
+    changed = False
+    if recorded.startswith('biological_assembly:'):
+        st = biological_assembly_structure(st)
+        if dict(st.info).get(STRUCTURE_SOURCE_KEY) != recorded:
+            raise ValueError(f'assembly choice {dict(st.info).get(STRUCTURE_SOURCE_KEY)} differs from graph provenance {recorded}')
+        changed = True
+    keep = set(graph.chain_ids)
+    present = {chain.name for chain in st[0]}
+    if keep - present:
+        raise ValueError(f'graph chains missing from rebuilt source: {sorted(keep - present)}')
+    for index in reversed(range(len(st[0]))):
+        if st[0][index].name not in keep:
+            del st[0][index]
+            changed = True
+    if not changed:
+        return source_path
+    st.setup_entities()
+    st.make_mmcif_document().write_file(str(destination))
+    return destination
+
+
 def read_structure(task):
+    st, multi = _read_raw_structure(task)
+    assembly = prebuilt_assembly(task['member'] or task['path'])
+    if task.get('subset') not in ASSEMBLY_SUBSETS:
+        st.info[STRUCTURE_SOURCE_KEY] = 'as_deposited_file'
+    elif assembly is not None:
+        # Already the assembly: never transform it again.
+        st.info[STRUCTURE_SOURCE_KEY] = f'prebuilt_assembly_file:assembly{assembly}'
+    else:
+        st = biological_assembly_structure(st)
+    return st, multi
+
+
+def _read_raw_structure(task):
     name = task['member'] or task['path']
     if not task['member'] and not name.lower().endswith('.pdb'):
         return gemmi.read_structure(task['path']), False
@@ -298,7 +484,7 @@ def audit(task):
     out = dict(task, valid=False, error='', residues=0, missing_residues=0, missing_examples=[], chains=0,
         interface_status='not_applicable', max_contact_residues=None, weak_pairs=0, pairs=[],
         models_first_only=False, vhh_status='not_applicable', cdr3_lengths=[],
-        resolution_angstrom=None, structure_quality_status='not_evaluated',
+        resolution_angstrom=None, resolution_source=None, structure_quality_status='not_evaluated',
         structure_quality_reasons=[], interface_missing_sidechain_residues=0,
         interface_altloc_residues=0, interface_min_occupancy=None,
         interface_mean_bfactor=None)
@@ -313,13 +499,14 @@ def audit(task):
         pdbid = re.search(r'pdb_0000([a-zA-Z0-9]{4})', name)
         pdbid = pdbid.group(1).upper() if pdbid else name[:4].upper()
         resolution=float(getattr(st,'resolution',0.0) or 0.0)
+        resolution_source='structure_file'
         if not math.isfinite(resolution) or resolution<=0:
-            resolution=None
+            resolution,resolution_source=RESOLUTION_BY_PDB.get(pdbid,(None,None))
         out.update(valid=True, pdb_id=pdbid, chains=len(chains), residues=total,
             missing_residues=missing, missing_examples=details[:20],
             models_first_only=multi or len(st)>1,
             legacy_pdb_tail=task.get('_legacy_pdb_tail',False),
-            resolution_angstrom=resolution)
+            resolution_angstrom=resolution, resolution_source=resolution_source)
         allowed = None
         if task['subset'] in ('sabdab_vhh', 'snac_db') or task['subset'].startswith('extra_snac_'):
             features, allowed = nano_features(task, chains, pdbid)
@@ -415,8 +602,13 @@ def report(root, rows, ignored, archives, pairs, elapsed, destination):
     '- 快速模式只计算每个文件首模型。CAPRI 多模型 PDB 仅读至首个 ENDMDL，后续模型既未解析也未做完整性验证；本报告不是全部 decoy 的质量分布。',
     '- SNAC 主表 snac_db = curated_structures/nb_complexes（ZIP 内直接读）；nb_unbound 和 benchmark/nb_complexes 单列。其他 SNAC ZIP 只登记、不解析内部结构；所有松散 .pdb/.cif/.cif.gz 均已纳入。',
     '- CDR-H3 使用 SNAC 的 IMGT Region_Split_VH.cdr3；SAbDab 通过同PDB来源标注与坐标序列匹配转移，不套用未经确认的残基编号。分箱为 <12、12–15、≥16，避免16 aa重复计数。',
+    '- 分辨率：优先取结构文件自带值；文件未记录时按 PDB ID 回落到整理元数据（SNAC curation summary 的 Resolution 列、SAbDab 汇总表的 resolution 列），逐行记录 resolution_source。一个字段列出多个值时取最差（最大）值。流水线工作目录（external_vhh）下的文件不参与，本报告列出实际使用的元数据文件及其哈希。仍然查不到分辨率的条目按 unknown_resolution 排除，阈值不变。',
     '- VHH通过 = SNAC非TCR单VHH来源标注、唯一H链、无L链、H链序列覆盖≥70%且与标注一致，允许合计≤20aa的端部扩展（标签等），更长扩展记未判定；或SAbDab同PDB的ASU0全链域标注仅一个VHH且坐标序列匹配。c_st/c_e不直接当成恒定域。缺乏完整域标注时记candidate；多VHH晶体副本记fail仅表示不符合单链条目要求。未运行ANARCI，本项是本地来源标注核验，不是独立序列分类，未知/候选不得当作合格。','',
     '## 核心子集规模与基础质量','', '| 子集 | 结构文件 | 有效 | 解析/坐标失败 | 有主链缺失文件（占有效） | 缺原子残基/观测残基 | 可评估界面 | 弱界面 | 基础合格/有效 |', '|---|---:|---:|---:|---:|---:|---:|---:|---:|']
+    if RESOLUTION_SOURCE_FILES:
+        lines += ['## 分辨率元数据来源','', '| 文件 | 类型 | SHA-256 |','|---|---|---|']
+        lines += [f'| `{f["path"]}` | {f["kind"]} | `{f["sha256"]}` |' for f in RESOLUTION_SOURCE_FILES]
+        lines += ['']
     order=['train_rcsb','sabdab_vhh','snac_db','test_db55']
     def summary(g):
         rr=groups[g];v=[r for r in rr if r['valid']];m=sum(r['missing_residues']>0 for r in v);nr=sum(r['residues'] for r in v);nm=sum(r['missing_residues'] for r in v); ev=sum(r['interface_status']!='not_applicable' for r in v);w=sum(r['interface_status']=='weak' for r in v);good=sum(r['missing_residues']==0 and r['interface_status']=='pass' for r in v)
@@ -485,7 +677,7 @@ def main():
             rows.append(r);handle.write(json.dumps(r,ensure_ascii=False)+'\n')
             if len(rows)%250==0:handle.flush();print(f'{len(rows)}/{len(tasks)} audited, {time.time()-start:.0f}s',flush=True)
     pairs=db55_pairs(tasks)
-    fields=['subset','id','pdb_id','valid','error','chains','residues','missing_residues','interface_status','max_contact_residues','weak_pairs','vhh_status','vhh_reason','cdr3_lengths','models_first_only','legacy_pdb_tail','resolution_angstrom','structure_quality_status','structure_quality_reasons','interface_missing_sidechain_residues','interface_altloc_residues','interface_min_occupancy','interface_mean_bfactor']
+    fields=['subset','id','pdb_id','valid','error','chains','residues','missing_residues','interface_status','max_contact_residues','weak_pairs','vhh_status','vhh_reason','cdr3_lengths','models_first_only','legacy_pdb_tail','resolution_angstrom','resolution_source','structure_quality_status','structure_quality_reasons','interface_missing_sidechain_residues','interface_altloc_residues','interface_min_occupancy','interface_mean_bfactor']
     with (args.out/'data_audit_details.csv').open('w',encoding='utf-8-sig',newline='') as handle:
         writer=csv.DictWriter(handle,fieldnames=fields,extrasaction='ignore');writer.writeheader();writer.writerows(rows)
     (args.out/'data_audit_db55_pairs.json').write_text(json.dumps(pairs,ensure_ascii=False,indent=2),encoding='utf-8')

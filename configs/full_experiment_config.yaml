@@ -56,6 +56,7 @@ stages:
   energy_calibration: true    # train-only coarse component -> Amber14 calibration
   method_sensitivity: true     # development-only QAOA hyperparameter robustness
   qc_benchmark: true          # --research-ablation: pruning x budget x objective sweep
+  quantum_exploration: true   # exploratory QAOA depth/budget + parameter transfer (descriptive)
   structure_experiment: true  # dev queue + validation queue recovery-benchmark
   external_validation: true    # external VHH graphs + FASPR/Phenix structural baselines
   statistics: true            # --paired-statistics
@@ -141,30 +142,51 @@ queue_freeze:
     required: true
     cluster_map: "data/independence/pdb_family_clusters.json"
     pair_tsv: "data/independence/foldseek_pairs.tsv"
-    # Pair TSV must start with: query<TAB>target<TAB>qtmscore.
-    # Foldseek's default third column is fident and is rejected. Generate scores
-    # with --format-output query,target,qtmscore, then prepend that header.
-    # qtmscore is normalized by query protein length; direction matters.
+    # Pair TSV must start with: query<TAB>target<TAB>mintmscore, as written by
+    # prepare_external_vhh.sh foldseek (build_foldseek_pairs.py). Foldseek's
+    # default third column is fident and is rejected. mintmscore is
+    # min(qtmscore q->t, qtmscore t->q) per antigen-chain pair, i.e. the TM-score
+    # normalized by the longer chain: a short chain can no longer link whole
+    # complexes by a query-normalized hit (PROTOCOL_AMENDMENTS.md A11).
     # TM-score 0.50 has published fold/topology significance [METHODS_EVIDENCE R27].
     min_score: 0.50
-    score_semantics: "qtmscore"
+    score_semantics: "mintmscore"
     query_column: 0
     target_column: 1
     score_column: 2
   # Homology-isolation protocol. Any criterion that fires joins two complexes
   # into the same connected component; a component may never cross a split.
+  # Antigen-fold holdout carved from the training split (PROTOCOL_AMENDMENTS.md A10).
+  # Whole layered-isolation components are held out by a deterministic hash of
+  # their member file names, on a fold index distinct from the internal
+  # validation fold, before any training or outcome exists.
+  antigen_fold_holdout:
+    enabled: true
+    # Folds held out, of train_egnn_pruning.SPLIT_FOLDS; the internal validation
+    # fold is 0. Several folds are held out together when one does not reach
+    # min_components: the rule is the lowest non-validation folds ("1,2"), never
+    # the fold that happens to hold most components (PROTOCOL_AMENDMENTS.md A13).
+    fold: "1,2"
+    min_components: 10  # preregistered adequacy gate, matching external_validation min_clusters
+    min_train_components: 20
   homology_isolation:
     # Literature-supported anti-leakage precedents:
     # VHH/antibody non-redundancy at 0.80 [R24]; CDR-H3 clustering at 0.50 [R23];
     # protein train/test filtering at 0.30 identity with 0.70 coverage [R25].
-    vhh_full_chain_identity: 0.80
-    cdr_h3_identity: 0.50
-    antigen_identity: 0.30
+    # Region of each identity: VHH and antigen are FULL-CHAIN global NW
+    # identities; cdr_h3_identity is computed on the CDR-H3 LOOP sequence only.
+    # Measured values in outputs carry the region in their names
+    # (*_vhh_full_chain_identity, *_cdr_h3_loop_identity,
+    # *_antigen_full_chain_identity). Key names here are kept for checkpoint
+    # and frozen-config compatibility.
+    vhh_full_chain_identity: 0.80   # full VHH chain
+    cdr_h3_identity: 0.50           # CDR-H3 loop only
+    antigen_identity: 0.30          # full antigen chain(s)
     antigen_min_length_coverage: 0.70
   graph_build:
     workers: 8  # runtime fallback; auto-resolved from server CPU resources
     # Scientific graph protocol. Changing any value requires a fresh dataset;
-    # graph v1.6 records these values in every .pt and run_summary.json.
+    # graph v1.8 records these values in every .pt and run_summary.json.
     # 5 A cross-partner atom contact is literature-supported for antibody-antigen/CAPRI-style interfaces [METHODS_EVIDENCE R3,R4].
     interface_label_cutoff_angstrom: 5.0
     # 8 A C-alpha residue-graph construction has direct protein-GNN precedent [R22].
@@ -238,6 +260,12 @@ egnn_train:
   amp: true
   pin_memory: true
   # Uses queue_freeze.homology_isolation exactly; no independent threshold.
+  # Development-only seed sensitivity (Bouthillier et al., MLSys 2021): this
+  # many extra EGNN models on the same split with derived training seeds.
+  # Reported as ROC-AUC spread and Active-site Jaccard stability on the
+  # internal validation fold; the primary checkpoint stays the only formal
+  # model. Costs this many extra training runs. 0 disables.
+  seed_replicates: 2
   device: "cuda"
   threads: 4      # runtime fallback; auto-resolved
   num_workers: 8  # runtime fallback; auto-resolved
@@ -277,6 +305,25 @@ quantum_protocol:
     cvar_alpha: [0.05, 0.10, 0.25, 0.50, 1.0]
 
 # ---------------------------------------------------------------------------
+# Exploratory QAOA analyses (docs/PROTOCOL_AMENDMENTS.md A7). Descriptive only;
+# never used to choose the frozen primary protocol above.
+# * Depth x optimizer budget: each depth p gets evals_per_parameter x 2p
+#   objective evaluations, separating circuit depth from optimizer budget
+#   (QAOA depth: Farhi et al. [R7]; noiseless p up to 12: Shaydulin et al. [R45]).
+# * Parameter transfer: component-wise median of optimized, scale-normalised
+#   angles on TRAINING graphs, applied untrained to the hard set (parameter
+#   concentration/transfer [R46,R47]).
+# ---------------------------------------------------------------------------
+quantum_exploration:
+  depths: [1, 2, 3, 4, 6]
+  evals_per_parameter: 20
+  active_sites: 6          # preregistered primary size
+  repeats: 3               # hard-set repeat identities per depth
+  transfer:
+    train_max_targets: 40  # training graphs used to fit transferred angles
+    min_instances: 10
+
+# ---------------------------------------------------------------------------
 # Stage 4: quantum-vs-classical coarse-grained benchmark
 # (batch_benchmark_hard_set.py --research-ablation). This is the ablation
 # sweep: five pruning strategies x output-budget curve x QAOA objective x
@@ -297,6 +344,9 @@ qc_benchmark:
   max_targets: 0  # 0 = every qualifying graph in input_dir, no silent subset
   max_failure_fraction: 0.0  # formal benchmark is fail-closed by default
   pruning: ["egnn", "contact", "distance", "cdr", "random"]
+  # Subgraph radius used to name/record each case. Coarse antigen and fixed-VHH
+  # non-bonded terms use the FULL complex, limited only by
+  # coarse_force_field.cutoff_angstrom, so this value no longer changes energies.
   radii: [6.0]
   # QAOA depth/evaluation budgets are read only from quantum_protocol.
   # Active-site scaling axis for the quantum-vs-classical benchmark. Every
@@ -425,16 +475,22 @@ structure_experiment:
 # ---------------------------------------------------------------------------
 # External validation / mature structural baselines.
 # These are real external dependencies; formal runs fail closed when required
-# inputs are absent. External VHH graphs must have been built with graph v1.6
+# inputs are absent. External VHH graphs must have been built with graph v1.8
 # and independently certified against the training family/structure cluster map.
 # ---------------------------------------------------------------------------
 external_validation:
   required: true
   external_vhh:
     required: true
-    graph_dir: "data/external_vhh/graphs"
-    source_structure_dir: "data/external_vhh/structures"  # trusted raw <pdb>.pdb/.cif/.mmcif files used to verify graph residues and CA coordinates
-    # The external-vs-training independence audit is regenerated by every run as
+    # Antigen-fold holdout (PROTOCOL_AMENDMENTS.md A10). Leave graph_dir and
+    # source_structure_dir empty to use this run's own holdout, carved at
+    # queue_freeze from the training split by whole layered-isolation
+    # components: the frozen pipeline is scored on antigen folds it never saw
+    # in training. Set them to a directory pair to score a genuinely external
+    # VHH set instead; the independence audit is identical either way.
+    graph_dir: ""
+    source_structure_dir: ""  # trusted raw <pdb>.pdb/.cif/.mmcif files used to verify graph residues and CA coordinates
+    # The independence audit is regenerated by every run as
     # <run_dir>/external_validation/external_vhh_independence_manifest.json.
     max_targets: 0
     repeats: 10
@@ -451,7 +507,14 @@ external_validation:
 statistics:
   resamples: 10000
   primary_qc_baseline: "sa"
-  primary_qc_metric: "gap"
+  # Resource-normalized time-to-solution (Ronnow et al. 2014): log10 of the
+  # measurement shots / energy queries needed to see a ground state with 99%
+  # probability, QAOA optimization shots included. Best-of-N gap/hit saturate
+  # (SA reaches the ground state in every case at <=10 sites), so they are
+  # reported as secondary effects only. See docs/PROTOCOL_AMENDMENTS.md.
+  # Since A7 every QAOA-vs-classical effect (this one included) is secondary;
+  # the primary family is QAOA's own ground-state amplification and its slope.
+  primary_qc_metric: "log10_qts99"
   min_qc_clusters: 10  # adequacy gate for the frozen coarse QAOA-vs-classical primary contrast
   min_scaling_clusters: 10  # independent family/structure clusters for the fixed-p=2 scaling slope
   min_primary_clusters: 10  # adequacy gate, not a formal power guarantee
@@ -479,7 +542,6 @@ final_report:
 # Hardware resource limits; worker counts live in their owning stages.
 # Training uses DDP; ablations use spawned CPU worker processes.
 # Structural target execution remains sequential; platform is explicit.
-# See HARDWARE_REVIEW.md for limitations and protocol amendments.
 # ---------------------------------------------------------------------------
 hardware:
   cpu_threads_per_process: 2
@@ -502,9 +564,9 @@ control:
 #   data_root -> /data/quantum-protein/data (server's existing raw data; not bundled)
 #   run_root  -> /data/quantum-protein/runs (shared, outside this versioned code dir;
 #                survives future code re-deploys)
-#   stages.smoke_check -> false (the formal one-command launch never runs a
-#                smoke/trial sub-run; see run_stage()'s config-disabled-stage
-#                fix in run_full_experiment.py for why this is now safe)
-# Hardware/protocol amendments are documented in HARDWARE_REVIEW.md.
+#   stages.smoke_check -> false was part of that packaged bundle only; this
+#                source configuration keeps stages.smoke_check: true (see the
+#                stages block above), which is the value a run launched from
+#                this file actually freezes into <run_dir>/frozen_config.yaml.
 # This revised configuration must not be mixed into an existing frozen run.
 # ---------------------------------------------------------------------------

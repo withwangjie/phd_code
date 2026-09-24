@@ -1,0 +1,1303 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>XY-QAOA 侧链重建 3D</title>
+
+<!--
+  单文件三维演示：纳米抗体界面侧链重建的 XY-QAOA 研究流程（七幕）。
+  依赖（均走 CDN，双击即可运行，但需要联网）：
+    - Tailwind CSS play CDN（界面布局）
+    - Three.js r128 UMD 构建 + examples/js 版 OrbitControls
+      选 r128 是因为它是最后一个同时提供 UMD 主包与非模块 OrbitControls 的版本，
+      用 file:// 打开时不会遇到 ES 模块的跨域限制。
+  数值说明：第五、六幕的基态概率 0.0412 与放大倍数 1.48 为示意值（见页面顶部提示）。
+-->
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    darkMode: "class",
+    theme: {
+      extend: {
+        fontFamily: {
+          ui: ['"Familjen Grotesk"', "system-ui", "-apple-system", '"PingFang SC"', '"Microsoft YaHei"', "sans-serif"],
+          mono: ['"JetBrains Mono"', "ui-monospace", "SFMono-Regular", "Menlo", "monospace"]
+        }
+      }
+    }
+  };
+</script>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+<style>
+  /* 关键样式内联：即使 Tailwind CDN 加载失败，页面主体也能正常显示 */
+  html, body { height: 100%; margin: 0; }
+  /* Tailwind 的 .flex 与 [hidden] 优先级相同且排在后面，会让带 hidden 的弹层照样显示；这里强制隐藏 */
+  [hidden] { display: none !important; }
+  body { background: #ffffff; color: #0f172a; }
+  html.dark body { background: #0f172a; color: #e2e8f0; }
+  #gl { display: block; width: 100%; height: 100%; touch-action: none; }
+  .tabular { font-variant-numeric: tabular-nums; }
+  .act-btn[aria-current="true"] .act-n { color: inherit; }
+  .notice-pulse { animation: glow 2.4s ease-in-out infinite; }
+  @keyframes glow { 0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); } 50% { box-shadow: 0 0 0 3px rgba(245, 158, 11, .18); } }
+  .cta-pulse { animation: cta 1.8s ease-in-out infinite; }
+  @keyframes cta { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.035); } }
+  @media (prefers-reduced-motion: reduce) {
+    .notice-pulse, .cta-pulse { animation: none; }
+    * { scroll-behavior: auto !important; }
+  }
+</style>
+</head>
+
+<body class="h-full bg-white font-ui text-slate-900 antialiased dark:bg-[#0F172A] dark:text-slate-100">
+<div id="app" class="flex h-[100dvh] flex-col">
+
+  <!-- ================= 固定页头：标题 + 主题 + 分享 + 强制提示 ================= -->
+  <header class="z-20 shrink-0 border-b border-slate-200 bg-white/95 backdrop-blur dark:border-slate-800 dark:bg-[#0F172A]/95">
+    <div class="flex items-center gap-3 px-4 pt-3 pb-2">
+      <div class="min-w-0">
+        <div class="font-mono text-[10px] uppercase tracking-[0.18em] text-sky-600 dark:text-cyan-300">纳米抗体界面 · 受约束离散优化</div>
+        <h1 class="truncate text-lg font-bold tracking-tight sm:text-xl">XY-QAOA 侧链重建</h1>
+      </div>
+      <div class="ml-auto flex shrink-0 items-center gap-2">
+        <button id="theme-btn" type="button"
+          class="inline-flex h-9 items-center gap-1.5 rounded-md border border-slate-300 px-3 text-sm font-semibold hover:border-sky-500 hover:text-sky-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 dark:border-slate-700 dark:hover:border-cyan-400 dark:hover:text-cyan-300"
+          aria-label="切换浅色或深色主题">
+          <svg id="theme-icon" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"></svg>
+          <span id="theme-label" class="hidden sm:inline">深色</span>
+        </button>
+        <button id="share-btn" type="button"
+          class="inline-flex h-9 items-center gap-1.5 rounded-md bg-sky-600 px-3 text-sm font-semibold text-white hover:bg-sky-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 dark:bg-cyan-500 dark:text-slate-950 dark:hover:bg-cyan-400">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/></svg>
+          分享
+        </button>
+      </div>
+    </div>
+    <div class="px-4 pb-3" data-notice></div>
+  </header>
+
+  <!-- ================= 主体：分幕导航 / 3D 视口 / 解释面板 ================= -->
+  <main class="flex min-h-0 flex-1 flex-col lg:flex-row">
+
+    <section id="viewport" class="relative order-1 min-h-[30dvh] flex-[1.15] overflow-hidden lg:order-2 lg:flex-1">
+      <canvas id="gl" aria-label="研究流程三维场景"></canvas>
+      <div class="pointer-events-none absolute left-3 top-3 flex flex-col gap-1">
+        <div id="act-chip" class="w-fit rounded-md border border-slate-200 bg-white/85 px-2.5 py-1 font-mono text-[11px] text-slate-700 backdrop-blur dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-200"></div>
+      </div>
+      <div id="hint" class="pointer-events-none absolute bottom-3 left-3 rounded bg-white/80 px-2 py-1 font-mono text-[10px] text-slate-500 backdrop-blur dark:bg-slate-900/70 dark:text-slate-400"></div>
+      <div id="gl-error" hidden class="absolute inset-0 flex items-center justify-center p-6">
+        <div class="max-w-sm rounded-lg border border-rose-300 bg-rose-50 p-4 text-sm text-rose-900 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-200">
+          <p class="font-semibold">三维场景无法启动</p>
+          <p id="gl-error-msg" class="mt-1"></p>
+        </div>
+      </div>
+    </section>
+
+    <nav id="acts" aria-label="七幕切换"
+      class="order-2 flex shrink-0 gap-1 overflow-x-auto border-t border-slate-200 bg-slate-50 p-2 dark:border-slate-800 dark:bg-slate-900/60 lg:order-1 lg:w-44 lg:flex-col lg:overflow-x-visible lg:overflow-y-auto lg:border-r lg:border-t-0"></nav>
+
+    <aside id="panel" aria-live="polite"
+      class="order-3 min-h-[22dvh] flex-1 overflow-y-auto border-t border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-[#0F172A] lg:w-[27rem] lg:flex-none lg:border-l lg:border-t-0"></aside>
+  </main>
+</div>
+
+<!-- ================= 分享模态框 ================= -->
+<div id="share-modal" hidden class="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="share-title">
+  <div data-close class="absolute inset-0 bg-slate-950/55 backdrop-blur-sm"></div>
+  <div class="relative w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
+    <div class="flex items-start gap-3">
+      <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-sky-100 text-lg dark:bg-cyan-400/15">🔒</div>
+      <div class="min-w-0">
+        <h2 id="share-title" class="text-base font-bold">分享与访问权限</h2>
+        <p class="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-300">
+          通过 Claude Artifact 发布后，页面默认为<strong class="text-slate-900 dark:text-white">私有状态 🔒</strong>（仅本人可见）。
+          若需向导师或组会同事开放查看投屏权限，请在分享菜单中将访问控制切换为：
+          <strong class="text-slate-900 dark:text-white">👥 组织内或凭链接可见</strong>。
+        </p>
+        <p class="mt-3 rounded-md bg-slate-100 px-3 py-2 text-xs leading-relaxed text-slate-600 dark:bg-slate-800 dark:text-slate-400">
+          以本地单文件打开时没有访问控制：分享即把这个 HTML 文件本身发给对方。
+        </p>
+      </div>
+    </div>
+    <div class="mt-5 flex justify-end">
+      <button type="button" data-close
+        class="rounded-md border border-slate-300 px-4 py-2 text-sm font-semibold hover:border-sky-500 hover:text-sky-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 dark:border-slate-600 dark:hover:border-cyan-400 dark:hover:text-cyan-300">知道了</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* =====================================================================
+   * 0. 基础设施：主题、减弱动态、提示框
+   * ===================================================================== */
+  var root = document.documentElement;
+  var motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+  var reduced = motionQuery.matches;
+
+  function storedTheme() {
+    try { return localStorage.getItem("xyqaoa-theme"); } catch (e) { return null; }
+  }
+  function saveTheme(t) {
+    try { localStorage.setItem("xyqaoa-theme", t); } catch (e) { /* 无痕模式等场景下忽略 */ }
+  }
+  var theme = storedTheme() || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  root.classList.toggle("dark", theme === "dark");
+
+  // 强制性风险提示（页头、第五幕、第六幕共用同一段文字）
+  var NOTICE_TEXT = "💡 提示：第五、六幕的数值（基态概率 0.0412、放大倍数 1.48）为系统收敛终点的逻辑示意值（Mock Data），" +
+    "用以说明终点的定义与计算方式，并非最终实验运行结果。正式的大规模生产运行尚未产出最终数据。请在汇报展示时予以保留。";
+  function noticeHTML(extra) {
+    return '<div class="notice-pulse flex gap-2.5 rounded-md border border-amber-400/70 bg-amber-50 px-3 py-2 ' +
+      'text-amber-900 dark:border-amber-400/40 dark:bg-amber-400/10 dark:text-amber-100 ' + (extra || "") + '" role="note">' +
+      '<svg class="mt-0.5 h-4 w-4 shrink-0 text-amber-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+      'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/>' +
+      '<path d="M12 9v4M12 17h.01"/></svg>' +
+      '<p class="text-xs leading-relaxed"><span class="mr-1 rounded bg-amber-500 px-1.5 py-px font-mono text-[10px] font-semibold ' +
+      'text-white dark:text-slate-950">MOCK DATA</span>' + NOTICE_TEXT + "</p></div>";
+  }
+  document.querySelector("[data-notice]").innerHTML = noticeHTML();
+
+  var THEME_ICONS = {
+    light: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+    dark: '<path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/>'
+  };
+  function refreshThemeButton() {
+    document.getElementById("theme-icon").innerHTML = theme === "dark" ? THEME_ICONS.light : THEME_ICONS.dark;
+    document.getElementById("theme-label").textContent = theme === "dark" ? "浅色" : "深色";
+  }
+  refreshThemeButton();
+
+  /* ---------------- 分享模态框 ---------------- */
+  var modal = document.getElementById("share-modal");
+  var shareBtn = document.getElementById("share-btn");
+  function openModal() { modal.hidden = false; modal.querySelector("button[data-close]").focus(); }
+  function closeModal() { modal.hidden = true; shareBtn.focus(); }
+  shareBtn.addEventListener("click", openModal);
+  modal.addEventListener("click", function (e) { if (e.target.closest("[data-close]")) closeModal(); });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && !modal.hidden) closeModal(); });
+
+  /* ---------------- Three.js 是否可用 ---------------- */
+  function fail(msg) {
+    document.getElementById("gl-error").hidden = false;
+    document.getElementById("gl-error-msg").textContent = msg;
+  }
+
+  /* =====================================================================
+   * 1. 七幕的文字面板
+   * ===================================================================== */
+  var ACTS = [
+    { n: "一", name: "界面", en: "Interface", hint: "悬停 VHH 原子查看接触 · 拖动旋转 · 滚轮缩放" },
+    { n: "二", name: "位点", en: "Hotspots", hint: "粒子流示意 EGNN 沿图连边的消息传递" },
+    { n: "三", name: "状态", en: "Conformations", hint: "连线连接只差一个位点状态的构型" },
+    { n: "四", name: "编码", en: "QUBO Encoding", hint: "每个寄存器恰好一个量子比特发光" },
+    { n: "五", name: "演化", en: "QAOA Evolution", hint: "点击面板里的「播放演化」" },
+    { n: "六", name: "终点", en: "Convergence", hint: "黄色平面为均匀采样水平 1/729" },
+    { n: "七", name: "推断", en: "Inference", hint: "整块分量被剥离，训练永远读不到" }
+  ];
+
+  function h2(i) {
+    return '<div class="font-mono text-[10px] uppercase tracking-[0.18em] text-sky-600 dark:text-cyan-300">第' + ACTS[i].n + "幕 · " +
+      ACTS[i].en + '</div><h2 class="mt-1 text-2xl font-bold tracking-tight">' + ACTS[i].name + "</h2>";
+  }
+  var P = 'class="mt-3 text-[15px] leading-relaxed text-slate-700 dark:text-slate-300"';
+  var MUTED = 'class="mt-3 text-[13px] leading-relaxed text-slate-500 dark:text-slate-400"';
+  var BOX = 'class="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3.5 text-[14px] leading-relaxed dark:border-slate-700 dark:bg-slate-800/50"';
+  var BTN = 'class="mt-4 inline-flex items-center gap-2 rounded-md border border-sky-500 px-3.5 py-2 text-sm font-semibold text-sky-700 ' +
+    'hover:bg-sky-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 dark:border-cyan-400 dark:text-cyan-300 dark:hover:bg-cyan-400/10"';
+  function dot(cls) { return '<span class="mr-2 inline-block h-2.5 w-2.5 rounded-full align-middle ' + cls + '"></span>'; }
+
+  function panelHTML(i, stats) {
+    switch (i) {
+      case 0: return h2(0) +
+        "<p " + P + ">复合物取自作者认定的生物组装体。抗原链按 SAbDab 规则判定：任一 CA/CB 落在 VHH 互补决定区（CDR）CA/CB 的 7.5 Å 以内。</p>" +
+        '<p class="mt-3 text-[15px] leading-relaxed">' + dot("bg-red-500 shadow-[0_0_8px_#ef4444]") +
+        "红色发光原子：跨伙伴<strong>重原子距离 &lt; 5 Å</strong>。这是界面<strong>标签</strong>的定义。</p>" +
+        "<div " + BOX + "><strong>图的连边另有规则。</strong>连边与 5 Å 标签相互独立：链内按 Cα 距离 &lt; 8 Å 连边，" +
+        "跨伙伴固定取 k = 3 的最近邻（KNN）。这样「两条链之间有没有边」就不会直接泄露界面标签。</div>" +
+        '<button id="toggle-contacts" type="button" ' + BTN + '>高亮全部 &lt; 5 Å 接触</button>' +
+        "<p " + MUTED + ">本演示模型里有 <span class=\"tabular font-mono\">" + stats.contactResidues + "</span> 个 VHH 残基、" +
+        "<span class=\"tabular font-mono\">" + stats.contactPairs + "</span> 对原子落在 5 Å 以内，距离 " + stats.dRange +
+        " Å，全部来自 CDR1–3。悬停（手机上轻点）VHH 原子可只看它的接触。</p>";
+
+      case 1: return h2(1) +
+        "<p " + P + ">E(n) 等变图神经网络（EGNN）沿图的连边传递信息，给每个残基一个界面概率。场景里的粒子流示意这一消息传递过程。</p>" +
+        "<div " + BOX + '><div class="font-mono text-[13px]">score = (1 − w) · EGNN + w · exp(−d<sub>Ag</sub> / 6 Å)</div>' +
+        '<div class="mt-1 font-mono text-[12px] text-slate-500 dark:text-slate-400">w = 0.25，d<sub>Ag</sub> 为到抗原的最近距离</div></div>' +
+        "<p " + P + ">排名最高的 6 个化学可动残基成为活性位点 " + dot("bg-amber-400 shadow-[0_0_8px_#fbbf24]") +
+        "<strong>H1–H6</strong>。6 位点是预注册的主要规模，规模轴另取 4 / 6 / 8 / 10 四档。</p>" +
+        "<p " + MUTED + ">对照策略：接触数、最近距离、CDR、随机。骨架断裂处 φ/ψ 无定义的残基不作为候选。</p>";
+
+      case 2: return h2(2) +
+        "<p " + P + ">每个活性位点按骨架 φ/ψ 查 Dunbrack 2010 骨架依赖旋转异构体库。规模基准固定为每位点 3 个状态，" +
+        "各占一个 χ1 势阱：<span class=\"font-mono\">60° · 180° · 300°</span>。</p>" +
+        '<div class="mt-4 rounded-lg bg-sky-50 px-4 py-3 dark:bg-cyan-400/10"><div class="font-mono text-2xl font-semibold text-sky-700 dark:text-cyan-300">' +
+        '3<sup>6</sup> = 729</div><div class="mt-0.5 text-sm text-slate-600 dark:text-slate-300">个可行构型</div></div>' +
+        "<p " + P + ">球体里每个节点是一个完整构型（6 位点各取一个状态），按 9 × 9 × 9 晶格排布后收成球形。" +
+        "连线连接只差一个位点状态的构型，这正是 XY 混合器能直接连通的方向。</p>" +
+        "<p " + MUTED + ">自适应模式下每位点 3–6 个状态，全局不超过 30 个变量。粗粒度模型为 χ1 取向，全原子验证用完整 χ1…χN。</p>";
+
+      case 3: return h2(3) +
+        "<p " + P + ">每个位点一个一次性（one-hot）寄存器：3 个量子比特里恰好一个为 1。6 个寄存器共 <strong>18 个逻辑量子比特</strong>。</p>" +
+        "<div " + BOX + '><div class="font-semibold">QUBO 系数矩阵的颜色</div><ul class="mt-2 space-y-1.5 text-[14px]">' +
+        "<li>" + dot("bg-cyan-500") + "对角项：位点内的先验能量</li>" +
+        "<li>" + dot("bg-amber-500") + "寄存器之间：位点间的成对相互作用</li>" +
+        "<li>" + dot("bg-slate-400") + "寄存器内部非对角：由 one-hot 约束处理，不进入能量</li></ul></div>" +
+        "<p " + P + ">约束由后面的 XY 混合器保证，不靠惩罚项。</p>" +
+        "<p " + MUTED + ">粗粒度伪原子力场可对 Amber ΔE 做线性校准，系数只用训练复合物拟合，验证与测试阶段冻结。</p>";
+
+      case 4: return h2(4) + '<div class="mt-4">' + noticeHTML() + "</div>" +
+        "<p " + P + ">初态是每个寄存器内的等幅 W 态，本身就在可行子空间里。XY 混合器只在寄存器内部搬运那一个激发，" +
+        "演化全程不离开可行空间。代价层与混合层交替作用后，概率向低能构型集中。</p>" +
+        '<div class="mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-slate-200 bg-slate-200 dark:border-slate-700 dark:bg-slate-700">' +
+        readout("当前层", "ro-layer", "初态 · W 态") + readout("可行构型", "ro-n", "729") +
+        readout("基态概率", "ro-p", "0.00137") + readout("log10 放大倍数", "ro-amp", "0.00") + "</div>" +
+        '<div class="mt-4 flex flex-wrap items-center gap-3">' +
+        '<button id="play-evo" type="button" class="cta-pulse inline-flex items-center gap-2 rounded-md bg-sky-600 px-4 py-2 text-sm font-semibold text-white ' +
+        'hover:bg-sky-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 dark:bg-cyan-500 dark:text-slate-950 dark:hover:bg-cyan-400">' +
+        '<svg class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg><span>播放演化</span></button>' +
+        '<label class="flex min-w-[10rem] flex-1 items-center gap-2 text-xs text-slate-500 dark:text-slate-400" for="evo-range">进度' +
+        '<input id="evo-range" type="range" min="0" max="1000" value="0" class="w-full accent-sky-600 dark:accent-cyan-400"></label></div>' +
+        "<p " + MUTED + ">主要深度 p = 2（两轮代价层 + 混合层）；有限 shot 目标函数用 CVaR α = 0.1。探索性分析扫 p ∈ {1, 2, 3, 4, 6}，" +
+        "每个参数 20 次评估，把深度和优化预算分开。27 × 27 根柱对应 729 个可行构型，高度为测到该构型的概率。</p>";
+
+      case 5: return h2(5) + '<div class="mt-4">' + noticeHTML() + "</div>" +
+        '<div class="mt-4 overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700"><table class="w-full text-left text-sm">' +
+        '<tbody class="divide-y divide-slate-200 dark:divide-slate-700">' +
+        row("均匀可行采样", "1 / 729 = 0.00137", "") +
+        row("XY-QAOA 基态概率", "0.0412", "text-emerald-600 dark:text-emerald-400") +
+        row("log10(0.0412 × 729)", "1.48", "text-emerald-600 dark:text-emerald-400 text-base") +
+        "</tbody></table></div>" +
+        "<p " + P + "><strong>主要终点（修订 A7）</strong>：6 位点上的 log10 精确基态放大倍数，做双侧簇符号翻转检验；" +
+        "以及它随 log10 可行构型数增长的组内斜率。</p>" +
+        '<div class="mt-4 rounded-lg border-l-4 border-sky-500 bg-sky-50 p-4 dark:border-cyan-400 dark:bg-cyan-400/5">' +
+        '<div class="text-[15px] font-bold">技术反思：为什么当前规模下不以经典求解器对比作主要终点？</div>' +
+        '<p class="mt-2 text-[14px] leading-relaxed text-slate-700 dark:text-slate-300">预实验模拟显示，在 6 位点和 10 位点上，' +
+        "模拟退火都 100% 命中基态，与 QAOA 的差距恒为 0，对比的方向在实验前就已注定；均匀随机采样的 best-of-1000 命中率（75%）" +
+        "甚至高于 QAOA（62%）；改用资源归一化的 QTS99 之后，结果又被 QAOA 的训练 shot 数主导（约 log10 45000），看不出深度的差别。</p>" +
+        '<p class="mt-2 text-[14px] leading-relaxed text-slate-700 dark:text-slate-300">因此主要终点改为不依赖经典对手的量子内禀指标，' +
+        "QAOA 对经典的对比（QTS99、best-of-N 等）保留为分层门控之后的次要终点（修订 A1 → A7）。</p>" +
+        '<p class="mt-2 text-[14px] leading-relaxed text-slate-700 dark:text-slate-300">本研究是<strong>无噪声的精确可行子空间模拟</strong>，' +
+        "不涉及硬件噪声，也不构成任何量子优势或加速的声明。</p></div>";
+
+      case 6: return h2(6) +
+        "<p " + P + "><strong>分层门控（修订 A4）。</strong>主要族两个假设在全 α 下做 Holm 校正；次要族的调整 p 值取主要族最大调整 p 与族内 Holm p " +
+        "中的较大者，所以只有两个主要假设都被拒绝后，次要效应才可能被声明。探索性分析只给区间，不做检验。</p>" +
+        "<p " + P + "><strong>抗原折叠留出集（修订 A10）。</strong>按分层隔离关系（VHH 全链 0.80、CDR-H3 0.50、抗原全链 0.30 且覆盖 0.70、" +
+        "共享 Foldseek 抗原结构簇 TM 0.50）把复合物连成连通分量，整块剥离。留出哪一块只取决于分量成员文件名的哈希（5 折中的第 1 折），" +
+        "不看任何结果；训练和能量校准都读不到这些图。</p>" +
+        '<button id="rescan" type="button" ' + BTN + ">重新扫描</button>" +
+        "<p " + MUTED + ">示意：40 个复合物、15 个分量，其中 3 个分量共 8 个复合物被剥离。正式运行要求留出至少 10 个独立分量。</p>" +
+        "<div " + BOX + "><strong>声明范围：</strong>冻结的流程在训练时从未见过的抗原折叠上依然成立。它是同一份 PDB 快照上的簇级留出，" +
+        "论文中不得表述为外部数据集。</div>";
+    }
+    return "";
+  }
+  function readout(label, id, value) {
+    return '<div class="bg-white px-3 py-2.5 dark:bg-slate-900"><div class="text-[11px] text-slate-500 dark:text-slate-400">' + label +
+      '</div><div id="' + id + '" class="tabular mt-0.5 font-mono text-[15px] font-semibold">' + value + "</div></div>";
+  }
+  function row(k, v, cls) {
+    return '<tr class="bg-white dark:bg-slate-900"><td class="px-3 py-2.5 text-slate-600 dark:text-slate-300">' + k +
+      '</td><td class="tabular px-3 py-2.5 text-right font-mono font-semibold ' + cls + '">' + v + "</td></tr>";
+  }
+
+  /* 导航按钮 */
+  var glReady = false;
+  var nav = document.getElementById("acts");
+  ACTS.forEach(function (a, i) {
+    var b = document.createElement("button");
+    b.type = "button";
+    b.className = "act-btn group flex shrink-0 items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-semibold text-slate-600 " +
+      "hover:bg-white hover:text-sky-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 " +
+      "aria-[current=true]:bg-sky-600 aria-[current=true]:text-white dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-cyan-300 " +
+      "dark:aria-[current=true]:bg-cyan-500 dark:aria-[current=true]:text-slate-950";
+    b.innerHTML = '<span class="act-n font-mono text-[11px] opacity-70">第' + a.n + '幕</span><span>' + a.name + "</span>";
+    b.addEventListener("click", function () { if (glReady) goTo(i); else showPanelOnly(i); });
+    nav.appendChild(b);
+  });
+
+  if (typeof THREE === "undefined" || typeof THREE.OrbitControls === "undefined") {
+    fail("Three.js 或 OrbitControls 没有加载成功。这个页面需要联网访问 cdnjs.cloudflare.com 与 cdn.jsdelivr.net；请检查网络后刷新。文字说明仍可在右侧面板阅读。");
+    showPanelOnly(0);
+    return;
+  }
+
+  /* =====================================================================
+   * 2. 调色板与「外观管理」：主题切换、分幕淡入淡出、按幕改色统一在这里处理
+   * ===================================================================== */
+  var PALETTES = {
+    light: {
+      bg: 0xffffff, fog: 0xffffff, grid1: 0x0ea5e9, grid2: 0xbae6fd, white: 0xffffff,
+      vhh: 0x0891b2, antigen: 0x64748b, cloud: 0x38bdf8, contact: 0xef4444, hot: 0xf59e0b,
+      ground: 0x16a34a, bar: 0x0ea5e9, dim: 0xcbd5e1, amber: 0xd97706, cyan: 0x0891b2,
+      laser: 0xef4444, tileA: 0x7dd3fc, tileB: 0xa5b4fc, slab: 0x0ea5e9, slab2: 0x94a3b8,
+      text: "#0f172a", muted: "#475569", labelBg: "rgba(255,255,255,0.88)"
+    },
+    dark: {
+      bg: 0x0f172a, fog: 0x0f172a, grid1: 0xd946ef, grid2: 0x155e75, white: 0xffffff,
+      vhh: 0x22d3ee, antigen: 0x94a3b8, cloud: 0x818cf8, contact: 0xf87171, hot: 0xfbbf24,
+      ground: 0x4ade80, bar: 0x38bdf8, dim: 0x334155, amber: 0xfbbf24, cyan: 0x22d3ee,
+      laser: 0xf472b6, tileA: 0x0e7490, tileB: 0x4338ca, slab: 0x22d3ee, slab2: 0x64748b,
+      text: "#e2e8f0", muted: "#94a3b8", labelBg: "rgba(15,23,42,0.82)"
+    }
+  };
+  var pal = PALETTES[theme];
+  var tmpColor = new THREE.Color();
+
+  // 每个材质登记在这里；每帧把颜色、不透明度、发光强度平滑地拉向目标值
+  var managed = [];
+  var groupAlpha = {};      // 当前组透明度
+  var groupAlphaT = {};     // 目标组透明度
+
+  function makeMat(kind, o) {
+    var m;
+    if (kind === "std") m = new THREE.MeshStandardMaterial({ roughness: 0.42, metalness: 0.08 });
+    else if (kind === "basic") m = new THREE.MeshBasicMaterial();
+    else if (kind === "line") m = new THREE.LineBasicMaterial();
+    else if (kind === "points") m = new THREE.PointsMaterial({ size: o.size || 1, sizeAttenuation: true });
+    else m = new THREE.SpriteMaterial();
+    m.transparent = true;
+    if (o.map) m.map = o.map;
+    if (o.alphaTest) m.alphaTest = o.alphaTest;
+    if (o.side) m.side = o.side;
+    if (o.depthWrite === false) m.depthWrite = false;
+    if (o.depthTest === false) m.depthTest = false;
+    var op = o.opacity === undefined ? 1 : o.opacity;
+    m.userData = {
+      group: o.group, colorKey: o.color || "white", emissiveKey: o.emissive || null,
+      emI: o.emissiveI || 0, emIT: o.emissiveI || 0,
+      base: op, baseT: op, pulse: 0, phase: Math.random() * 6.28, additive: !!o.additive
+    };
+    m.color.setHex(pal[m.userData.colorKey]);
+    if (m.userData.emissiveKey && m.emissive) { m.emissive.setHex(pal[m.userData.emissiveKey]); m.emissiveIntensity = m.userData.emI; }
+    if (!(o.group in groupAlpha)) { groupAlpha[o.group] = 0; groupAlphaT[o.group] = 0; }
+    managed.push(m);
+    return m;
+  }
+  function look(mat, o) {
+    var u = mat.userData;
+    if (o.color) u.colorKey = o.color;
+    if (o.opacity !== undefined) u.baseT = o.opacity;
+    if (o.emissive) u.emissiveKey = o.emissive;
+    if (o.emissiveI !== undefined) u.emIT = o.emissiveI;
+    if (o.pulse !== undefined) u.pulse = o.pulse;
+  }
+
+  function updateManaged(dt, t) {
+    var k = reduced ? 1 : 1 - Math.exp(-dt * 6);
+    var kg = reduced ? 1 : 1 - Math.exp(-dt * 4.5);
+    for (var g in groupAlpha) groupAlpha[g] += (groupAlphaT[g] - groupAlpha[g]) * kg;
+    for (var i = 0; i < managed.length; i++) {
+      var m = managed[i], u = m.userData;
+      u.base += (u.baseT - u.base) * k;
+      m.color.lerp(tmpColor.setHex(pal[u.colorKey]), k);
+      if (m.emissive) {
+        u.emI += (u.emIT - u.emI) * k;
+        if (u.emissiveKey) m.emissive.lerp(tmpColor.setHex(pal[u.emissiveKey]), k);
+        m.emissiveIntensity = u.emI;
+      }
+      var pulse = u.pulse && !reduced ? 0.55 + 0.45 * Math.sin(t * 6 + u.phase) : 1;
+      var a = u.base * groupAlpha[u.group] * pulse;
+      m.opacity = a;
+      m.visible = a > 0.004;
+      if (u.additive) {
+        var want = theme === "dark" ? THREE.AdditiveBlending : THREE.NormalBlending;
+        if (m.blending !== want) { m.blending = want; m.needsUpdate = true; }
+      }
+    }
+  }
+
+  /* ---------------- 画布纹理：圆点、辉光、文字标签 ---------------- */
+  function radialTexture(soft) {
+    var c = document.createElement("canvas"); c.width = c.height = 128;
+    var g = c.getContext("2d");
+    var grd = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+    grd.addColorStop(0, "rgba(255,255,255,1)");
+    grd.addColorStop(soft ? 0.25 : 0.55, soft ? "rgba(255,255,255,0.55)" : "rgba(255,255,255,1)");
+    grd.addColorStop(1, "rgba(255,255,255,0)");
+    g.fillStyle = grd; g.fillRect(0, 0, 128, 128);
+    return new THREE.CanvasTexture(c);
+  }
+  var DOT_TEX = radialTexture(false);
+  var GLOW_TEX = radialTexture(true);
+
+  var labels = [];
+  function makeLabel(text, o) {
+    var canvas = document.createElement("canvas");
+    var ctx = canvas.getContext("2d");
+    var tex = new THREE.CanvasTexture(canvas);
+    tex.minFilter = THREE.LinearFilter;
+    var mat = makeMat("sprite", { group: o.group, map: tex, depthTest: false, depthWrite: false, opacity: o.opacity === undefined ? 1 : o.opacity });
+    var spr = new THREE.Sprite(mat);
+    spr.renderOrder = 10;
+    var lab = { text: text, o: o, canvas: canvas, ctx: ctx, tex: tex, spr: spr };
+    lab.draw = function () {
+      var fs = 44, pad = o.bg === false ? 4 : 18;
+      ctx.font = (o.weight || 600) + " " + fs + 'px "Familjen Grotesk", "PingFang SC", "Microsoft YaHei", sans-serif';
+      var w = Math.ceil(ctx.measureText(lab.text).width) + pad * 2;
+      var h = fs + pad * 1.4;
+      canvas.width = w; canvas.height = h;
+      ctx.font = (o.weight || 600) + " " + fs + 'px "Familjen Grotesk", "PingFang SC", "Microsoft YaHei", sans-serif';
+      if (o.bg !== false) {
+        ctx.fillStyle = pal.labelBg;
+        var r = 12; ctx.beginPath();
+        ctx.moveTo(r, 0); ctx.lineTo(w - r, 0); ctx.quadraticCurveTo(w, 0, w, r); ctx.lineTo(w, h - r);
+        ctx.quadraticCurveTo(w, h, w - r, h); ctx.lineTo(r, h); ctx.quadraticCurveTo(0, h, 0, h - r);
+        ctx.lineTo(0, r); ctx.quadraticCurveTo(0, 0, r, 0); ctx.fill();
+      }
+      ctx.fillStyle = o.css ? cssOf(o.css) : pal.text;
+      ctx.textBaseline = "middle";
+      ctx.fillText(lab.text, pad, h / 2 + 2);
+      tex.needsUpdate = true;
+      var worldH = o.size || 1.6;
+      spr.scale.set(worldH * (w / h), worldH, 1);
+    };
+    lab.draw();
+    labels.push(lab);
+    return spr;
+  }
+  function cssOf(key) {
+    var v = pal[key];
+    return typeof v === "number" ? "#" + v.toString(16).padStart(6, "0") : v;
+  }
+
+  /* =====================================================================
+   * 3. 渲染器、相机、控件、地面网格
+   * ===================================================================== */
+  var canvas = document.getElementById("gl");
+  var viewport = document.getElementById("viewport");
+  var renderer;
+  try {
+    renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+  } catch (e) {
+    fail("浏览器无法创建 WebGL 上下文（" + e.message + "）。请换用启用了硬件加速的浏览器。文字说明仍可在右侧面板阅读。");
+    showPanelOnly(0);
+    return;
+  }
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  var scene = new THREE.Scene();
+  scene.background = new THREE.Color(pal.bg);
+  scene.fog = new THREE.Fog(pal.fog, 90, 230);
+  var camera = new THREE.PerspectiveCamera(45, 1, 0.1, 1000);
+  camera.position.set(-8, 18, 62);
+  var controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.08;
+  controls.minDistance = 12;
+  controls.maxDistance = 160;
+  controls.autoRotateSpeed = 0.55;
+
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x445566, 0.75));
+  var sun = new THREE.DirectionalLight(0xffffff, 0.85);
+  sun.position.set(30, 60, 40);
+  scene.add(sun);
+
+  var grid = null;
+  function buildGrid() {
+    if (grid) { scene.remove(grid); grid.geometry.dispose(); grid.material.dispose(); }
+    grid = new THREE.GridHelper(240, 60, pal.grid1, pal.grid2);
+    grid.position.y = -16;
+    grid.material.transparent = true;
+    grid.material.opacity = theme === "dark" ? 0.55 : 0.7;
+    scene.add(grid);
+  }
+  buildGrid();
+
+  function resize() {
+    var w = viewport.clientWidth, h = viewport.clientHeight;
+    if (!w || !h) return;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+  }
+  new ResizeObserver(resize).observe(viewport);
+  resize();
+
+  /* 通用几何体与工具 */
+  var SPHERE = new THREE.SphereGeometry(1, 18, 14);
+  var CYL = new THREE.CylinderGeometry(1, 1, 1, 10);
+  var UP = new THREE.Vector3(0, 1, 0);
+  function V(a) { return new THREE.Vector3(a[0], a[1], a[2]); }
+  function sphere(parent, pos, r, mat) {
+    var m = new THREE.Mesh(SPHERE, mat); m.position.copy(pos); m.scale.setScalar(r); parent.add(m); return m;
+  }
+  function stick(parent, a, b, r, mat) {
+    var d = new THREE.Vector3().subVectors(b, a), len = d.length();
+    var m = new THREE.Mesh(CYL, mat);
+    m.position.copy(a).addScaledVector(d, 0.5);
+    m.scale.set(r, len, r);
+    m.quaternion.setFromUnitVectors(UP, d.normalize());
+    parent.add(m); return m;
+  }
+  function glow(parent, pos, size, o) {
+    var mat = makeMat("sprite", { group: o.group, map: GLOW_TEX, color: o.color, opacity: o.opacity === undefined ? 0.9 : o.opacity, depthWrite: false, additive: true });
+    var s = new THREE.Sprite(mat); s.position.copy(pos); s.scale.setScalar(size); parent.add(s); return s;
+  }
+  function mulberry32(a) {
+    return function () { a |= 0; a = a + 0x6D2B79F5 | 0; var t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+  }
+  function easeInOut(x) { return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; }
+  function clamp01(x) { return x < 0 ? 0 : x > 1 ? 1 : x; }
+
+  /* =====================================================================
+   * 4. 分子模型（单位：Å）。几何在离线调参后固定：接触全部来自 CDR1–3
+   * ===================================================================== */
+  function buildMolecule(seed) {
+    var rng = mulberry32(seed);
+    var vhh = [];
+    var strandY = [-12, -7.2, -2.4, 2.4, 7.2, 12], sheetZ = [-4.6, 4.6];
+    var xMin = -26, xMax = -9, step = 3.4, n = Math.round((xMax - xMin) / step) + 1;
+    var prevEnd = null;
+    for (var s = 0; s < 6; s++) {
+      var forward = s % 2 === 0, y = strandY[s], z = sheetZ[s % 2], pts = [], k;
+      for (k = 0; k < n; k++) pts.push([forward ? xMin + k * step : xMax - k * step, y, z]);
+      if (prevEnd) {
+        // 连接两条链段的环；+x 端（朝向抗原）的环就是 CDR1/2/3
+        var atPlus = prevEnd[0] > -15;
+        var cdr = atPlus ? ((s - 1) / 2 | 0) + 1 : 0;
+        var bulge = atPlus ? [0, 19, 19, 21][cdr] : -6.4;
+        var count = atPlus ? [0, 4, 4, 6][cdr] : 2;
+        for (k = 1; k <= count; k++) {
+          var t = k / (count + 1);
+          var cx = (prevEnd[0] + pts[0][0]) / 2 + bulge, cy = (prevEnd[1] + pts[0][1]) / 2, cz = (prevEnd[2] + pts[0][2]) / 2;
+          vhh.push({
+            ca: [(1 - t) * (1 - t) * prevEnd[0] + 2 * (1 - t) * t * cx + t * t * pts[0][0],
+                 (1 - t) * (1 - t) * prevEnd[1] + 2 * (1 - t) * t * cy + t * t * pts[0][1],
+                 (1 - t) * (1 - t) * prevEnd[2] + 2 * (1 - t) * t * cz + t * t * pts[0][2]],
+            cdr: cdr, loop: true
+          });
+        }
+      }
+      for (k = 0; k < pts.length; k++) vhh.push({ ca: pts[k], cdr: 0, loop: false, side: k % 2 ? 1 : -1 });
+      prevEnd = pts[pts.length - 1];
+    }
+    vhh.forEach(function (r) {
+      if (r.loop && r.cdr) r.sc = [r.ca[0] + 2.3, r.ca[1] + (rng() - 0.5) * 1.2, r.ca[2] + (rng() - 0.5) * 1.2];
+      else if (r.loop) r.sc = [r.ca[0] - 2.0, r.ca[1], r.ca[2]];
+      else r.sc = [r.ca[0], r.ca[1], r.ca[2] + 2.3 * (r.ca[2] > 0 ? 1 : -1) * (r.side || 1)];
+    });
+    // 抗原：先铺一层与抗体表面互补的界面层（前方 3.6–4.6 Å），再用超椭球填充后方体积
+    var ag = [], beads = [];
+    vhh.forEach(function (r) { beads.push(r.ca, r.sc); });
+    function dist(p, q) { return Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]); }
+    function near(p, d) { return ag.some(function (q) { return dist(p, q) < d; }); }
+    function clash(p) { return beads.some(function (q) { return dist(p, q) < 3.3; }); }
+    for (var yy = -14.4; yy <= 14.4; yy += 3.6) {
+      for (var zz = -9; zz <= 9; zz += 3.6) {
+        var front = -Infinity;
+        beads.forEach(function (b) { if (Math.hypot(b[1] - yy, b[2] - zz) < 4.2 && b[0] > front) front = b[0]; });
+        var p = [(front > -Infinity ? Math.max(front, -2) : 3.2) + 3.6 + rng() * 1.0, yy + (rng() - 0.5) * 1.4, zz + (rng() - 0.5) * 1.4];
+        if (!clash(p) && !near(p, 3.3)) ag.push(p);
+      }
+    }
+    var C = [15.5, 0, 0], R = [10.5, 15, 13], guard = 0;
+    while (ag.length < 170 && guard++ < 80000) {
+      var q = [C[0] + (rng() * 2 - 1) * R[0], C[1] + (rng() * 2 - 1) * R[1], C[2] + (rng() * 2 - 1) * R[2]];
+      var e = Math.pow((q[0] - C[0]) / R[0], 4) + Math.pow((q[1] - C[1]) / R[1], 4) + Math.pow((q[2] - C[2]) / R[2], 4);
+      if (e > 1 || near(q, 3.5) || clash(q)) continue;
+      ag.push(q);
+    }
+    // 接触：任一 VHH 重原子珠子（CA 或侧链）与抗原珠子距离 < 5 Å
+    var contacts = [];
+    vhh.forEach(function (r, i) {
+      [["ca", r.ca], ["sc", r.sc]].forEach(function (a) {
+        ag.forEach(function (q, j) {
+          var d = dist(a[1], q);
+          if (d < 5) contacts.push({ i: i, j: j, d: d, atom: a[0] });
+        });
+      });
+    });
+    return { vhh: vhh, ag: ag, contacts: contacts };
+  }
+  var MOL = buildMolecule(11);
+
+  // 活性位点：按最近接触距离排序，取前 6 个残基，再按序列顺序编号 H1–H6
+  var minD = {};
+  MOL.contacts.forEach(function (c) { minD[c.i] = Math.min(minD[c.i] === undefined ? 99 : minD[c.i], c.d); });
+  var contactResidues = Object.keys(minD).map(Number);
+  var HOT = contactResidues.slice().sort(function (a, b) { return minD[a] - minD[b]; }).slice(0, 6).sort(function (a, b) { return a - b; });
+  var dvals = MOL.contacts.map(function (c) { return c.d; });
+  var STATS = {
+    contactResidues: contactResidues.length,
+    contactPairs: MOL.contacts.length,
+    dRange: Math.min.apply(null, dvals).toFixed(1) + "–" + Math.max.apply(null, dvals).toFixed(1)
+  };
+
+  /* ---------- 组「mol」：VHH 球棍模型 + 抗原珠子 + 半透明云雾 ---------- */
+  var molGroup = new THREE.Group(); scene.add(molGroup);
+  var residueMeshes = [];   // 用于射线检测
+  var molMats = { vhh: [], ag: [], cloud: [], stick: [] };
+  MOL.vhh.forEach(function (r, i) {
+    var mCA = makeMat("std", { group: "mol", color: "vhh" });
+    var mSC = makeMat("std", { group: "mol", color: "vhh" });
+    molMats.vhh.push(mCA, mSC);
+    var ca = sphere(molGroup, V(r.ca), 0.95, mCA);
+    var sc = sphere(molGroup, V(r.sc), 0.78, mSC);
+    ca.userData.residue = i; sc.userData.residue = i;
+    residueMeshes.push(ca, sc);
+    var ms = makeMat("std", { group: "mol", color: "vhh", opacity: 0.85 });
+    molMats.stick.push(ms);
+    stick(molGroup, V(r.ca), V(r.sc), 0.26, ms);
+    if (i > 0) stick(molGroup, V(MOL.vhh[i - 1].ca), V(r.ca), 0.34, ms);
+    r.caV = V(r.ca); r.scV = V(r.sc);
+  });
+  MOL.ag.forEach(function (p) {
+    var m = makeMat("std", { group: "mol", color: "antigen", opacity: 0.6 });
+    molMats.ag.push(m);
+    sphere(molGroup, V(p), 0.72, m);
+  });
+  (function cloud() {
+    // 抗原的「云雾」：细分二十面体按噪声扰动后拉成椭球
+    var geo = new THREE.IcosahedronGeometry(1, 5), pos = geo.attributes.position, v = new THREE.Vector3();
+    for (var i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos, i);
+      var nse = 1 + 0.07 * Math.sin(v.x * 7.1 + v.y * 3.3) * Math.cos(v.z * 5.7) + 0.05 * Math.sin(v.y * 11.0);
+      // 向 -x 方向压平一些，让云雾正面贴近界面
+      var flat = v.x < 0 ? 1 - 0.22 * Math.pow(-v.x, 3) : 1;
+      pos.setXYZ(i, 15.5 + v.x * 12.2 * nse * flat, v.y * 16.8 * nse, v.z * 14.8 * nse);
+    }
+    geo.computeVertexNormals();
+    var m = makeMat("std", { group: "mol", color: "cloud", opacity: 0.16, depthWrite: false, side: THREE.DoubleSide });
+    molMats.cloud.push(m);
+    var mesh = new THREE.Mesh(geo, m); mesh.renderOrder = 2; molGroup.add(mesh);
+  })();
+  var lblVHH = makeLabel("VHH 纳米抗体", { group: "mol", size: 2.2, css: "vhh" });
+  lblVHH.position.set(-18, 17, 0); molGroup.add(lblVHH);
+  var lblAG = makeLabel("抗原", { group: "mol", size: 2.2, css: "antigen" });
+  lblAG.position.set(17, 19.5, 0); molGroup.add(lblAG);
+
+  /* ---------- 组「contacts」：< 5 Å 原子对的红色辉光与脉冲连线 ---------- */
+  var contactGroup = new THREE.Group(); scene.add(contactGroup);
+  var contactViz = MOL.contacts.map(function (c) {
+    var r = MOL.vhh[c.i], a = c.atom === "ca" ? r.caV : r.scV, b = V(MOL.ag[c.j]);
+    var lm = makeMat("line", { group: "contacts", color: "contact", opacity: 0.35 });
+    var line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([a, b]), lm);
+    contactGroup.add(line);
+    var sm1 = makeMat("std", { group: "contacts", color: "contact", emissive: "contact", emissiveI: 0.9, opacity: 0 });
+    var sm2 = makeMat("std", { group: "contacts", color: "contact", emissive: "contact", emissiveI: 0.9, opacity: 0 });
+    sphere(contactGroup, a, 1.08, sm1);
+    sphere(contactGroup, b, 0.95, sm2);
+    var g1 = glow(contactGroup, a, 4.2, { group: "contacts", color: "contact", opacity: 0 });
+    var g2 = glow(contactGroup, b, 3.6, { group: "contacts", color: "contact", opacity: 0 });
+    return { c: c, lm: lm, mats: [sm1, sm2], glows: [g1.material, g2.material], a: a, b: b };
+  });
+  var hoverResidue = -1, showAllContacts = false;
+  function refreshContacts() {
+    contactViz.forEach(function (v) {
+      var on = showAllContacts || v.c.i === hoverResidue;
+      look(v.lm, { opacity: on ? 1 : 0.32, pulse: on ? 1 : 0 });
+      v.mats.forEach(function (m) { look(m, { opacity: on ? 1 : 0 }); });
+      v.glows.forEach(function (m) { look(m, { opacity: on ? 0.85 : 0 }); });
+    });
+  }
+
+  /* ---------- 组「flow」：EGNN 消息传递的粒子流（第二幕） ---------- */
+  var flowGroup = new THREE.Group(); scene.add(flowGroup);
+  var flowEdges = [];
+  MOL.contacts.forEach(function (c) { var r = MOL.vhh[c.i]; flowEdges.push([c.atom === "ca" ? r.caV : r.scV, V(MOL.ag[c.j])]); });
+  MOL.vhh.forEach(function (r, i) {
+    if (i > 0 && (r.cdr || MOL.vhh[i - 1].cdr)) flowEdges.push([MOL.vhh[i - 1].caV, r.caV]);
+    if (r.cdr) {
+      // 跨伙伴 KNN（k = 3）：图连边的真实规则，与 5 Å 标签无关
+      MOL.ag.map(function (q, j) { return { j: j, d: r.caV.distanceTo(V(q)) }; })
+        .sort(function (a, b) { return a.d - b.d; }).slice(0, 3)
+        .forEach(function (x) { flowEdges.push([r.caV, V(MOL.ag[x.j])]); });
+    }
+  });
+  var FLOW_N = 260;
+  var flowGeo = new THREE.BufferGeometry();
+  var flowPos = new Float32Array(FLOW_N * 3);
+  flowGeo.setAttribute("position", new THREE.BufferAttribute(flowPos, 3));
+  var flowState = [];
+  var frng = mulberry32(5);
+  for (var fi = 0; fi < FLOW_N; fi++) flowState.push({ e: Math.floor(frng() * flowEdges.length), t: frng(), v: 0.25 + frng() * 0.35, dir: frng() < 0.5 ? 1 : -1 });
+  var flowMat = makeMat("points", { group: "flow", color: "cyan", size: 1.1, map: DOT_TEX, depthWrite: false, additive: true, opacity: 0.95 });
+  flowGroup.add(new THREE.Points(flowGeo, flowMat));
+  var edgeMat = makeMat("line", { group: "flow", color: "cyan", opacity: 0.22 });
+  var edgePts = [];
+  flowEdges.forEach(function (e) { edgePts.push(e[0], e[1]); });
+  flowGroup.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(edgePts), edgeMat));
+  function updateFlow(dt) {
+    for (var i = 0; i < FLOW_N; i++) {
+      var s = flowState[i];
+      if (!reduced) { s.t += s.v * dt * s.dir; if (s.t > 1 || s.t < 0) { s.e = Math.floor(Math.random() * flowEdges.length); s.t = s.dir > 0 ? 0 : 1; } }
+      var e = flowEdges[s.e], tt = reduced ? 0.5 : s.t;
+      flowPos[i * 3] = e[0].x + (e[1].x - e[0].x) * tt;
+      flowPos[i * 3 + 1] = e[0].y + (e[1].y - e[0].y) * tt;
+      flowPos[i * 3 + 2] = e[0].z + (e[1].z - e[0].z) * tt;
+    }
+    flowGeo.attributes.position.needsUpdate = true;
+  }
+  updateFlow(0);
+
+  /* ---------- 组「hot」：6 个活性位点（红黄辉光 + H1–H6 标签） ---------- */
+  var hotGroup = new THREE.Group(); scene.add(hotGroup);
+  var hotViz = HOT.map(function (ri, k) {
+    var r = MOL.vhh[ri];
+    var shell = makeMat("std", { group: "hot", color: "hot", emissive: "hot", emissiveI: 0.75 });
+    var m = sphere(hotGroup, r.scV, 1.55, shell);
+    var g = glow(hotGroup, r.scV, 8.5, { group: "hot", color: "hot", opacity: 0.8 });
+    var lab = makeLabel("H" + (k + 1), { group: "hot", size: 1.7, css: "hot" });
+    lab.position.copy(r.scV).add(new THREE.Vector3(0.6, 3.2, 0));
+    hotGroup.add(lab);
+    return { r: r, mesh: m, glow: g };
+  });
+
+  /* ---------- 组「conf」：χ1 三个势阱的影子构型 + 729 节点拓扑球（第三幕） ---------- */
+  var confGroup = new THREE.Group(); scene.add(confGroup);
+  var BALL_C = new THREE.Vector3(0, 36, 0), BALL_R = 13;
+  var fanMat = makeMat("line", { group: "conf", color: "cyan", opacity: 0.75 });
+  var fanTipMat = makeMat("std", { group: "conf", color: "cyan", emissive: "cyan", emissiveI: 0.5, opacity: 0.8 });
+  var fanPts = [];
+  hotViz.forEach(function (h) {
+    var axis = new THREE.Vector3().subVectors(h.r.scV, h.r.caV).normalize();
+    var perp = new THREE.Vector3().crossVectors(axis, Math.abs(axis.y) < 0.9 ? UP : new THREE.Vector3(1, 0, 0)).normalize();
+    [60, 180, 300].forEach(function (deg) {
+      // 与 CA→CB 轴成四面体角，绕轴按 χ1 = 60°/180°/300° 旋转
+      var d = axis.clone().multiplyScalar(Math.cos(1.2)).addScaledVector(perp.clone().applyAxisAngle(axis, deg * Math.PI / 180), Math.sin(1.2));
+      var tip = h.r.scV.clone().addScaledVector(d, 3.4);
+      fanPts.push(h.r.scV, tip);
+      sphere(confGroup, tip, 0.5, fanTipMat);
+    });
+  });
+  confGroup.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(fanPts), fanMat));
+
+  // 729 = 3^6 个构型：六位点状态 (d0..d5) → 9×9×9 晶格坐标 → 按立方壳层映射到球体
+  var NODE_N = 729, nodeTarget = [], nodeStart = [], nodeDelay = [];
+  var nrng = mulberry32(3);
+  for (var ci = 0; ci < NODE_N; ci++) {
+    var d = [], x = ci;
+    for (var k = 0; k < 6; k++) { d.push(x % 3); x = Math.floor(x / 3); }
+    var gx = (d[0] * 3 + d[1]) / 4 - 1, gy = (d[2] * 3 + d[3]) / 4 - 1, gz = (d[4] * 3 + d[5]) / 4 - 1;
+    var vv = new THREE.Vector3(gx, gy, gz), shellR = Math.max(Math.abs(gx), Math.abs(gy), Math.abs(gz));
+    if (vv.lengthSq() > 0) vv.normalize().multiplyScalar(shellR * BALL_R);
+    nodeTarget.push(vv.add(BALL_C));
+    nodeStart.push(hotViz[ci % 6].r.scV.clone());
+    nodeDelay.push(nrng() * 0.45);
+  }
+  var nodeGeo = new THREE.BufferGeometry(), nodePos = new Float32Array(NODE_N * 3);
+  nodeGeo.setAttribute("position", new THREE.BufferAttribute(nodePos, 3));
+  var nodeMat = makeMat("points", { group: "conf", color: "cyan", size: 0.95, map: DOT_TEX, alphaTest: 0.02, depthWrite: false, additive: true });
+  confGroup.add(new THREE.Points(nodeGeo, nodeMat));
+  // 流线：每个节点一条从活性位点指向当前位置的线段
+  var trailGeo = new THREE.BufferGeometry(), trailPos = new Float32Array(NODE_N * 6);
+  trailGeo.setAttribute("position", new THREE.BufferAttribute(trailPos, 3));
+  var trailMat = makeMat("line", { group: "conf", color: "cyan", opacity: 0.16 });
+  confGroup.add(new THREE.LineSegments(trailGeo, trailMat));
+  // 拓扑连线：汉明距离为 1（只改一个位点状态）的构型对
+  var latPts = [];
+  for (var a = 0; a < NODE_N; a++) {
+    var pw = 1;
+    for (var s6 = 0; s6 < 6; s6++) {
+      var digit = Math.floor(a / pw) % 3;
+      for (var nd = digit + 1; nd < 3; nd++) latPts.push(nodeTarget[a], nodeTarget[a + (nd - digit) * pw]);
+      pw *= 3;
+    }
+  }
+  var latMat = makeMat("line", { group: "conf", color: "cyan", opacity: 0 });
+  confGroup.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(latPts), latMat));
+  var lblBall = makeLabel("3⁶ = 729 个可行构型", { group: "conf", size: 2.2, css: "cyan" });
+  lblBall.position.copy(BALL_C).add(new THREE.Vector3(0, BALL_R + 3.5, 0)); confGroup.add(lblBall);
+  var confT0 = 0;
+  function updateConf(now) {
+    var prog = reduced ? 1 : (now - confT0) / 2800;
+    for (var i = 0; i < NODE_N; i++) {
+      var s = reduced ? 1 : easeInOut(clamp01((prog - nodeDelay[i]) / 0.55));
+      var st = nodeStart[i], tg = nodeTarget[i];
+      var lift = Math.sin(s * Math.PI) * 6;
+      var px = st.x + (tg.x - st.x) * s, py = st.y + (tg.y - st.y) * s + lift, pz = st.z + (tg.z - st.z) * s;
+      nodePos[i * 3] = px; nodePos[i * 3 + 1] = py; nodePos[i * 3 + 2] = pz;
+      trailPos[i * 6] = st.x; trailPos[i * 6 + 1] = st.y; trailPos[i * 6 + 2] = st.z;
+      trailPos[i * 6 + 3] = px; trailPos[i * 6 + 4] = py; trailPos[i * 6 + 5] = pz;
+    }
+    nodeGeo.attributes.position.needsUpdate = true;
+    trailGeo.attributes.position.needsUpdate = true;
+    var done = reduced || prog > 1.05;
+    look(trailMat, { opacity: done ? 0.05 : 0.18 });
+    look(latMat, { opacity: done ? 0.1 : 0 });
+  }
+
+  /* ---------- 组「qubo」：6 个一次性寄存器 + 18×18 系数矩阵（第四幕） ---------- */
+  var quboGroup = new THREE.Group(); scene.add(quboGroup);
+  var registers = [];
+  var qrng = mulberry32(19);
+  for (var rg = 0; rg < 6; rg++) {
+    var rx = -30 + rg * 4.6;
+    var cm = makeMat("std", { group: "qubo", color: "dim", opacity: 0.45 });
+    var col = new THREE.Mesh(CYL, cm); col.position.set(rx, 6, 0); col.scale.set(1.15, 12.5, 1.15); quboGroup.add(col);
+    var reg = { lit: Math.floor(qrng() * 3), bits: [] };
+    for (var b = 0; b < 3; b++) {
+      var bm = makeMat("std", { group: "qubo", color: "dim", emissive: "cyan", emissiveI: 0 });
+      var bp = new THREE.Vector3(rx, 2.2 + b * 3.8, 0);
+      sphere(quboGroup, bp, 1.05, bm);
+      var bg = glow(quboGroup, bp, 6.5, { group: "qubo", color: "cyan", opacity: 0 });
+      reg.bits.push({ mat: bm, glow: bg.material });
+    }
+    var rl = makeLabel("H" + (rg + 1), { group: "qubo", size: 1.4, css: "muted", bg: false });
+    rl.position.set(rx, -1.8, 0); quboGroup.add(rl);
+    registers.push(reg);
+  }
+  function paintRegisters() {
+    registers.forEach(function (reg) {
+      reg.bits.forEach(function (bit, k) {
+        var on = k === reg.lit;
+        look(bit.mat, { color: on ? "cyan" : "dim", emissiveI: on ? 1.1 : 0 });
+        look(bit.glow, { opacity: on ? 0.9 : 0 });
+      });
+    });
+  }
+  paintRegisters();
+  var lblReg = makeLabel("6 个一次性寄存器 · 18 个量子比特", { group: "qubo", size: 1.8, css: "text" });
+  lblReg.position.set(-18.5, 16.5, 0); quboGroup.add(lblReg);
+
+  // 对称的 18×18 QUBO 系数：三类元素分别用三个 InstancedMesh，颜色随主题切换
+  var BOXGEO = new THREE.BoxGeometry(1, 1, 1); BOXGEO.translate(0, 0.5, 0);
+  var cats = { diag: [], inter: [], intra: [] };
+  var qvals = [];
+  for (var qi = 0; qi < 18; qi++) { qvals.push([]); for (var qj = 0; qj < 18; qj++) qvals[qi].push(0); }
+  for (qi = 0; qi < 18; qi++) {
+    for (qj = qi; qj < 18; qj++) {
+      var same = Math.floor(qi / 3) === Math.floor(qj / 3);
+      var val = qi === qj ? 0.45 + qrng() * 0.55 : same ? 0 : Math.pow(qrng(), 2.2) * (qrng() < 0.5 ? -1 : 1);
+      qvals[qi][qj] = qvals[qj][qi] = val;
+    }
+  }
+  var CELL = 1.25, QX = 6, QZ = -(18 * CELL) / 2;
+  for (qi = 0; qi < 18; qi++) for (qj = 0; qj < 18; qj++) {
+    var cat = qi === qj ? "diag" : Math.floor(qi / 3) === Math.floor(qj / 3) ? "intra" : "inter";
+    cats[cat].push({ i: qi, j: qj, h: cat === "intra" ? 0.12 : 0.35 + Math.abs(qvals[qi][qj]) * 7.5 });
+  }
+  var catColor = { diag: "cyan", inter: "amber", intra: "dim" };
+  var m4 = new THREE.Matrix4(), qpos = new THREE.Vector3(), qscl = new THREE.Vector3(), qq = new THREE.Quaternion();
+  Object.keys(cats).forEach(function (cat) {
+    var list = cats[cat];
+    var mat = makeMat("std", { group: "qubo", color: catColor[cat], emissive: catColor[cat], emissiveI: cat === "diag" ? 0.35 : 0.12, opacity: cat === "intra" ? 0.6 : 0.95 });
+    var inst = new THREE.InstancedMesh(BOXGEO, mat, list.length);
+    list.forEach(function (c, n) {
+      qpos.set(QX + c.j * CELL, 0, QZ + c.i * CELL);
+      qscl.set(CELL * 0.82, c.h, CELL * 0.82);
+      m4.compose(qpos, qq, qscl);
+      inst.setMatrixAt(n, m4);
+    });
+    inst.instanceMatrix.needsUpdate = true;
+    quboGroup.add(inst);
+  });
+  var lblQ = makeLabel("QUBO 系数矩阵 Q（18 × 18）", { group: "qubo", size: 1.8, css: "text" });
+  lblQ.position.set(QX + 9 * CELL, 12.5, 0); quboGroup.add(lblQ);
+  var hopTimer = 0;
+  function updateQubo(dt) {
+    if (reduced) return;
+    hopTimer += dt;
+    if (hopTimer > 1.4) {
+      // 激发在寄存器内跳到另一个状态：任何时刻每个寄存器仍恰好一个 1
+      hopTimer = 0;
+      var reg = registers[Math.floor(Math.random() * 6)];
+      reg.lit = (reg.lit + 1 + Math.floor(Math.random() * 2)) % 3;
+      paintRegisters();
+    }
+  }
+
+  /* ---------- 组「bars」「barsExtra」：729 维概率柱状图（第五、六幕） ---------- */
+  var barsGroup = new THREE.Group(); scene.add(barsGroup);
+  var barsExtra = new THREE.Group(); scene.add(barsExtra);
+  var GRID = 27, SP = 1.15, GI = 17, GJ = 9;          // 基态所在格
+  var BETA = 14.85;                                     // 使终点基态概率恰为 0.0412（示意）
+  var P_FINAL = 0.0412, H_SCALE = 20, H_BASE = 0.25;
+  var E = new Float64Array(NODE_N), PH = new Float64Array(NODE_N), PROB = new Float64Array(NODE_N);
+  (function landscape() {
+    var rr = mulberry32(29), raw = [];
+    for (var i = 0; i < NODE_N; i++) {
+      var ci2 = i % GRID, cj = Math.floor(i / GRID);
+      var dd = Math.hypot(ci2 - GI, cj - GJ) / GRID;
+      raw.push({ i: i, e: i === GJ * GRID + GI ? -1 : dd + 0.32 * rr() + 0.18 * Math.sin(ci2 * 0.7) * Math.cos(cj * 0.55) });
+      PH[i] = rr() * Math.PI * 2;
+    }
+    // 按能量排序后取归一化秩次：终点分布只由秩次决定，基态概率因此可精确控制
+    raw.sort(function (a, b) { return a.e - b.e; }).forEach(function (x, rank) { E[x.i] = Math.pow(rank / (NODE_N - 1), 0.75); });
+  })();
+  var GROUND = GJ * GRID + GI;
+  function distribution(u) {
+    var beta = BETA * easeInOut(u);
+    // 代价层 / 混合层交替造成的干涉起伏，振幅在终点衰减为零
+    var amp = 0.95 * Math.pow(1 - u, 1.05) * Math.abs(Math.sin(Math.PI * 4 * u));
+    var Z = 0;
+    for (var i = 0; i < NODE_N; i++) {
+      var w = Math.exp(-beta * E[i]) * (1 + amp * Math.sin(PH[i] + 11 * u));
+      PROB[i] = w > 0 ? w : 0; Z += PROB[i];
+    }
+    for (i = 0; i < NODE_N; i++) PROB[i] /= Z;
+  }
+  var barMat = makeMat("std", { group: "bars", color: "bar", emissive: "bar", emissiveI: 0.12 });
+  var bars = new THREE.InstancedMesh(BOXGEO, barMat, NODE_N - 1);
+  barsGroup.add(bars);
+  var groundMat = makeMat("std", { group: "bars", color: "ground", emissive: "ground", emissiveI: 0.55 });
+  var groundBar = new THREE.Mesh(BOXGEO, groundMat); barsGroup.add(groundBar);
+  var floorMat = makeMat("std", { group: "bars", color: "dim", opacity: 0.35 });
+  var floor = new THREE.Mesh(new THREE.BoxGeometry(GRID * SP + 1.5, 0.2, GRID * SP + 1.5), floorMat);
+  floor.position.y = -0.1; barsGroup.add(floor);
+  function cellX(i) { return (i % GRID - (GRID - 1) / 2) * SP; }
+  function cellZ(i) { return (Math.floor(i / GRID) - (GRID - 1) / 2) * SP; }
+  var groundWidth = 1, groundWidthT = 1;
+  function drawBars() {
+    var n = 0;
+    for (var i = 0; i < NODE_N; i++) {
+      var h = H_BASE + PROB[i] / P_FINAL * H_SCALE;
+      if (i === GROUND) {
+        groundBar.position.set(cellX(i), 0, cellZ(i));
+        groundBar.scale.set(SP * 0.8 * groundWidth, h, SP * 0.8 * groundWidth);
+        continue;
+      }
+      qpos.set(cellX(i), 0, cellZ(i)); qscl.set(SP * 0.8, h, SP * 0.8);
+      m4.compose(qpos, qq, qscl); bars.setMatrixAt(n++, m4);
+    }
+    bars.instanceMatrix.needsUpdate = true;
+  }
+  var groundGlow = glow(barsExtra, new THREE.Vector3(cellX(GROUND), H_BASE + H_SCALE, cellZ(GROUND)), 14, { group: "barsExtra", color: "ground", opacity: 0.9 });
+  var H_UNI = H_BASE + (1 / NODE_N) / P_FINAL * H_SCALE;
+  var uniMat = makeMat("basic", { group: "barsExtra", color: "amber", opacity: 0.22, side: THREE.DoubleSide, depthWrite: false });
+  var uniPlane = new THREE.Mesh(new THREE.PlaneGeometry(GRID * SP + 1.5, GRID * SP + 1.5), uniMat);
+  uniPlane.rotation.x = -Math.PI / 2; uniPlane.position.y = H_UNI + 0.02; barsExtra.add(uniPlane);
+  var lblUni = makeLabel("均匀采样 1/729 = 0.00137", { group: "barsExtra", size: 1.5, css: "amber" });
+  lblUni.position.set(-(GRID * SP) / 2 + 5, H_UNI + 1.6, (GRID * SP) / 2); barsExtra.add(lblUni);
+  var lblGround = makeLabel("基态 p = 0.0412 · 放大 1.48（示意）", { group: "barsExtra", size: 1.7, css: "ground" });
+  lblGround.position.set(cellX(GROUND), H_BASE + H_SCALE + 3.2, cellZ(GROUND)); barsExtra.add(lblGround);
+
+  var evo = { u: 0, playing: false, t0: 0, dur: 7000, step: 0 };
+  var LAYER_NAMES = ["代价层 1", "混合层 1", "代价层 2", "混合层 2"];
+  function setEvolution(u) {
+    evo.u = clamp01(u);
+    distribution(evo.u);
+    drawBars();
+    var pg = PROB[GROUND];
+    var el = function (id) { return document.getElementById(id); };
+    if (el("ro-p")) {
+      el("ro-layer").textContent = evo.u <= 0 ? "初态 · W 态" : evo.u >= 1 ? "终点（p = 2）" : LAYER_NAMES[Math.min(3, Math.floor(evo.u * 4))];
+      el("ro-p").textContent = pg.toFixed(4);
+      el("ro-amp").textContent = (Math.log(pg * NODE_N) / Math.LN10).toFixed(2);
+      el("evo-range").value = Math.round(evo.u * 1000);
+    }
+  }
+  setEvolution(0);
+
+  /* ---------- 组「infer」：分层门控的两族假设 + 40 格留出集（第七幕） ---------- */
+  var inferGroup = new THREE.Group(); scene.add(inferGroup);
+  function slab(x, y, z, w, tier, text) {
+    var mats = [];
+    for (var l = 0; l < 3; l++) {
+      var m = makeMat("std", { group: "infer", color: tier === 1 ? "slab" : "slab2", emissive: tier === 1 ? "slab" : "slab2", emissiveI: tier === 1 ? 0.35 : 0.08, opacity: tier === 1 ? 0.8 - l * 0.15 : 0.5 - l * 0.1 });
+      var box = new THREE.Mesh(new THREE.BoxGeometry(w, 0.38, 4.2), m);
+      box.position.set(x, y + l * 0.72, z); inferGroup.add(box); mats.push(m);
+    }
+    var lb = makeLabel(text, { group: "infer", size: 1.35, css: tier === 1 ? "slab" : "muted" });
+    lb.position.set(x, y + 3.1, z); inferGroup.add(lb);
+    return mats;
+  }
+  var TZ = -16;
+  slab(-25, 13, TZ, 8.5, 1, "H₁ 基态放大倍数");
+  slab(-15, 13, TZ, 8.5, 1, "H₂ 规模斜率");
+  var gateMat = makeMat("std", { group: "infer", color: "amber", emissive: "amber", emissiveI: 0.6 });
+  var gate = new THREE.Mesh(new THREE.TorusGeometry(3.2, 0.22, 10, 48), gateMat);
+  gate.position.set(-20, 9.2, TZ); gate.rotation.x = Math.PI / 2; inferGroup.add(gate);
+  var lblGate = makeLabel("门控：两个主要假设都拒绝后放行", { group: "infer", size: 1.35, css: "amber" });
+  lblGate.position.set(-6.5, 9.6, TZ); inferGroup.add(lblGate);
+  [["QTS99", -29], ["QTS99 · 仅执行", -22.3], ["best-of-N", -15.7], ["CVaR 对均值", -9]].forEach(function (s) { slab(s[1], 3, TZ, 5.8, 2, s[0]); });
+  var lblPrim = makeLabel("主要族 · 全 α · Holm", { group: "infer", size: 1.7, css: "slab" });
+  lblPrim.position.set(-20, 19.5, TZ); inferGroup.add(lblPrim);
+  var lblSec = makeLabel("次要族 · 门控调整", { group: "infer", size: 1.7, css: "muted" });
+  lblSec.position.set(-19, 0.2, TZ + 3.5); inferGroup.add(lblSec);
+
+  // 40 个复合物排成 8×5；同一字母为一个连通分量（整块），E/J/M 三块被留出
+  var LAYOUT = ["AABBBCDD", "AEEBFCDG", "HEIIFFJG", "HKILLJJG", "MKKLNNJO"];
+  var HELD = { E: 1, J: 1, M: 1 };
+  var TILE = 3.3, TX0 = 2, TZ0 = -4;
+  var comps = {}, tiles = [], compOrder = [];
+  for (var tr = 0; tr < 5; tr++) for (var tc = 0; tc < 8; tc++) {
+    var id = LAYOUT[tr][tc];
+    if (!comps[id]) { comps[id] = { id: id, tiles: [], held: !!HELD[id], group: new THREE.Group(), center: new THREE.Vector3() }; compOrder.push(id); inferGroup.add(comps[id].group); }
+  }
+  compOrder.forEach(function (id, n) { comps[id].tint = n % 2 ? "tileA" : "tileB"; });
+  for (tr = 0; tr < 5; tr++) for (tc = 0; tc < 8; tc++) {
+    var cid = LAYOUT[tr][tc], comp = comps[cid];
+    // 与相邻格属于不同分量的一侧留缝，分量因此显示为连续的整块
+    var gapL = tc === 0 || LAYOUT[tr][tc - 1] !== cid ? 0.28 : 0;
+    var gapR = tc === 7 || LAYOUT[tr][tc + 1] !== cid ? 0.28 : 0;
+    var gapT = tr === 0 || LAYOUT[tr - 1][tc] !== cid ? 0.28 : 0;
+    var gapB = tr === 4 || LAYOUT[tr + 1][tc] !== cid ? 0.28 : 0;
+    var w = TILE - gapL - gapR, dz = TILE - gapT - gapB;
+    var cx = TX0 + tc * TILE + (gapL - gapR) / 2, cz = TZ0 + tr * TILE + (gapT - gapB) / 2;
+    var tm = makeMat("std", { group: "infer", color: comp.tint, emissive: "ground", emissiveI: 0, opacity: 0.85 });
+    var tile = new THREE.Mesh(new THREE.BoxGeometry(w, 0.5, dz), tm);
+    tile.position.set(cx, 0, cz);
+    comp.group.add(tile);
+    comp.center.add(new THREE.Vector3(cx, 0, cz));
+    var tileRec = { comp: comp, mat: tm, x: cx, scanned: false };
+    comp.tiles.push(tileRec); tiles.push(tileRec);
+  }
+  compOrder.forEach(function (id) {
+    var comp = comps[id];
+    comp.center.divideScalar(comp.tiles.length);
+    // 分量组以自身中心为原点，便于整块抬起并旋转
+    comp.group.position.copy(comp.center);
+    comp.group.children.forEach(function (m) { m.position.sub(comp.center); });
+    if (comp.held) {
+      var km = makeMat("std", { group: "infer", color: "ground", emissive: "ground", emissiveI: 0.45, opacity: 0 });
+      var knot = new THREE.Mesh(new THREE.TorusKnotGeometry(1.25, 0.36, 90, 12), km);
+      knot.position.set(0, 4.2, 0); comp.group.add(knot);
+      comp.knot = knot; comp.knotMat = km;
+    }
+  });
+  var laserMat = makeMat("basic", { group: "infer", color: "laser", opacity: 0, side: THREE.DoubleSide, depthWrite: false });
+  var laser = new THREE.Mesh(new THREE.PlaneGeometry(0.35, 5 * TILE + 3), laserMat);
+  laser.rotation.x = -Math.PI / 2; laser.position.set(TX0 - 2, 0.6, TZ0 + 2 * TILE); inferGroup.add(laser);
+  var laserGlow = glow(inferGroup, new THREE.Vector3(TX0 - 2, 1, TZ0 + 2 * TILE), 9, { group: "infer", color: "laser", opacity: 0 });
+  var lblTrain = makeLabel("训练 + 内部验证", { group: "infer", size: 1.3, css: "muted" });
+  lblTrain.position.set(TX0 + 3.5 * TILE, 3.5, TZ0 + 5 * TILE + 1.5); inferGroup.add(lblTrain);
+  var lblHeld = makeLabel("留出 · 整块分量（示意）", { group: "infer", size: 1.45, css: "ground" });
+  lblHeld.position.set(TX0 + 3.5 * TILE, 13.5, TZ0 + 2 * TILE); inferGroup.add(lblHeld);
+  var scan = { t0: 0, phase: "idle" };
+  function startScan(now) {
+    scan.t0 = now; scan.phase = reduced ? "done" : "scan";
+    tiles.forEach(function (t) { t.scanned = reduced && t.comp.held; look(t.mat, { color: t.scanned ? "ground" : t.comp.tint, emissiveI: t.scanned ? 0.55 : 0 }); });
+    compOrder.forEach(function (id) {
+      var c = comps[id];
+      c.lift = reduced && c.held ? 1 : 0;
+      if (c.knotMat) look(c.knotMat, { opacity: reduced ? 0.95 : 0 });
+    });
+    look(lblHeld.material, { opacity: reduced ? 1 : 0 });
+  }
+  function updateInfer(now, dt) {
+    var span = 8 * TILE + 4;
+    if (scan.phase === "scan") {
+      var s = clamp01((now - scan.t0) / 3000);
+      var lx = TX0 - 2 + s * span;
+      laser.position.x = lx; laserGlow.position.x = lx;
+      look(laserMat, { opacity: 0.85 }); look(laserGlow.material, { opacity: 0.8 });
+      tiles.forEach(function (t) {
+        if (!t.scanned && t.comp.held && t.comp.group.position.x + t.x - t.comp.center.x <= lx) {
+          t.scanned = true;
+          look(t.mat, { color: "ground", emissiveI: 0.55 });
+        }
+      });
+      if (s >= 1) { scan.phase = "lift"; scan.t0 = now; look(laserMat, { opacity: 0 }); look(laserGlow.material, { opacity: 0 }); }
+    } else if (scan.phase === "lift") {
+      var l = easeInOut(clamp01((now - scan.t0) / 1300));
+      compOrder.forEach(function (id) { if (comps[id].held) comps[id].lift = l; });
+      if (l >= 1) scan.phase = "done";
+      look(lblHeld.material, { opacity: l });
+      compOrder.forEach(function (id) { if (comps[id].knotMat) look(comps[id].knotMat, { opacity: l > 0.5 ? 0.95 : 0 }); });
+    }
+    compOrder.forEach(function (id) {
+      var c = comps[id];
+      c.group.position.y = (c.lift || 0) * 8;
+      if (c.held && c.lift > 0 && !reduced) c.group.rotation.y += dt * 0.6;
+      if (c.knot && !reduced) { c.knot.rotation.x += dt * 0.9; c.knot.rotation.z += dt * 0.5; }
+    });
+  }
+
+  /* =====================================================================
+   * 5. 分幕调度：组淡入淡出、按幕改外观、相机飞行
+   * ===================================================================== */
+  var SCENES = [
+    { groups: ["mol", "contacts"], cam: [-6, 16, 60], tgt: [-3, 0, 0], rotate: true },
+    { groups: ["mol", "contacts", "flow", "hot"], cam: [6, 20, 50], tgt: [-2, 0, 0], rotate: true },
+    { groups: ["mol", "hot", "conf"], cam: [4, 22, 92], tgt: [0, 17, 0], rotate: true },
+    { groups: ["qubo"], cam: [-2, 20, 64], tgt: [-3, 4, 0], rotate: false },
+    { groups: ["bars"], cam: [30, 30, 44], tgt: [0, 5, 0], rotate: false },
+    { groups: ["bars", "barsExtra"], cam: [cellX(GROUND) + 20, 26, cellZ(GROUND) + 26], tgt: [cellX(GROUND), 9, cellZ(GROUND)], rotate: false },
+    { groups: ["infer"], cam: [2, 28, 80], tgt: [-1, 5, -3], rotate: true }
+  ];
+  var MOL_LOOKS = [
+    { vhh: ["vhh", 1], ag: ["antigen", 0.6], cloud: ["cloud", 0.16], stick: ["vhh", 0.85] },
+    { vhh: ["vhh", 0.3], ag: ["antigen", 0.22], cloud: ["cloud", 0.07], stick: ["vhh", 0.25] },
+    { vhh: ["dim", 0.4], ag: ["dim", 0.16], cloud: ["dim", 0.05], stick: ["dim", 0.3] }
+  ];
+  var current = -1;
+  var camFrom = new THREE.Vector3(), camTo = new THREE.Vector3(), tgtFrom = new THREE.Vector3(), tgtTo = new THREE.Vector3();
+  var camT0 = -1, CAM_DUR = 1400, userInteracting = false;
+
+  function goTo(i) {
+    if (i === current) return;
+    var prev = current;
+    current = i;
+    var sc = SCENES[i];
+    Object.keys(groupAlphaT).forEach(function (g) { groupAlphaT[g] = sc.groups.indexOf(g) >= 0 ? 1 : 0; });
+    if (i === 1) groupAlphaT.contacts = 0.45;
+    if (MOL_LOOKS[i]) {
+      var L = MOL_LOOKS[i];
+      ["vhh", "ag", "cloud", "stick"].forEach(function (key) { molMats[key].forEach(function (m) { look(m, { color: L[key][0], opacity: L[key][1] }); }); });
+    }
+    // 进入各幕时的状态
+    showAllContacts = i === 0 ? showAllContacts : false; hoverResidue = -1; refreshContacts();
+    if (i === 2) confT0 = performance.now();
+    if (i === 3) paintRegisters();
+    if (i === 4) { evo.playing = false; evo.step = 0; if (prev !== 5) setEvolution(0); }
+    if (i === 5) { evo.playing = false; setEvolution(1); }
+    groundWidthT = i === 5 ? 1.7 : 1;
+    if (i === 6) startScan(performance.now());
+    // 相机
+    camFrom.copy(camera.position); tgtFrom.copy(controls.target);
+    camTo.set(sc.cam[0], sc.cam[1], sc.cam[2]); tgtTo.set(sc.tgt[0], sc.tgt[1], sc.tgt[2]);
+    if (reduced) { camera.position.copy(camTo); controls.target.copy(tgtTo); camT0 = -1; }
+    else camT0 = performance.now();
+    userInteracting = false;
+    controls.autoRotate = !reduced && sc.rotate;
+    // 界面文字
+    renderPanel(i);
+    document.getElementById("act-chip").textContent = "第" + ACTS[i].n + "幕 · " + ACTS[i].name + " " + ACTS[i].en;
+    document.getElementById("hint").textContent = ACTS[i].hint;
+    var btns = nav.querySelectorAll("button");
+    for (var k = 0; k < btns.length; k++) btns[k].setAttribute("aria-current", k === i ? "true" : "false");
+    if (btns[i].scrollIntoView) btns[i].scrollIntoView({ block: "nearest", inline: "nearest", behavior: reduced ? "auto" : "smooth" });
+    canvas.style.cursor = "";
+  }
+
+  function renderPanel(i) {
+    var panel = document.getElementById("panel");
+    panel.innerHTML = panelHTML(i, STATS);
+    panel.scrollTop = 0;
+    if (i === 0) {
+      var tb = document.getElementById("toggle-contacts");
+      tb.textContent = showAllContacts ? "只看悬停的残基" : "高亮全部 < 5 Å 接触";
+      tb.addEventListener("click", function () {
+        showAllContacts = !showAllContacts;
+        tb.textContent = showAllContacts ? "只看悬停的残基" : "高亮全部 < 5 Å 接触";
+        refreshContacts();
+      });
+    }
+    if (i === 4) {
+      var pb = document.getElementById("play-evo"), rng = document.getElementById("evo-range");
+      if (reduced) pb.querySelector("span").textContent = "下一层";
+      pb.addEventListener("click", function () {
+        pb.classList.remove("cta-pulse");
+        if (reduced) {
+          // 减弱动态：每次点击推进一层（共四层：两轮代价层 + 混合层）
+          evo.step = evo.step >= 4 ? 0 : evo.step + 1;
+          setEvolution(evo.step / 4);
+          pb.querySelector("span").textContent = evo.step >= 4 ? "从头开始" : "下一层";
+        } else {
+          evo.playing = true; evo.t0 = performance.now() - evo.u * evo.dur;
+          if (evo.u >= 1) evo.t0 = performance.now();
+        }
+      });
+      rng.addEventListener("input", function () { evo.playing = false; setEvolution(rng.value / 1000); });
+      setEvolution(evo.u);
+    }
+    if (i === 6) document.getElementById("rescan").addEventListener("click", function () { startScan(performance.now()); });
+  }
+
+  /* 射线检测：第一幕悬停（触屏上为轻点）VHH 原子 */
+  var raycaster = new THREE.Raycaster(), pointer = new THREE.Vector2();
+  function pick(ev) {
+    if (current !== 0) return;
+    var rect = canvas.getBoundingClientRect();
+    pointer.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+    pointer.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(pointer, camera);
+    var hit = raycaster.intersectObjects(residueMeshes, false)[0];
+    var r = hit ? hit.object.userData.residue : -1;
+    canvas.style.cursor = r >= 0 ? "pointer" : "";
+    if (r !== hoverResidue) { hoverResidue = r; refreshContacts(); }
+  }
+  canvas.addEventListener("pointermove", function (e) { if (e.pointerType === "mouse") pick(e); });
+  canvas.addEventListener("pointerdown", function (e) { if (e.pointerType !== "mouse") pick(e); });
+  canvas.addEventListener("pointerleave", function () { if (current === 0 && hoverResidue !== -1) { hoverResidue = -1; refreshContacts(); } });
+  controls.addEventListener("start", function () { userInteracting = true; controls.autoRotate = false; camT0 = -1; });
+
+  /* 键盘左右键切换 */
+  document.addEventListener("keydown", function (e) {
+    if (!modal.hidden) return;
+    var tag = (e.target && e.target.tagName) || "";
+    if (tag === "INPUT" || tag === "TEXTAREA") return;
+    if (e.key === "ArrowRight") goTo(Math.min(ACTS.length - 1, current + 1));
+    if (e.key === "ArrowLeft") goTo(Math.max(0, current - 1));
+  });
+
+  /* 主题切换 */
+  function applyTheme(t) {
+    theme = t; pal = PALETTES[t];
+    root.classList.toggle("dark", t === "dark");
+    saveTheme(t);
+    scene.background.setHex(pal.bg);
+    scene.fog.color.setHex(pal.fog);
+    buildGrid();
+    labels.forEach(function (l) { l.draw(); });
+    refreshThemeButton();
+  }
+  document.getElementById("theme-btn").addEventListener("click", function () { applyTheme(theme === "dark" ? "light" : "dark"); });
+
+  /* 减弱动态设置在运行中改变时同步 */
+  function onMotionChange(e) {
+    reduced = e.matches;
+    controls.autoRotate = !reduced && SCENES[current].rotate && !userInteracting;
+    renderPanel(current);
+    if (current === 2) confT0 = performance.now();
+    if (current === 6) startScan(performance.now());
+  }
+  if (motionQuery.addEventListener) motionQuery.addEventListener("change", onMotionChange);
+  else if (motionQuery.addListener) motionQuery.addListener(onMotionChange);
+
+  /* =====================================================================
+   * 6. 渲染循环
+   * ===================================================================== */
+  var last = performance.now();
+  function frame(now) {
+    var dt = Math.min(0.05, (now - last) / 1000); last = now;
+    var t = now / 1000;
+    if (camT0 >= 0) {
+      var s = easeInOut(clamp01((now - camT0) / CAM_DUR));
+      camera.position.lerpVectors(camFrom, camTo, s);
+      controls.target.lerpVectors(tgtFrom, tgtTo, s);
+      if (s >= 1) camT0 = -1;
+    }
+    if (groupAlpha.flow > 0.01) updateFlow(dt);
+    if (groupAlpha.conf > 0.01) updateConf(now);
+    if (groupAlpha.qubo > 0.01) updateQubo(dt);
+    if (groupAlpha.infer > 0.01) updateInfer(now, dt);
+    if (evo.playing) {
+      var u = (now - evo.t0) / evo.dur;
+      setEvolution(u);
+      if (u >= 1) evo.playing = false;
+    }
+    groundWidth += (groundWidthT - groundWidth) * (reduced ? 1 : 1 - Math.exp(-dt * 5));
+    if (groupAlpha.bars > 0.01 && Math.abs(groundWidth - groundWidthT) > 1e-3) drawBars();
+    if (!reduced) {
+      hotViz.forEach(function (h, k) { h.glow.scale.setScalar(8.5 + Math.sin(t * 2.4 + k) * 1.1); });
+      groundGlow.scale.setScalar(14 + Math.sin(t * 2) * 2);
+      gate.rotation.z += dt * 0.8;
+    }
+    updateManaged(dt, t);
+    controls.update();
+    renderer.render(scene, camera);
+    requestAnimationFrame(frame);
+  }
+
+  glReady = true;
+  goTo(0);
+  // 首帧直接落到第一幕的目标机位，避免开场飞行
+  camera.position.copy(camTo); controls.target.copy(tgtTo); camT0 = -1;
+  requestAnimationFrame(frame);
+
+  /* 降级模式：三维场景不可用时只切换文字面板（交互按钮无效，文字完整） */
+  function showPanelOnly(i) {
+    var stats = { contactResidues: 7, contactPairs: 17, dRange: "4.3–4.9" };
+    document.getElementById("panel").innerHTML = panelHTML(i, stats);
+    document.getElementById("act-chip").textContent = "第" + ACTS[i].n + "幕 · " + ACTS[i].name + " " + ACTS[i].en;
+    var btns = nav.querySelectorAll("button");
+    for (var k = 0; k < btns.length; k++) btns[k].setAttribute("aria-current", k === i ? "true" : "false");
+  }
+})();
+</script>
+</body>
+</html>

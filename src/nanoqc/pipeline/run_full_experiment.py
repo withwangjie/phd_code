@@ -83,7 +83,7 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from nanoqc.common.seed_streams import derive_streams, derive_child_seed, save_stream_map, verify_stream_map, DEFAULT_MASTER_SEED  # noqa: E402
 from nanoqc.common.repo_io import sha256_file as sha256_of, repo_path, module_name, DOCS_DIR, CONFIGS_DIR  # noqa: E402
-from nanoqc.inference.paired_statistics import paired_denominator_failures, holm_step_down  # noqa: E402
+from nanoqc.inference.paired_statistics import serial_gatekeeping, paired_denominator_failures, holm_step_down  # noqa: E402
 
 
 # Detail prefix of the failure recorded when a stage is refused because a
@@ -131,6 +131,59 @@ def primary_qc_effect_name(baseline: str, budget_mode: str) -> str:
     return str(baseline) if budget_mode == "outputs" else f"{baseline}_time"
 
 
+def cluster_adequacy(config: Dict[str, Any], dataset_dir: Path, selected_targets_path: Path,
+                     cluster_map_path: Path) -> Dict[str, Any]:
+    """Outcome-free count of independent clusters available to each inference.
+
+    Cluster-level inference is unreliable with few clusters (Cameron & Miller
+    2015), and the statistics stage enforces preregistered minima. Counting
+    the clusters once the queue and split are frozen -- before any EGNN
+    training, benchmark or structure run -- turns a late, costly failure into
+    an early one without looking at any result (PROTOCOL_AMENDMENTS.md A5).
+    """
+    cluster_map={str(k).lower():str(v) for k,v in
+                 json.loads(Path(cluster_map_path).read_text(encoding="utf-8")).items()}
+    manifest=json.loads((Path(dataset_dir)/"graph_manifest.json").read_text(encoding="utf-8"))
+    hard_pdbs=sorted({str(r.get("pdb_id","")).lower() for r in manifest if r.get("split")=="test_snac_hard"})
+    selected=json.loads(Path(selected_targets_path).read_text(encoding="utf-8"))
+    validation_pdbs=sorted({str((e.get("target") or e.get("pdb_id")) if isinstance(e,dict) else e).lower()
+                            for e in selected})
+    def clusters(pdbs):
+        missing=[p for p in pdbs if p not in cluster_map]
+        return len({cluster_map[p] for p in pdbs if p in cluster_map}),missing
+    holdout_pdbs=sorted({str(r.get("pdb_id","")).lower() for r in manifest if r.get("split")=="holdout"})
+    hard_clusters,hard_missing=clusters(hard_pdbs)
+    validation_clusters,validation_missing=clusters(validation_pdbs)
+    holdout_clusters,holdout_missing=clusters(holdout_pdbs)
+    stats=config.get("statistics",{}) or {}
+    external=((config.get("external_validation",{}) or {}).get("external_vhh",{}) or {})
+    requirements=[
+        ("coarse primary QC contrast (test_snac_hard)",hard_clusters,int(stats.get("min_qc_clusters",10))),
+        ("scaling slope (test_snac_hard)",hard_clusters,int(stats.get("min_scaling_clusters",10))),
+        ("structural primary endpoint (validation queue)",validation_clusters,int(stats.get("min_primary_clusters",10))),
+        ("RQ5 (validation queue)",validation_clusters,int(stats.get("min_rq5_clusters",10))),
+    ]
+    # The antigen-fold holdout is scored by the external stage, which enforces
+    # the same minimum on family/structure clusters (A5 counts it here too, so
+    # a shortfall surfaces before any training rather than at the last stage).
+    if holdout_pdbs and external.get("required",False):
+        requirements.append(("antigen-fold holdout (external_validation)",holdout_clusters,
+                             int(external.get("min_clusters",10))))
+    shortfalls=[f"{name}: {have} independent clusters < required {need}"
+                for name,have,need in requirements if have<need]
+    if hard_missing or validation_missing or holdout_missing:
+        shortfalls.append(
+            f"cluster map lacks PDBs: {(hard_missing+validation_missing+holdout_missing)[:20]}")
+    return dict(
+        schema="cluster_adequacy_v1",outcome_free=True,
+        test_snac_hard_pdbs=len(hard_pdbs),test_snac_hard_clusters=hard_clusters,
+        validation_queue_pdbs=len(validation_pdbs),validation_queue_clusters=validation_clusters,
+        holdout_pdbs=len(holdout_pdbs),holdout_clusters=holdout_clusters,
+        requirements=[dict(inference=n,available=h,required=r) for n,h,r in requirements],
+        adequate=not shortfalls,shortfalls=shortfalls,
+    )
+
+
 def rq5_inference_failures(rq5: dict, min_clusters: int) -> list[str]:
     """Require an estimable, fully reported confirmatory RQ5 result."""
     if not isinstance(rq5,dict):
@@ -144,6 +197,10 @@ def rq5_inference_failures(rq5: dict, min_clusters: int) -> list[str]:
         failures.append(
             f"RQ5 energy-structure inference has {clusters} clusters; requires >= {min_clusters}"
         )
+    # Pre-specified non-estimable outcomes (constant cluster-level difference)
+    # are reported results, not failures; see docs/PROTOCOL_AMENDMENTS.md A2.
+    if str(rq5.get("estimability","")).startswith("not_estimable_"):
+        return failures
     missing=[]
     for field in ("spearman_rho","p_value","ci_low","ci_high","p_holm_confirmatory_family"):
         try:
@@ -165,6 +222,13 @@ def rq5_inference_failures(rq5: dict, min_clusters: int) -> list[str]:
 # entrypoint in this repository already fingerprints its own code
 # dependencies (_ablation_main / _recovery_benchmark_main / build_manifest).
 # ---------------------------------------------------------------------------
+# Must equal build_final_pyg_dataset.VERSION (kept literal so the orchestrator
+# does not import torch/PyG at start-up; a test pins the two together).
+REQUIRED_GRAPH_VERSION = "1.8"
+# Must equal qaoa_interface_sampler.MAX_QAOA_DEPTH (literal to avoid importing
+# PennyLane at start-up; a test pins the two together).
+MAX_QAOA_DEPTH = 12
+
 ORCHESTRATED_SCRIPTS: List[str] = [
     "run_full_experiment.py",
     "resolve_server_config.py",
@@ -173,17 +237,25 @@ ORCHESTRATED_SCRIPTS: List[str] = [
     "build_final_pyg_dataset.py",
     "build_independence_cluster_map.py",
     "train_egnn_pruning.py",
+    "egnn_seed_sensitivity.py",
     "generate_energy_calibration_dataset.py",
     "batch_benchmark_hard_set.py",
     "run_real_complex_pilot.py",
     "run_external_structure_baselines.py",
     "audit_external_vhh_independence.py",
+    "carve_holdout_clusters.py",
     "generate_final_research_report.py",
     "analyze_structure_recovery.py",
     "analyze_quantum_scaling.py",
+    "analyze_quantum_exploration.py",
+    "fit_qaoa_transfer_parameters.py",
     "model_egnn_pruning.py",
     "subgraph_to_qubo.py",
     "qaoa_interface_sampler.py",
+    # Formal QUBO/Ising instance and QAOA logical-resource accounting,
+    # imported by subgraph_to_qubo / qaoa_interface_sampler / the benchmark.
+    "instance.py",
+    "resource_estimation.py",
     "evaluate_complex_metrics.py",
     "prediction_contract.py",
     "structural_quality.py",
@@ -206,6 +278,7 @@ STAGE_ORDER: List[str] = [
     "energy_calibration",
     "method_sensitivity",
     "qc_benchmark",
+    "quantum_exploration",
     "structure_experiment",
     "external_validation",
     "statistics",
@@ -229,6 +302,7 @@ STAGE_PREREQUISITES: Dict[str, List[str]] = {
     "energy_calibration": ["queue_freeze", "egnn_train"],
     "method_sensitivity": ["egnn_train", "energy_calibration"],
     "qc_benchmark": ["egnn_train", "energy_calibration", "method_sensitivity"],
+    "quantum_exploration": ["egnn_train", "energy_calibration"],
     "structure_experiment": ["queue_freeze", "egnn_train"],
     "external_validation": ["qc_benchmark", "structure_experiment"],
     "statistics": ["qc_benchmark", "structure_experiment", "external_validation"],
@@ -363,8 +437,8 @@ def _validate_scientific_config(config: Dict[str, Any]) -> None:
         )
 
     depth=int(qprimary.get("depth",0) or 0)
-    if depth not in (1,2,3):
-        raise ValueError("quantum_protocol.primary.depth must be one of 1, 2, 3")
+    if not 1<=depth<=MAX_QAOA_DEPTH:
+        raise ValueError(f"quantum_protocol.primary.depth must be in 1..{MAX_QAOA_DEPTH}")
     for key in ("max_evals","restarts","eval_shots","output_shots"):
         value=qprimary.get(key)
         if isinstance(value,bool) or value is None or int(value)!=value or int(value)<=0:
@@ -402,8 +476,8 @@ def _validate_scientific_config(config: Dict[str, Any]) -> None:
         raise ValueError("Formal structure_experiment.robust_qaoa must remain true for the frozen quantum protocol")
 
     sensitivity_depths=[int(v) for v in qsensitivity.get("depths",[])]
-    if not sensitivity_depths or any(v not in (1,2,3) for v in sensitivity_depths):
-        raise ValueError("quantum_protocol.development_sensitivity.depths must use supported p in {1,2,3}")
+    if not sensitivity_depths or any(not 1<=v<=MAX_QAOA_DEPTH for v in sensitivity_depths):
+        raise ValueError(f"quantum_protocol.development_sensitivity.depths must use supported p in 1..{MAX_QAOA_DEPTH}")
     for key in ("max_evals","eval_shots"):
         values=[int(v) for v in qsensitivity.get(key,[])]
         if not values or any(v<=0 for v in values) or len(values)!=len(set(values)):
@@ -420,6 +494,22 @@ def _validate_scientific_config(config: Dict[str, Any]) -> None:
         raise ValueError("quantum primary eval_shots must be included in development_sensitivity.eval_shots")
     if float(qprimary["cvar_alpha"]) not in sensitivity_alpha:
         raise ValueError("quantum primary cvar_alpha must be included in development_sensitivity.cvar_alpha")
+
+    exploration=config.get("quantum_exploration",{}) or {}
+    if exploration:
+        exploration_depths=[int(v) for v in exploration.get("depths",[])]
+        if (not exploration_depths or len(set(exploration_depths))!=len(exploration_depths)
+                or any(not 1<=v<=MAX_QAOA_DEPTH for v in exploration_depths)):
+            raise ValueError(f"quantum_exploration.depths must be unique integers in 1..{MAX_QAOA_DEPTH}")
+        per_parameter=int(exploration.get("evals_per_parameter",0) or 0)
+        restarts_primary=int(qprimary.get("restarts",4))
+        if per_parameter<=0 or any(per_parameter*2*d < 1+restarts_primary*(2*d+2) for d in exploration_depths):
+            raise ValueError("quantum_exploration.evals_per_parameter is too small for the primary restarts")
+        if int(exploration.get("repeats",0) or 0)<=0:
+            raise ValueError("quantum_exploration.repeats must be positive")
+        transfer=exploration.get("transfer",{}) or {}
+        if int(transfer.get("train_max_targets",0) or 0)<int(transfer.get("min_instances",1) or 1):
+            raise ValueError("quantum_exploration.transfer.train_max_targets must be >= min_instances")
 
     if clustering.get("required", False) and not clustering.get("cluster_map"):
         raise ValueError("queue_freeze.independence_clustering.cluster_map is required")
@@ -480,8 +570,8 @@ def _validate_scientific_config(config: Dict[str, Any]) -> None:
             min_score=float(clustering.get("min_score",0.50))
             if not math.isfinite(min_score):
                 raise ValueError("independence_clustering.min_score must be finite")
-            if str(clustering.get("score_semantics","")).lower() not in ("qtmscore","ttmscore"):
-                raise ValueError("independence_clustering.score_semantics must be qtmscore or ttmscore")
+            if str(clustering.get("score_semantics","")).lower() not in ("qtmscore","ttmscore","mintmscore"):
+                raise ValueError("independence_clustering.score_semantics must be qtmscore, ttmscore or mintmscore")
             for key in ("query_column","target_column","score_column"):
                 if int(clustering.get(key,0)) < 0:
                     raise ValueError(f"independence_clustering.{key} must be nonnegative")
@@ -527,8 +617,8 @@ def _validate_scientific_config(config: Dict[str, Any]) -> None:
         raise ValueError("statistics.min_scaling_clusters must be >=2")
     if str(stats.get("primary_qc_baseline","sa")) not in ("sa","uniform","greedy"):
         raise ValueError("statistics.primary_qc_baseline must be sa, uniform, or greedy")
-    if str(stats.get("primary_qc_metric","gap")) not in (
-        "gap","hit","ground_probability","low_energy_mass","low_energy_coverage","entropy"
+    if str(stats.get("primary_qc_metric","log10_qts99")) not in (
+        "gap","hit","ground_probability","low_energy_mass","low_energy_coverage","entropy","log10_qts99"
     ):
         raise ValueError("Invalid statistics.primary_qc_metric")
     if int(stats.get("min_primary_clusters",10)) < 2:
@@ -540,10 +630,12 @@ def _validate_scientific_config(config: Dict[str, Any]) -> None:
     if external.get("required",False):
         ext=external.get("external_vhh",{}) or {}
         structural=external.get("structural_baselines",{}) or {}
-        if ext.get("required",False) and not ext.get("graph_dir"):
-            raise ValueError("external_validation.external_vhh.graph_dir is required")
-        if ext.get("required",False) and not ext.get("source_structure_dir"):
-            raise ValueError("external_validation.external_vhh.source_structure_dir is required")
+        # Empty directories mean this run's own antigen-fold holdout, resolved
+        # against the run directory once the dataset exists (A10). Configuring
+        # one without the other is always a mistake.
+        if ext.get("required",False) and bool(ext.get("graph_dir")) != bool(ext.get("source_structure_dir")):
+            raise ValueError("external_validation.external_vhh.graph_dir and source_structure_dir must be "
+                             "set together, or both left empty to score this run's antigen-fold holdout")
         if ext.get("independence_manifest"):
             # The independence audit is bound to this run's frozen dataset and
             # cluster map, so it is always regenerated inside the run directory.
@@ -687,8 +779,10 @@ class StageResult:
 
 class Orchestrator:
     def __init__(self, config: Dict[str, Any], run_dir: Path, *, only: Optional[str] = None,
-                 smoke_only: bool = False, force_restage: Optional[List[str]] = None):
+                 smoke_only: bool = False, force_restage: Optional[List[str]] = None,
+                 stop_after: Optional[str] = None):
         self.config = config
+        self.stop_after = stop_after
         self.run_dir = run_dir
         self.only = only
         self.smoke_only = smoke_only
@@ -732,6 +826,20 @@ class Orchestrator:
         """This run's own checkpoint directory (run_dir/<paths.checkpoint_dir>);
         see dataset_dir() -- same run-isolation guarantee."""
         return self.run_dir / self.config["paths"].get("checkpoint_dir", "checkpoints")
+
+    def external_vhh_dirs(self) -> Tuple[Path, Path, bool]:
+        """Graph and raw-structure directories of the external VHH set.
+
+        Empty configuration means this run's own antigen-fold holdout (A10),
+        which lives inside the run directory and exists only after
+        queue_freeze; the third value says which of the two it is.
+        """
+        ext=(self.config.get("external_validation",{}) or {}).get("external_vhh",{}) or {}
+        if ext.get("graph_dir"):
+            return (resolve_path(self.config,ext["graph_dir"]),
+                    resolve_path(self.config,ext.get("source_structure_dir","")), False)
+        dataset=self.dataset_dir()
+        return dataset/"graphs"/"holdout", dataset/"holdout_source_structures", True
 
     def frozen_cluster_map_path(self) -> Path:
         """Run-local family/structure cluster map used by every downstream stage."""
@@ -1165,8 +1273,13 @@ class Orchestrator:
                 cluster_path,cluster_provenance,universe,
                 freeze/"selected_targets.json",freeze/"eligibility.json",freeze/"run_manifest.json",
                 freeze/"freeze_manifest.json",
+                self.run_dir/"independence"/"cluster_adequacy.json",
             ])
             if not ok:return ok,detail
+            adequacy,error=read_json(self.run_dir/"independence"/"cluster_adequacy.json")
+            if error:return False,error
+            if not adequacy.get("adequate"):
+                return False,"cluster_adequacy.json reports insufficient independent clusters: "+"; ".join(adequacy.get("shortfalls",[]))
             summary,error=read_json(dataset/"run_summary.json")
             if error:return False,error
             if not summary.get("complete"):
@@ -1246,7 +1359,29 @@ class Orchestrator:
                 return False,"training_summary.json has no checkpoint sha256"
             if sha256_of(checkpoint)!=expected_sha:
                 return False,"EGNN checkpoint sha256 mismatch"
+            replicates=int((self.config.get("egnn_train",{}) or {}).get("seed_replicates",0) or 0)
+            if replicates>0:
+                sensitivity=self.checkpoint_dir()/"seed_sensitivity"
+                ok,detail=require([sensitivity/"summary.json",sensitivity/"summary.md"])
+                if not ok:return ok,detail
+                payload,error=read_json(sensitivity/"summary.json")
+                if error:return False,error
+                if int(payload.get("models",0) or 0)!=replicates+1:
+                    return False,f"seed sensitivity covers {payload.get('models')} models; expected {replicates+1}"
+                if (payload.get("checkpoints",{}).get("primary",{}) or {}).get("sha256")!=expected_sha:
+                    return False,"seed sensitivity was computed against a different primary checkpoint"
             return True,"EGNN checkpoint and training summary verified"
+        if stage=="quantum_exploration":
+            root=self.run_dir/"quantum_exploration"
+            ok,detail=require([root/"summary.json",root/"summary.md"])
+            if not ok:return ok,detail
+            payload,error=read_json(root/"summary.json")
+            if error:return False,error
+            depths=[int(v) for v in (self.config.get("quantum_exploration",{}) or {}).get("depths",[1,2,3,4,6])]
+            observed=sorted(int(row.get("depth",-1)) for row in payload.get("per_depth",[]))
+            if observed!=sorted(depths):
+                return False,f"exploration summary covers depths {observed}; expected {sorted(depths)}"
+            return True,"Quantum exploration summary verified"
         if stage=="energy_calibration":
             qc=self.config.get("qc_benchmark",{}) or {}
             cal=qc.get("energy_calibration",{}) or {}
@@ -1489,7 +1624,7 @@ class Orchestrator:
                 effect=next((entry for entry in paired.get("effects",[])
                              if entry.get("baseline")==primary_qc_effect_name(
                                  cfg.get("primary_qc_baseline","sa"),mode)
-                             and entry.get("metric")==str(cfg.get("primary_qc_metric","gap"))),None)
+                             and entry.get("metric")==str(cfg.get("primary_qc_metric","log10_qts99"))),None)
                 clusters=0 if effect is None else int(effect.get("n_clusters",0) or 0)
                 if clusters<int(cfg.get("min_qc_clusters",10)):
                     return False,f"{mode} primary coarse contrast has insufficient clusters: {clusters}"
@@ -1553,17 +1688,19 @@ class Orchestrator:
         if external.get("required",False):
             ext=external.get("external_vhh", {}) or {}
             if ext.get("required",False):
-                graph_dir=resolve_path(self.config,ext.get("graph_dir",""))
-                source_dir=resolve_path(self.config,ext.get("source_structure_dir",""))
-                graph_ok=graph_dir.is_dir() and any(graph_dir.glob("*.pt"))
+                graph_dir,source_dir,from_run=self.external_vhh_dirs()
+                # The antigen-fold holdout is produced by this run's own
+                # queue_freeze, so it cannot exist yet at env_check time.
+                graph_ok=from_run or (graph_dir.is_dir() and any(graph_dir.glob("*.pt")))
                 checks["external_vhh_graphs"]=graph_ok
-                checks["external_vhh_raw_structures"]=source_dir.is_dir()
+                checks["external_vhh_source"]=("run_antigen_fold_holdout" if from_run else str(graph_dir))
+                checks["external_vhh_raw_structures"]=from_run or source_dir.is_dir()
                 # The independence manifest is generated run-locally during
                 # external_validation, after queue_freeze has frozen this run's
                 # training dataset and cluster map; it is never read from the repo.
                 if not graph_ok:
                     missing_resources.append(str(graph_dir))
-                if not source_dir.is_dir():
+                if not from_run and not source_dir.is_dir():
                     missing_resources.append(str(source_dir))
             structural=external.get("structural_baselines", {}) or {}
             if structural.get("required",False):
@@ -1656,9 +1793,16 @@ class Orchestrator:
             print("[smoke_check] qc_benchmark input_dir not yet built; skipping that sub-check "
                   "(expected before queue_freeze has run).")
 
+        # Like the benchmark sub-check above, this one reads THIS run's dataset;
+        # without --dataset the pilot falls back to its standalone default path.
+        # smoke_check runs before queue_freeze, so on a fresh run there is
+        # nothing to read yet and the sub-check is skipped rather than failed.
         smoke_target = smoke_cfg.get("recovery_pilot_pdb_id")
+        smoke_manifest = self.dataset_dir() / "graph_manifest.csv"
         smoke_argv = [
             self.venv_python, "-m", module_name("run_real_complex_pilot.py"),
+            "--dataset", str(self.dataset_dir()),
+            "--data-root", str(resolve_path(self.config, self.config["paths"]["data_root"])),
             "--out-dir", str(smoke_dir / "real_complex"),
             "--targets", str(smoke_cfg.get("recovery_pilot_targets", 1)),
             "--sites", str(smoke_cfg.get("recovery_pilot_sites", 6)),
@@ -1671,7 +1815,11 @@ class Orchestrator:
         ]
         if smoke_target:
             smoke_argv += ["--pdb-id", str(smoke_target)]
-        checks.append(("real_complex_smoke", smoke_argv))
+        if smoke_manifest.is_file():
+            checks.append(("real_complex_smoke", smoke_argv))
+        else:
+            print("[smoke_check] dataset graph manifest not yet built; skipping the recovery sub-check "
+                  "(expected before queue_freeze has run).")
 
         failures = []
         for name, argv in checks:
@@ -1679,7 +1827,10 @@ class Orchestrator:
             if returncode != 0:
                 failures.append(f"{name} exited {returncode} (see {log_path})")
         status = "completed" if not failures else "failed"
-        detail = "All smoke checks passed." if not failures else "; ".join(failures)
+        detail = ("; ".join(failures) if failures else
+                  f"All {len(checks)} smoke check(s) passed." if checks else
+                  "No smoke check could run yet: this run has no dataset, which is expected before "
+                  "queue_freeze. Re-run with --only smoke_check --resume <run> to exercise them.")
         atomic_write_json(smoke_dir/"smoke_summary.json",{
             "status":status,
             "checks":[{"name":name,"argv":argv} for name,argv in checks],
@@ -1779,9 +1930,10 @@ class Orchestrator:
             # similarity universe. They must not be appended as untracked
             # singleton clusters only at external-validation time.
             external_cfg=(self.config.get("external_validation",{}) or {}).get("external_vhh",{}) or {}
-            if external_cfg.get("required",False):
-                external_graph_dir=resolve_path(self.config,external_cfg.get("graph_dir",""))
-                external_source_dir=resolve_path(self.config,external_cfg.get("source_structure_dir",""))
+            external_graph_dir,external_source_dir,external_from_run=self.external_vhh_dirs()
+            # A holdout carved from this run's own audited data is already in
+            # the universe; only a genuinely external set adds PDBs to it.
+            if external_cfg.get("required",False) and not external_from_run:
                 if not external_graph_dir.is_dir():
                     return StageResult(
                         "queue_freeze","failed",started,utc_timestamp(),None,
@@ -1834,8 +1986,11 @@ class Orchestrator:
             if missing_pair_coverage:
                 return StageResult(
                     "queue_freeze","failed",started,utc_timestamp(),None,
-                    "Frozen structure-similarity pair table does not demonstrate query/target coverage "
-                    f"for the complete internal+external universe: {missing_pair_coverage[:20]}"
+                    f"Frozen structure-similarity pair table {pair_path} covers "
+                    f"{len(universe_ids) - len(missing_pair_coverage)} of this run's {len(universe_ids)} "
+                    f"universe PDBs; {len(missing_pair_coverage)} are not demonstrated as searched, e.g. "
+                    f"{missing_pair_coverage[:20]}. Rebuild it against THIS run's universe: "
+                    f"prepare_external_vhh.sh foldseek --run-dir {self.run_dir} --force"
                 )
 
         if not cluster_map_path.is_file():
@@ -1963,6 +2118,29 @@ class Orchestrator:
                                 f"build_final_pyg_dataset.py exited {returncode}; {graph_detail} (see {graph_log})",
                                 graph_argv, str(graph_log), graph_ok)
 
+        # 3a2. Antigen-fold holdout (PROTOCOL_AMENDMENTS.md A10). Carved BEFORE
+        # the validation queue is frozen and before any training, so the queue
+        # is selected from the data the pipeline will actually train on, and
+        # held-out complexes can never reach training or calibration.
+        holdout_cfg = qf_cfg.get("antigen_fold_holdout", {}) or {}
+        holdout_json = self.run_dir / "independence" / "antigen_fold_holdout.json"
+        if holdout_cfg.get("enabled", False):
+            holdout_argv = [
+                self.venv_python, "-m", module_name("carve_holdout_clusters.py"),
+                "--dataset-dir", str(dataset_dir),
+                "--audit-dir", str(self.run_dir / "audit"),
+                "--fold", str(holdout_cfg.get("fold", 1)),  # "1" or "1,2" (A13)
+                "--min-clusters", str(holdout_cfg.get("min_components", 10)),
+                "--min-train-components", str(holdout_cfg.get("min_train_components", 20)),
+                "--out-json", str(holdout_json),
+            ]
+            holdout_rc, holdout_log = self._run_subprocess("carve_holdout_clusters", holdout_argv)
+            if holdout_rc != 0 or not holdout_json.is_file():
+                return StageResult(
+                    "queue_freeze", "failed", started, utc_timestamp(), holdout_rc,
+                    f"Antigen-fold holdout could not be carved (exit={holdout_rc}; see {holdout_log})",
+                    holdout_argv, str(holdout_log), False)
+
         # 3b. Frozen, blind validation-target queue (explicitly excludes the
         # historical dev queue; seeded-random, never "smallest first").
         #
@@ -2045,6 +2223,17 @@ class Orchestrator:
                 sha256_of(universe_path) if universe_path.is_file() else None),
         )
         atomic_write_json(freeze_manifest_path,freeze_manifest)
+        if not cluster_map_path.is_file():
+            return StageResult("queue_freeze","failed",started,utc_timestamp(),1,
+                               f"Cluster adequacy check needs the run-local cluster map: {cluster_map_path}",
+                               graph_argv + ["&&"] + vq_argv, f"{graph_log};{vq_log}", False)
+        adequacy=cluster_adequacy(self.config,dataset_dir,selected_path,cluster_map_path)
+        atomic_write_json(self.run_dir/"independence"/"cluster_adequacy.json",adequacy)
+        if not adequacy["adequate"]:
+            return StageResult("queue_freeze","failed",started,utc_timestamp(),1,
+                               "Insufficient independent clusters for preregistered inference, detected "
+                               "before any training or outcome: "+"; ".join(adequacy["shortfalls"]),
+                               graph_argv + ["&&"] + vq_argv, f"{graph_log};{vq_log}", False)
         selected = json.loads(selected_path.read_text(encoding="utf-8"))
         cap_label = vq_cfg.get("target_count", 0) or "unlimited (all qualifying targets)"
         detail = (f"Graph build: {graph_detail} Validation queue: {len(selected)} targets frozen "
@@ -2105,9 +2294,63 @@ class Orchestrator:
         expected = [checkpoint_dir / name for name in ("best_egnn_pruning.pt", "training_summary.json")]
         ok, detail = self._artifacts_present(expected)
         status = "completed" if (returncode == 0 and ok) else "failed"
+        argvs = [argv]; logs = [str(log_path)]
+        replicates = int(cfg.get("seed_replicates", 0) or 0)
+        if status == "completed" and replicates > 0:
+            # Development-only seed sensitivity (Bouthillier et al. 2021;
+            # PROTOCOL_AMENDMENTS.md A6): same split, different training
+            # seeds. The primary checkpoint above stays the only formal model.
+            replicate_checkpoints = []
+            for index in range(1, replicates + 1):
+                replicate_dir = checkpoint_dir / "seed_replicates" / f"r{index}"
+                seed_position = argv.index("--seed") + 1
+                replicate_argv = list(argv)
+                replicate_argv[seed_position] = str(
+                    derive_child_seed(streams["train"], "egnn_seed_replicate", str(index)))
+                replicate_argv[replicate_argv.index("--checkpoint-dir") + 1] = str(replicate_dir)
+                if "--resume" in replicate_argv:
+                    replicate_argv.remove("--resume")
+                if (replicate_dir / "last_egnn_pruning.pt").is_file():
+                    replicate_argv += ["--resume"]
+                rc, replicate_log = self._run_subprocess(f"egnn_train_seed_replicate_{index}", replicate_argv)
+                argvs.append(replicate_argv); logs.append(str(replicate_log))
+                if rc != 0 or not (replicate_dir / "best_egnn_pruning.pt").is_file():
+                    status = "failed"
+                    detail += f"; seed replicate {index} failed (see {replicate_log})"
+                    break
+                replicate_checkpoints.append(replicate_dir / "best_egnn_pruning.pt")
+            if status == "completed":
+                sensitivity_dir = checkpoint_dir / "seed_sensitivity"
+                qc = self.config.get("qc_benchmark", {}) or {}
+                analysis_argv = [
+                    self.venv_python, "-m", module_name("egnn_seed_sensitivity.py"),
+                    "--data-dir", str(train_data_dir),
+                    "--primary-checkpoint", str(checkpoint_dir / "best_egnn_pruning.pt"),
+                    "--replicate-checkpoints", *[str(p) for p in replicate_checkpoints],
+                    "--active-sites", str(self.config.get("statistics", {}).get("primary_active_sites", 6)),
+                    "--antigen-guidance-weight", str(qc.get("antigen_guidance_weight", 0.25)),
+                    "--antigen-proximity-scale", str(qc.get("antigen_proximity_scale_angstrom", 6.0)),
+                    "--contact-ca-cutoff", str(qc.get("contact_ca_cutoff_angstrom", 8.0)),
+                    "--vhh-identity-threshold", str(homology.get("vhh_full_chain_identity", 0.80)),
+                    "--cdr-h3-identity-threshold", str(homology.get("cdr_h3_identity", 0.50)),
+                    "--antigen-identity-threshold", str(homology.get("antigen_identity", 0.30)),
+                    "--antigen-min-length-coverage", str(homology.get("antigen_min_length_coverage", 0.70)),
+                    "--seed", str(derive_child_seed(streams["train"], "egnn_seed_sensitivity")),
+                    "--out-json", str(sensitivity_dir / "summary.json"),
+                    "--out-md", str(sensitivity_dir / "summary.md"),
+                ]
+                rc, analysis_log = self._run_subprocess("egnn_seed_sensitivity", analysis_argv)
+                argvs.append(analysis_argv); logs.append(str(analysis_log))
+                sens_ok, sens_detail = self._artifacts_present(
+                    [sensitivity_dir / "summary.json", sensitivity_dir / "summary.md"])
+                if rc != 0 or not sens_ok:
+                    status = "failed"
+                    detail += f"; seed-sensitivity analysis failed: {sens_detail} (see {analysis_log})"
+                else:
+                    detail += f"; seed sensitivity: {replicates} replicate(s), {sensitivity_dir / 'summary.md'}"
         return StageResult("egnn_train", status, started, utc_timestamp(), returncode,
                             f"{detail} (train stream seed {streams['train']}, {len(graphs)} training graphs)",
-                            argv, str(log_path), ok)
+                            argvs if len(argvs) > 1 else argv, ";".join(logs), status == "completed")
 
     # ================================================================
     # Stage 5: TRAIN-only coarse-to-Amber energy calibration
@@ -2155,7 +2398,8 @@ class Orchestrator:
             "--assignments-per-complex", str(cal_cfg.get("assignments_per_complex", 64)),
             "--active-sites", str(cal_cfg.get("active_sites", qc_cfg.get("active_sites", 6))),
             "--radius", str(cal_cfg.get("radius_angstrom", qc_cfg.get("radii", [6.0])[0])),
-            "--seed", str(derive_streams(self.config["master_seed"])["partition"]),
+            "--seed", str(derive_child_seed(
+                derive_streams(self.config["master_seed"])["partition"], "energy_calibration")),
             "--antigen-proximity-scale", str(qc_cfg.get("antigen_proximity_scale_angstrom", 6.0)),
             "--contact-ca-cutoff", str(qc_cfg.get("contact_ca_cutoff_angstrom", 8.0)),
             "--nonbonded-cutoff", str(ff.get("cutoff_angstrom", 8.0)),
@@ -2695,6 +2939,166 @@ class Orchestrator:
                             argv, str(log_path), ok)
 
     # ================================================================
+    # Stage 5b: pre-declared exploratory QAOA analyses (A7)
+    # ================================================================
+    def _coarse_benchmark_argv(self, *, input_dir: Path, out_dir: Path, seeds: Sequence[int],
+                               depth: int, max_evals: int, active_sites: Sequence[int],
+                               outputs: Sequence[int], max_targets: int,
+                               target_selection_seed: Optional[int] = None) -> List[str]:
+        """Benchmark argv with the frozen coarse model and primary QAOA settings."""
+        cfg = self.config["qc_benchmark"]
+        qprimary = quantum_primary(self.config)
+        homology = self.config["queue_freeze"]["homology_isolation"]
+        ff = cfg.get("coarse_force_field", {}) or {}
+        rot = cfg.get("rotamer_model", {}) or {}
+        argv = [
+            self.venv_python, "-m", module_name("batch_benchmark_hard_set.py"), "--research-ablation",
+            "--input-dir", str(input_dir), "--checkpoint", str(self.checkpoint_dir() / cfg["checkpoint"]),
+            "--out-dir", str(out_dir), "--seeds", *[str(v) for v in seeds],
+            "--master-seed", str(self.config["master_seed"]), "--pruning", "egnn",
+            "--radii", str(self.config.get("statistics", {}).get("primary_radius", cfg.get("radii", [6.0])[0])),
+            "--depths", str(depth), "--max-evals", str(max_evals),
+            "--active-sites", *[str(v) for v in active_sites], "--states-per-site", "3",
+            "--vhh-identity-threshold", str(homology.get("vhh_full_chain_identity", 0.80)),
+            "--cdr-h3-identity-threshold", str(homology.get("cdr_h3_identity", 0.50)),
+            "--antigen-identity-threshold", str(homology.get("antigen_identity", 0.30)),
+            "--antigen-min-length-coverage", str(homology.get("antigen_min_length_coverage", 0.70)),
+            "--antigen-guidance-weight", str(cfg.get("antigen_guidance_weight", 0.25)),
+            "--antigen-proximity-scale", str(cfg.get("antigen_proximity_scale_angstrom", 6.0)),
+            "--contact-ca-cutoff", str(cfg.get("contact_ca_cutoff_angstrom", 8.0)),
+            "--nonbonded-cutoff", str(ff.get("cutoff_angstrom", 8.0)),
+            "--softcore-delta", str(ff.get("softcore_delta_angstrom", 0.5)),
+            "--hard-core-fraction", str(ff.get("hard_core_fraction", 0.72)),
+            "--hard-sphere-penalty", str(ff.get("hard_sphere_penalty", 25.0)),
+            "--lj-repulsion-cap", str(ff.get("lj_repulsion_cap", 50.0)),
+            "--lj-attraction-cap", str(ff.get("lj_attraction_cap", 5.0)),
+            "--coulomb-cap", str(ff.get("coulomb_cap", 20.0)),
+            "--dielectric-base", str(ff.get("dielectric_base", 4.0)),
+            "--dielectric-slope", str(ff.get("dielectric_slope", 2.0)),
+            "--thermal-energy-kcal", str(ff.get("thermal_energy_kcal", 0.593)),
+            "--rotamer-mode", str(rot.get("mode", "dunbrack2010")),
+            "--rotamer-library", str(resolve_path(self.config, rot.get("library_path", "data/rotamer/ALL.bbdep.rotamers.lib"))),
+            "--rotamer-probability-floor", str(rot.get("probability_floor", 1e-4)),
+            "--rotamer-sigma-offsets", *[str(v) for v in rot.get("sigma_offsets", [-1.0, 0.0, 1.0])],
+            "--outputs", *[str(v) for v in outputs],
+            "--qaoa-objective", str(qprimary.get("objective", "cvar")),
+            "--qaoa-restarts", str(qprimary.get("restarts", 4)),
+            "--cvar-alpha", str(qprimary.get("cvar_alpha", 0.1)),
+            "--eval-shots", str(qprimary.get("eval_shots", 500)),
+            "--parameter-scale", str(qprimary.get("parameter_scale", "max_coefficient")),
+            "--sa-passes", str(cfg.get("sa_passes", 100)),
+            "--greedy-passes", str(cfg.get("greedy_passes", 50)),
+            "--energy-window", str(cfg.get("energy_window", 2.0)),
+            "--max-targets", str(max_targets),
+            "--workers", str(cfg.get("workers", 1)),
+            "--omp-threads", str(self.config.get("hardware", {}).get("cpu_threads_per_process", 2)),
+        ]
+        if target_selection_seed is not None:
+            argv += ["--target-selection-seed", str(target_selection_seed)]
+        calibration_cfg = cfg.get("energy_calibration", {}) or {}
+        calibration_file = self.run_dir / calibration_cfg.get("calibration_file", "calibration/coarse_to_amber.json")
+        if calibration_cfg.get("require_calibrated", False):
+            argv.append("--require-calibrated-energy")
+        if calibration_file.is_file():
+            argv += ["--energy-calibration-file", str(calibration_file)]
+        return argv
+
+    def _closed_benchmark(self, out_dir: Path) -> tuple[bool, str]:
+        path = out_dir / "run_summary.json"
+        if not path.is_file():
+            return False, f"no run_summary.json in {out_dir}"
+        summary = json.loads(path.read_text(encoding="utf-8"))
+        limit = float(self.config["qc_benchmark"].get("max_failure_fraction", 0.0))
+        fraction = summary.get("failures_total", 0) / max(1, summary.get("total_cases_planned", 1))
+        if not summary.get("closed") or summary.get("cases_completed_total", 0) == 0 or fraction > limit:
+            return False, (f"{out_dir}: closed={summary.get('closed')} completed={summary.get('cases_completed_total')} "
+                           f"failure fraction={fraction:.4f} (limit {limit})")
+        return True, f"{out_dir}: closed"
+
+    def stage_quantum_exploration(self) -> StageResult:
+        """Depth x optimizer budget, and parameter transfer (exploratory; A7).
+
+        For each pre-declared depth p the optimizer budget is
+        evals_per_parameter x 2p. Transfer angles are fitted on TRAINING
+        graphs only and then applied, untrained, to the hard set alongside
+        per-instance-trained QAOA. Descriptive output only; no hypothesis
+        tests and no influence on the confirmatory analyses.
+        """
+        started = utc_timestamp()
+        cfg = self.config.get("quantum_exploration", {}) or {}
+        qprimary = quantum_primary(self.config)
+        streams = derive_streams(self.config["master_seed"])
+        root = self.run_dir / "quantum_exploration"
+        depths = [int(v) for v in cfg.get("depths", [1, 2, 3, 4, 6])]
+        per_parameter = int(cfg.get("evals_per_parameter", 20))
+        sites = [int(cfg.get("active_sites", self.config.get("statistics", {}).get("primary_active_sites", 6)))]
+        output_shots = int(qprimary.get("output_shots", 1000))
+        transfer_cfg = cfg.get("transfer", {}) or {}
+        repeats = [derive_child_seed(streams["perturb"], "exploration_repeat", str(i))
+                   for i in range(int(cfg.get("repeats", 3)))]
+        fit_seed = [derive_child_seed(streams["perturb"], "transfer_fit_repeat", "0")]
+        argvs, logs, failures, hard_dirs = [], [], [], []
+        for depth in depths:
+            max_evals = per_parameter * 2 * depth
+            fit_dir = root / "transfer_fit" / f"p{depth}"
+            fit_argv = self._coarse_benchmark_argv(
+                input_dir=self.dataset_dir() / "graphs" / "train", out_dir=fit_dir, seeds=fit_seed,
+                depth=depth, max_evals=max_evals, active_sites=sites, outputs=[output_shots],
+                max_targets=int(transfer_cfg.get("train_max_targets", 40)),
+                target_selection_seed=derive_child_seed(streams["partition"], "transfer_fit_targets"))
+            rc, log = self._run_subprocess(f"quantum_exploration_fit_p{depth}", fit_argv)
+            argvs.append(fit_argv); logs.append(str(log))
+            ok, detail = self._closed_benchmark(fit_dir)
+            if rc not in (0, 1) or not ok:
+                failures.append(f"transfer fit p={depth}: exit={rc}; {detail}"); break
+            transfer_file = root / "transfer_parameters" / f"p{depth}.json"
+            fit_params_argv = [
+                self.venv_python, "-m", module_name("fit_qaoa_transfer_parameters.py"),
+                "--results-dir", str(fit_dir), "--objective", str(qprimary.get("objective", "cvar")),
+                "--restarts", str(qprimary.get("restarts", 4)),
+                "--min-instances", str(int(transfer_cfg.get("min_instances", 10))),
+                "--out", str(transfer_file)]
+            rc, log = self._run_subprocess(f"quantum_exploration_transfer_p{depth}", fit_params_argv)
+            argvs.append(fit_params_argv); logs.append(str(log))
+            if rc != 0 or not transfer_file.is_file():
+                failures.append(f"transfer parameter fit p={depth} failed (see {log})"); break
+            hard_dir = root / "hard_set" / f"p{depth}"
+            hard_argv = self._coarse_benchmark_argv(
+                input_dir=self.dataset_dir() / self.config["qc_benchmark"]["input_dir"], out_dir=hard_dir,
+                seeds=repeats, depth=depth, max_evals=max_evals, active_sites=sites, outputs=[output_shots],
+                max_targets=int(self.config["qc_benchmark"].get("max_targets", 0))) + [
+                "--transfer-parameters", str(transfer_file)]
+            rc, log = self._run_subprocess(f"quantum_exploration_hard_p{depth}", hard_argv)
+            argvs.append(hard_argv); logs.append(str(log))
+            ok, detail = self._closed_benchmark(hard_dir)
+            if rc not in (0, 1) or not ok:
+                failures.append(f"hard-set exploration p={depth}: exit={rc}; {detail}"); break
+            hard_dirs.append(hard_dir)
+        if not failures:
+            analysis_argv = [
+                self.venv_python, "-m", module_name("analyze_quantum_exploration.py"),
+                "--depth-dirs", *[str(d) for d in hard_dirs],
+                "--cluster-map", str(self.frozen_cluster_map_path()),
+                "--primary-outputs", str(output_shots),
+                "--objective", str(qprimary.get("objective", "cvar")),
+                "--restarts", str(qprimary.get("restarts", 4)),
+                "--active-sites", str(sites[0]),
+                "--resamples", str(self.config.get("statistics", {}).get("resamples", 10000)),
+                "--seed", str(derive_child_seed(streams["inference"], "quantum_exploration")),
+                "--out-json", str(root / "summary.json"), "--out-md", str(root / "summary.md")]
+            rc, log = self._run_subprocess("quantum_exploration_analysis", analysis_argv)
+            argvs.append(analysis_argv); logs.append(str(log))
+            ok, detail = self._artifacts_present([root / "summary.json", root / "summary.md"])
+            if rc != 0 or not ok:
+                failures.append(f"exploration analysis failed: {detail} (see {log})")
+        status = "failed" if failures else "completed"
+        detail = "; ".join(failures) if failures else (
+            f"Exploratory depth/budget and parameter-transfer analyses for p={depths} "
+            f"({per_parameter} evaluations per parameter): {root / 'summary.md'}")
+        return StageResult("quantum_exploration", status, started, utc_timestamp(),
+                           1 if failures else 0, detail, argvs, ";".join(logs), not failures)
+
+    # ================================================================
     # Stage 6: real-atom structural experiment (dev queue + validation queue)
     # ================================================================
     def stage_structure_experiment(self) -> StageResult:
@@ -3063,8 +3467,7 @@ class Orchestrator:
 
         ext=cfg.get("external_vhh", {}) or {}
         if ext.get("required", False):
-            graph_dir=resolve_path(self.config,ext.get("graph_dir",""))
-            source_dir=resolve_path(self.config,ext.get("source_structure_dir",""))
+            graph_dir,source_dir,from_run=self.external_vhh_dirs()
             run_external_root=self.run_dir/"external_validation"
             run_external_root.mkdir(parents=True,exist_ok=True)
             # Always regenerated for this run (never reused from another run or
@@ -3074,10 +3477,11 @@ class Orchestrator:
             if independence.exists():
                 independence.unlink()
             ext_failures=[]
+            label="antigen-fold holdout" if from_run else "external VHH"
             if not graph_dir.is_dir() or not any(graph_dir.glob("*.pt")):
-                ext_failures.append(f"Required external VHH graph set missing/empty: {graph_dir}")
+                ext_failures.append(f"Required {label} graph set missing/empty: {graph_dir}")
             if not source_dir.is_dir():
-                ext_failures.append(f"Required external VHH raw structures missing: {source_dir}")
+                ext_failures.append(f"Required {label} raw structures missing: {source_dir}")
             if graph_dir.is_dir() and source_dir.is_dir() and any(graph_dir.glob("*.pt")):
                 cluster_path=self.frozen_cluster_map_path()
                 if cluster_path is None or not cluster_path.is_file():
@@ -3118,9 +3522,9 @@ class Orchestrator:
                     ext_failures.append(
                         "External independence manifest does not certify zero training-family overlap"
                     )
-                if manifest.get("graph_version")!="1.6":
+                if manifest.get("graph_version")!=REQUIRED_GRAPH_VERSION:
                     ext_failures.append(
-                        f"External VHH graph version must be 1.6, got {manifest.get('graph_version')}"
+                        f"External VHH graph version must be {REQUIRED_GRAPH_VERSION}, got {manifest.get('graph_version')}"
                     )
                 if manifest.get("training_cluster_map_sha256") != current_cluster_sha:
                     ext_failures.append(
@@ -3183,16 +3587,16 @@ class Orchestrator:
                             if (audit.get("source_structure")!=str(source.resolve())
                                     or audit.get("source_structure_sha256")!=sha256_of(source)):
                                 ext_failures.append(f"{pdb}: raw structure provenance mismatch")
-                            if float(audit["max_vhh_identity"]) >= expected_homology["vhh_full_chain_identity"]:
-                                ext_failures.append(f"{pdb}: VHH identity overlap")
-                            if float(audit["max_cdr_h3_identity"]) >= expected_homology["cdr_h3_identity"]:
-                                ext_failures.append(f"{pdb}: CDR-H3 identity overlap")
+                            if float(audit["max_vhh_full_chain_identity"]) >= expected_homology["vhh_full_chain_identity"]:
+                                ext_failures.append(f"{pdb}: VHH full-chain identity overlap")
+                            if float(audit["max_cdr_h3_loop_identity"]) >= expected_homology["cdr_h3_identity"]:
+                                ext_failures.append(f"{pdb}: CDR-H3 loop identity overlap")
                             if (
-                                float(audit["max_antigen_identity"]) >= expected_homology["antigen_identity"]
+                                float(audit["max_antigen_full_chain_identity"]) >= expected_homology["antigen_identity"]
                                 and float(audit.get("antigen_length_coverage",1.0))
                                     >= expected_homology["antigen_min_length_coverage"]
                             ):
-                                ext_failures.append(f"{pdb}: antigen identity overlap")
+                                ext_failures.append(f"{pdb}: antigen full-chain identity overlap")
                             if bool(audit.get("family_cluster_overlap",True)):
                                 ext_failures.append(f"{pdb}: family/structure cluster overlap or unverified")
                         except (KeyError,TypeError,ValueError) as exc:
@@ -3275,7 +3679,9 @@ class Orchestrator:
                                 self.venv_python,"-m", module_name("batch_benchmark_hard_set.py"),"--paired-statistics",
                                 "--results-dir",str(out),
                                 "--resamples",str(self.config.get("statistics",{}).get("resamples",10000)),
-                                "--seed",str(self.config["master_seed"]),
+                                "--seed",str(derive_child_seed(
+                                    derive_streams(self.config["master_seed"])["inference"],
+                                    "external_vhh_statistics")),
                                 "--cluster-map",str(cluster_path),
                                 "--budget-mode","outputs",
                                 "--primary-pruning",str(
@@ -3306,16 +3712,17 @@ class Orchestrator:
                                     failures.append(
                                         "External VHH paired-statistics denominator is incomplete: "
                                         f"{ext_denominator_failures}")
-                                sa_gap=next(
+                                primary_metric=str(self.config.get("statistics",{}).get("primary_qc_metric","log10_qts99"))
+                                sa_primary=next(
                                     (e for e in stats_payload.get("effects",[])
-                                     if e.get("baseline")=="sa" and e.get("metric")=="gap"),
+                                     if e.get("baseline")=="sa" and e.get("metric")==primary_metric),
                                     None,
                                 )
-                                observed_clusters=0 if sa_gap is None else int(sa_gap.get("n_clusters",0) or 0)
+                                observed_clusters=0 if sa_primary is None else int(sa_primary.get("n_clusters",0) or 0)
                                 required_clusters=int(ext.get("min_clusters",10))
                                 if observed_clusters < required_clusters:
                                     failures.append(
-                                        f"External VHH QAOA-vs-SA gap contrast has {observed_clusters} "
+                                        f"External VHH QAOA-vs-SA {primary_metric} contrast has {observed_clusters} "
                                         f"independent clusters; requires >= {required_clusters}"
                                     )
 
@@ -3481,7 +3888,7 @@ class Orchestrator:
                         (e for e in stats_payload.get("effects",[])
                          if e.get("baseline")==primary_qc_effect_name(
                              cfg.get("primary_qc_baseline","sa"),budget_mode)
-                         and e.get("metric")==str(cfg.get("primary_qc_metric","gap"))),
+                         and e.get("metric")==str(cfg.get("primary_qc_metric","log10_qts99"))),
                         None,
                     )
                     observed_clusters=0 if primary_effect is None else int(
@@ -3490,7 +3897,7 @@ class Orchestrator:
                     if observed_clusters < min_qc_clusters:
                         failures.append(
                             f"{results_dir.name}/{budget_mode}: primary coarse contrast "
-                            f"{cfg.get('primary_qc_baseline','sa')}/{cfg.get('primary_qc_metric','gap')} "
+                            f"{cfg.get('primary_qc_baseline','sa')}/{cfg.get('primary_qc_metric','log10_qts99')} "
                             f"has {observed_clusters} independent clusters; requires >= {min_qc_clusters}")
         scaling_json=self.run_dir/"statistics"/"quantum_scaling_statistics.json"
         scaling_md=self.run_dir/"statistics"/"quantum_scaling_statistics.md"
@@ -3512,6 +3919,7 @@ class Orchestrator:
                 "--primary-radius",str(primary_radius),
                 "--baseline",str(cfg.get("primary_qc_baseline","sa")),
                 "--active-sites",*[str(v) for v in qc_cfg.get("active_sites",[4,6,8,10])],
+                "--primary-active-sites",str(primary_active_sites),
                 "--resamples",str(cfg.get("resamples",10000)),
                 "--seed",str(derive_child_seed(streams["inference"], "quantum_scaling")),
             ]
@@ -3527,35 +3935,48 @@ class Orchestrator:
                     failures.append(
                         f"Scaling inference has {scaling_clusters} independent clusters; "
                         f"requires >= {min_scaling}")
-                # Put the scaling slope in the same matched-output inferential
-                # family as the QC effects. This prevents the scaling result
-                # from being presented as an unadjusted confirmatory test.
+                # Serial gatekeeping (Dmitrienko & Tamhane 2007; FDA 2022
+                # multiple-endpoints guidance; PROTOCOL_AMENDMENTS.md A4, A7):
+                # the two quantum-intrinsic confirmatory hypotheses (primary-
+                # size QAOA ground-state amplification and its scaling slope)
+                # are Holm-adjusted on their own; every QAOA-vs-classical
+                # effect is secondary and gated behind them.
                 output_stats_path=self.run_dir / "qc_benchmark" / "statistics_outputs.json"
                 if output_stats_path.is_file():
                     output_payload=json.loads(output_stats_path.read_text(encoding="utf-8"))
-                    p_entries=[]
-                    for effect in output_payload.get("effects",[]):
-                        value=effect.get("p_value")
-                        if value is not None and math.isfinite(float(value)):
-                            p_entries.append(("qc:"+str(effect.get("baseline"))+":"+str(effect.get("metric")),effect))
                     scaling_primary=scaling_payload.get("primary",{}) or {}
-                    scaling_p=scaling_primary.get("p_value")
-                    if scaling_p is not None and math.isfinite(float(scaling_p)):
-                        p_entries.append(("scaling:primary",scaling_primary))
-                    if p_entries:
-                        adjusted=holm_step_down([float(item[1].get("p_value")) for item in p_entries])
-                        for (_, target), value in zip(p_entries, adjusted):
-                            target["p_holm_global_qc_scaling"]=value
-                        output_payload["multiplicity_family"]="matched-output QC effects plus primary scaling slope"
-                        output_payload["multiplicity_n_tests"]=len(p_entries)
-                        output_stats_path.write_text(json.dumps(output_payload,indent=2,sort_keys=True)+"\n",encoding="utf-8")
-                        scaling_payload["multiplicity_family"]="matched-output QC effects plus primary scaling slope"
-                        scaling_payload["multiplicity_n_tests"]=len(p_entries)
-                        scaling_payload["primary"]=scaling_primary
-                        scaling_json.write_text(json.dumps(scaling_payload,indent=2,sort_keys=True)+"\n",encoding="utf-8")
-                        scaling_md.write_text(scaling_md.read_text(encoding="utf-8")+
-                            f"\nHolm family: matched-output QC effects plus primary scaling slope (n={len(p_entries)}); "
-                            f"adjusted scaling p={scaling_primary.get('p_holm_global_qc_scaling')}.\n",encoding="utf-8")
+                    amplification_primary=scaling_payload.get("primary_amplification",{}) or {}
+                    if not amplification_primary:
+                        failures.append("Scaling statistics lack the primary-size amplification test")
+                    primary_family={"amplification:primary":amplification_primary.get("p_value"),
+                                    "scaling:primary":scaling_primary.get("p_value")}
+                    secondary_family={}
+                    targets={"amplification:primary":amplification_primary,"scaling:primary":scaling_primary}
+                    for effect in output_payload.get("effects",[]):
+                        key="qc:"+str(effect.get("baseline"))+":"+str(effect.get("metric"))
+                        targets[key]=effect
+                        secondary_family[key]=effect.get("p_value")
+                        effect["gatekeeping_family"]="secondary"
+                    scaling_primary["gatekeeping_family"]="primary"
+                    amplification_primary["gatekeeping_family"]="primary"
+                    adjusted=serial_gatekeeping(primary_family,secondary_family)
+                    for key,value in adjusted.items():
+                        targets[key]["p_gatekeeping_adjusted"]=value
+                    family_note=(
+                        "serial gatekeeping: primary family {primary-size QAOA ground-state amplification, "
+                        "amplification scaling slope} Holm-adjusted alone; QAOA-vs-classical matched-output "
+                        "effects are secondary, tested only after both primary hypotheses are rejected")
+                    output_payload["multiplicity_procedure"]=family_note
+                    output_payload["multiplicity_primary_family"]=sorted(primary_family)
+                    output_stats_path.write_text(json.dumps(output_payload,indent=2,sort_keys=True)+"\n",encoding="utf-8")
+                    scaling_payload["multiplicity_procedure"]=family_note
+                    scaling_payload["multiplicity_primary_family"]=sorted(primary_family)
+                    scaling_payload["primary"]=scaling_primary
+                    scaling_payload["primary_amplification"]=amplification_primary
+                    scaling_json.write_text(json.dumps(scaling_payload,indent=2,sort_keys=True)+"\n",encoding="utf-8")
+                    scaling_md.write_text(scaling_md.read_text(encoding="utf-8")+
+                        f"\nMultiplicity: {family_note}; gatekeeping-adjusted scaling p="
+                        f"{scaling_primary.get('p_gatekeeping_adjusted')}.\n",encoding="utf-8")
         else:
             failures.append(f"Quantum scaling statistics require run-local cluster map: {cluster_path}")
 
@@ -3583,6 +4004,7 @@ class Orchestrator:
                 ],
             ]
             returncode, log_path = self._run_subprocess("structure_statistics", structure_argv)
+            logs.append(str(log_path)); argvs.append(structure_argv)
             if returncode != 0 or not structure_json.is_file():
                 failures.append(f"structure statistics exited {returncode} (see {log_path})")
             else:
@@ -3637,6 +4059,8 @@ class Orchestrator:
                 stage, STAGE_PREREQUISITES[stage], getattr(self, f"stage_{stage}"))
             if stage == "smoke_check" and self.smoke_only:
                 return results
+            if self.stop_after is not None and stage == self.stop_after:
+                return results
         return results
 
 
@@ -3652,6 +4076,7 @@ def save_derived_child(streams: Dict[str, int], stream_name: str, *labels: str) 
 def build_run_manifest(config: Dict[str, Any], repo_root: Path) -> Dict[str, Any]:
     evidence_path=repo_root/DOCS_DIR/"METHODS_EVIDENCE.md"
     results_contract_path=repo_root/DOCS_DIR/"RESULTS_CONTRACT.md"
+    amendments_path=repo_root/DOCS_DIR/"PROTOCOL_AMENDMENTS.md"
     # Fail closed: a missing orchestrated file must never silently drop out of
     # the code fingerprint that resume compares against.
     missing=[name for name in ORCHESTRATED_SCRIPTS if not repo_path(name, repo_root).is_file()]
@@ -3665,6 +4090,10 @@ def build_run_manifest(config: Dict[str, Any], repo_root: Path) -> Dict[str, Any
         methods_evidence_sha256=sha256_of(evidence_path) if evidence_path.is_file() else None,
         results_contract_sha256=(
             sha256_of(results_contract_path) if results_contract_path.is_file() else None
+        ),
+        # Binds each run to the protocol amendments in force when it launched.
+        protocol_amendments_sha256=(
+            sha256_of(amendments_path) if amendments_path.is_file() else None
         ),
         config=config,
     )
@@ -3827,6 +4256,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--force-restage", type=str, nargs="+", default=[],
                          choices=STAGE_ORDER,
                          help="Re-run these stage(s) even if already marked completed/failed.")
+    parser.add_argument("--stop-after", type=str, default=None, choices=STAGE_ORDER,
+                         help="Stop after this stage (e.g. queue_freeze to check independent-cluster "
+                              "adequacy before training). The run is resumable with --resume and is "
+                              "not a completed formal run.")
     parser.add_argument("--smoke-only", action="store_true",
                          help="Run only env_check + smoke_check, then stop (for a fast preflight pass).")
     args = parser.parse_args(list(argv) if argv is not None else None)
@@ -3861,9 +4294,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             if (previous.get("code_sha256") != current["code_sha256"]
                     or previous.get("methods_evidence_sha256") != current["methods_evidence_sha256"]
                     or previous.get("results_contract_sha256") != current["results_contract_sha256"]
+                    or previous.get("protocol_amendments_sha256") != current["protocol_amendments_sha256"]
                     or previous.get("config") != current["config"]):
                 raise SystemExit(
-                    "Refusing to resume: orchestrated code, methods evidence, results contract, or config differs from the original launch. "
+                    "Refusing to resume: orchestrated code, methods evidence, results contract, protocol amendments, or config differs from the original launch. "
                     "Start a fresh run directory for changed code/evidence/config (this repository's established "
                     "rule: a changed source hash, literature-evidence hash, or configuration always gets a new output directory)."
                 )
@@ -3900,8 +4334,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print(f"Derived seed streams: {streams}")
 
         orchestrator = Orchestrator(config, run_dir, only=args.only, smoke_only=args.smoke_only,
-                                     force_restage=args.force_restage)
+                                     force_restage=args.force_restage, stop_after=args.stop_after)
         results = orchestrator.run_all()
+        if args.stop_after is not None:
+            stopped_ok = all(r.status != "failed" for r in results.values())
+            print(f"\nStopped after {args.stop_after} (not a completed formal run; resume with --resume {run_dir.name}).")
+            for stage, result in results.items():
+                print(f"  {stage:24s} {result.status}")
+            adequacy = run_dir/"independence"/"cluster_adequacy.json"
+            if adequacy.is_file():
+                print(f"Cluster adequacy: {adequacy}")
+            return 0 if stopped_ok else 1
 
         print("\n=== Stage summary ===")
         overall_ok = True

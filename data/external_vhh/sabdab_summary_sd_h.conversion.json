@@ -1,0 +1,24 @@
+{
+  "caveat": "A single-domain export lists only single-domain chains, so an entry that also contains a Fab shows no Lchain here and the selector's VH/VL exclusion cannot fire from this file alone.",
+  "converted_rows": 4615,
+  "date_range": [
+    "1996-04-16",
+    "2026-07-12"
+  ],
+  "entries": 2429,
+  "failures": [],
+  "kept_types": [
+    "SD-H"
+  ],
+  "output": "/home/user/phd_code/data/external_vhh/sabdab_summary_sd_h.tsv",
+  "output_sha256": "74937339c88cfe846439a1550119ac69193a3f10b78eb756efaf6f38a62a29d2",
+  "rows_by_type": {
+    "SD-H": 4615,
+    "SD-L": 95,
+    "VNAR": 91
+  },
+  "schema": "sabdab2_conversion_v1",
+  "source": "/root/.claude/uploads/591fc6f0-0053-529d-8300-bb156746e765/10b7f80a-sabdab_summary_all_single_domain_1.csv",
+  "source_sha256": "cb0673dbf95bcfa40242f6dbec6076b270753d33481487c096f7df96800f46bd",
+  "unique_rows": 4615
+}

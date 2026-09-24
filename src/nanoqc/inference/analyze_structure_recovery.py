@@ -26,6 +26,10 @@ from nanoqc.inference.paired_statistics import holm_step_down, sign_flip_pvalue
 from nanoqc.common.seed_streams import DEFAULT_MASTER_SEED, derive_child_seed
 
 
+# Cluster-level differences within this tolerance (kcal/mol or A) count as constant.
+RQ5_CONSTANT_TOLERANCE = 1e-6
+
+
 def percentile_ci(values: list[float], rng: np.random.Generator, resamples: int) -> tuple[float|None,float|None]:
     if len(values)<2:
         return None,None
@@ -240,6 +244,32 @@ def rq5_energy_structure(
 
     energy=np.asarray([p["delta_energy"] for p in cluster_points],float)
     rmsd=np.asarray([p["delta_rmsd"] for p in cluster_points],float)
+    # Pre-specified handling of a degenerate association (statistical-analysis
+    # plan practice, Gamble et al. JAMA 2017; docs/PROTOCOL_AMENDMENTS.md A2):
+    # Spearman rho is undefined when either cluster-level difference is
+    # constant. The commonest cause is scientifically meaningful (both solvers
+    # returned the same discrete optimum everywhere), so it is reported as a
+    # named non-estimable outcome, not a pipeline failure, and RQ5 then leaves
+    # the confirmatory Holm family.
+    degenerate=None
+    if np.all(np.abs(energy-energy[0])<=RQ5_CONSTANT_TOLERANCE):
+        degenerate=("not_estimable_identical_discrete_energies" if np.all(np.abs(energy)<=RQ5_CONSTANT_TOLERANCE)
+                    else "not_estimable_constant_energy_difference")
+    elif np.all(np.abs(rmsd-rmsd[0])<=RQ5_CONSTANT_TOLERANCE):
+        degenerate="not_estimable_constant_rmsd_difference"
+    if degenerate is not None:
+        return dict(
+            definition=f"paired QAOA-{baseline} discrete-energy difference vs final-RMSD difference",
+            contrast=contrast,estimability=degenerate,
+            n_targets=len(target_points),n_clusters=len(cluster_points),
+            paired_seed_count=sum(p["paired_seeds"] for p in target_points),
+            incomplete_seed_count=incomplete_seed_count,
+            spearman_rho=None,p_value=None,ci_low=None,ci_high=None,
+            mean_delta_energy=float(np.mean(energy)),mean_delta_rmsd=float(np.mean(rmsd)),
+            interpretation=("Spearman rho is undefined because a cluster-level difference is constant; "
+                            "reported descriptively under the pre-specified rule and excluded from the Holm family."),
+            target_points=target_points,cluster_points=cluster_points,
+        )
     rho_value=spearmanr(energy,rmsd).statistic
     rho=None if not math.isfinite(float(rho_value)) else float(rho_value)
 
@@ -270,7 +300,7 @@ def rq5_energy_structure(
 
     return dict(
         definition=f"paired QAOA-{baseline} discrete-energy difference vs final-RMSD difference",
-        contrast=contrast,
+        contrast=contrast,estimability="estimable",
         difference_sign="negative delta means QAOA lower than baseline",
         n_targets=len(target_points),n_clusters=len(cluster_points),
         paired_seed_count=sum(p["paired_seeds"] for p in target_points),

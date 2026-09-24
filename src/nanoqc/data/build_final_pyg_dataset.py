@@ -30,6 +30,7 @@ from torch_geometric.data import Data, Batch
 import nanoqc.data.audit_all_datasets as audit
 from nanoqc.common.repo_io import sha256_file as sha256, REPO_ROOT
 from nanoqc.data.sequence_identity import nw_identity, length_coverage, partner_orientations, partner_roles_anchored
+from nanoqc.structure.residue_tables import PEPTIDE_BOND_MAX_C_N_ANGSTROM
 
 BASE = REPO_ROOT  # standalone-run defaults (data/, outputs) are relative to the checkout root
 AA = 'ACDEFGHIKLMNPQRSTVWY'
@@ -48,7 +49,13 @@ MIN_INTERFACE_RESIDUES = 15
 # load.  Override explicitly in code/config when a different contract is
 # intended, and record the value in each graph's provenance.
 GRAPH_MEMORY_BUDGET_BYTES = 4 * 1024**3
-VERSION = '1.6'
+# 1.7: phi/psi are defined only across real peptide bonds (NaN at chain breaks).
+# 1.8: sabdab_vhh/train_rcsb complexes come from the biological assembly and
+#      keep only antigen chains in contact with the VHH paratope.
+VERSION = '1.8'
+# SAbDab antigen-chain criterion [METHODS_EVIDENCE R33]: any CA/CB within 7.5 A
+# of a CA/CB of the antibody's CDR residues.
+ANTIGEN_CHAIN_CONTACT_ANGSTROM = 7.5
 PROCESS = psutil.Process()
 PEAK_RSS = 0
 MEMORY_LOCK = threading.Lock()
@@ -64,24 +71,25 @@ def write_csv(path, records, fields):
         w=csv.DictWriter(f,fieldnames=fields,extrasaction='ignore');w.writeheader();w.writerows(records)
 
 @functools.lru_cache(maxsize=300000)
-def similarity(a,b):
-    """Symmetric global identity, exact matches / alignment length incl. gaps."""
+def cdr_h3_loop_identity(a,b):
+    """CDR-H3 LOOP identity (never full-chain): exact matches / alignment length incl. gaps."""
     if a==b:return 1.0
     if not a or not b or length_coverage(a,b) < CDR_H3_IDENTITY_THRESHOLD:return 0.0
     return nw_identity(a,b,saturation_message='alignment score saturation')
 
-def seqsim(a,b):
-    return similarity(*sorted((a,b)))
+def cdr_h3_loop_seqsim(a,b):
+    """Order-independent CDR-H3 loop identity."""
+    return cdr_h3_loop_identity(*sorted((a,b)))
 
 
-def max_pair_similarity(sequences):
-    """Maximum pairwise sequence identity; empty/singleton sets have no pair."""
-    return max((seqsim(s,t) for s,t in itertools.combinations(sequences,2)), default=0.0)
+def max_pair_cdr_h3_loop_identity(sequences):
+    """Maximum pairwise CDR-H3 loop identity; empty/singleton sets have no pair."""
+    return max((cdr_h3_loop_seqsim(s,t) for s,t in itertools.combinations(sequences,2)), default=0.0)
 
 
 @functools.lru_cache(maxsize=500000)
 def _global_identity_cached(a: str, b: str) -> float:
-    """Symmetric Needleman-Wunsch identity over alignment length."""
+    """Symmetric Needleman-Wunsch identity over alignment length (full-chain or loop, as passed)."""
     if a == b:
         return 1.0
     if not a or not b:
@@ -174,7 +182,7 @@ def cluster_long(rows):
             seq_j=sequences[j]
             if min(len(seq_i),len(seq_j))/max(len(seq_i),len(seq_j)) < CDR_H3_IDENTITY_THRESHOLD:
                 continue
-            if seqsim(seq_i,seq_j)>=CDR_H3_IDENTITY_THRESHOLD:
+            if cdr_h3_loop_seqsim(seq_i,seq_j)>=CDR_H3_IDENTITY_THRESHOLD:
                 union(i,j)
 
     components=collections.defaultdict(list)
@@ -219,6 +227,11 @@ def _dihedral_degrees(a, b, c, d):
     return float(np.degrees(np.arctan2(y,x)))
 
 
+def _peptide_bonded(previous, following):
+    """True when C(previous)-N(following) is a real peptide bond, not a chain break."""
+    gap=np.asarray(previous['c'],dtype=np.float64)-np.asarray(following['n'],dtype=np.float64)
+    return float(np.linalg.norm(gap))<PEPTIDE_BOND_MAX_C_N_ANGSTROM
+
 def build_atoms(st, prefix='', identity_overrides=None):
     """Full protein residue nodes; recheck every retained heavy-atom residue."""
     if not len(st):raise ValueError('no model')
@@ -242,8 +255,10 @@ def build_atoms(st, prefix='', identity_overrides=None):
             if key in seen:raise ValueError(f'ambiguous duplicate residue ID: {chain.name}:{key}')
             seen.add(key)
             ca=atoms['CA'].pos
+            cb=atoms['CB'].pos if 'CB' in atoms else None
             nodes.append(dict(
                 aa=aa,pos=(ca.x,ca.y,ca.z),residue_id=prefix+chain.name+':'+key,name=res.name,
+                cb=(None if cb is None else (cb.x,cb.y,cb.z)),
                 n=(atoms['N'].pos.x,atoms['N'].pos.y,atoms['N'].pos.z),
                 c=(atoms['C'].pos.x,atoms['C'].pos.y,atoms['C'].pos.z),
                 phi=math.nan,psi=math.nan,
@@ -252,9 +267,13 @@ def build_atoms(st, prefix='', identity_overrides=None):
                 heavy.append((atom.pos.x,atom.pos.y,atom.pos.z));owners.append(len(nodes)-1)
         for idx,node in enumerate(nodes):
             ca=np.asarray(node['pos'],dtype=np.float64)
-            if idx>0:
+            # phi/psi need a real peptide bond to the neighbour; at a chain
+            # break (unresolved residues) they stay NaN, which later excludes
+            # the residue from Dunbrack site selection instead of looking up a
+            # meaningless backbone bin.
+            if idx>0 and _peptide_bonded(nodes[idx-1],node):
                 node['phi']=_dihedral_degrees(nodes[idx-1]['c'],node['n'],ca,node['c'])
-            if idx+1<len(nodes):
+            if idx+1<len(nodes) and _peptide_bonded(node,nodes[idx+1]):
                 node['psi']=_dihedral_degrees(node['n'],ca,node['c'],nodes[idx+1]['n'])
         if nodes:chains.append(dict(name=prefix+chain.name,original_name=chain.name,nodes=nodes,xyz=np.array(heavy),owners=np.array(owners,dtype=np.int64)))
     if not chains:raise ValueError('no amino acid nodes')
@@ -314,10 +333,73 @@ def extract(row, pair=None):
     if sum(c['name']==anchor for c in chains)!=1:raise ValueError('anchor chain absent or ambiguous')
     for c in chains:c['group']=0 if c['name']==anchor else 1
     if {c['group'] for c in chains}!={0,1}:raise ValueError('both interaction partners required')
+    meta=dict(structure_source=str(dict(st.info).get(audit.STRUCTURE_SOURCE_KEY,'as_deposited_file')),
+              antigen_chain_rule='all non-VHH chains of the curated complex file',
+              antigen_contact_basis='not_applicable',dropped_chains=[])
+    if row['subset'] in audit.ASSEMBLY_SUBSETS:
+        chains,meta=select_contacting_partner_chains(chains,row,meta)
+    for c in chains:c['complex_meta']=meta
     return chains
 
-def make_graph(row, split, pair=None, family_structure_cluster=''):
-    chains=extract(row,pair);memory_sample()
+
+def _ca_cb_coordinates(nodes):
+    return np.asarray([xyz for node in nodes for xyz in (node['pos'],node.get('cb')) if xyz is not None],dtype=np.float64)
+
+
+def _paratope_nodes(anchor,row):
+    """VHH CDR1-3 residues when the annotation maps uniquely, else the whole chain."""
+    nodes=anchor['nodes']
+    if row['subset']!='sabdab_vhh':
+        return nodes,'whole_anchor_chain'
+    sequence=''.join(node['aa'] for node in nodes)
+    for rec in audit.PDB_ANNOTATIONS.get(str(row['pdb_id']).upper(),[]):
+        loops=[rec.get(key,'') for key in ('cdr1','cdr2','cdr3')]
+        if rec.get('kind')!='VHH' or not all(loops) or any(sequence.count(loop)!=1 for loop in loops):
+            continue
+        indices=sorted({i for loop in loops for i in range(sequence.index(loop),sequence.index(loop)+len(loop))})
+        return [nodes[i] for i in indices],'vhh_cdr1_cdr2_cdr3'
+    return nodes,'whole_vhh_chain_cdr_unmapped'
+
+
+def select_contacting_partner_chains(chains,row,meta):
+    """Keep only partner chains that contact the anchor's paratope (SAbDab rule).
+
+    A partner chain is antigen when any of its CA/CB atoms lies within
+    ANTIGEN_CHAIN_CONTACT_ANGSTROM of a CA/CB of the paratope residues. For
+    sabdab_vhh, further copies of the VHH itself are never antigen.
+    """
+    anchor=next(c for c in chains if c['group']==0)
+    paratope,basis=_paratope_nodes(anchor,row)
+    tree=cKDTree(_ca_cb_coordinates(paratope))
+    anchor_sequence=''.join(node['aa'] for node in anchor['nodes'])
+    kept=[];dropped=[]
+    for chain in chains:
+        if chain['group']==0:
+            kept.append(chain);continue
+        sequence=''.join(node['aa'] for node in chain['nodes'])
+        if row['subset']=='sabdab_vhh' and sequence==anchor_sequence:
+            dropped.append(dict(chain=chain['name'],reason='copy_of_vhh'));continue
+        distance=float(tree.query(_ca_cb_coordinates(chain['nodes']),k=1)[0].min())
+        if distance<=ANTIGEN_CHAIN_CONTACT_ANGSTROM:
+            kept.append(chain)
+        else:
+            dropped.append(dict(chain=chain['name'],reason=f'no_paratope_contact_within_{ANTIGEN_CHAIN_CONTACT_ANGSTROM:g}A',
+                                min_ca_cb_distance=round(distance,3)))
+    if not any(c['group']==1 for c in kept):
+        raise ValueError(f'no partner chain within {ANTIGEN_CHAIN_CONTACT_ANGSTROM:g} A of the paratope in the biological assembly')
+    meta=dict(meta,antigen_chain_rule=(f'biological-assembly chains with any CA/CB within '
+                                       f'{ANTIGEN_CHAIN_CONTACT_ANGSTROM:g} A of a paratope CA/CB (SAbDab)'),
+              antigen_contact_basis=basis,dropped_chains=dropped)
+    return kept,meta
+
+def make_graph(row, split, pair=None, family_structure_cluster='', chains=None):
+    # ``chains`` lets callers with their own complex definition (external VHH
+    # graphs) reuse the identical labelling, edge and validation code.
+    chains=extract(row,pair) if chains is None else chains;memory_sample()
+    complex_meta=chains[0].get('complex_meta',dict(
+        structure_source='db55_bound_receptor_ligand_files',
+        antigen_chain_rule='DB5.5 bound receptor/ligand files as paired by the benchmark',
+        antigen_contact_basis='not_applicable',dropped_chains=[]))
     nodes=[];groups=[];chainidx=[];heavy={0:[],1:[]};owners={0:[],1:[]}
     for i,c in enumerate(chains):
         offset=len(nodes);nodes.extend(c['nodes']);groups.extend([c['group']]*len(c['nodes']));chainidx.extend([i]*len(c['nodes']))
@@ -389,6 +471,9 @@ def make_graph(row, split, pair=None, family_structure_cluster=''):
         split=split,source_id=row['id'],node_chain_id=torch.tensor(chainidx,dtype=torch.long),chain_ids=[c['name'] for c in chains],
         chain_groups=[c['group'] for c in chains],residue_ids=[r['residue_id'] for r in nodes],
         chain_sequences=chain_sequences,vhh_sequences=vhh_sequences,antigen_sequences=antigen_sequences,
+        structure_source=complex_meta['structure_source'],antigen_chain_rule=complex_meta['antigen_chain_rule'],
+        antigen_contact_basis=complex_meta['antigen_contact_basis'],
+        dropped_partner_chains=json.dumps(complex_meta['dropped_chains'],sort_keys=True),
         edge_policy='intra_chain_ca_radius_plus_cross_partner_knn',
         intra_chain_ca_cutoff_angstrom=float(INTRA_CHAIN_CA_CUTOFF_ANGSTROM),
         cross_partner_knn_k=cross_partner_knn_k,
@@ -412,42 +497,47 @@ def make_graph(row, split, pair=None, family_structure_cluster=''):
     memory_sample()
     return graph
 
+def _require(condition, message):
+    """Explicit validation that, unlike ``assert``, still runs under ``python -O``."""
+    if not condition:
+        raise AssertionError(message)
+
 def validate_graph(g):
     n=g.num_nodes;e=g.edge_index
-    assert isinstance(g,Data) and g.pos.shape==(n,3) and g.pos.dtype==torch.float32
-    assert g.x.shape==(n,21) and g.x.dtype==torch.float32 and e.dtype==torch.long and e.shape[0]==2
-    assert g.backbone_phi.shape==(n,) and g.backbone_psi.shape==(n,)
-    assert torch.all(torch.isfinite(g.backbone_phi)|torch.isnan(g.backbone_phi))
-    assert torch.all(torch.isfinite(g.backbone_psi)|torch.isnan(g.backbone_psi))
-    assert torch.isfinite(g.pos).all() and torch.isfinite(g.x).all()
-    assert torch.all(g.x[:,:20].sum(1)==1) and torch.all((g.x==0)|(g.x==1))
-    assert set(g.x[:,20].tolist())=={0.0,1.0}
-    assert e.shape[1]%2==0 and e.shape[1]>0 and e.min()>=0 and e.max()<n
+    _require(isinstance(g,Data) and g.pos.shape==(n,3) and g.pos.dtype==torch.float32, 'validation failed: isinstance(g,Data) and g.pos.shape==(n,3) and g.pos.dtype==torch.float32')
+    _require(g.x.shape==(n,21) and g.x.dtype==torch.float32 and e.dtype==torch.long and e.shape[0]==2, 'validation failed: g.x.shape==(n,21) and g.x.dtype==torch.float32 and e.dtype==torch.long and e.shape[0]==2')
+    _require(g.backbone_phi.shape==(n,) and g.backbone_psi.shape==(n,), 'validation failed: g.backbone_phi.shape==(n,) and g.backbone_psi.shape==(n,)')
+    _require(torch.all(torch.isfinite(g.backbone_phi)|torch.isnan(g.backbone_phi)), 'validation failed: torch.all(torch.isfinite(g.backbone_phi)|torch.isnan(g.backbone_phi))')
+    _require(torch.all(torch.isfinite(g.backbone_psi)|torch.isnan(g.backbone_psi)), 'validation failed: torch.all(torch.isfinite(g.backbone_psi)|torch.isnan(g.backbone_psi))')
+    _require(torch.isfinite(g.pos).all() and torch.isfinite(g.x).all(), 'validation failed: torch.isfinite(g.pos).all() and torch.isfinite(g.x).all()')
+    _require(torch.all(g.x[:,:20].sum(1)==1) and torch.all((g.x==0)|(g.x==1)), 'validation failed: torch.all(g.x[:,:20].sum(1)==1) and torch.all((g.x==0)|(g.x==1))')
+    _require(set(g.x[:,20].tolist())=={0.0,1.0}, 'validation failed: set(g.x[:,20].tolist())=={0.0,1.0}')
+    _require(e.shape[1]%2==0 and e.shape[1]>0 and e.min()>=0 and e.max()<n, 'validation failed: e.shape[1]%2==0 and e.shape[1]>0 and e.min()>=0 and e.max()<n')
     m=e.shape[1]//2
-    assert torch.equal(e[:,:m].flip(0),e[:,m:]) and torch.all(e[0]!=e[1])
+    _require(torch.equal(e[:,:m].flip(0),e[:,m:]) and torch.all(e[0]!=e[1]), 'validation failed: torch.equal(e[:,:m].flip(0),e[:,m:]) and torch.all(e[0]!=e[1])')
     first=e[:,:m].numpy();codes=first[0]*n+first[1]
-    assert len(np.unique(codes))==m
+    _require(len(np.unique(codes))==m, 'validation failed: len(np.unique(codes))==m')
     pos=g.pos.numpy().astype(np.float64);d=pos[first[0]]-pos[first[1]];d2=np.einsum('ij,ij->i',d,d)
     chain=g.node_chain_id.numpy();group=g.x[:,-1].numpy()
     same_chain=chain[first[0]]==chain[first[1]]
     cross_partner=group[first[0]]!=group[first[1]]
-    assert np.all(same_chain|cross_partner)
+    _require(np.all(same_chain|cross_partner), 'validation failed: np.all(same_chain|cross_partner)')
     ca_cutoff=float(getattr(g,'intra_chain_ca_cutoff_angstrom',0.0))
     label_cutoff=float(getattr(g,'interface_label_cutoff_angstrom',0.0))
     min_interface=int(getattr(g,'min_interface_residues',0))
-    assert ca_cutoff>0 and label_cutoff>0 and min_interface>0
-    assert np.all(d2[same_chain]<ca_cutoff**2)
-    assert getattr(g,'edge_policy','')=='intra_chain_ca_radius_plus_cross_partner_knn'
-    assert getattr(g,'label_policy','')=='cross_partner_heavy_atom_cutoff'
-    assert int(getattr(g,'cross_partner_knn_k',0))>0
+    _require(ca_cutoff>0 and label_cutoff>0 and min_interface>0, 'validation failed: ca_cutoff>0 and label_cutoff>0 and min_interface>0')
+    _require(np.all(d2[same_chain]<ca_cutoff**2), 'validation failed: np.all(d2[same_chain]<ca_cutoff**2)')
+    _require(getattr(g,'edge_policy','')=='intra_chain_ca_radius_plus_cross_partner_knn', "validation failed: getattr(g,'edge_policy','')=='intra_chain_ca_radius_plus_cross_partner_knn'")
+    _require(getattr(g,'label_policy','')=='cross_partner_heavy_atom_cutoff', "validation failed: getattr(g,'label_policy','')=='cross_partner_heavy_atom_cutoff'")
+    _require(int(getattr(g,'cross_partner_knn_k',0))>0, "validation failed: int(getattr(g,'cross_partner_knn_k',0))>0")
     for node in range(n):
         mask=(first[0]==node)|(first[1]==node)
-        assert np.any(mask & cross_partner), f'node {node} lacks threshold-independent cross-partner context'
-    assert len(getattr(g,'vhh_sequences',[]))>=1 and len(getattr(g,'antigen_sequences',[]))>=1
-    assert g.num_interface_residues>=min_interface and len(g.cdr3_seq)==g.cdr3_len
+        _require(np.any(mask & cross_partner), f'node {node} lacks threshold-independent cross-partner context')
+    _require(len(getattr(g,'vhh_sequences',[]))>=1 and len(getattr(g,'antigen_sequences',[]))>=1, "validation failed: len(getattr(g,'vhh_sequences',[]))>=1 and len(getattr(g,'antigen_sequences',[]))>=1")
+    _require(g.num_interface_residues>=min_interface and len(g.cdr3_seq)==g.cdr3_len, 'validation failed: g.num_interface_residues>=min_interface and len(g.cdr3_seq)==g.cdr3_len')
     if getattr(g,'split','') in ('train','test_snac_hard'):
-        assert str(getattr(g,'family_structure_cluster','')), 'formal VHH graph lacks family/structure cluster ID'
-    assert g.validate(raise_on_error=True)
+        _require(str(getattr(g,'family_structure_cluster','')), 'formal VHH graph lacks family/structure cluster ID')
+    _require(g.validate(raise_on_error=True), 'validation failed: g.validate(raise_on_error=True)')
 
 def save_graph(row, split, output, pair=None, cluster_id='', family_structure_cluster=''):
     try:
@@ -507,9 +597,11 @@ def layered_graph_homology(left: Data, right: Data) -> dict:
         antigen=max(antigen,side_identity(la,ra,min_length_coverage=ANTIGEN_MIN_LENGTH_COVERAGE))
     cdr_id=global_identity(left_cdr,right_cdr) if left_cdr and right_cdr else 0.0
     return dict(
-        vhh_identity=float(vhh),
-        cdr_h3_identity=float(cdr_id),
-        antigen_identity=float(antigen),
+        # Measured values; region is explicit in every key: VHH and antigen are
+        # full-chain global identities, CDR-H3 is the loop sequence only.
+        vhh_full_chain_identity=float(vhh),
+        cdr_h3_loop_identity=float(cdr_id),
+        antigen_full_chain_identity=float(antigen),
         violates_vhh=bool(vhh>=VHH_IDENTITY_THRESHOLD),
         violates_cdr_h3=bool(cdr_id>=CDR_H3_IDENTITY_THRESHOLD),
         violates_antigen=bool(antigen>=ANTIGEN_IDENTITY_THRESHOLD),
@@ -547,7 +639,7 @@ def delivery_report(output,manifest,exclusions,failures,summary,complete):
         '- 训练候选按审计清单中的全部DB5.5配对PDB ID保守排除，即使对应备用图构建失败也不放回训练池；PDB ID排除不构成序列同源独立性证明。',
         f'- SNAC长CDR-H3：{summary.get("long_eligible",0)}条非DB5.5重叠候选，{summary.get("unique_long_cdr",0)}条唯一序列，{CDR_H3_IDENTITY_THRESHOLD*100:.0f}%代表簇 {summary.get("clusters",0)} 个；固定随机种子 {SEED} 选取目标400个，实际 {sum(r["split"]=="test_snac_hard" for r in manifest)}。',
         '- SNAC候选首先按CDR-H3做代表簇选择；最终图级隔离进一步统一检查VHH全链、CDR-H3和抗原序列。',
-        f'- 分层阈值：VHH全链<{VHH_IDENTITY_THRESHOLD:.2f}、CDR-H3<{CDR_H3_IDENTITY_THRESHOLD:.2f}、抗原<{ANTIGEN_IDENTITY_THRESHOLD:.2f}（抗原最小长度覆盖{ANTIGEN_MIN_LENGTH_COVERAGE:.2f}）。任一阈值触发即判为同源并隔离。',
+        f'- 分层阈值：VHH全链<{VHH_IDENTITY_THRESHOLD:.2f}、CDR-H3 loop<{CDR_H3_IDENTITY_THRESHOLD:.2f}、抗原全链<{ANTIGEN_IDENTITY_THRESHOLD:.2f}（抗原最小长度覆盖{ANTIGEN_MIN_LENGTH_COVERAGE:.2f}）。任一阈值触发即判为同源并隔离。',
         '- 同源计算使用全局Needleman–Wunsch、BLOSUM62、gap-open=10、gap-extend=1；训练与SNAC hard test在最终图级再次审计。',
         '- 硬过滤和隔离的数量可能重叠；逐样本多原因记录见 `excluded_samples.csv`。',
         '- Formal协议除分层序列阈值外还要求冻结PDB→family/structure cluster map，并在train↔hard及EGNN train↔validation中保持cluster不跨split。独立性声明仅限该cluster输入及其相似性定义，不外推为对所有可能远缘同源关系的绝对排除。',
@@ -710,7 +802,7 @@ def main():
         long=[r for r in pool if r['subset']=='snac_db' and len(cdr(r))>=16]
         clusters=cluster_long(long);order=list(range(len(clusters)));random.Random(partition_seed).shuffle(order)
         summary.update(long_eligible=len(long),unique_long_cdr=len({cdr(r) for r in long}),clusters=len(clusters))
-        print(f'Hard pool: {len(long)} structures / {len(clusters)} CDR-H3 identity clusters',flush=True)
+        print(f'Hard pool: {len(long)} structures / {len(clusters)} CDR-H3 loop identity clusters',flush=True)
         chosen=[];used_ids=set()
         for index in order:
             cl=clusters[index]
@@ -734,7 +826,7 @@ def main():
         # VHH/CDR-H3/antigen protocol later used for train/test isolation.
         hard_records=[r for r in manifest if r['split']=='test_snac_hard']
         kept_hard_records=[]; kept_hard_graphs=[]; removed_hard_ids=set(); kept_hard_clusters=set()
-        hard_pair_max=dict(vhh_identity=0.0,cdr_h3_identity=0.0,antigen_identity=0.0)
+        hard_pair_max=dict(vhh_full_chain_identity=0.0,cdr_h3_loop_identity=0.0,antigen_full_chain_identity=0.0)
         for record in hard_records:
             graph=torch.load(output/record['path'],map_location='cpu',weights_only=False)
             violation=None
@@ -747,7 +839,7 @@ def main():
                 if family_cluster in kept_hard_clusters:
                     violation=('family_cluster',dict(
                         violates_vhh=False,violates_cdr_h3=False,violates_antigen=False,
-                        vhh_identity=0.0,cdr_h3_identity=0.0,antigen_identity=0.0))
+                        vhh_full_chain_identity=0.0,cdr_h3_loop_identity=0.0,antigen_full_chain_identity=0.0))
             if violation is None:
                 for other_record,other_graph in zip(kept_hard_records,kept_hard_graphs):
                     homologous,detail=layered_graph_homologous(graph,other_graph)
@@ -770,7 +862,7 @@ def main():
                 if other_record=='family_cluster': reasons.append('family_cluster_overlap_snac_hard')
                 if detail['violates_vhh']: reasons.append('vhh_full_chain_overlap_snac_hard')
                 if detail['violates_cdr_h3']: reasons.append('cdr3_overlap_snac_hard_threshold')
-                if detail['violates_antigen']: reasons.append('antigen_overlap_snac_hard')
+                if detail['violates_antigen']: reasons.append('antigen_full_chain_overlap_snac_hard')
                 exclusions.append(exclusion(source,reasons))
         if removed_hard_ids:
             manifest[:]=[r for r in manifest if not (r['split']=='test_snac_hard' and r['source_id'] in removed_hard_ids)]
@@ -791,7 +883,7 @@ def main():
             if r['pdb_id'].upper() in hardids:reasons.append('pdb_overlap_snac_hard')
             seqs={cdr(r)} if cdr(r) else set()
             if r['subset']=='train_rcsb':seqs.update(x['cdr3'] for x in audit.PDB_ANNOTATIONS.get(r['pdb_id'].upper(),[]) if x['kind']=='VHH' and x['cdr3'])
-            if any(seqsim(s,t)>=CDR_H3_IDENTITY_THRESHOLD for s in seqs for t in hardseqs):reasons.append('cdr3_overlap_snac_hard_threshold')
+            if any(cdr_h3_loop_seqsim(s,t)>=CDR_H3_IDENTITY_THRESHOLD for s in seqs for t in hardseqs):reasons.append('cdr3_overlap_snac_hard_threshold')
             if reasons:exclusions.append(exclusion(r,reasons))
             else:train.append(r);known_train_cdr[r['id']]=sorted(seqs)
         print(f'Building {len(train)} train graphs; hard test {len(chosen)}',flush=True)
@@ -819,7 +911,7 @@ def main():
                 hard_clusters.add(cluster_map[key])
         train_records=[r for r in manifest if r['split']=='train']
         retained_train=[]; removed_train=set()
-        cross_max=dict(vhh_identity=0.0,cdr_h3_identity=0.0,antigen_identity=0.0)
+        cross_max=dict(vhh_full_chain_identity=0.0,cdr_h3_loop_identity=0.0,antigen_full_chain_identity=0.0)
         for record in train_records:
             graph=torch.load(output/record['path'],map_location='cpu',weights_only=False)
             violation_details=[]
@@ -830,7 +922,7 @@ def main():
                 if cluster_map[pdb_key] in hard_clusters:
                     violation_details.append(('family_cluster',dict(
                         violates_vhh=False,violates_cdr_h3=False,violates_antigen=False,
-                        vhh_identity=0.0,cdr_h3_identity=0.0,antigen_identity=0.0)))
+                        vhh_full_chain_identity=0.0,cdr_h3_loop_identity=0.0,antigen_full_chain_identity=0.0)))
             for hard_record,hard_graph in zip(hard_records,hard_graphs):
                 homologous,detail=layered_graph_homologous(graph,hard_graph)
                 for key in cross_max:
@@ -843,7 +935,7 @@ def main():
                     if source=='family_cluster': reasons.add('family_cluster_overlap_snac_hard')
                     if detail['violates_vhh']: reasons.add('vhh_full_chain_overlap_snac_hard')
                     if detail['violates_cdr_h3']: reasons.add('cdr3_overlap_snac_hard_threshold')
-                    if detail['violates_antigen']: reasons.add('antigen_overlap_snac_hard')
+                    if detail['violates_antigen']: reasons.add('antigen_full_chain_overlap_snac_hard')
                 source=next((row for row in train if row['id']==record['source_id']),
                             dict(id=record['source_id'],pdb_id=record['pdb_id'],subset=record['subset_source']))
                 exclusions.append(exclusion(source,sorted(reasons)))
@@ -858,20 +950,20 @@ def main():
         train_records=retained_train
         if not train_records:
             raise ValueError('Layered train/test homology isolation removed every training graph')
-        assert not ({r['pdb_id'] for r in train_records}&(dbids|hardids))
-        assert not (dbids&hardids)
-        maxhard=max_pair_similarity(hardseqs)
-        assert maxhard<CDR_H3_IDENTITY_THRESHOLD
-        maxtrain=max((seqsim(s,t) for r in train_records for s in known_train_cdr[r['source_id']] for t in hardseqs),default=0)
-        assert maxtrain<CDR_H3_IDENTITY_THRESHOLD
-        assert len(list((output/'graphs').rglob('*.pt')))==len(manifest)
-        assert sum(r['split']=='test_db55' for r in manifest)==248
+        _require(not ({r['pdb_id'] for r in train_records}&(dbids|hardids)), "validation failed: not ({r['pdb_id'] for r in train_records}&(dbids|hardids))")
+        _require(not (dbids&hardids), 'validation failed: not (dbids&hardids)')
+        maxhard=max_pair_cdr_h3_loop_identity(hardseqs)
+        _require(maxhard<CDR_H3_IDENTITY_THRESHOLD, 'validation failed: maxhard<CDR_H3_IDENTITY_THRESHOLD')
+        maxtrain=max((cdr_h3_loop_seqsim(s,t) for r in train_records for s in known_train_cdr[r['source_id']] for t in hardseqs),default=0)
+        _require(maxtrain<CDR_H3_IDENTITY_THRESHOLD, 'validation failed: maxtrain<CDR_H3_IDENTITY_THRESHOLD')
+        _require(len(list((output/'graphs').rglob('*.pt')))==len(manifest), "validation failed: len(list((output/'graphs').rglob('*.pt')))==len(manifest)")
+        _require(sum(r['split']=='test_db55' for r in manifest)==248, "validation failed: sum(r['split']=='test_db55' for r in manifest)==248")
         for split in ['train','test_db55','test_snac_hard']:
             sample_rows=[r for r in manifest if r['split']==split][:2]
             sample=[torch.load(output/r['path'],weights_only=False,map_location='cpu') for r in sample_rows]
-            batched=Batch.from_data_list(sample);assert batched.num_nodes==sum(g.num_nodes for g in sample)
+            batched=Batch.from_data_list(sample);_require(batched.num_nodes==sum(g.num_nodes for g in sample),f'PyG batch read-back failed for split {split}')
         summary.update(validation=dict(all_graphs_read_back=True,db55_count_248=True,pdb_split_overlap=0,
-            hard_max_pair_identity=maxhard,known_train_hard_max_identity=maxtrain,
+            hard_max_pair_cdr_h3_loop_identity=maxhard,known_train_hard_max_cdr_h3_loop_identity=maxtrain,
             hard_layered_pair_max=hard_pair_max,train_hard_layered_cross_max=cross_max,
             layered_train_hard_isolation=True,
             family_cluster_map_used=cluster_map is not None,

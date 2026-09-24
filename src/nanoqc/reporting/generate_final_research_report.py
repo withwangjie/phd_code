@@ -219,10 +219,10 @@ def section_data_reliability(ctx: ReportContext) -> List[str]:
     lines.append(f"- Admission by source: {json.dumps(run_summary.get('admission', {}))}")
     lines.append(f"- CDR-H3 >=16aa eligible pool: {run_summary.get('long_eligible', 'n/a')}; "
                   f"unique CDR sequences: {run_summary.get('unique_long_cdr', 'n/a')}; "
-                  f"{cdr_h3_threshold*100:.0f}%-CDR-H3-identity initial clusters: {run_summary.get('clusters', 'n/a')}.")
+                  f"{cdr_h3_threshold*100:.0f}%-CDR-H3-loop-identity initial clusters: {run_summary.get('clusters', 'n/a')}.")
     lines.append(
-        f"- Final layered graph-level isolation: VHH<{vhh_threshold:.2f}, "
-        f"CDR-H3<{cdr_h3_threshold:.2f}, antigen<{antigen_threshold:.2f} "
+        f"- Final layered graph-level isolation: VHH full-chain<{vhh_threshold:.2f}, "
+        f"CDR-H3 loop<{cdr_h3_threshold:.2f}, antigen full-chain<{antigen_threshold:.2f} "
         f"with antigen length coverage>={antigen_coverage:.2f}. "
         f"Observed train-hard maxima: "
         f"{json.dumps((run_summary.get('validation', {}) or {}).get('train_hard_layered_cross_max', {}))}"
@@ -285,16 +285,16 @@ def section_data_reliability(ctx: ReportContext) -> List[str]:
         f"{validation_meta.get('family_cluster_train_hard_overlap')}."
     )
     if selected:
-        vhh_ids = [float(d.get("max_vhh_identity", 0.0)) for d in selected]
-        antigen_ids = [float(d.get("max_antigen_identity", 0.0)) for d in selected]
-        cdr_ids = [float(d.get("cdr3_identity", 0.0)) for d in selected]
+        vhh_ids = [float(d.get("max_vhh_full_chain_identity", 0.0)) for d in selected]
+        antigen_ids = [float(d.get("max_antigen_full_chain_identity", 0.0)) for d in selected]
+        cdr_ids = [float(d.get("max_cdr_h3_loop_identity", 0.0)) for d in selected]
         if vhh_ids:
             lines.append(
-                f"- Layered homology isolation: VHH < {vhh_threshold:.2f}, "
-                f"CDR-H3 < {cdr_h3_threshold:.2f}, antigen < {antigen_threshold:.2f} "
+                f"- Layered homology isolation: VHH full-chain < {vhh_threshold:.2f}, "
+                f"CDR-H3 loop < {cdr_h3_threshold:.2f}, antigen full-chain < {antigen_threshold:.2f} "
                 f"with minimum length coverage {antigen_coverage:.2f}. "
-                f"Selected-target maxima: VHH {max(vhh_ids):.3f}, "
-                f"CDR-H3 {max(cdr_ids):.3f}, antigen {max(antigen_ids):.3f}."
+                f"Selected-target maxima: VHH full-chain {max(vhh_ids):.3f}, "
+                f"CDR-H3 loop {max(cdr_ids):.3f}, antigen full-chain {max(antigen_ids):.3f}."
             )
     lines.append("")
     return lines
@@ -553,9 +553,26 @@ def section_search_performance(ctx: ReportContext) -> List[str]:
         "The other site counts are pre-declared scaling conditions used to assess how relative "
         "quantum-classical performance changes with QUBO/problem size; they are not pooled into the primary test."
     )
+    exploration_md=ctx.run_dir/"quantum_exploration"/"summary.md"
+    if exploration_md.is_file():
+        lines.append("### Exploratory QAOA analyses (depth, optimizer budget, parameter transfer)")
+        lines.append("")
+        lines.extend(line for line in exploration_md.read_text(encoding="utf-8").splitlines()[2:])
+        lines.append("")
     lines.append("")
     scaling_stats=_read_json(ctx.run_dir/"statistics"/"quantum_scaling_statistics.json") or {}
     if scaling_stats:
+        amplification=scaling_stats.get("primary_amplification",{}) or {}
+        if amplification:
+            lines.append(
+                f"Primary quantum-intrinsic endpoint: at {amplification.get('active_sites')} sites the mean "
+                f"log10 exact ground-state amplification of QAOA over uniform feasible sampling is "
+                f"{_fmt(amplification.get('mean_log10_amplification'))} "
+                f"(95% cluster-bootstrap CI [{_fmt(amplification.get('ci_low'))}, {_fmt(amplification.get('ci_high'))}]; "
+                f"clusters={amplification.get('n_clusters')}; raw sign-flip p={_fmt(amplification.get('p_value'))}; "
+                f"gatekeeping-adjusted p={_fmt(amplification.get('p_gatekeeping_adjusted'))}). "
+                "0 means no concentration beyond random sampling; values are noiseless-simulator properties.")
+            lines.append("")
         primary_scaling=scaling_stats.get("primary",{}) or {}
         lines.append(
             f"Formal scaling inference uses `{scaling_stats.get('primary_predictor')}` as the primary "
@@ -565,11 +582,11 @@ def section_search_performance(ctx: ReportContext) -> List[str]:
             f"95% cluster-bootstrap CI=[{_fmt(primary_scaling.get('ci_low'))}, "
             f"{_fmt(primary_scaling.get('ci_high'))}]; "
             f"raw sign-flip p={_fmt(primary_scaling.get('p_value'))}; "
-            f"Holm-adjusted p={_fmt(primary_scaling.get('p_holm_global_qc_scaling'))}."
+            f"gatekeeping-adjusted p (primary family)={_fmt(primary_scaling.get('p_gatekeeping_adjusted'))}."
         )
         lines.append(
-            "Negative slope means the QAOA-minus-classical energy-gap difference becomes more favorable "
-            "to QAOA as the feasible configuration space grows. Every scaling size uses three states "
+            "Positive slope means QAOA concentrates relatively more probability on the ground state "
+            "(relative to uniform sampling) as the feasible configuration space grows. Every scaling size uses three states "
             "per site, one from each chi1 well; the analysis rejects cases lacking this policy. "
             "QAOA depth and optimizer evaluations stay fixed, so the slope estimates fixed-resource "
             "scaling rather than equal-compute scaling. This simulator-level analysis does "
@@ -648,19 +665,24 @@ def section_search_performance(ctx: ReportContext) -> List[str]:
             f"restarts={payload.get('primary_restarts')}; "
             f"cluster unit: {payload.get('cluster_unit','n/a')}.")
         lines.append("")
-        lines.append("| Baseline | Metric | Clusters | Mean QAOA-classical difference | 95% CI | p | Holm p (QC family) | Holm p (QC+scaling) |")
-        lines.append("|---|---|---:|---:|---|---:|---:|---:|")
+        lines.append("| Baseline | Metric | Family | Clusters | Mean QAOA-classical difference | 95% CI | p | Holm p (all effects, descriptive) | Gatekeeping-adjusted p |")
+        lines.append("|---|---|---|---:|---:|---|---:|---:|---:|")
         effects=payload.get("effects") or []
         if effects:
             for effect in effects:
                 lines.append(
-                    f"| {effect.get('baseline')} | {effect.get('metric')} | {effect.get('n_clusters',0)} | "
+                    f"| {effect.get('baseline')} | {effect.get('metric')} | {effect.get('gatekeeping_family','n/a')} | {effect.get('n_clusters',0)} | "
                     f"{_fmt(effect.get('mean_difference'))} | "
                     f"{_fmt(effect.get('ci_low'))}, {_fmt(effect.get('ci_high'))} | "
                     f"{_fmt(effect.get('p_value'))} | {_fmt(effect.get('p_holm'))} | "
-                    f"{_fmt(effect.get('p_holm_global_qc_scaling'))} |")
+                    f"{_fmt(effect.get('p_gatekeeping_adjusted'))} |")
         else:
-            lines.append("| — | — | 0 | n/a | n/a | n/a | n/a | n/a |")
+            lines.append("| — | — | — | 0 | n/a | n/a | n/a | n/a | n/a |")
+        lines.append("")
+        lines.append(
+            "Multiplicity: serial gatekeeping. The primary family (primary QC contrast and primary "
+            "scaling slope) is Holm-adjusted alone; secondary effects are confirmatory only after both "
+            "primary hypotheses are rejected. The all-effects Holm column is descriptive.")
         lines.append("")
         lines.append(f"Paired-case counts: `{json.dumps(payload.get('paired_cases',{}),sort_keys=True)}`.")
         lines.append(f"Exclusions: `{json.dumps(payload.get('exclusions',{}),sort_keys=True)}`.")
@@ -763,8 +785,16 @@ def section_structural_benefit(ctx: ReportContext) -> List[str]:
             f"- RQ5 energy-to-structure transfer: Spearman rho={_fmt(rq5.get('spearman_rho'))}; "
             f"95% cluster-bootstrap CI=[{_fmt(rq5.get('ci_low'))}, {_fmt(rq5.get('ci_high'))}]; "
             f"raw cluster-aware permutation p={_fmt(rq5.get('p_value'))}; "
-            f"Holm-adjusted p={_fmt(rq5.get('p_holm_confirmatory_family'))}."
+            f"Holm-adjusted p={_fmt(rq5.get('p_holm_confirmatory_family'))}; "
+            f"estimability={rq5.get('estimability', 'estimable')}."
         )
+        if str(rq5.get("estimability", "")).startswith("not_estimable_"):
+            lines.append(
+                "- RQ5 is not estimable under the pre-specified rule (a cluster-level difference is constant; "
+                f"mean delta energy={_fmt(rq5.get('mean_delta_energy'))}, "
+                f"mean delta RMSD={_fmt(rq5.get('mean_delta_rmsd'))}). It is reported descriptively and is "
+                "excluded from the Holm family; it is neither a positive nor a negative finding."
+            )
         lines.append(
             "- These are the only inferential structural results. Additional method/metric tables below "
             "are descriptive and are not separate hypothesis tests."
@@ -1064,9 +1094,9 @@ def section_applicability_boundary(ctx: ReportContext) -> List[str]:
         "- A small queue (see section 1.3 for its actual selected count) supports stability/sanity checking, "
         "not a general statistical-power guarantee.",
         f"- Independence checking is PDB-disjoint plus layered sequence isolation using published anti-leakage precedents: "
-        f"VHH < {100.0 * float((((ctx.frozen_config.get('queue_freeze', {}) or {}).get('homology_isolation', {}) or {}).get('vhh_full_chain_identity', 0.80))):.0f}%, "
-        f"CDR-H3 < {100.0 * float((((ctx.frozen_config.get('queue_freeze', {}) or {}).get('homology_isolation', {}) or {}).get('cdr_h3_identity', 0.50))):.0f}%, "
-        f"antigen < {100.0 * float((((ctx.frozen_config.get('queue_freeze', {}) or {}).get('homology_isolation', {}) or {}).get('antigen_identity', 0.30))):.0f}% "
+        f"VHH full-chain < {100.0 * float((((ctx.frozen_config.get('queue_freeze', {}) or {}).get('homology_isolation', {}) or {}).get('vhh_full_chain_identity', 0.80))):.0f}%, "
+        f"CDR-H3 loop < {100.0 * float((((ctx.frozen_config.get('queue_freeze', {}) or {}).get('homology_isolation', {}) or {}).get('cdr_h3_identity', 0.50))):.0f}%, "
+        f"antigen full-chain < {100.0 * float((((ctx.frozen_config.get('queue_freeze', {}) or {}).get('homology_isolation', {}) or {}).get('antigen_identity', 0.30))):.0f}% "
         f"with minimum length coverage {100.0 * float((((ctx.frozen_config.get('queue_freeze', {}) or {}).get('homology_isolation', {}) or {}).get('antigen_min_length_coverage', 0.70))):.0f}%. "
         "Formal runs additionally require the frozen family/structure cluster map recorded in section 1; "
         "independence claims are limited to those explicitly encoded sequence and cluster criteria, not arbitrary remote homology.",

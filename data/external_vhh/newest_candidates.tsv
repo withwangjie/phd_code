@@ -1,0 +1,1275 @@
+pdb_id	release_date	resolution	method	vhh_chains	antigen_chains	antigen_name	cdr_h3
+27xk	2026-06-16	2.64	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein G(s) subunit alpha|Guanine nucleoti	ARCPAPFTRDCFDVTSTTYAY
+27uh	2026-06-12	1.82	X-RAY DIFFRACTION	A,C,E,G	B,D,F,H,I,J,K	Protein S100-A4	AAARVLGGTTERA
+26xh	2026-05-19	2.82	ELECTRON MICROSCOPY	N	A,B	G protein subunit q|Guanine nucleotide-binding protein G(I)/G(S)/G(T) 	ARCPAPFTRDCFDVTSTTYAY
+30wc	2026-05-14	3.0	ELECTRON MICROSCOPY	C,D	A,B	Undecaprenyl-phosphate galactose phosphotransferase WbaP	AADPRPLSYSSSYYYRSGSYDY
+30us	2026-05-13	3.0	ELECTRON MICROSCOPY	C,D	A,B	UDP-Gal::undecaprenolphosphate Gal-1-P transferase WbaP	AADPRPLSYSSSYYYRSGSYDY
+26ap	2026-04-24	1.5	X-RAY DIFFRACTION	B	A	Activity-regulated cytoskeleton-associated protein	AARKPMYRVDISKGQNYDY
+25nx	2026-04-10	2.86	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein G(s) subunit alpha isoforms short|G	ARCPAPFTRDCFDVTSTTYAY
+24xy	2026-03-24	3.0	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein G(I)/G(S)/G(O) subunit gamma-2,mini	ARCPAPFTRDCFDVTSTTYAY
+11zw	2026-03-21	2.8	ELECTRON MICROSCOPY	N	L	PD3 Fab fragment light chain	AIDSDTFYSGSYDY
+24ti	2026-03-19	2.88	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein G(s) subunit alpha isoforms short|G	ARCPAPFTRDCFDVTSTTYAY
+24kr	2026-03-08	2.53	ELECTRON MICROSCOPY	D,E,F	A,B,C,J,P,S	Hemagglutinin|2-acetamido-2-deoxy-beta-D-glucopyranose	NADPSSVVGAIGAGYVY
+10zo	2026-02-12	1.65	X-RAY DIFFRACTION	A,C	B,D	Nucleoprotein	AQGWGIASMRY
+28jf	2026-02-03	2.593	X-RAY DIFFRACTION	F,G,H,I,J,Q,R,S,T,U	A,B,C,D,E,L,M,N,O,P	Capsid protein VP1	VGEIQYGTRYY
+28je	2026-02-03	2.492	X-RAY DIFFRACTION	F,G,H,I,J	A,AA,AB,AC,AD,AE,AF,AG,AH,AI,B,C,D,E,W,X,Y,Z	Capsid protein VP1|GLYCEROL	AAAPNWLGYSFKVDDYIY
+9ty2	2026-01-16	1.75	X-RAY DIFFRACTION	B	A	Maltose/maltodextrin-binding periplasmic protein	MRRGLPAY
+9zzo	2026-01-07	2.6	ELECTRON MICROSCOPY	E	A,C	Kappa-type opioid receptor,Vasopressin V2 receptor|Isoform 1B of Beta-	NTFVRSLS
+21tw	2025-12-24	2.43	ELECTRON MICROSCOPY	A1,A2	B,C,D	Tumor necrosis factor	ARSPSGFN
+9tpq	2025-12-18	2.9	ELECTRON MICROSCOPY	F,G	A,D,I,L,N	Gamma-aminobutyric acid receptor subunit alpha-3|2-acetamido-2-deoxy-b	YSYFGSGR
+9tns	2025-12-16	2.8	ELECTRON MICROSCOPY	F	A,E	Gamma-aminobutyric acid receptor subunit alpha-3|GABA-A receptor beta-	AARMGSGYSYYTGAQYDY
+9tnb	2025-12-15	2.8	ELECTRON MICROSCOPY	F,G	A,D,I,L,N,Q	Gamma-aminobutyric acid receptor subunit alpha-3|2-acetamido-2-deoxy-b	YSYFGSGR
+21du	2025-12-09	2.9	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alpha | guanine nucleo	ARCPAPFTRDCFDVTSTTYAY
+9th6	2025-12-02	2.267	X-RAY DIFFRACTION	B	A	guanine-n7 methyltransferase nsp14	AATRRSLTTATTDADA
+9xxt	2025-12-01	2.0	ELECTRON MICROSCOPY	N	A,B	Isoform Gnas-2 of Guanine nucleotide-binding protein G(s) subunit alph	ARCPAPFTRDCFDVTSTTYAY
+9xou	2025-11-15	2.5	ELECTRON MICROSCOPY	D,E,F	A,B,C,G,H,I	lactose permease | h3-prac-5350a,2-dehydro-3-deoxyphosphogluconate ald	AAAARPSYSGDYGYTEALRYDY
+9z3j	2025-11-06	2.8	ELECTRON MICROSCOPY	N	L	H1H7 light chain	AIDSDTFYSGSYDY
+9xjw	2025-11-05	2.53	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein G(s) subunit alpha isoforms short|G	ARCPAPFTRDCFDVTSTTYAY
+9t5q	2025-11-05	1.6	X-RAY DIFFRACTION	C,I	A,B	Volume-regulated anion channel subunit LRRC8A	AAAYEGDTSPLYYEEYGY
+9rit	2025-11-05	1.6	X-RAY DIFFRACTION	A,B	C,D	cytotoxin 1	
+9yz9	2025-10-30	2.1	X-RAY DIFFRACTION	B,D	A,C,H,O,P,Q	SARS-CoV-2 KP.3 RBD|GLYCEROL	ATCLCLDSFMYSSTDDY
+9yz8	2025-10-30	1.9	X-RAY DIFFRACTION	B	A,H,J,Q,S,T,U,V	SARS-CoV-2 KP.3 RBD|1,2-ETHANEDIOL	ATAACSGTYYHTNEYDY
+9yz7	2025-10-30	2.35	X-RAY DIFFRACTION	B	A,D,O,P,Q	SARS-CoV-2 KP.3 RBD|1,2-ETHANEDIOL|IODIDE ION	ATVVDYELGYPRCYPHERGY
+9h01	2025-10-29	2.533	X-RAY DIFFRACTION	B	A	guanine-n7 methyltransferase nsp14	
+9yxd	2025-10-27	2.29	X-RAY DIFFRACTION	K	C	Fab light chain	AIDSDTFYSGSYDY
+9t0e	2025-10-17	2.3	ELECTRON MICROSCOPY	C	A	RNA-directed RNA polymerase L	NAYELRPIQGARNY
+9yq5	2025-10-15	2.8	ELECTRON MICROSCOPY	B,C	A	hyaluronan synthase	AARRYGGTDYTTTGSYDY
+9yq2	2025-10-15	2.9	ELECTRON MICROSCOPY	B,C	A	hyaluronan synthase	AARRYGGTDYTTTGSYDY
+9yp2	2025-10-13	2.09	X-RAY DIFFRACTION	C,D	A,B	Capsid protein	KYGSY
+9ydr	2025-09-23	2.14	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein G(s) subunit alpha isoforms XLas|Gu	ARCPAPFTRDCFDVTSTTYAY
+9ydq	2025-09-23	1.94	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein G(s) subunit alpha isoforms XLas|Gu	ARCPAPFTRDCFDVTSTTYAY
+9ydp	2025-09-23	1.95	ELECTRON MICROSCOPY	N	A,B,G	guanine nucleotide-binding protein g(s) subunit alphaisoforms xlas  | 	ARCPAPFTRDCFDVTSTTYAY
+9yc3	2025-09-18	2.8	X-RAY DIFFRACTION	A	B	male gamete fusion factor hap2	AALSQKQMTTVQAMCAVPIANY
+9y7f	2025-09-10	1.7	X-RAY DIFFRACTION	A	B	Sodium channel protein type 9 subunit alpha	TMRAWSENTGNFAS
+9wpi	2025-09-09	1.82	X-RAY DIFFRACTION	B,D,F	A,C,E,M,T,V,W	TGP	TVKVGAEY
+9slq	2025-09-04	2.33	X-RAY DIFFRACTION	E,F,G,H	A,AH,AI,B,C,D,X	phosphopyruvate hydratase	NTVGGVHTNS
+9y3j	2025-09-02	1.95	X-RAY DIFFRACTION	C,D	A,B,H,I	CFTR inhibitory factor|1,2-ETHANEDIOL	AKAIRATTDRTQCVAFPGVS
+9y3i	2025-09-02	1.8	X-RAY DIFFRACTION	C,D,E,F	A,B	CFTR inhibitory factor	NAAILAYTGEVTNY
+9sl1	2025-09-02	2.68	ELECTRON MICROSCOPY	F,G,H,I	A,B,C,D,J,P,Q,U	Gamma-aminobutyric acid receptor subunit alpha-4|Gamma-aminobutyric ac	AARNAVRPSWFAVKQTESAYDY
+9shw	2025-08-28	2.79	ELECTRON MICROSCOPY	Ba,Bb,Bc	Aa,Ab,Ac	Fusion glycoprotein F0	QANINTSGGWFREY
+9shv	2025-08-28	2.87	ELECTRON MICROSCOPY	Ba,Bb,Bc	Aa,Ab,Ac	Fusion glycoprotein F0	NADPIWTIATMKRMGY
+9shd	2025-08-26	1.9	X-RAY DIFFRACTION	K	L	Light chain of Fab 10M2146	AIDSDTFYSGSYDY
+9wg6	2025-08-22	2.44	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein G(s) subunit alpha isoforms short|G	ARCPAPFTRDCFDVTSTTYAY
+9wg0	2025-08-22	2.59	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein G(s) subunit alpha isoforms short|G	ARCPAPFTRDCFDVTSTTYAY
+9q6n	2025-08-22	2.8	ELECTRON MICROSCOPY	B,C,D,E	A	Albumin	AATSYLNPDSDYARSDRSYGY
+9weu	2025-08-20	2.65	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein G(s) subunit alpha isoforms short|G	ARCPAPFTRDCFDVTSTTYAY
+9sf4	2025-08-19	2.6	ELECTRON MICROSCOPY	Ba,Bb,Bc	Aa,Ab,Ac	Fusion glycoprotein F0	NAQRVALTISPNDGY
+9q00	2025-08-12	2.84	X-RAY DIFFRACTION	A,C	B,D	Activity-regulated cytoskeleton-associated protein	AARKPMYRVDISKGQNYDY
+9pzz	2025-08-12	1.56	X-RAY DIFFRACTION	A,C	B,D	Activity-regulated cytoskeleton-associated protein	AARKPMYRVDISKGQNYDY
+9w8a	2025-08-07	2.95	ELECTRON MICROSCOPY	B	A	Spike glycoprotein E2,Spike glycoprotein E1	AAGFSARSGYGGYWYDPAAYNY
+9w89	2025-08-07	2.89	ELECTRON MICROSCOPY	B	A	Spike glycoprotein E2,Spike glycoprotein E1	AEVFCDSFHQGKYEAFY
+9pym	2025-08-07	2.98	ELECTRON MICROSCOPY	B	A	isethionate trap transporter permease protein dctmq	AVWARYPSTYYLGRGYDYLY
+9w7j	2025-08-06	2.97	ELECTRON MICROSCOPY	D	C	Spike glycoprotein E2,Spike glycoprotein E1	AEVFCDSFHQGKYEAFY
+9s9e	2025-08-06	1.31	X-RAY DIFFRACTION	A,B	C,D,E,G,H	Cytotoxin 1|ACETATE ION	NTEDEGSGTYYE
+9pum	2025-07-31	2.8	ELECTRON MICROSCOPY	H,I	A,B	Hemagglutinin-neuraminidase	NAVASPSWGLYDDY
+9w3l	2025-07-29	2.76	ELECTRON MICROSCOPY	B	A	G-protein coupled receptor 151	NAEYRTGIWEELLDG
+9w2j	2025-07-28	2.82	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein G(s) subunit alpha isoforms short|G	ARCPAPFTRDCFDVTSTTYAY
+9w2i	2025-07-28	2.93	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein G(s) subunit alpha isoforms short|G	ARCPAPFTRDCFDVTSTTYAY
+9w1j	2025-07-25	2.97	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein G(s) subunit alpha isoforms short|G	ARCPAPFTRDCFDVTSTTYAY
+9s35	2025-07-23	3.0	ELECTRON MICROSCOPY	B	A	gdp-mannose transporter	NAHRRVVMEWGPLGYDY
+9vxh	2025-07-18	2.5	X-RAY DIFFRACTION	B,D	A,C	Envelopment polyprotein	GAGGIATMRDLPAIAH
+9vwo	2025-07-17	2.45	X-RAY DIFFRACTION	B	A	Oncostatin-M	AKGGYYTGTPAY
+9vup	2025-07-13	2.52	X-RAY DIFFRACTION	B,D	A,C	Envelopment polyprotein	NTDNGDGLGDDY
+9vud	2025-07-12	2.69	X-RAY DIFFRACTION	D	C	Envelopment polyprotein	AAGYLDYSVSSYPQYEADY
+9vts	2025-07-11	2.56	ELECTRON MICROSCOPY	G,H,I	A,B,C,D,E,F	Envelope glycoprotein,GP1|Envelope glycoprotein	AADASYSPCYSAMTLRQSAYNS
+9rxi	2025-07-11	2.59	X-RAY DIFFRACTION	E,H	B	cathepsin d (a01 family)	AARYVGEGPRSELLYSDLMTVDY
+9pi8	2025-07-10	2.11	ELECTRON MICROSCOPY	E	A,B,C	viral protein 1|viral protein 2|viral protein 3	YARNLFTSGEY
+9pi7	2025-07-10	2.05	ELECTRON MICROSCOPY	E	A,B,C	viral protein 1|viral protein 2|viral protein 3	YARNLFTSGEY
+9vt4	2025-07-09	2.96	ELECTRON MICROSCOPY	G,H,I	A,B,C,D,E,F	Envelope glycoprotein|Envelope glycoprotein,GP1	VADRGWYGGSWSDYRSYRY
+9pel	2025-07-02	2.54	ELECTRON MICROSCOPY	D,H,J	A,B,C,E,F,G,a,b,c	Envelope glycoprotein GP1|alpha-D-mannopyranose-(1-3)-alpha-D-mannopyr	AARPWSIANLAYTYDS
+9vmg	2025-06-27	2.82	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein G(s) subunit alpha isoforms short|G	ARCPAPFTRDCFDVTSTTYAY
+9p94	2025-06-24	3.0	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+9p6x	2025-06-20	2.92	ELECTRON MICROSCOPY	D,E,F,G,H,I	A,B,C,J,K,L	envelope glycoprotein	NARLLVAPPPYEYDY
+9rn6	2025-06-19	2.4	X-RAY DIFFRACTION	B,C	A	spike protein s2',chimeric protein mimic of sars-cov-2spike hr1 	HTYGDSPERGY
+9vh5	2025-06-16	2.7	ELECTRON MICROSCOPY	C,F,I	A,B,D,E,G,H	Hemagglutinin	AARKWTGNVWAF
+9vh4	2025-06-16	2.8	ELECTRON MICROSCOPY	C,F,I	A,B,D,E,G,H	Hemagglutinin HA1 chain|Hemagglutinin	NFPRGLEFLDDF
+9riu	2025-06-11	2.5	X-RAY DIFFRACTION	A,C	B,D,E,H,I,J,L,M,O,T	short neurotoxin 1	AAAIGPGDNYIY
+9v2n	2025-05-20	2.63	ELECTRON MICROSCOPY	N	A,B	Engineered G-alpha-q subunit|Guanine nucleotide-binding protein G(I)/G	ARCPAPFTRDCFDVTSTTYAY
+9v0o	2025-05-18	2.7	X-RAY DIFFRACTION	A,B,E,G	C,D,F,H	Spike glycoprotein	AAVGGLENWVVVTSGYDY
+9uy3	2025-05-14	2.52	ELECTRON MICROSCOPY	N	A,B	Engineered G-alpha-q subunit|Guanine nucleotide-binding protein G(I)/G	ARCPAPFTRDCFDVTSTTYAY
+9upr	2025-04-28	2.77	ELECTRON MICROSCOPY	E	C,F	2-acetamido-2-deoxy-beta-D-glucopyranose-(1-4)-2-acetamido-2-deoxy-bet	NYGSMSNPRTSGPNAF
+9uoi	2025-04-25	1.96	X-RAY DIFFRACTION	A,C	B,D	Spike glycoprotein|2-acetamido-2-deoxy-beta-D-glucopyranose-(1-4)-2-ac	SVFRAHVGQS
+9r19	2025-04-25	2.69	X-RAY DIFFRACTION	D,E,F,G,H,I	A,B,C	processed angiotensin-converting enzyme 2	ARAKGFSTIYNQDEGRYDY
+9uo0	2025-04-24	2.5	X-RAY DIFFRACTION	A	M	Spike glycoprotein	AMHWSGDYLHETSYDY
+9r0j	2025-04-24	2.45	X-RAY DIFFRACTION	C	B,I,L	Entry-fusion complex protein OPG094|GLYCEROL	NARRDNFATAIY
+9r0b	2025-04-24	2.45	X-RAY DIFFRACTION	C	B,H,I	Entry-fusion complex protein OPG094|GLYCEROL	NARRDNFATAIY
+9r09	2025-04-24	2.45	X-RAY DIFFRACTION	C	B,H	Entry-fusion complex protein OPG094|GLYCEROL	NARRDNFATAIY
+9obn	2025-04-22	2.5	X-RAY DIFFRACTION	E,F,G,H	A,B,C,D,K,L	gametocyte surface protein p45/48	AQTGSTGWPAGRTYTYDY
+9ulp	2025-04-20	2.55	X-RAY DIFFRACTION	C,D	A,B	Iron-hydroxamate ABC transporter substrate-binding protein	NVRGHPPLTYDY
+9uln	2025-04-20	2.94	X-RAY DIFFRACTION	K	B	light chain	AVDSDTFYSGSYDY
+9ulm	2025-04-20	2.01	X-RAY DIFFRACTION	I,K	B,D	light chain	AVDSDTFYSGSYDY
+9o5s	2025-04-10	2.27	X-RAY DIFFRACTION	F,G,K,O	AQ,B,BA,D,I,M	Beta-2-microglobulin	YGLSYSNDDY
+9qty	2025-04-09	2.98	ELECTRON MICROSCOPY	C	B	Isoform 2 of Multiple epidermal growth factor-like domains protein 8	HAYTVRRFQGMEY
+9qto	2025-04-09	2.16	ELECTRON MICROSCOPY	F,G,H,I,J	A,B,C,D,E,F,G,H,I,J,L,O,R,U,X	neuronal acetylcholine receptor subunit alpha-7,chrna7(exons 5-10) and	AADFLSTCSLAGYRYEEV
+9qtn	2025-04-09	2.28	ELECTRON MICROSCOPY	F,G,H,I,J	A,B,C,D,E,L,M,N,O,R,S,U,V,X,Y	neuronal acetylcholine receptor subunit alpha-7	AADGDRFYPEPVVDDNAYKF
+9o38	2025-04-06	3.0	ELECTRON MICROSCOPY	E	B,C	taste receptor type 1 member 3,guanine nucleotide-bindingprotein g(s) 	ARCPAPFTRDCFDVTSTTYAY
+9ucp	2025-04-05	2.88	ELECTRON MICROSCOPY	C	A	m1 muscarinic acetylcholine receptor, de novo designprotein 	AVRRVYVYVQRYYHYY
+9ucl	2025-04-04	2.43	ELECTRON MICROSCOPY	D,E,F	A,B,C,G,H,I	nectin-4 | h3-prac-5350a,2-dehydro-3-deoxyphosphogluconate aldolase/4-	AASWHWNPPDHSWDAGY
+9ubr	2025-04-03	2.62	ELECTRON MICROSCOPY	G,H,I,J,K,L	A,B,C,D,E,F,M,N,O,P,Q,R	galectin-10 | prac-5350a,2-dehydro-3-deoxyphosphogluconate aldolase/4-	AAGSAFSLSPGRFPY
+9ub6	2025-04-02	2.89	X-RAY DIFFRACTION	B	A	glycoprotein n	NVRWTDY
+9qqs	2025-04-02	2.65	ELECTRON MICROSCOPY	C	B	Isoform 2 of Multiple epidermal growth factor-like domains protein 8	HAYTVRRFQGMEY
+9uaq	2025-04-01	2.29	ELECTRON MICROSCOPY	D,E,F	A,B,C,G,H,I	green fluorescent protein | h3-prac-5350a,2-dehydro-3-deoxyphosphogluc	NVNVGFEY
+9u9v	2025-03-29	2.85	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+9u8g	2025-03-26	2.0	X-RAY DIFFRACTION	E,F	B,D,K,L,M,N	transmembrane protease serine 2 catalytic chain	ATPQMWVQRDRDDRWY
+9u5c	2025-03-21	2.25	ELECTRON MICROSCOPY	B,D,F,H	A,C,E,G	Short transient receptor potential channel 3	AARVYSYSSDVDCRPSFTTRFPY
+9qjy	2025-03-19	2.78	ELECTRON MICROSCOPY	F,G	A,D,L,Q	Gamma-aminobutyric acid receptor subunit alpha-2|2-acetamido-2-deoxy-b	AAQSVIRSIFTSDVKDASKYDY
+9qjx	2025-03-19	2.7	ELECTRON MICROSCOPY	F,G	A,B,D,E	Gamma-aminobutyric acid receptor subunit alpha-2|Gamma-aminobutyric ac	AAVGYSSSCNPLWYDY
+9qjs	2025-03-19	2.52	ELECTRON MICROSCOPY	F,G,H,I	A,B,C,D,E,K,O,Q,S,U,V,W	Gamma-aminobutyric acid receptor subunit alpha-2|2-acetamido-2-deoxy-b	AASLSAYYSSYAREYNY
+9qjr	2025-03-19	2.92	ELECTRON MICROSCOPY	F,G,H,I	A,B,C,D,E,N,P,R,T	Gamma-aminobutyric acid receptor subunit alpha-2	GADSSWGWCGSGWYVSVPREYEY
+9qjq	2025-03-19	2.63	ELECTRON MICROSCOPY	F,G,H,I	A,B,C,D,E,K,L,P,R,T,V,W	Gamma-aminobutyric acid receptor subunit alpha-3|2-acetamido-2-deoxy-b	YSYFGSGR
+9npt	2025-03-11	2.98	ELECTRON MICROSCOPY	G,H,I	A,C,E	envelope glycoprotein gp1	AASTEWASESLQYGNWGHESSKYAN
+9nox	2025-03-10	3.0	ELECTRON MICROSCOPY	E	B,C	minigs/gust25 | guanine nucleotide-binding protein g(i)/g(s)/g(t) subu	ARCPAPFTRDCFDVTSTTYAY
+9m6o	2025-03-07	1.49	X-RAY DIFFRACTION	B,C	A,H	immunoglobulin g-binding protein a	AARDGIPTSRTVGSYNY
+9m6j	2025-03-07	2.0	X-RAY DIFFRACTION	A	H	immunoglobulin g-binding protein a	AARDGIPTSRTVGSYNY
+9nn9	2025-03-05	2.59	X-RAY DIFFRACTION	B,D,F	A,C,E,J	ubiquitin-like protein isg15	HASTLWPEKHQDY
+9m40	2025-03-03	2.72	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein G(s) subunit alpha isoforms short|G	ARCPAPFTRDCFDVTSTTYAY
+9m3s	2025-03-03	2.83	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein G(s) subunit alpha isoforms short|G	ARCPAPFTRDCFDVTSTTYAY
+9m3q	2025-03-03	2.74	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein G(s) subunit alpha isoforms short|G	ARCPAPFTRDCFDVTSTTYAY
+9nk9	2025-02-28	2.1	X-RAY DIFFRACTION	A	B	ser-phe-glu-asp-phe-trp-lys-gly-glu-asp	KVNIRGQDY
+9m2s	2025-02-28	2.78	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein G(s) subunit alpha isoforms short|G	ARCPAPFTRDCFDVTSTTYAY
+9m2o	2025-02-28	2.59	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein G(s) subunit alpha isoforms short|G	ARCPAPFTRDCFDVTSTTYAY
+9q9s	2025-02-26	2.7	ELECTRON MICROSCOPY	d,e,f	A,B,C	envelope glycoprotein b	NARWRGMNV
+9q9n	2025-02-26	3.0	ELECTRON MICROSCOPY	d,e,f	A,B,C	glycoprotein b	NARWRGMNV
+9m1u	2025-02-26	2.64	ELECTRON MICROSCOPY	N	A,B	fusion protein of Guanine nucleotide-binding protein G(i) subunit alph	ARCPAPFTRDCFDVTSTTYAY
+9m1s	2025-02-26	2.65	ELECTRON MICROSCOPY	N	A,B	fusion protein of Guanine nucleotide-binding protein G(i) subunit alph	ARCPAPFTRDCFDVTSTTYAY
+9m1r	2025-02-26	2.66	ELECTRON MICROSCOPY	N	A,B	fusion protein of Guanine nucleotide-binding protein G(i) subunit alph	ARCPAPFTRDCFDVTSTTYAY
+9m1p	2025-02-26	2.8	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein G(s) subunit alpha isoforms short|G	ARCPAPFTRDCFDVTSTTYAY
+9m0z	2025-02-25	2.74	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein G(s) subunit alpha isoforms short|G	ARCPAPFTRDCFDVTSTTYAY
+9m0x	2025-02-25	2.71	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein G(s) subunit alpha isoforms short|G	ARCPAPFTRDCFDVTSTTYAY
+9m0j	2025-02-24	2.9	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein G(q) subunit alpha-1|Guanine nucleo	ARCPAPFTRDCFDVTSTTYAY
+9ias	2025-02-11	2.8	ELECTRON MICROSCOPY	C,D	A,B,E,H	Sodium-independent sulfate anion transporter|1,2-dioleoyl-sn-glycero-3	ARKIPGSSLFLRNKADFDS
+9lrb	2025-01-30	2.77	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+9n2i	2025-01-28	3.0	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein G(s) subunit alpha isoforms short|G	ARCPAPFTRDCFDVTSTTYAY
+9n29	2025-01-28	2.6	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein Gi chimera (mGsI)|Guanine nucleotid	ARCPAPFTRDCFDVTSTTYAY
+9lqx	2025-01-28	2.7	ELECTRON MICROSCOPY	C,D	A,B,W	apelin receptor	AAVPRAGIEYSGAYCKWNMKDSGS
+9lqw	2025-01-28	2.7	ELECTRON MICROSCOPY	C,D	A,B	apelin receptor	AAVPRAGIEYSGAYCKWNMKDSGS
+9lqu	2025-01-28	2.7	ELECTRON MICROSCOPY	C,D	A,B,M,X	apelin receptor	AAVPRAGIEYSGAYCKWNMKDSGS
+9lqi	2025-01-28	2.95	X-RAY DIFFRACTION	A,B	C,R	Tumor necrosis factor receptor superfamily member 1B	HAEISQLGYAFRDY
+9n1q	2025-01-26	3.0	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein G(s) subunit alpha isoforms short|G	ARCPAPFTRDCFDVTSTTYAY
+9n1p	2025-01-26	2.9	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein G(s) subunit alpha isoforms short|G	ARCPAPFTRDCFDVTSTTYAY
+9n0e	2025-01-24	2.3	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein G(s) subunit alpha isoforms short|G	ARCPAPFTRDCFDVTSTTYAY
+9n09	2025-01-23	2.57	ELECTRON MICROSCOPY	N	A,B,G	mini-gs/i chimera | guanine nucleotide-binding protein g(i)/g(s)/g(o) 	ARCPAPFTRDCFDVTSTTYAY
+9n05	2025-01-23	2.2	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein G(s) subunit alpha isoforms short|G	ARCPAPFTRDCFDVTSTTYAY
+9n04	2025-01-23	2.3	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein G(s) subunit alpha isoforms short|G	ARCPAPFTRDCFDVTSTTYAY
+9mzg	2025-01-22	3.0	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein G(s) subunit alpha isoforms short|G	ARCPAPFTRDCFDVTSTTYAY
+9mzf	2025-01-22	2.5	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein G(s) subunit alpha isoforms short|G	ARCPAPFTRDCFDVTSTTYAY
+9mze	2025-01-22	2.2	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein G(s) subunit alpha isoforms short|G	ARCPAPFTRDCFDVTSTTYAY
+9mxu	2025-01-20	2.5	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein G(s) subunit alpha isoforms short|G	ARCPAPFTRDCFDVTSTTYAY
+9lme	2025-01-18	2.404	X-RAY DIFFRACTION	C,F	A,AG,B,BH,BL,BZ,CB,CC,CD,CF,CG,CI,CJ,CK,O	cd276 antigen	ALGFRTLTGL
+9lm5	2025-01-18	2.77	ELECTRON MICROSCOPY	D,E,F	A,B,C	fusion glycoprotein f0	AAGNAAWGLVDYYTEADFAY
+9llj	2025-01-17	2.61	ELECTRON MICROSCOPY	N	A,B	Isoform Gnas-2 of Guanine nucleotide-binding protein G(s) subunit alph	ARCPAPFTRDCFDVTSTTYAY
+9llh	2025-01-17	2.73	ELECTRON MICROSCOPY	N	A,B	Isoform Gnas-2 of Guanine nucleotide-binding protein G(s) subunit alph	ARCPAPFTRDCFDVTSTTYAY
+9llf	2025-01-17	2.64	ELECTRON MICROSCOPY	N	A,B	Isoform Gnas-2 of Guanine nucleotide-binding protein G(s) subunit alph	ARCPAPFTRDCFDVTSTTYAY
+9lle	2025-01-17	2.9	ELECTRON MICROSCOPY	N	B,D	Guanine nucleotide-binding protein G(I)/G(S)/G(T) subunit beta-1|Isofo	ARCPAPFTRDCFDVTSTTYAY
+9mw5	2025-01-16	2.1	ELECTRON MICROSCOPY	D,E,F	A,B,C	envelope glycoprotein b	AAVGPKTWDYGLASEYDY
+9mvu	2025-01-16	2.2	ELECTRON MICROSCOPY	D,E,F	A,B,C	envelope glycoprotein b	LFDRRLGTVVTGPEGY
+8rlb	2025-01-15	2.99	ELECTRON MICROSCOPY	D,K	B	green fluorescent protein	
+9hzk	2025-01-13	2.07	X-RAY DIFFRACTION	A	B,H,I,J,K,O	circumsporozoite protein	AADLWQYGRNSRAADYDY
+9hzj	2025-01-13	2.06	X-RAY DIFFRACTION	A	B,G,H	circumsporozoite protein	AADLLQFGRSSRAADYDY
+9mte	2025-01-11	2.66	ELECTRON MICROSCOPY	A,B	C	receptor tyrosine-protein kinase erbb-2	WDVNGDI
+9lh2	2025-01-11	2.3	X-RAY DIFFRACTION	B,D	A,C	spike protein s1	AKDHHAHEDHFNSGFDRKYDY
+9lgm	2025-01-10	2.84	ELECTRON MICROSCOPY	N	A,B,C	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+9lds	2025-01-06	1.6	X-RAY DIFFRACTION	A,C	B,D	spike protein s2'	NARRGATNT
+9lad	2025-01-02	2.02	X-RAY DIFFRACTION	B	C,H	neuronal pentraxin-2	NARAGRYDY
+9hvl	2024-12-29	2.71	ELECTRON MICROSCOPY	H,P	A,E,K,S	Glutamate carboxypeptidase 2|2-acetamido-2-deoxy-beta-D-glucopyranose	AARRDYSLSSSSDDFDY
+9hvk	2024-12-29	3.0	ELECTRON MICROSCOPY	H,M,P,Q	A,E,K,U	glutamate carboxypeptidase 2	AVAACHFCDSLPKTQDEYIL
+9hvi	2024-12-29	2.46	ELECTRON MICROSCOPY	H,Q	A,E,K,S	glutamate carboxypeptidase 2	AARRDYSLSSSSDDFDY
+9mo0	2024-12-24	2.83	ELECTRON MICROSCOPY	C	A,F	Mitochondrial pyruvate carrier 1|MBP-PrA/G	AVKSGLIYAHRY
+9hur	2024-12-23	1.65	X-RAY DIFFRACTION	B	A,D	cd63 antigen	AAAENGFKIPLWEYIYTY
+9hq5	2024-12-16	2.6	X-RAY DIFFRACTION	B	A,E	cd63 antigen	YVYVGWLY
+9min	2024-12-13	2.05	X-RAY DIFFRACTION	E,J	B,G,Z	Beta-2-microglobulin	YGLSYSNDDY
+9ho6	2024-12-11	2.0	X-RAY DIFFRACTION	C,D	A,B	frataxin mature form	NAVPPIVTVNATDY
+9ho5	2024-12-11	1.5	X-RAY DIFFRACTION	C	A	frataxin mature form	NAVPPIVTVNATDY
+9ho4	2024-12-11	1.76	X-RAY DIFFRACTION	C	A	frataxin mature form	NSVPPAPGEYGRDY
+9hng	2024-12-10	2.5	X-RAY DIFFRACTION	C	B	Entry-fusion complex protein OPG094	NARRDNFATAIY
+9mfg	2024-12-09	2.85	X-RAY DIFFRACTION	E,F,G,H	A,AG,B,C,D	interleukin-23 receptor	AAKRPDAGWQTYDY
+9hml	2024-12-09	2.171	X-RAY DIFFRACTION	C	B	kir2dl protein	AAERTGWSSEYDY
+9hlw	2024-12-05	2.66	ELECTRON MICROSCOPY	H,Q	A,E	glutamate carboxypeptidase 2	AVAACHFCDSLPKTQDEYIL
+9hll	2024-12-05	2.17	X-RAY DIFFRACTION	B,C,D	A,B,D,E,F,G	integrin alpha-m	AAEWNNFGRLCMYPDY
+9ekh	2024-12-02	2.89	ELECTRON MICROSCOPY	K	L	anti-BRIL Fab Light Chain	AIDSDTFYSGSYDY
+9ejz	2024-11-30	2.06	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein Gq chimera|Guanine nucleotide-bindi	ARCPAPFTRDCFDVTSTTYAY
+9ei0	2024-11-25	2.91	ELECTRON MICROSCOPY	E,F,G,H	A,B,C,D	potassium voltage-gated channel subfamily a member 3,greenfluorescent 	SSWRTGFYEY
+9kpd	2024-11-22	2.84	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short,gu	ARCPAPFTRDCFDVTSTTYAY
+9egn	2024-11-21	1.57	X-RAY DIFFRACTION	B	A	caveolae-associated protein 1	NAPQFTDRY
+9ee8	2024-11-18	2.63	ELECTRON MICROSCOPY	E	B,D	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+9ee5	2024-11-18	2.89	ELECTRON MICROSCOPY	K	L	anti-BRIL Fab Light Chain	AIDSDTFYSGSYDY
+9eb9	2024-11-12	3.0	ELECTRON MICROSCOPY	E,F,G,H	A,B,C,D	mucolipin-1	YVMVGQWY
+9ea9	2024-11-10	2.93	X-RAY DIFFRACTION	C,F	A	Botulinum neurotoxin type A	ATGYRTDTRIPGGS
+9kgk	2024-11-08	2.63	ELECTRON MICROSCOPY	B,E	A	leucine-rich repeat-containing g-protein coupled receptor4 	AAASLSTRGCSRAEWEYRY
+9e9s	2024-11-08	2.68	ELECTRON MICROSCOPY	N	A,B,C	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+9hap	2024-11-04	2.5	ELECTRON MICROSCOPY	K	L	Synthetic antibody, anti-BRIL Fab fragment, Light chain	AIDSDTFYSGSYDY
+9kdb	2024-11-03	2.67	ELECTRON MICROSCOPY	E,F,G,H	A,B,C,D	Short transient receptor potential channel 3	AADRYIGTRWKYVRPEDYSY
+9e7o	2024-11-03	1.93	X-RAY DIFFRACTION	A	B,C,E,F	gametocyte surface protein p230	AAGPYSSDYGGFGS
+9e7n	2024-11-03	2.49	X-RAY DIFFRACTION	C,D	A,B	gametocyte surface protein p230	AARWPGGGMWYEPPYDY
+9e7k	2024-11-01	2.41	X-RAY DIFFRACTION	C	A,B	isoform 3 of ubiquitin carboxyl-terminal hydrolase isozymel5  | protea	AAGRNIWHAY
+9h77	2024-10-26	2.01	X-RAY DIFFRACTION	A,B	C,D	m-phase phosphoprotein 8	ARGSTLFSTNWDY
+9h76	2024-10-26	2.9	ELECTRON MICROSCOPY	B	A	putative amino acid/polyamine transport protein	NAQLVAWSENY
+9h6v	2024-10-25	2.19	X-RAY DIFFRACTION	C,D,E,F	A,B,C,D,E,F,K,L,O,P,Q,R,S,T,U,V,W	lysm type receptor kinase	AARTRGIVCDSTDSYGY
+9k0x	2024-10-16	2.83	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTPFCFDVTSTTYAY
+9h39	2024-10-16	1.66	X-RAY DIFFRACTION	C,D	A,B,M,N	lysm type receptor kinase	LVRDQREWYGPEYDN
+9k07	2024-10-15	2.83	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein G(i) subunit alpha-2,Guanine nucleo	ARCPAPFTRDCFDVTSTTYAY
+9h1j	2024-10-09	1.73	X-RAY DIFFRACTION	A,B,C,D	E,F,G,H	sequestosome-1	ATDLRGAQ
+9h1f	2024-10-09	1.8	X-RAY DIFFRACTION	B	A	cofilin-1	VRVGAEY
+9dvr	2024-10-08	2.7	ELECTRON MICROSCOPY	G,H	A,B	antiplasmin-cleaving enzyme fap, soluble form	AKARTGWSLAVPSFGS
+9dvq	2024-10-08	2.7	ELECTRON MICROSCOPY	G	A	antiplasmin-cleaving enzyme fap, soluble form	AKARTGWSLAVPSFGS
+9gyo	2024-10-02	2.5	ELECTRON MICROSCOPY	N	A,B	isoform gnas-2 of guanine nucleotide-binding protein g(s)subunit alpha	ARCPAPFTRDCFDVTSTTYAY
+9gv3	2024-09-21	1.751	X-RAY DIFFRACTION	E,F,G,H	A,B,C,D	fructose-bisphosphate aldolase	ALDTTDRYDSANGRYYCTISSDTYAY
+9jkq	2024-09-16	2.66	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+9jh6	2024-09-09	2.89	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein G(i) subunit alpha-1|Guanine nucleo	ARCPAPFTRDCFDVTSTTYAY
+9jfz	2024-09-05	2.9	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+9jfx	2024-09-05	2.87	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+9jd0	2024-08-30	2.0	X-RAY DIFFRACTION	E,F	C,D,L,N,O	transmembrane protease serine 2 catalytic chain	ATPQMWVQRDVQARWY
+9jcq	2024-08-30	2.59	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein G(s) subunit alpha|Guanine nucleoti	ARCPAPFTRDCFDVTSTTYAY
+9jcp	2024-08-30	2.55	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein G(q) subunit alpha|Guanine nucleoti	ARCPAPFTRDCFDVTSTTYAY
+9jco	2024-08-30	2.36	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein G(s) subunit alpha|Guanine nucleoti	ARCPAPFTRDCFDVTSTTYAY
+9jcl	2024-08-29	2.76	ELECTRON MICROSCOPY	N	A,B,G	gnas complex locus | guanine nucleotide-binding protein g(i)/g(s)/g(t)	ARCPAPFTRDCFDVTSTTYAY
+9det	2024-08-29	3.0	ELECTRON MICROSCOPY	q	a	V-type proton ATPase 116 kDa subunit a 4	VATAMTTGATMTVDNVDY
+9glz	2024-08-28	2.1	X-RAY DIFFRACTION	C,D	A,B	gtpase kras	AATRSNFYFPREDMSYDS
+9dc3	2024-08-25	2.31	ELECTRON MICROSCOPY	AB,AD,AF,AH,AJ,AL,AN,AP,AQ,AR,AS,AT,AU,AV,AW,AX,AY,AZ,BA,BB,BC,BD,BE,BF,BG,BH,BI,BJ,BK,BL,BM,BN,BO,BP,BQ,BR,BS,BT,BU,BV,BW,BX,BY,BZ,CA,CB,CC,CD,CE,CF,CG,CH,CI,CJ,CK,CL,CM,CN,CO,CP	A,AA,AC,AE,AG,AI,AK,AM,AO,B,C,D,E,F,G,H,I,J,K,L,M,N,O,P,Q,R,S,T,U,V,W,X,Y,Z,a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z	Capsid protein	AAGPTLMSGSYNSARDYDY
+9j7y	2024-08-20	2.59	X-RAY DIFFRACTION	H	G	entry-fusion complex associated protein opg095	AVAWLSIPDLAEWYDY
+9j3o	2024-08-08	2.9	ELECTRON MICROSCOPY	B	A	adp,atp carrier protein 1	AARKRYHYYSY
+9j3n	2024-08-08	2.72	ELECTRON MICROSCOPY	B	A	adp,atp carrier protein 1	AARKRYHYYSY
+9j3m	2024-08-08	2.77	ELECTRON MICROSCOPY	B	A	adp,atp carrier protein 1, chloroplastic	NVKDYVYNTYLYDY
+9j3l	2024-08-08	2.72	ELECTRON MICROSCOPY	C	A	adp,atp carrier protein 1, chloroplastic	NVKDYVYNTYLYDY
+9j3j	2024-08-08	2.83	ELECTRON MICROSCOPY	B	A	adp,atp carrier protein 1, chloroplastic	NVKDLGAWYNDYDY
+9j1p	2024-08-05	2.99	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(i) subunit alpha-1,guanine nucleo	ARCPAPFTRDCFDVTSTTYAY
+9gcn	2024-08-02	3.0	X-RAY DIFFRACTION	A,B,C,D	V,X,Y,Z	alpha-cobratoxin	NAVVGNWYTSGYYEDTY
+9ixj	2024-07-28	2.92	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+9g9p	2024-07-25	2.8	X-RAY DIFFRACTION	B,C	A,B,C	lipid iii flippase	AATLPAWTGIIGGRRPGNYPY
+9g9o	2024-07-25	2.69	X-RAY DIFFRACTION	B,C	A	lipid iii flippase	AATLPAWTGIIGGRRPGNYPY
+9g9n	2024-07-25	2.8	X-RAY DIFFRACTION	B,C	A,B,C	lipid iii flippase	AATLPAWTGIIGGRRPGNYPY
+9g9m	2024-07-25	2.55	X-RAY DIFFRACTION	B,C	A	lipid iii flippase	AATLPAWTGIIGGRRPGNYPY
+9g97	2024-07-24	2.31	X-RAY DIFFRACTION	B	A	lipid iii flippase	AATLPAWTGIIGGRRPGNYPY
+9g95	2024-07-24	2.8	X-RAY DIFFRACTION	B	A	lipid iii flippase	AATLPAWTGIIGGRRPGNYPY
+9ivg	2024-07-23	3.0	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(i) subunit alpha-1,guanine nucleo	ARCPAPFTRDCFDVTSTTYAY
+9g7k	2024-07-21	2.08687	X-RAY DIFFRACTION	C,D,G,H	A,AA,AC,AG,AH,AI,AJ,AM,B,E,F,J,N,Q,R,V,X,Z	endoribonuclease mazf	AAKEGPYSGSYYYMPVFRDEYDY
+9itb	2024-07-19	2.89	ELECTRON MICROSCOPY	N	A,B	engineered minigaq | guanine nucleotide-binding protein g(i)/g(s)/g(t)	ARCPAPFTRDCFDVTSTTYAY
+9g6v	2024-07-19	2.9	ELECTRON MICROSCOPY	A,E,I,M,Q	B,C,D,F,G,H,J,K,L,N,O,P,R,S,T	Genome polyprotein	TTVLQQTTKKENNCPDGYSCGYRCRSGWGCSGDECCGRRGGGWGSIELIACCSSTYIHEFHVDA
+9ish	2024-07-17	2.88	X-RAY DIFFRACTION	B,D	A,C,E,F,G,H	glycoprotein d	AANRYFTYGGSMRNPQEYNR
+9g5l	2024-07-17	1.8222	X-RAY DIFFRACTION	B	A	endoribonuclease mazf	AADSYLLEFCGYYSGSSYSGPASGRLDY
+9g5k	2024-07-17	2.87	ELECTRON MICROSCOPY	B	A	thiamine transporter 2	AAAEDRWALAVRTATTYNY
+9co8	2024-07-16	2.99	ELECTRON MICROSCOPY	D,E,F	A,B,C,E,F	spike glycoprotein	AADPGAVCHSGSYYYTDDDFYY
+9g4g	2024-07-15	2.89573	X-RAY DIFFRACTION	B	A	endoribonuclease mazf	AADPFPGVCTYASSRIYEHDY
+9g48	2024-07-15	2.14354	X-RAY DIFFRACTION	C,D	A,B,I,K	endoribonuclease mazf	AAEAPPLLYDSGSYYCQPLYQYDY
+9iqp	2024-07-13	1.55	X-RAY DIFFRACTION	B	A,D	spike protein s1	VARGVGVYGMHWFCGEYNF
+9g2g	2024-07-10	1.80048	X-RAY DIFFRACTION	C,D	A,B,E	endoribonuclease mazf	AADPWDSGYGCYLDYDY
+9g2a	2024-07-10	2.04659	X-RAY DIFFRACTION	C,D	A,B,E,F,G,H	endoribonuclease mazf	AADVWGCISYTDYGLGNLDY
+9g1y	2024-07-10	2.69655	X-RAY DIFFRACTION	C,D	A,B	endoribonuclease mazf	AADEYLCTGLAYSDYYPGKYEYDY
+9fzd	2024-07-05	2.3	X-RAY DIFFRACTION	B	A	outer membrane protein a	HANYRIGRNDLPV
+9fzc	2024-07-05	2.27	X-RAY DIFFRACTION	C,D	A,B	outer membrane protein a	GHRRLGKTTYDY
+9imx	2024-07-04	2.2	X-RAY DIFFRACTION	C,D,G,H	A,B,E,F	secreted protein orf2	AAAGWAGYGCPPNRYEYDY
+9fxt	2024-07-02	2.3	X-RAY DIFFRACTION	K,V	L,M,P,Q,R	L2A5 Fab Light Chain	XXXXXXXXXXXXXX
+9fww	2024-07-01	1.844	X-RAY DIFFRACTION	B	A	natural cytotoxicity triggering receptor 3	AAQSSSRSPLESNYDY
+9fve	2024-06-26	2.81	X-RAY DIFFRACTION	B,D,F,H,J,L,N,P,R,T,V,X	A,B,C,E,G,I,K,M,O,P,Q,R,U,W,X,Y	sialic acid-binding periplasmic protein siap	AADHFHVTHRKYDY
+9fvc	2024-06-26	2.64	X-RAY DIFFRACTION	C,H	A,B	sialic acid-binding periplasmic protein siap	AAERWLATPQAMAVTPNALDA
+9fvb	2024-06-26	2.05	X-RAY DIFFRACTION	C,H	A,B,J	sialic acid-binding periplasmic protein siap	AADHFHVTHRKYDY
+9fot	2024-06-12	3.0	ELECTRON MICROSCOPY	B	A	Monocarboxylate transporter 8	HVLEDRVDSFHDY
+8zw0	2024-06-12	2.72	ELECTRON MICROSCOPY	N	A,B,G	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8zvz	2024-06-12	2.35	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein G(s) subunit alpha isoforms short|G	ARCPAPFTRDCFDVTSTTYAY
+9fm1	2024-06-05	2.93	ELECTRON MICROSCOPY	D,E,F	A,B,C	hemagglutinin	AANQWYSGGYYGEKNYDY
+8zsj	2024-06-05	2.8	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8zrd	2024-06-04	2.715	X-RAY DIFFRACTION	C,D	A,E	spike protein s1	ARPRKDVGGSYLYTHFPGLTEYDY
+8zpb	2024-05-29	2.6	ELECTRON MICROSCOPY	B	A	sodium-dependent noradrenaline transporter	NVKDAGWASYQYDY
+8zp2	2024-05-29	2.4	ELECTRON MICROSCOPY	B	A	Sodium-dependent noradrenaline transporter	NVKDAGWASYQYDY
+8zp1	2024-05-29	2.5	ELECTRON MICROSCOPY	B	A	Sodium-dependent noradrenaline transporter	NVKDAGWASYQYDY
+8zoy	2024-05-29	2.5	ELECTRON MICROSCOPY	B	A	sodium-dependent noradrenaline transporter	NVKDNGAWRQNYDY
+8fsl	2024-05-29	2.9	X-RAY DIFFRACTION	A,B,C,D	E,F	mesothelin	
+9c0k	2024-05-25	2.72	ELECTRON MICROSCOPY	N	A,B,G	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+9byo	2024-05-24	2.31	ELECTRON MICROSCOPY	N	A,B,G	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+9fgh	2024-05-23	3.0	ELECTRON MICROSCOPY	G	A,E	gamma-aminobutyric acid receptor subunit alpha-1 | gamma-aminobutyric 	AAGAGFWGLRTASSYHY
+9fgg	2024-05-23	2.6	ELECTRON MICROSCOPY	G	A,E	Gamma-aminobutyric acid receptor subunit alpha-1|Gamma-aminobutyric ac	AAGAGFWGLRTASSYHY
+9fg2	2024-05-23	3.0	ELECTRON MICROSCOPY	F	A,E	gamma-aminobutyric acid receptor subunit alpha-1 | gamma-aminobutyric 	AAGAGFWGLRTASSYHY
+9ffv	2024-05-23	2.8	ELECTRON MICROSCOPY	F	A,E	gamma-aminobutyric acid receptor subunit alpha-1 | gamma-aminobutyric 	AAGAGFWGLRTASSYHY
+9ffu	2024-05-23	2.5	ELECTRON MICROSCOPY	F	B,C,e	gamma-aminobutyric acid receptor subunit beta-3 | gamma-aminobutyric a	AAKGRYSGGLYYPTNYDY
+9ffm	2024-05-23	3.0	ELECTRON MICROSCOPY	F	B,C,e	gamma-aminobutyric acid receptor subunit beta-3 | gamma-aminobutyric a	AAKGRYSGGLYYPTNYDY
+9ffl	2024-05-23	2.8	ELECTRON MICROSCOPY	F	B,C,e	gamma-aminobutyric acid receptor subunit beta-3 | gamma-aminobutyric a	AAKGRYSGGLYYPTNYDY
+9bud	2024-05-16	2.5	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein G(s) subunit alpha isoforms short|G	ARCPAPFTRDCFDVTSTTYAY
+9bub	2024-05-16	2.3	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein G(s) subunit alpha isoforms short|G	ARCPAPFTRDCFDVTSTTYAY
+9fcm	2024-05-15	1.94	X-RAY DIFFRACTION	A,B,C	D,E,F,G	spike protein s2'	GAAYVSKANYGSLWYQDSRRYDY
+9fc2	2024-05-15	1.21	X-RAY DIFFRACTION	B	A,F	spike protein s1	AATISRTGSLWCEEY
+9btw	2024-05-15	3.0	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+9fax	2024-05-10	2.9	ELECTRON MICROSCOPY	F	A,B,J	gamma-aminobutyric acid receptor subunit beta-3 | gamma-aminobutyric a	AAKGRYSGGLYYPTNYDY
+9faw	2024-05-10	2.9	ELECTRON MICROSCOPY	F,K,O	A,B,D,E,I,M,P,U,W,Y	gamma-aminobutyric acid receptor subunit beta-3	AAKGRYSGGLYYPTNYDY
+9faq	2024-05-10	2.9	ELECTRON MICROSCOPY	G	A,E	gamma-aminobutyric acid receptor subunit alpha-1 | gamma-aminobutyric 	AAGAGFWGLRTASSYHY
+9fap	2024-05-10	2.8	ELECTRON MICROSCOPY	G	A,E	gamma-aminobutyric acid receptor subunit alpha-1 | gamma-aminobutyric 	AAGAGFWGLRTASSYHY
+9fak	2024-05-10	2.6	ELECTRON MICROSCOPY	G,P	A,C,D,E	gamma-aminobutyric acid receptor subunit alpha-1 | gamma-aminobutyric 	AAGAGFWGLRTASSYHY
+9faj	2024-05-10	2.6	ELECTRON MICROSCOPY	G,P	A,C,D,E	gamma-aminobutyric acid receptor subunit alpha-1 | gamma-aminobutyric 	AAGAGFWGLRTASSYHY
+9bq3	2024-05-08	2.8	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein G(s) subunit alpha isoforms short|G	ARCPAPFTRDCFDVTSTTYAY
+9bp3	2024-05-06	2.2	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein G(s) subunit alpha isoforms short|G	ARCPAPFTRDCFDVTSTTYAY
+8zcf	2024-04-29	2.9	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+9biu	2024-04-24	2.9	ELECTRON MICROSCOPY	B	A	solute carrier family 15 member 2	AAARRRWTFKATNTEEFYET
+9bip	2024-04-24	2.8	ELECTRON MICROSCOPY	N	A,B	minigs | guanine nucleotide-binding protein g(i)/g(s)/g(t) subunitbeta	ARCPAPFTRDCFDVTSTTYAY
+9bia	2024-04-23	3.0	ELECTRON MICROSCOPY	E,F	A,B,C,D,E,F	ninjurin-1 | ninjurin-1	EVYIFGQYFE
+8z9o	2024-04-23	2.4	ELECTRON MICROSCOPY	N	B,C	isoform gnas-2 of guanine nucleotide-binding protein g(s)subunit alpha	ARCPAPFTRDCFDVTSTTYAY
+9bi6	2024-04-22	2.9	ELECTRON MICROSCOPY	N	A,B	minigsq | guanine nucleotide-binding protein g(i)/g(s)/g(t) subunitbet	ARCPAPFTRDCFDVTSTTYAY
+8z8v	2024-04-22	2.05	X-RAY DIFFRACTION	B	A	serum albumin	TIGGSLSR
+8z8m	2024-04-22	2.59	X-RAY DIFFRACTION	B,D,F,H,J,L	A,C,E,G,I,K	tumor necrosis factor	ARSPSGFN
+9bhm	2024-04-21	2.9	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+9bhl	2024-04-21	2.8	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+9ezw	2024-04-14	1.9	X-RAY DIFFRACTION	B,D,F,H	A,C,E,G,J,M,Q,R,S	v-set and immunoglobulin domain-containing protein 4	AAGRWNRYGEQDQYNYEY
+9ezv	2024-04-14	1.45	X-RAY DIFFRACTION	B	A,C,I,J,K	v-set and immunoglobulin domain-containing protein 4	AAGRWNRYGFEDQDNFDY
+9ezu	2024-04-14	1.05	X-RAY DIFFRACTION	B	A	v-set and immunoglobulin domain-containing protein 4	AAGRWNRYGFEDQDNFDY
+9ezi	2024-04-12	1.97	X-RAY DIFFRACTION	B	A	v-set and immunoglobulin domain-containing protein 4	AAGRWNRYGFEDQDNFDY
+9ezh	2024-04-12	1.94	X-RAY DIFFRACTION	B	A,C	v-set and immunoglobulin domain-containing protein 4	AAGRWNRYGFYDQDNYDY
+8ywf	2024-03-31	2.74	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein G(i) subunit alpha-1,Guanine nucleo	ARCPAPFTRDCFDVTSTTYAY
+8yw5	2024-03-29	2.84	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8yw3	2024-03-29	2.68	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8yvo	2024-03-28	2.1	X-RAY DIFFRACTION	A,B	C,D,E,H,I	toxin a	ATAGDRWHATDAFILRDFVYEY
+8yvj	2024-03-28	1.65	X-RAY DIFFRACTION	A	B,C,D	toxin a	AAARGLSDWTCSFESGVNS
+9etl	2024-03-26	1.5	X-RAY DIFFRACTION	C,D	A,B	2',3'-cyclic-nucleotide 3'-phosphodiesterase	ARDSLLSTRYLHTSE
+9etj	2024-03-26	2.55	X-RAY DIFFRACTION	C,D,F,H	A,B,E,G,I,J,K,L,M,N,O	2',3'-cyclic-nucleotide 3'-phosphodiesterase	AADNDLPDRLWGGSDWSDPSPYDY
+9erw	2024-03-25	1.73	X-RAY DIFFRACTION	E	B	2',3'-cyclic-nucleotide 3'-phosphodiesterase	AADADPEYGSRCPDPYYGMDY
+9eru	2024-03-25	2.5	X-RAY DIFFRACTION	C,E,G,H	A,B,D,F	2',3'-cyclic-nucleotide 3'-phosphodiesterase	NMDLTVMTATSSLYAYDY
+9ert	2024-03-25	2.75	X-RAY DIFFRACTION	B	A	2',3'-cyclic-nucleotide 3'-phosphodiesterase	AVDGWDSSCTFYSPSYYRDFSDHGA
+8ysh	2024-03-23	1.99	X-RAY DIFFRACTION	A	B	spike glycoprotein	HLDGSDAKGD
+8ysf	2024-03-22	2.76	X-RAY DIFFRACTION	C,D	A,B	spike glycoprotein	YVQIDLNYY
+8yot	2024-03-13	2.48	ELECTRON MICROSCOPY	A,C	B,D	lilrb3	AVTGLRIYPFVY
+9ena	2024-03-12	1.7	X-RAY DIFFRACTION	B	A,N	glucosylceramidase	ATDRGQCTYYSSGYYRDLRWYDY
+9en2	2024-03-12	2.2	X-RAY DIFFRACTION	B,C	A,F,G	procollagen c-endopeptidase enhancer 1	AAEQDMSDLWLGSY
+9emy	2024-03-11	2.814	X-RAY DIFFRACTION	C,D,E,F,I,J,K,L	A,B,C,E,G,H,I,J,K,L	non-specific serine/threonine protein kinase	AADRSYGSSWYHYPEDALDA
+9b0a	2024-03-11	1.87	X-RAY DIFFRACTION	A,B	C,D	cyclized peptide	TVGVGVSY
+8yn3	2024-03-10	2.56	ELECTRON MICROSCOPY	N	A,B	engineered guanine nucleotide,binding protein g(s) subunitalpha  | gua	ARCPAPFTRDCFDVTSTTYAY
+8s79	2024-02-29	2.29	X-RAY DIFFRACTION	C,D	A,B,P,T,U	nod-factor receptor 5	NRVPPVLS
+9auc	2024-02-28	2.4	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+9au0	2024-02-27	2.45	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein G(s) subunit alpha isoforms short|G	ARCPAPFTRDCFDVTSTTYAY
+8yg4	2024-02-26	2.59	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alpha-1 | guanine nucl	ARCPAPFTRDCFDVTSTTYAY
+8s5z	2024-02-26	3.0	ELECTRON MICROSCOPY	B	A	Thiamine transporter 2	AAAEDRWALAVRTATTYNY
+8yfo	2024-02-25	2.71	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alpha-1 | guanine nucl	ARCPAPFTRDCFDVTSTTYAY
+8ybp	2024-02-15	2.08	X-RAY DIFFRACTION	B	A	enterotoxin type b	AAYWKGYKYHPKFDDSAYEY
+8ybo	2024-02-15	1.59	X-RAY DIFFRACTION	B,D	A,C	enterotoxin type b	AKSKYPKYVPTWPPLLDEHDY
+8ybn	2024-02-15	2.18	X-RAY DIFFRACTION	B	A	enterotoxin type b	AAGDAYHKWFMPSSRALDRKEYNY
+8ybm	2024-02-15	2.04	X-RAY DIFFRACTION	B,D	A,C	enterotoxin type b	ASTRAYQLYSGSRSLRPVDYDY
+8ybl	2024-02-15	2.33	X-RAY DIFFRACTION	B	A	enterotoxin type b	AADSRGGIWYEQQLSTLRYNY
+8s0n	2024-02-14	2.3	X-RAY DIFFRACTION	B,D	A,C	transmembrane protease serine 2	AGRVGGRRNWIVPLDGYDNAY
+8s0l	2024-02-14	1.8	X-RAY DIFFRACTION	B	A	transmembrane protease serine 2	AGRVGGRRNWIVPLDGYDNAY
+8vyl	2024-02-08	2.02	X-RAY DIFFRACTION	E,F	A,B,C,D	hemoglobin subunit beta | hemoglobin subunit alpha	AAARFLQNARLTTGPYDY
+8ya0	2024-02-07	2.97	ELECTRON MICROSCOPY	C,V	A,E,G,Y	green fluorescent protein | protein translocase subunit seca	NVNVGFEY
+8y9t	2024-02-07	2.4	X-RAY DIFFRACTION	B	A	albumin	ATNSGDGKRYCSGGYCYRS
+8y9s	2024-02-07	2.88	X-RAY DIFFRACTION	B,D	A,C	albumin	AAGSTLTMVVANYRY
+8rw9	2024-02-02	1.99	X-RAY DIFFRACTION	A,B,C,D	E	s-layer protein sap	ATEGKYGRTWYGQLEYHY
+8y53	2024-01-31	2.93	ELECTRON MICROSCOPY	N	A,B	Guanine nucleotide-binding protein G(q) subunit alpha|Guanine nucleoti	ARCPAPFTRDCFDVTSTTYAY
+8rtf	2024-01-26	2.8	X-RAY DIFFRACTION	G,H,I,J,K,L	A,B,C,D,E,F	pyruvate kinase	AGRDSWYFSKVPDEYRY
+8xve	2024-01-15	3.0	ELECTRON MICROSCOPY	N	A,B	isoform gnas-2 of guanine nucleotide-binding protein g(s)subunit alpha	ARCPAPFTRDCFDVTSTTYAY
+8xum	2024-01-13	2.9	ELECTRON MICROSCOPY	C	A	leucine-rich repeat-containing g-protein coupled receptor4 	ASRTRAGVTCGLNWAIFSY
+8xql	2024-01-05	2.99	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(t) subunit alpha-3 | guanine nucl	ARCPAPFTRDCFDVTSTTYAY
+8xqj	2024-01-05	2.95	ELECTRON MICROSCOPY	A,B	C,D	soluble cytochrome b562,apelin receptor	AAVPRAGIESGAYCKWNMKDSGS
+8xld	2023-12-25	2.1	X-RAY DIFFRACTION	B	A	Fluorescent protein	AADRYVPAPPYYY
+8rj7	2023-12-20	2.1	X-RAY DIFFRACTION	B,D,F,H,J	A,C,E,G,I	spike protein s1	ASGYYGASGYDFNN
+8rby	2023-12-05	1.9	X-RAY DIFFRACTION	B	A	spike protein s1	APCSAPHDPEYNY
+8v5k	2023-11-30	2.6	ELECTRON MICROSCOPY	D,E,F,G,H,I	A,B,C	fusion glycoprotein f0	AVGRPPLNRPTLAYY
+8x7a	2023-11-23	2.56	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short,gn	ARCPAPFTRDCFDVTSTTYAY
+8x79	2023-11-23	2.41	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short,gn	ARCPAPFTRDCFDVTSTTYAY
+8uy6	2023-11-13	1.9	ELECTRON MICROSCOPY	B,D,F,H,J,L,N,P	A,C,E,G,I,K,M,O	aquaporin z	HVLEDRVDSFHDY
+8uw9	2023-11-06	1.9	X-RAY DIFFRACTION	B	A	rac-alpha serine/threonine-protein kinase	NTYGRLRRDV
+8uw7	2023-11-06	1.972	X-RAY DIFFRACTION	B	A,J	rac-alpha serine/threonine-protein kinase	NTYGRLRRDV
+8uw2	2023-11-05	2.2	X-RAY DIFFRACTION	B	A	rac-alpha serine/threonine-protein kinase	NTYGRLRRDV
+8uvy	2023-11-05	2.11	X-RAY DIFFRACTION	B	A	rac-alpha serine/threonine-protein kinase	NTYGRLRRDV
+8qz7	2023-10-26	3.0	ELECTRON MICROSCOPY	B,D	A,C,G,J	isoform 2 of ceramide synthase 6	AALRRKAEYGSRSIADFDS
+8qz3	2023-10-26	2.4	X-RAY DIFFRACTION	C,D,E	A,B,K	potassium channel subfamily k member 10	AARDRLGGAGTATFWGDYDY
+8ww2	2023-10-24	2.79	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8qw4	2023-10-18	2.9	ELECTRON MICROSCOPY	B	A	frizzled-3	NAEVEWLDMDY
+8wst	2023-10-17	2.4	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(q) subunit alpha-1 | guanine nucl	ARCPAPFTRDCFDVTSTTYAY
+8ukv	2023-10-15	2.94	X-RAY DIFFRACTION	C,D	A,B	epidermal growth factor receptor	HLKNIRDYRNYSNY
+8hgi	2023-09-27	1.95	X-RAY DIFFRACTION	C,D	A,B	gfp	
+8wg8	2023-09-20	2.71	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8wg7	2023-09-20	2.54	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8weo	2023-09-18	1.5	X-RAY DIFFRACTION	C,D	A,B,E,F	fragilysin	HAETIGYESGAHDY
+8wcg	2023-09-12	2.599	X-RAY DIFFRACTION	C,D,E,b	A,B,C,D,E,b	spike protein s1	VAGGNHYDSARYFSEREWDY
+8u3s	2023-09-08	1.85	X-RAY DIFFRACTION	B	A	tudor-interacting repair regulator protein	AYSDPYQPMSY
+8wa3	2023-09-06	2.86	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8qgx	2023-09-06	2.3	X-RAY DIFFRACTION	B	A	neutrophil elastase	TADPKLLPLADSSYGY
+8u26	2023-09-05	2.5	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8w90	2023-09-04	1.81	X-RAY DIFFRACTION	A,C,E	B,D,F	t-cell surface glycoprotein cd4	AADLRGGSIYGTADYVY
+8w8y	2023-09-04	2.9	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8w8x	2023-09-04	2.9	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8w8w	2023-09-04	2.9	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8w8q	2023-09-04	2.89	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8qf5	2023-09-02	1.5	X-RAY DIFFRACTION	A,G	B,H	activity-regulated cytoskeleton-associated protein	NVVKRGPQWGME
+8qf4	2023-09-02	1.02	X-RAY DIFFRACTION	E	A,B,C	activity-regulated cytoskeleton-associated protein	AARKPMYRVDISKGQNYDY
+8qf3	2023-09-02	1.25	X-RAY DIFFRACTION	A,E	A,E	Nanobody H11	AARKPMYRVDISKGQNYDY
+8w8a	2023-09-01	2.8	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8w89	2023-09-01	3.0	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8w88	2023-09-01	2.6	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8w87	2023-09-01	2.8	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8tzu	2023-08-27	2.9	X-RAY DIFFRACTION	C,D,E,G,H	A,B,F,O,P,Q	spike protein s1	AASYLSLNFPDDL
+8kh5	2023-08-21	2.83	ELECTRON MICROSCOPY	E	B,C	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8tw3	2023-08-19	2.9	X-RAY DIFFRACTION	A,B,Y,Z	F,X	fusion glycoprotein	ATLRANYCSGPPTLGPY
+8q95	2023-08-19	1.6	X-RAY DIFFRACTION	B,C	A	spike protein s1	AADEAYYHERGWQSPLGWPY
+8q94	2023-08-19	2.5	X-RAY DIFFRACTION	B,C	A	spike protein s1	AADEAYYHEKGWQSPLGWPY
+8q7s	2023-08-16	2.7	X-RAY DIFFRACTION	B,C,E,F,H,I,K,L,N,O	A,D,G,J,M,S,V	spike protein s1	NPDPGCRG
+8q7o	2023-08-16	1.76	X-RAY DIFFRACTION	A,B	C,D,E,G,K	frizzled-3	NLLYYIDYVEYDY
+8q6r	2023-08-14	1.9	X-RAY DIFFRACTION	A,B	D,F,H,K	properdin	NALQYEKHGGADY
+8k8j	2023-07-30	2.88	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8pyr	2023-07-26	2.15	X-RAY DIFFRACTION	D,H	A,E,I	cyclin-dependent kinase 7	SKQSSTPA
+8k4q	2023-07-20	2.59	X-RAY DIFFRACTION	B,D	A,B,C	interleukin-4 receptor subunit alpha	AASDNDGNCQDY
+8k3l	2023-07-16	2.3	X-RAY DIFFRACTION	B,D,F,H	A,C,E,G	superoxide dismutase [cu-zn]	AANHFFDYSRDPLATAEYNY
+8k3k	2023-07-16	2.43	X-RAY DIFFRACTION	D	E	spike protein s1	AYWDMDYLQNSIPVDY
+8k3a	2023-07-14	2.74	X-RAY DIFFRACTION	B	A	superoxide dismutase [cu-zn]	AAGNGALPPGRRLSPQNMDT
+8k33	2023-07-14	2.13	X-RAY DIFFRACTION	B,D,F,H,J,M,O,Q,R,T,V,X	A,C,E,G,I,K,L,N,P,U,W,Y	superoxide dismutase [cu-zn]	NVYGTNLAP
+8k2w	2023-07-14	3.0	ELECTRON MICROSCOPY	N	B,R	soluble cytochrome b562,c-x-c chemokine receptor type 3,kappa-type opi	NAEYRTGIWEELLDG
+8th3	2023-07-13	3.0	ELECTRON MICROSCOPY	B	A	AT118-H nanobody, Type-1 angiotensin II receptor, Soluble cytochrome b	AAYRIVSDPRVY
+8pnv	2023-07-02	2.048	ELECTRON MICROSCOPY	D,E,F,J,K,L	A,B,C,D,E,F,G,H,I,J,K,L	styrene oxide isomerase	ASRGVSGRYEY
+8pnu	2023-07-02	2.12	ELECTRON MICROSCOPY	D,E,F,J,K,L	A,B,C,D,E,F,G,H,I,J,K,L	styrene oxide isomerase	ASRGVSGRYEY
+8pnl	2023-06-30	2.7	X-RAY DIFFRACTION	B,D	A,C	putative triacylglyceride transporter	ARIINSASNIAY
+8tb7	2023-06-28	2.94	ELECTRON MICROSCOPY	N	L	Fab24 BAK5 light chain	AIDSDTFYSGSYDY
+8pm2	2023-06-28	2.92	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8tao	2023-06-27	2.9	ELECTRON MICROSCOPY	C,D	A,B	metabotropic glutamate receptor 5	AAAMYGSRWPDWEYDY
+8pjp	2023-06-23	2.92	ELECTRON MICROSCOPY	C	A,D	pilin	AAGVYTIVTGTGPEDGMDY
+8t8m	2023-06-22	3.0	ELECTRON MICROSCOPY	C,D	A,B	metabotropic glutamate receptor 5	AAAMYGSRWPDWEYDY
+8piz	2023-06-22	2.75	ELECTRON MICROSCOPY	B	A,C,D	pilin	AADFRGSRLSDVCSYSSMDY
+8pij	2023-06-21	2.9	ELECTRON MICROSCOPY	B	A,C,D	pilin	AADFRGSRLSDVCSYSSMDY
+8pii	2023-06-21	2.35	X-RAY DIFFRACTION	A	B	microtubule-associated protein tau	APAYEGDLYAFDSY
+8pih	2023-06-21	1.76	X-RAY DIFFRACTION	B,C	A	phospholipase a2	AAEGSRGSSTRLDARGTYDY
+8jr9	2023-06-16	2.57	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alpha-1 | guanine nucl	ARCPAPFTRDCFDVTSTTYAY
+8pet	2023-06-14	2.6	ELECTRON MICROSCOPY	F	D,E,e	gamma-aminobutyric acid receptor subunit beta-3 | gamma-aminobutyric a	AAKGRYSGGLYYPTNYDY
+8pe2	2023-06-13	2.05	X-RAY DIFFRACTION	B	A,J	1,3-beta-glucanosyltransferase	NVEVRTGPTRSWSPY
+8pe1	2023-06-13	1.9	X-RAY DIFFRACTION	C,D	A,B,G,Q	1,3-beta-glucanosyltransferase	NAVRGRRNDGSFENDY
+8jly	2023-06-04	1.29	X-RAY DIFFRACTION	A	B,C	alpha-synuclein peptide	ASRWRSVSEGC
+8jjv	2023-05-31	1.23	X-RAY DIFFRACTION	A	B,C,D	alpha-synuclein peptide	ASRWRSVSEGC
+8jiu	2023-05-27	2.76	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8jit	2023-05-27	2.91	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8jis	2023-05-27	2.46	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8jir	2023-05-27	2.57	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8jip	2023-05-27	2.85	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8ozb	2023-05-08	2.09	X-RAY DIFFRACTION	A,C	E,F	nucleoporin nup35	HVVIESTRFVYDHY
+8sos	2023-04-29	2.33	X-RAY DIFFRACTION	D,G	A,E	antigen-presenting glycoprotein cd1d	AARLVPPGIPIERTLESMRY
+8oww	2023-04-28	1.969	X-RAY DIFFRACTION	B	A,D,E,F,I,J	spike protein s2'	ATRSGPYCTTSVSDFDD
+8sne	2023-04-27	3.0	ELECTRON MICROSCOPY	B,C	A,G	hyaluronan synthase	AARRYGGTDYTTTGSYDY
+8smv	2023-04-26	2.74	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8j5j	2023-04-23	3.0	X-RAY DIFFRACTION	E	A	spike protein s1	AAEPDYSGVYYYTCGWTDFGS
+8oud	2023-04-22	2.31	ELECTRON MICROSCOPY	D,E,F	A,B,C,D,E,F	neutral amino acid transporter b(0)	NAVQILKTIY
+8skj	2023-04-19	2.01	X-RAY DIFFRACTION	A,B,D,G	C,E,F,H	v5 epitope tag peptide	AEWMNTRREFITPY
+8sk5	2023-04-18	2.011	X-RAY DIFFRACTION	B	A	spike protein s1	AAEPTLGWYVPRRSVEYEY
+8j1n	2023-04-13	2.51	ELECTRON MICROSCOPY	B	A	mitochondrial brown fat uncoupling protein 1	NVKDFGWRWEAYDY
+8sfz	2023-04-11	1.9	X-RAY DIFFRACTION	A,B,C	D,F,G,H,I	green fluorescent protein	AADRAADFFAQRDEYDY
+8sfx	2023-04-11	1.95	X-RAY DIFFRACTION	C,D	A,AC,AD,AF,AH,AI,AK,B,Z	green fluorescent protein	AARRRVTLFTSRADYDF
+8sfs	2023-04-11	2.37	X-RAY DIFFRACTION	C,D	A,AA,AE,AF,AH,AJ,AM,B,Q,U,V,W,Z	green fluorescent protein	SARSRGYVLSVLRSVDSYDY
+8oq3	2023-04-11	2.9	ELECTRON MICROSCOPY	C,F	A,C,D,F	complement c3	AAGTGWSPQTDCEYNY
+8opr	2023-04-07	1.811	X-RAY DIFFRACTION	B,C	A,N	s-layer protein ea1	NIYLYGDRTGSTLNS
+8opi	2023-04-07	1.83	X-RAY DIFFRACTION	A	B	phf6 tau peptide	APAYEGDLYAFDS
+8op0	2023-04-06	1.54	X-RAY DIFFRACTION	A	B	tau phf6 peptide	APAYEGDLYAFDS
+8sbb	2023-04-03	0.0	ELECTRON MICROSCOPY	B	A	alkane 1-monooxygenase	AVTYRGPWFNRDPHYY
+8ont	2023-04-03	0.0	ELECTRON MICROSCOPY	B	A,C	nramp related aluminium transporter	AAGTSTFALRRSPEY
+8gjr	2023-03-16	1.85	X-RAY DIFFRACTION	A	C	cftr inhibitory factor	NAKILLVASTDDY
+8iq4	2023-03-15	2.7	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTPFCFDVTSTTYAY
+8iod	2023-03-10	2.59	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(i) subunit alpha-1,guanine nucleo	ARCPAPFTRDCFDVTSTTYAY
+8ioc	2023-03-10	2.86	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(i) subunit alpha-1,guanine nucleo	ARCPAPFTRDCFDVTSTTYAY
+8im1	2023-03-05	2.05	X-RAY DIFFRACTION	B,D,F,H	A,B,C,E,G,H,L	mcherry fluorescent protein	AAKSVLTIATMRVPDEYNY
+8im0	2023-03-05	1.31	X-RAY DIFFRACTION	B	A	mcherry fluorescent protein	AMSRVDTDSPAFYDY
+8ifn	2023-02-19	2.81	ELECTRON MICROSCOPY	A,D,F	B,C,E,G,H,I	spike glycoprotein	AGAVSNWVCGMSIKSQGYGMDY
+8g77	2023-02-16	2.8	ELECTRON MICROSCOPY	F,G,K	A,B,D	spike glycoprotein	HLQVPFLGGGYDY
+8g74	2023-02-16	2.5	ELECTRON MICROSCOPY	C,E	A,B	spike glycoprotein	YAVDKSQDY
+8g73	2023-02-16	2.5	ELECTRON MICROSCOPY	C,E,F	B,D	spike glycoprotein	YAVDKSQDY
+8ido	2023-02-14	2.5	X-RAY DIFFRACTION	C,D	A,B,E,F	spike protein s1	AGAVSNWVCGMSIKSQGYGMDY
+8idi	2023-02-13	1.901	X-RAY DIFFRACTION	A,C	B,D,E,F	spike protein s1	ATDVRLIDWYSGDWSLARLYST
+8ci1	2023-02-08	2.8	ELECTRON MICROSCOPY	F,G,H,I,J	A,AB,AC,B,C,D,E,F,G,H,I,J,K,L,N,O,V,W,Y,Z	neuronal acetylcholine receptor subunit alpha-7	APARFGTGSAARDEYDD
+8g0w	2023-02-01	2.87	X-RAY DIFFRACTION	C,D,G,H	A,B,E,F	vp1	NLKRRDLQSRFGGY
+8ce4	2023-02-01	2.7	ELECTRON MICROSCOPY	F,G,H,I,J	A,B,C,D,E,F,G,H,I,J,K,L,M,N,O,U,V,W,X,Y	neuronal acetylcholine receptor subunit alpha-7	APARFGTGSAARDEYDD
+8g0i	2023-01-31	2.2	X-RAY DIFFRACTION	D	A,E	green fluorescent protein	NAKKVSFGDY
+8cd0	2023-01-29	2.42	ELECTRON MICROSCOPY	C	A	bifunctional heparan sulfate n-deacetylase/n-sulfotransferase 1 	AADRSKYCVGKYFSTPSQYDF
+8fxv	2023-01-25	2.2	X-RAY DIFFRACTION	B	A	transforming growth factor beta-2 proprotein	AAQSEGGYWFGY
+8c9x	2023-01-23	2.3	ELECTRON MICROSCOPY	F,G,H,I,J	A,B,C,D,E,K,L,M,N,O,U,V,W,X,Y	neuronal acetylcholine receptor subunit alpha-7	AAARFGVGVDDDYSY
+8c8p	2023-01-20	0.0	ELECTRON MICROSCOPY	H	A	spike glycoprotein,sars-cov-2 spike glycoprotein	ARGLGFGELPPFDF
+8fu6	2023-01-16	2.9	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8i2g	2023-01-14	2.8	ELECTRON MICROSCOPY	N	A,B,G	chimera of guanine nucleotide-binding protein g(s) subunitalpha and gu	ARCPAPFTRDCFDVTSTTYAY
+8c5h	2023-01-09	1.68	X-RAY DIFFRACTION	N	E,S	synaptotagmin-1	AKGSWARDMT
+8hxr	2023-01-05	2.7	X-RAY DIFFRACTION	A,B	A,B,C,D	tumor necrosis factor receptor superfamily member 17	AADRKSVMSIRPDY
+8hxq	2023-01-05	2.4	X-RAY DIFFRACTION	A,B	A,B,C,D	tumor necrosis factor receptor superfamily member 17	AARRIDAADFDS
+8c3l	2022-12-26	1.5971	X-RAY DIFFRACTION	B,D	A,C,F,K,P,Q,S,T	phage repressor protein ci	TTRGY
+8c3k	2022-12-26	1.74972	X-RAY DIFFRACTION	B	A	phage repressor protein ci	TTRGY
+8flu	2022-12-22	2.76	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8fls	2022-12-22	0.0	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8flr	2022-12-22	0.0	ELECTRON MICROSCOPY	N	A,B,G	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8flq	2022-12-22	0.0	ELECTRON MICROSCOPY	N	A,B,G	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8hti	2022-12-21	2.97	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8fif	2022-12-16	2.35	X-RAY DIFFRACTION	A,B,C	A,B,D,F,G	microcystin-lr	YGSLLETGTFQYREY
+8c02	2022-12-15	0.0	ELECTRON MICROSCOPY	B	A	solute carrier family 40 member 1	NVKDYGMAFWYYDY
+8bzy	2022-12-15	0.0	ELECTRON MICROSCOPY	B	A	solute carrier family 40 member 1	NVKDYGMAFWYYDY
+8hr2	2022-12-14	1.94	X-RAY DIFFRACTION	B,C	A	spike protein s1	AAELFCPWPDIGTMSPAEYKY
+8hn1	2022-12-06	2.9	ELECTRON MICROSCOPY	D	A	alpha-1a adrenergic receptor	NAEYRTGIWEELLDG
+8hmv	2022-12-05	0.0	ELECTRON MICROSCOPY	N	B,C	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8hmp	2022-12-05	2.77	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+7s83	2022-11-23	2.52	X-RAY DIFFRACTION	A,B	C	spike protein s1	
+8hj2	2022-11-22	0.0	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8hj0	2022-11-22	0.0	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8hix	2022-11-22	0.0	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8f8x	2022-11-22	2.6	X-RAY DIFFRACTION	C,D	A,B,E,F	uncharacterized protein dkfzp686c11235	SVDGGTRADPYHYY
+8f8w	2022-11-22	2.71	X-RAY DIFFRACTION	C,D,G,H	A,B,E,F,I,J,K,L	afucosylated igg1 fragment	SVDGGTRADPYHYY
+8f76	2022-11-18	0.0	ELECTRON MICROSCOPY	N	X,Y,Z	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8f6v	2022-11-17	2.3	X-RAY DIFFRACTION	A,B	C,D	cftr inhibitory factor	AKAIRLTTDRTQCVAFPGVS
+8f6u	2022-11-17	1.7	X-RAY DIFFRACTION	A,B	C,D	cftr inhibitory factor	NGASDIGALQSGASSWS
+8f2b	2022-11-07	2.0	ELECTRON MICROSCOPY	N	A,B,G	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8f2a	2022-11-07	2.2	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8hdo	2022-11-05	2.87	ELECTRON MICROSCOPY	N	A,B	chimeric minigs | guanine nucleotide-binding protein g(i)/g(s)/g(t) su	ARCPAPFTRDCFDVTSTTYAY
+8f0k	2022-11-03	1.9	ELECTRON MICROSCOPY	N	A,B,G	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8f0j	2022-11-03	2.0	ELECTRON MICROSCOPY	N	A,B,G	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8hbw	2022-10-31	2.57	ELECTRON MICROSCOPY	B	A	mitochondrial brown fat uncoupling protein 1	NVKDFGWRWEAYDY
+8hbv	2022-10-31	2.51	ELECTRON MICROSCOPY	B	A	mitochondrial brown fat uncoupling protein 1	NVKDFGWRWEAYDY
+8hbj	2022-10-28	2.9	ELECTRON MICROSCOPY	E,F	A,C	vp3 of capsid protein	NTVRRVATLSGSSSGS
+8hbi	2022-10-28	2.9	ELECTRON MICROSCOPY	E	A	vp1 of capsid protein	AAKYQSTFYSTMDVQYDY
+8bgg	2022-10-27	0.0	ELECTRON MICROSCOPY	Y	A,C	spike glycoprotein	HALIKNELGFLDY
+8haf	2022-10-26	0.0	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alpha-1 | guanine nucl	ARCPAPFTRDCFDVTSTTYAY
+8ha0	2022-10-26	2.62	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alpha | guanine nucleo	ARCPAPFTRDCFDVTSTTYAY
+8bf4	2022-10-24	2.15	X-RAY DIFFRACTION	A,B,D,E	C,F,I,N	plexin-b1	AAACEVVAVGY
+8ew6	2022-10-21	1.904	X-RAY DIFFRACTION	V	W	t-cell surface glycoprotein cd8 alpha chain	AAGSFWACTRPEGAMDY
+8bev	2022-10-21	0.0	ELECTRON MICROSCOPY	B	A	spike glycoprotein	HALIKNELGFLDY
+8be4	2022-10-21	1.9	X-RAY DIFFRACTION	A	R,S	Isoform 2B of GTPase KRas|Son of sevenless homolog 1	NAKIHPWSVADL
+8be3	2022-10-21	1.85	X-RAY DIFFRACTION	B,C	A,R	Isoform 2B of GTPase KRas	RLGADY
+8be2	2022-10-21	1.89794	X-RAY DIFFRACTION	N	E,S	son of sevenless homolog 1	TTLTGFPRIRS
+8evd	2022-10-20	2.0	X-RAY DIFFRACTION	A,B,E,F,I,J	C,D,G,H,K,L	cftr inhibitory factor	NGASEIGALQSGASLWS
+8h64	2022-10-15	2.35	X-RAY DIFFRACTION	B,D,F,H	A,C,E,G,J,K,L	internalin a	AVRDRGRVYSSTWSGFGS
+8h63	2022-10-15	1.53	X-RAY DIFFRACTION	B	A,C,I	internalin a	AALADIATMGPNDY
+8et0	2022-10-15	2.15	X-RAY DIFFRACTION	C,D	A,B	prostaglandin g/h synthase 2	NAESDGWYGLSY
+8h5u	2022-10-13	2.401	X-RAY DIFFRACTION	B,D	A,C	spike protein s1	NLGTI
+8h5t	2022-10-13	2.0	X-RAY DIFFRACTION	B	A	spike protein s1	ASRRSYGCDYYGMEY
+8bb7	2022-10-12	2.95	X-RAY DIFFRACTION	C,D	A,B,I	plexin-b1	GASSYNTQRAECYGMDY
+8h3y	2022-10-09	2.25	X-RAY DIFFRACTION	D,E,F	A,B,C	fragilysin	ASMMGTYYSGSPKN
+8h3x	2022-10-09	1.66	X-RAY DIFFRACTION	A	C	fragilysin	AIPKRTYVPPSQFDD
+8h3m	2022-10-09	2.48	ELECTRON MICROSCOPY	D,H	A,C	Spike glycoprotein	AKDKTYDSPGYFLNSFDY
+8b8i	2022-10-04	2.75	X-RAY DIFFRACTION	A,B,C,D,E,F,G,H	I,J,K,L,M,N,O,P	synaptotagmin-1	AGGDYSDRLGS
+8b7w	2022-10-03	2.85	X-RAY DIFFRACTION	H	A,C,D	interleukin-17a	AVRRRFDGTSYYTGDYDS
+8en3	2022-09-28	2.1	X-RAY DIFFRACTION	C,D	A,B	capsid protein vp1	AHRYIYGSLSDSGSYDN
+8en2	2022-09-28	1.85	X-RAY DIFFRACTION	C,D	A,B	gii.10 p domain	AAKMGRRLAVSRTLEEYDF
+8en0	2022-09-28	2.99	X-RAY DIFFRACTION	D	A	capsid protein vp1	VAYRTGGPPQ
+8emz	2022-09-28	1.4	X-RAY DIFFRACTION	B	A,R	gii.17 p domain	AAAREGAYYPDSYYRTVRYDY
+8eln	2022-09-26	2.4	X-RAY DIFFRACTION	C,D,G,H,K,L	A,B,E,F,I,J	cftr inhibitory factor	NAQILSWMGGTDY
+8gz5	2022-09-25	1.7	X-RAY DIFFRACTION	B	A,H,I,N,O	spike protein s1	AAGGWGKERNYAY
+8b41	2022-09-19	0.0	ELECTRON MICROSCOPY	G,H,I,J	A,B,C,D	volume-regulated anion channel subunit lrrc8a	YVYVGNEY
+8gw8	2022-09-16	2.9	ELECTRON MICROSCOPY	N	A,B	isoform gnas-2 of guanine nucleotide-binding protein g(s)subunit alpha	ARCPAPFTRDCFDVTSTTYAY
+8b1k	2022-09-09	2.8	X-RAY DIFFRACTION	B	A,D	dipeptide and tripeptide permease b	AARFGGMLPLQPSGYAN
+8b1j	2022-09-09	2.67	X-RAY DIFFRACTION	B	A,D	dipeptide and tripeptide permease b	AARFGGMLPLQPSGYAN
+8b1i	2022-09-09	2.55	X-RAY DIFFRACTION	B	A,D	dipeptide and tripeptide permease b	AARFGGMLPLQPSGYAN
+8b1h	2022-09-09	2.6	X-RAY DIFFRACTION	B	A,D	dipeptide and tripeptide permease b	AARFGGMLPLQPSGYAN
+8b1g	2022-09-09	2.5	X-RAY DIFFRACTION	B	A,D	dipeptide and tripeptide permease b	AARFGGMLPLQPSGYAN
+8b1f	2022-09-09	2.35	X-RAY DIFFRACTION	B	A,D	dipeptide and tripeptide permease b	AARFGGMLPLQPSGYAN
+8b1e	2022-09-09	2.47	X-RAY DIFFRACTION	B	A,D	dipeptide and tripeptide permease b	AARFGGMLPLQPSGYAN
+8b1d	2022-09-09	2.3	X-RAY DIFFRACTION	B	A,D	dipeptide and tripeptide permease b	AARFGGMLPLQPSGYAN
+8b1c	2022-09-09	2.56	X-RAY DIFFRACTION	B	A,D	dipeptide and tripeptide permease b	AARFGGMLPLQPSGYAN
+8b1b	2022-09-09	2.8	X-RAY DIFFRACTION	B	A,D	dipeptide and tripeptide permease b	AARFGGMLPLQPSGYAN
+8b1a	2022-09-09	2.15	X-RAY DIFFRACTION	B	A,D	dipeptide and tripeptide permease b	AARFGGMLPLQPSGYAN
+8b19	2022-09-09	2.45	X-RAY DIFFRACTION	B	A,D	dipeptide and tripeptide permease b	AARFGGMLPLQPSGYAN
+8b18	2022-09-09	2.3	X-RAY DIFFRACTION	B	A,D	dipeptide and tripeptide permease b	AARFGGMLPLQPSGYAN
+8b17	2022-09-09	2.5	X-RAY DIFFRACTION	B	A,D	dipeptide and tripeptide permease b	AARFGGMLPLQPSGYAN
+8ee2	2022-09-06	2.4	X-RAY DIFFRACTION	C,D,G,H,K,L	A,B,E,F,I,J	cftr inhibitory factor	NAAILAYTGEVTNY
+8gq5	2022-08-29	0.0	ELECTRON MICROSCOPY	a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p	A,B,C,D,E,F,G,H,I,J,K,L,M,N,O,P	nanobody c6	NANVET
+8e99	2022-08-26	0.0	ELECTRON MICROSCOPY	E	B	glutamate receptor ionotropic, nmda 2a	AAAAAAAAAAAY
+8av2	2022-08-26	1.75	X-RAY DIFFRACTION	C,D	A,B,J,K,P,Q,R	leptin receptor	AAERAPMCYSRSYYLVDYGMDY
+8gnj	2022-08-24	0.0	ELECTRON MICROSCOPY	C	A	nad(+) hydrolase sarm1	NANVET
+8gni	2022-08-24	0.0	ELECTRON MICROSCOPY	C	A	nad(+) hydrolase sarm1	NANVET
+8e3z	2022-08-17	0.0	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8e3y	2022-08-17	0.0	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8e3x	2022-08-17	0.0	ELECTRON MICROSCOPY	N	A,B,G	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8apy	2022-08-10	2.34	X-RAY DIFFRACTION	C	A,B	er lumen protein-retaining receptor 2	NVKDEGDFSYWYDY
+8e0g	2022-08-09	2.1	X-RAY DIFFRACTION	B	A	Mu-type opioid receptor	AARAPVXXXXXXXDYDY
+8e0e	2022-08-09	2.0	X-RAY DIFFRACTION	B	A	voltage-dependent l-type calcium channel subunit beta-2	AASSYWSRSVDEYDY
+8aom	2022-08-08	2.202	X-RAY DIFFRACTION	V	A	programmed cell death 1 ligand 1	WDLGHRPYFKDY
+8aok	2022-08-08	1.6	X-RAY DIFFRACTION	B	A,D,I,K	programmed cell death 1 ligand 1	AAEGTLYGSGGRTHQSAYDY
+7ym8	2022-07-27	2.92	ELECTRON MICROSCOPY	D	A	alpha1a adrenergic receptor	AAYSYYRDHSY
+8dtu	2022-07-26	2.447	X-RAY DIFFRACTION	A	B,C,D	b-cell lymphoma/leukemia 11a | nanobody 5344n74d	AALDEGYLDYDS
+8dtn	2022-07-26	2.199	X-RAY DIFFRACTION	A,C,E,G	A,B,C,D,E,F,G,H,I,J,L,M,N,O,P	b-cell lymphoma/leukemia 11a	AALDYVIDGY
+8dqu	2022-07-20	2.45003	X-RAY DIFFRACTION	A,B	C,F	non-structural protein 9	AAPKFRYYFSTSPGDFDS
+8dp0	2022-07-14	2.96	ELECTRON MICROSCOPY	B	A	phosphatidylinositol 4,5-bisphosphate 3-kinase catalyticsubunit gamma 	NEAGDPFLGSTWNGPPAFGS
+7fbk	2022-07-13	1.9	X-RAY DIFFRACTION	C,D	A,B	spike protein s1	
+7fbj	2022-07-13	2.85	X-RAY DIFFRACTION	B,D,F,H,J,L,N,P	A,C,E,K,M,O	spike protein s1	
+8dm0	2022-07-08	0.0	ELECTRON MICROSCOPY	H	C	spike glycoprotein	ARVWLYGSGYMDV
+8dly	2022-07-08	0.0	ELECTRON MICROSCOPY	H	C	spike glycoprotein	ARVWLYGSGYMDV
+7ydm	2022-07-04	2.89	ELECTRON MICROSCOPY	N	A,B	engineered mini-gaq | guanine nucleotide-binding protein g(i)/g(s)/g(t	ARCPAPFTRDCFDVTSTTYAY
+8di5	2022-06-28	0.0	ELECTRON MICROSCOPY	H	C	spike glycoprotein	ARVESGSGWLDF
+7yaj	2022-06-28	0.0	ELECTRON MICROSCOPY	C	A	calcium-transporting atpase type 2c member 1	AVQYTQGWSGQYRSYDSLLY
+7yai	2022-06-28	0.0	ELECTRON MICROSCOPY	C	A	calcium-transporting atpase type 2c member 1	AVQYTQGWSGQYRSYDSLLY
+7yah	2022-06-28	0.0	ELECTRON MICROSCOPY	C	A	calcium-transporting atpase type 2c member 1	AVQYTQGWSGQYRSYDSLLY
+7yag	2022-06-28	0.0	ELECTRON MICROSCOPY	C	A	calcium-transporting atpase type 2c member 1	AVQYTQGWSGQYRSYDSLLY
+8dcs	2022-06-17	2.5	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8dcr	2022-06-17	2.6	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8a67	2022-06-16	1.86	X-RAY DIFFRACTION	D,H	A,B,C,E,F,G	polyubiquitin-b | polyubiquitin-b | polyubiquitin-b	AAGIVGDEVGWIYYLY
+8dam	2022-06-13	2.0	X-RAY DIFFRACTION	B,C	A,E,G,H	voltage-dependent l-type calcium channel subunit beta-1	AASSYWSRSVDEYDY
+7y3g	2022-06-10	2.77	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+7y36	2022-06-10	2.8	ELECTRON MICROSCOPY	N	A,B	isoform gnas-2 of guanine nucleotide-binding protein g(s)subunit alpha	ARCPAPFTRDCFDVTSTTYAY
+7y35	2022-06-09	2.9	ELECTRON MICROSCOPY	N	A,B	isoform gnas-2 of guanine nucleotide-binding protein g(s)subunit alpha	ARCPAPFTRDCFDVTSTTYAY
+7xz6	2022-06-02	0.0	ELECTRON MICROSCOPY	N	A,B,G	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+7xz5	2022-06-02	0.0	ELECTRON MICROSCOPY	N	A,B,G	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+7xw5	2022-05-26	2.96	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8cyj	2022-05-23	0.0	ELECTRON MICROSCOPY	A,B,C,D	R	spike glycoprotein	AASDGVIDGTNANAYRY
+8cyd	2022-05-23	0.0	ELECTRON MICROSCOPY	D,E,F	A,B,C	spike glycoprotein	NAGIPMTTVLSGLGF
+8cyc	2022-05-23	0.0	ELECTRON MICROSCOPY	D,E,F	A,B,C	spike glycoprotein	AVGGNHYSRSKYYNLDEYDD
+8cyb	2022-05-23	0.0	ELECTRON MICROSCOPY	D	A	spike glycoprotein	AADRGSSYYYTRASEYTY
+8cya	2022-05-23	0.0	ELECTRON MICROSCOPY	D,E,F	A,B,C	spike glycoprotein	AASDGVIDGTNANAYRY
+8cy9	2022-05-23	0.0	ELECTRON MICROSCOPY	D,E,F	A,B,C	spike glycoprotein	AVGSLRVGSFSVEY
+8cy7	2022-05-23	0.0	ELECTRON MICROSCOPY	D,E,F	A,B,C	spike glycoprotein	VQGGWGIRQPIIVDY
+8cy6	2022-05-23	0.0	ELECTRON MICROSCOPY	D,E,F	A,B,C	spike glycoprotein	NTRVLEGGTQIRDY
+8cxq	2022-05-22	0.0	ELECTRON MICROSCOPY	D,E,F	A,B,C	spike glycoprotein	AVGSLRVGSFSPDY
+8cxn	2022-05-22	0.0	ELECTRON MICROSCOPY	D,E,F	A,B,C	spike glycoprotein	AVRRDSSWGYSRQSTEYDY
+7xv3	2022-05-20	2.76	ELECTRON MICROSCOPY	N	A,B	engineered g protein subunit s (mini-gs) | guanine nucleotide-binding 	ARCPAPFTRDCFDVTSTTYAY
+8cwu	2022-05-19	1.71	X-RAY DIFFRACTION	B	A	spike protein s1	AQGGWGLTQPISVDY
+7zw1	2022-05-17	0.0	ELECTRON MICROSCOPY	C	B	rod outer segment membrane protein 1	AAAEPRRYSYYMRPDEYNY
+7xtq	2022-05-17	0.0	ELECTRON MICROSCOPY	N	A,B,G	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+7xtp	2022-05-17	1.828	X-RAY DIFFRACTION	C,D	A,B	eukaryotic translation initiation factor 4e	GRVAKALNSRSPSFVVNTYSSIGFDY
+7xt8	2022-05-16	0.0	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+7xqv	2022-05-09	2.76	X-RAY DIFFRACTION	B	A	rhoa	AWIAWGPWMRTSWY
+7xp6	2022-05-03	0.0	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(t) subunit alpha-3 | guanine nucl	ARCPAPFTRDCFDVTSTTYAY
+7xp5	2022-05-03	0.0	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(t) subunit alpha-3 | guanine nucl	ARCPAPFTRDCFDVTSTTYAY
+7xp4	2022-05-03	0.0	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(t) subunit alpha-3 | guanine nucl	ARCPAPFTRDCFDVTSTTYAY
+7xov	2022-05-01	0.0	ELECTRON MICROSCOPY	N	A,B	isoform gnas-2 of guanine nucleotide-binding protein g(s)subunit alpha	ARCPAPFTRDCFDVTSTTYAY
+7xou	2022-05-01	0.0	ELECTRON MICROSCOPY	N	A,B	isoform gnas-2 of guanine nucleotide-binding protein g(s)subunit alpha	ARCPAPFTRDCFDVTSTTYAY
+7utz	2022-04-28	0.0	ELECTRON MICROSCOPY	N	X,Y,Z	guanine nucleotide-binding protein g(i)/g(s)/g(t) subunitbeta-1  | gua	ARCPAPFTRDCFDVTSTTYAY
+7usv	2022-04-25	2.1	X-RAY DIFFRACTION	C,D	A,B,F,J,K,L	gametocyte surface protein p230	AGGGSYYPMSPYDGMDY
+7ust	2022-04-25	1.7	X-RAY DIFFRACTION	B	A,C	gametocyte surface protein p230	ARDHGPCTVLADILYDYGMDY
+7xli	2022-04-21	1.7	X-RAY DIFFRACTION	B	A,D	fur-regulated protein b	ALDREGFVFEQGMDF
+7xld	2022-04-21	1.65	X-RAY DIFFRACTION	B	A,C,D	iron-regulated surface determinant protein h	ALDREGFVFEQGMDF
+7zmv	2022-04-19	2.002	X-RAY DIFFRACTION	E,F,G,K	A,B,C,D	atp-dependent dna helicase q5	EAYGTYTLAPTGEGEYDDY
+7zmt	2022-04-19	2.5	X-RAY DIFFRACTION	C,K	A,B	atp-dependent dna helicase q5	EAYGTYTLAPTGEGEYDDY
+7zms	2022-04-19	2.7	X-RAY DIFFRACTION	K	A	atp-dependent dna helicase q5	EAYGTYTLAPTGEGEYDDY
+7zmq	2022-04-19	2.7	X-RAY DIFFRACTION	C,K	A,B	atp-dependent dna helicase q5	EAYGTYTLAPTGEGEYDDY
+7zmm	2022-04-19	2.5	X-RAY DIFFRACTION	E,F,G,K	A,B,C,D	atp-dependent dna helicase q5	EAYGTYTLAPTGEGEYDDY
+7zml	2022-04-19	2.79	X-RAY DIFFRACTION	E,F,G,K	A,B,C,D	atp-dependent dna helicase q5	EAYGTYTLAPTGEGEYDDY
+7xkf	2022-04-19	2.4	ELECTRON MICROSCOPY	N	A,B,G	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+7xke	2022-04-19	0.0	ELECTRON MICROSCOPY	N	A,B	mini-gs | guanine nucleotide-binding protein g(i)/g(s)/g(t) subunitbet	ARCPAPFTRDCFDVTSTTYAY
+7xkd	2022-04-19	0.0	ELECTRON MICROSCOPY	N	A,B,G	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+7upm	2022-04-15	2.7	X-RAY DIFFRACTION	B	A	tribbles homolog 2	AVISAGGGESIGYHFY
+7zkz	2022-04-13	2.329	X-RAY DIFFRACTION	B,C	A	cystinosin homolog	AADPESHVRLRLGVGAY
+7zk1	2022-04-12	2.65	X-RAY DIFFRACTION	B,C	A	cystinosin homolog	AADPESHVRLRLGVGAY
+7unz	2022-04-12	2.03	X-RAY DIFFRACTION	A,C	B,D,Y	cysteine-rich small secreted protein css, putative	NAAGATIDLADFGS
+7ul4	2022-04-03	2.8	ELECTRON MICROSCOPY	D	A	mu-type opioid receptor	NAEYRTGIWEELLDG
+7ul2	2022-04-03	2.4	ELECTRON MICROSCOPY	D	R	neurotensin receptor 1	NAEYRTGIWEELLDG
+7uib	2022-03-29	2.77	X-RAY DIFFRACTION	B,E	A,D	neurotoxin type e	AAEDRLGVPTINAHPSKYDYNY
+7uia	2022-03-28	2.59	X-RAY DIFFRACTION	B,E	A,D	neurotoxin type e	AAEDRLGVPTINAHPSKYDYNY
+7zau	2022-03-22	2.2	X-RAY DIFFRACTION	B,D,F,H	A,AA,AB,AC,C,E,G,S,X	fascin	AAKIYYSGTYLAFNPDY
+7z85	2022-03-16	0.0	ELECTRON MICROSCOPY	D,E,F	A,B,C	spike glycoprotein,fibritin	ASYQATRSLLSDYATWPYDY
+7z7x	2022-03-16	0.0	ELECTRON MICROSCOPY	D,E,F	A,B,C	spike glycoprotein,fibritin	AGSKITRSLLSDYATWPYDY
+7uby	2022-03-15	2.1	X-RAY DIFFRACTION	C,D	A,B	glucosyltransferase tcda	AAFRATMCGVFPLSPYGKDD
+7ubx	2022-03-15	1.81	X-RAY DIFFRACTION	C,D	A,B	toxin a	ARGRVISASAIRGAV
+7x8r	2022-03-14	0.0	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+7x7e	2022-03-09	2.67	X-RAY DIFFRACTION	A,B,E	C,D,F	spike protein s1	AAHFVPPGSRLRGCLVNELYNY
+7x7d	2022-03-09	2.92	X-RAY DIFFRACTION	B,C,F	A,D,E	spike protein s1	AAHFVPPGSRLRGCLVNELYNY
+7z1x	2022-02-25	1.86	X-RAY DIFFRACTION	B,C,E,F	A,C,D,E,F	gasdermin-d	NLERYTGSSVYP
+7x2m	2022-02-25	1.8	X-RAY DIFFRACTION	B	E	spike protein s1	AGSRPSAHYCSHYPTEYDD
+7x2l	2022-02-25	2.4	X-RAY DIFFRACTION	B	A,E	spike protein s1	KLENGGFFYY
+7x2j	2022-02-25	2.4	X-RAY DIFFRACTION	B	S	spike protein s1	AAGGNQYYSATYSIWNEYDF
+7x2f	2022-02-25	3.0	ELECTRON MICROSCOPY	E	A,B,D	guanine nucleotide-binding protein g(s) subunit alphaisoforms short, i	ARCPAPFTRDCFDVTSTTYAY
+7x2c	2022-02-25	0.0	ELECTRON MICROSCOPY	E	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short, i	ARCPAPFTRDCFDVTSTTYAY
+7z1e	2022-02-24	1.59	X-RAY DIFFRACTION	F,FFF	E,EEE	unknown	ARTEYVSYLLSDYATWPYDY
+7z1d	2022-02-24	1.55	X-RAY DIFFRACTION	F,FFF	E,EEE	unknown	AGSKITRSLLSDYATWPYDY
+7z1c	2022-02-24	1.9	X-RAY DIFFRACTION	B,D,E,F	A,C,H,L,N,O,P	spike protein s1	AADRGESYYYTRPTEYEF
+7z1b	2022-02-24	2.3	X-RAY DIFFRACTION	B,D,E,F	A,C	spike protein s1	AADRGESYYYTRPTEYEF
+7z1a	2022-02-24	2.59	X-RAY DIFFRACTION	B,D,E,F	A,C	spike protein s1	AADRGESYYYTRPTEYEF
+7yzi	2022-02-20	0.0	ELECTRON MICROSCOPY	C,D,E	A,B	adenylate cyclase	NTPAGRVGGT
+7yz9	2022-02-19	1.97	X-RAY DIFFRACTION	B	A,F	adenylate cyclase	NTPAGRVGGT
+7wy8	2022-02-15	2.83	ELECTRON MICROSCOPY	D	A,B	engineered mini g alpha s subunit | guanine nucleotide-binding protein	ARCPAPFTRDCFDVTSTTYAY
+7wy5	2022-02-15	2.83	ELECTRON MICROSCOPY	N	A,B	engineered mini g alpha q subunit | guanine nucleotide-binding protein	ARCPAPFTRDCFDVTSTTYAY
+7wxw	2022-02-15	2.84	ELECTRON MICROSCOPY	D	A,B	engineered mini galpha-s subunit | guanine nucleotide-binding protein 	ARCPAPFTRDCFDVTSTTYAY
+7wxu	2022-02-15	2.85	ELECTRON MICROSCOPY	N	A,B	engineered mini galpha-q subunit | guanine nucleotide-binding protein 	ARCPAPFTRDCFDVTSTTYAY
+7tzf	2022-02-15	2.4	ELECTRON MICROSCOPY	N	A,B,G	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+7tyy	2022-02-14	3.0	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+7tyx	2022-02-14	2.55	ELECTRON MICROSCOPY	N	A,B,G	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+7tyw	2022-02-14	3.0	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+7tyo	2022-02-14	2.7	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+7tyn	2022-02-13	2.6	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+7tyf	2022-02-13	2.2	ELECTRON MICROSCOPY	N	A,B,G	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+7wuq	2022-02-09	2.9	ELECTRON MICROSCOPY	N	A,B,G	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+7wu2	2022-02-05	2.8	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+7r24	2022-02-04	2.7	X-RAY DIFFRACTION	C,E	A	activity-regulated cytoskeleton-associated protein	AVRTPSSQTLY
+7r23	2022-02-04	2.77	X-RAY DIFFRACTION	B,C	A	arc	AARKPMYRVDISKGQNYDY
+7r1z	2022-02-03	1.94	X-RAY DIFFRACTION	C,E	A	activity-regulated cytoskeleton-associated protein	AVRTPSSQTLY
+7tpr	2022-01-25	2.39	ELECTRON MICROSCOPY	D,E,F,G,H	A,B,C,D,E,G,H	spike glycoprotein	AAHGTYDKYAPCGGFAGTYTY
+7wq4	2022-01-24	2.6	ELECTRON MICROSCOPY	N	A,B	engineered guanine nucleotide-binding protein g(q) subunitalpha  | gua	ARCPAPFTRDCFDVTSTTYAY
+7wn1	2022-01-17	0.0	ELECTRON MICROSCOPY	C	A,B	equilibrative nucleoside/nucleobase transporter	NAETISYVYTVVFQDY
+7wn0	2022-01-17	0.0	ELECTRON MICROSCOPY	B	A	equilibrative nucleoside/nucleobase transporter	NAYVVSSYGYRASWNDY
+7wki	2022-01-10	2.6	X-RAY DIFFRACTION	B	A	complement factor h	AAAVSPNLECGTGPFGIYASYYGMDY
+7th3	2022-01-10	2.292	X-RAY DIFFRACTION	B	A	ricin chain a	AAGSYAAILYAPSY
+7th2	2022-01-10	1.838	X-RAY DIFFRACTION	C,D	A,AA,AF,B,K	ricin a chain	AAADPLPLVCTWGDEYDY
+7tgi	2022-01-07	2.104	X-RAY DIFFRACTION	B	A,H	ricin chain a	AADRDRLPSAITYEYNY
+7tgf	2022-01-07	1.347	X-RAY DIFFRACTION	B	A,I,K,L	ricin chain a	ATEEVCTLGIFGHGPDDY
+7spp	2022-01-05	1.96	X-RAY DIFFRACTION	C	A	spike protein s1	
+7spo	2022-01-05	1.92	X-RAY DIFFRACTION	C,D	A,B	spike protein s1	
+7te8	2022-01-04	1.998	X-RAY DIFFRACTION	A,B,C,D	A,B,C,D,E,F	cannabidiol	AFHDFLRMWEY
+7whi	2021-12-30	2.93	ELECTRON MICROSCOPY	D,E,F,G	A,B,C	spike glycoprotein	VSNWASGSTGDY
+7wd2	2021-12-20	2.69	X-RAY DIFFRACTION	C,D	A,B,E,G	spike protein s1	AAEPDYSGVYYYTCGWTDFGS
+7wd1	2021-12-20	2.5	X-RAY DIFFRACTION	C,D	A,B	spike protein s1	AATPATYYSGRYYYQCPAGGMDY
+7wcn	2021-12-20	0.0	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+7wcm	2021-12-20	0.0	ELECTRON MICROSCOPY	N	A,B,C	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+7qne	2021-12-20	2.7	ELECTRON MICROSCOPY	G	A,E	gaba(a) receptor subunit alpha-1 | gamma-aminobutyric acid receptor su	AAGAGFWGLRTASSYHY
+7qnc	2021-12-20	2.9	ELECTRON MICROSCOPY	F,G	B,C,D,I,J	gamma-aminobutyric acid receptor subunit beta-3	AAKGRYSGGLYYPTNYDY
+7qna	2021-12-20	3.0	ELECTRON MICROSCOPY	N	D,E,H	gamma-aminobutyric acid receptor subunit beta-3 | gamma-aminobutyric a	AAKGRYSGGLYYPTNYDY
+7qn9	2021-12-20	2.9	ELECTRON MICROSCOPY	L,M	B,C,D,G,H	gamma-aminobutyric acid receptor subunit beta-3	AAKGRYSGGLYYPTNYDY
+7qn7	2021-12-20	3.0	ELECTRON MICROSCOPY	F,G	B,C,D,I,J	gamma-aminobutyric acid receptor subunit beta-3	AAKGRYSGGLYYPTNYDY
+7qn6	2021-12-20	2.9	ELECTRON MICROSCOPY	K,L,M	A,B,C,D,G,H,I,N	gamma-aminobutyric acid receptor subunit beta-3	AAKGRYSGGLYYPTNYDY
+7qn5	2021-12-20	2.5	ELECTRON MICROSCOPY	F,G	B,C,D,I,J	gamma-aminobutyric acid receptor subunit beta-3	AAKGRYSGGLYYPTNYDY
+7t9i	2021-12-19	0.0	ELECTRON MICROSCOPY	N	X,Y	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+7qiv	2021-12-16	2.8	X-RAY DIFFRACTION	C	A,B	complement c3b alpha' chain | complement c3 beta chain	AAGTGWSPQTDNEYNY
+7t5f	2021-12-12	2.6	X-RAY DIFFRACTION	B,C,E,F	A,D,L,M,N	botulinum neurotoxin type b	TLGTRDDLGPE
+7qha	2021-12-11	0.0	ELECTRON MICROSCOPY	C	A,B	putative trap-type c4-dicarboxylate transport system, largepermease co	AAYPLYDDPYYY
+7qe5	2021-12-01	0.0	ELECTRON MICROSCOPY	B	A	sialic acid trap transporter permease protein siat	ARSSAYGSSWLNPSRYDY
+7qcq	2021-11-25	1.7	X-RAY DIFFRACTION	A,AAA	A,B,BBB	unknown	APAYEGDLYAFDSY
+7w1s	2021-11-20	1.997	X-RAY DIFFRACTION	B	A	spike protein s1	WGWRMNDY
+7qbg	2021-11-19	2.69	X-RAY DIFFRACTION	E,G	A,B,C,D,P,Q	transcobalamin-2 | cd320 antigen	AAIYQPSNGCVLRPEYSY
+7qbf	2021-11-19	1.85	X-RAY DIFFRACTION	B	A,AE,AJ,AU,AW,E,F	transcobalamin-2	NAAAEGETGSNWSLCEEYDY
+7qbe	2021-11-19	3.0	X-RAY DIFFRACTION	E,F	A,C	transcobalamin-2	AASSQIFYGATTSIKDFNS
+7srk	2021-11-08	2.5	X-RAY DIFFRACTION	B,D	A,C	rpa-related protein radx peptide,beta-2-microglobulin,mhcclass i antig	YGLSYSNDDY
+7sr5	2021-11-07	2.35	X-RAY DIFFRACTION	B,D	A,C	wilms tumor protein peptide,beta-2-microglobulin,mhc classi antigen ch	YGLSYSNDDY
+7sr4	2021-11-07	2.59	X-RAY DIFFRACTION	B,D	A,C	protein e7 peptide,beta-2-microglobulin,mhc class i antigenchimera 	YGLSYSNDDY
+7sr3	2021-11-07	2.49	X-RAY DIFFRACTION	B,D	A,C	protein e7 peptide,beta-2-microglobulin,mhc class i antigenchimera 	YGLSYSNDDY
+7sr0	2021-11-07	2.54	X-RAY DIFFRACTION	B,D	A,C	protein e7 peptide,beta-2-microglobulin,mhc class i antigenchimera 	YGLSYSNDDY
+7vvl	2021-11-06	2.8	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+7sqp	2021-11-05	2.53	X-RAY DIFFRACTION	B,D	A,C	protein e7 peptide,beta-2-microglobulin,mhc class i antigenchimera 	YGLSYSNDDY
+7spa	2021-11-02	2.8	ELECTRON MICROSCOPY	B,C	A,F	hyaluronan synthase	AARRYGGTDYTTTGSYDY
+7sp9	2021-11-02	2.9	ELECTRON MICROSCOPY	B,C	A	hyaluronan synthase	AARRYGGTDYTTTGSYDY
+7sp8	2021-11-02	2.7	ELECTRON MICROSCOPY	B,C	A,E	hyaluronan synthase	AARRYGGTDYTTTGSYDY
+7q3r	2021-10-28	1.92	X-RAY DIFFRACTION	F,G	A,I	spike glycoprotein	AATVDYSGTLTAARGREDYDD
+7q3q	2021-10-28	2.3	X-RAY DIFFRACTION	B	A,D	spike glycoprotein	AAARVGEIIAVLISPSNYAY
+7vqx	2021-10-21	2.74	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+7q1u	2021-10-21	2.7	ELECTRON MICROSCOPY	B	A,E	protein-cysteine n-palmitoyltransferase hhat	HAGVQGAMLGPRNY
+7vq0	2021-10-18	0.0	ELECTRON MICROSCOPY	D,E,F	A,AM,B,C,I	spike glycoprotein	HSADVNGGMDY
+7voa	2021-10-13	1.8	X-RAY DIFFRACTION	A	B	spike glycoprotein	APVSHTVVAGCAFEAWTDFGS
+7vnb	2021-10-10	2.27	X-RAY DIFFRACTION	A	B	spike protein s1	VSNWASGSTGDY
+7vke	2021-09-29	1.9	X-RAY DIFFRACTION	B	A	adp-ribosyl cyclase/cyclic adp-ribose hydrolase 1	AKDRGTMRVVVYDTLDI
+7sak	2021-09-22	1.15	X-RAY DIFFRACTION	B	A	mcherry	AANLGNYISSNQRLYGY
+7saj	2021-09-22	2.37	X-RAY DIFFRACTION	B,D,F,H,J	A,C,E,G,I	mcherry	AAAKSGTWWYQRSENDFGS
+7sai	2021-09-22	2.23	X-RAY DIFFRACTION	C	A,E,H,K,L	green fluorescent protein	TARSRGFVLSDLRSVDSFDY
+7s7r	2021-09-17	1.77	X-RAY DIFFRACTION	B	A,E,F	merozoite surface protein p12	AADHALVVGGTYNY
+7vfb	2021-09-11	2.0	X-RAY DIFFRACTION	B	A	3c-like proteinase	AASGAIAGIRLCLPGHTFYTY
+7vfa	2021-09-11	1.75	X-RAY DIFFRACTION	D	E	3c-like proteinase	AATYLLRFASLSATNFPY
+7s3i	2021-09-07	2.51	ELECTRON MICROSCOPY	N	A,B,G	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+7s2s	2021-09-03	1.93	X-RAY DIFFRACTION	A,C	B,D,F,I,K	interleukin-2 receptor subunit beta	AAASPGRCFLPRTALEPALYYN
+7s2r	2021-09-03	2.49	X-RAY DIFFRACTION	B	A,G,H,J,N,P,R,S	cytokine receptor common subunit gamma	AADDRTWLPRVQLGGPRENEYNY
+7s1m	2021-09-02	2.41	ELECTRON MICROSCOPY	N	A,B,G	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+7vbi	2021-08-31	3.0	ELECTRON MICROSCOPY	N	A,B	isoform 3 of guanine nucleotide-binding protein g(s)subunit alpha isof	ARCPAPFTRDCFDVTSTTYAY
+7vbh	2021-08-31	3.0	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+7v9l	2021-08-26	2.6	ELECTRON MICROSCOPY	N	A,B,Y	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+7piv	2021-08-23	2.86	ELECTRON MICROSCOPY	N	A,B	isoform gnas-2 of guanine nucleotide-binding protein g(s)subunit alpha	ARCPAPFTRDCFDVTSTTYAY
+7piu	2021-08-23	2.58	ELECTRON MICROSCOPY	N	A,B	isoform gnas-2 of guanine nucleotide-binding protein g(s)subunit alpha	ARCPAPFTRDCFDVTSTTYAY
+7ph7	2021-08-16	0.0	ELECTRON MICROSCOPY	C,D	A,B,H	atp-binding transport protein multicopy suppressor of htrb	NAEGPAGY
+7ph4	2021-08-16	0.0	ELECTRON MICROSCOPY	C,D	A,B,K,M	atp-dependent lipid a-core flippase	NAEGPAGY
+7ph3	2021-08-16	2.8	ELECTRON MICROSCOPY	C,D	A,B	atp-dependent lipid a-core flippase	NAEGPAGY
+7ph2	2021-08-16	0.0	ELECTRON MICROSCOPY	C,D	A,B	atp-dependent lipid a-core flippase	NAEGPAGY
+7rtb	2021-08-12	2.14	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+7pc0	2021-08-03	3.0	ELECTRON MICROSCOPY	F	B,C,I	gamma-aminobutyric acid receptor subunit beta-3 | gamma-aminobutyric a	AAKGRYSGGLYYPTNYDY
+7pbz	2021-08-03	2.79	ELECTRON MICROSCOPY	F	B,C,J	gamma-aminobutyric acid receptor subunit beta-3 | gamma-aminobutyric a	AAKGRYSGGLYYPTNYDY
+7rnn	2021-07-29	2.86	ELECTRON MICROSCOPY	C	D	acid-sensing ion channel 1	NARYRSSYP
+7rmg	2021-07-27	3.0	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short, w	ARCPAPFTRDCFDVTSTTYAY
+7ri2	2021-07-19	2.8	X-RAY DIFFRACTION	B	A	glycoprotein 120	AAKWRPLRYSDYPSNSDYYD
+7ri1	2021-07-19	2.55	X-RAY DIFFRACTION	B	A,K,N	glycoprotein 120	ARSKSTYISYNSNGYDY
+7p77	2021-07-19	2.98	ELECTRON MICROSCOPY	A,D,H,W,X,Y	B,C,E	spike glycoprotein	FVYVGRSY
+7rga	2021-07-14	2.9	X-RAY DIFFRACTION	A,B,C,D,E,F,G	A,AB,B,C,D,E,F,G,H,J,K,M,N,P,Q,S,T,V,W,Y,Z	METHOTREXATE	AADDNYVTASWRSGPDY
+7fau	2021-07-07	2.08	X-RAY DIFFRACTION	B,D	A,C,G	spike protein s1	AAGLVRGSCTDVLDHPSYLGV
+7fat	2021-07-07	1.99	X-RAY DIFFRACTION	B	A	spike protein s1	AAEGGPSLSYCTGGYGFLLSGLMYNS
+7rby	2021-07-06	2.82	X-RAY DIFFRACTION	B,D	A,C	spike protein s1	AAVPSTYYSGTYYYTCHPGGMDY
+7f9y	2021-07-05	2.9	ELECTRON MICROSCOPY	N	A,B,G	engineered g-alpha-q subunit | guanine nucleotide-binding protein g(i)	ARCPAPFTRDCFDVTSTTYAY
+7r98	2021-06-28	2.51	X-RAY DIFFRACTION	D,E,F	A,B,C	nucleoprotein	ASGRYLGGITSYSQGDFAP
+7r74	2021-06-24	2.76	X-RAY DIFFRACTION	B,D	A,C	glycoprotein 120	AARRLPIGDYTD
+7r73	2021-06-24	1.76	X-RAY DIFFRACTION	A	G	glycoprotein 120	AAKWRPLRYSDNPSNSDYNY
+7f5h	2021-06-22	3.0	X-RAY DIFFRACTION	C,D	A,B,G,H	sars-cov-2 spike receptor-binding domain (rbd)	NVVDRWYDY
+7f5g	2021-06-22	1.75	X-RAY DIFFRACTION	B,D	A,AD,AE,C,M,O,Z	spike glycoprotein	NILEGQRWSNY
+7f54	2021-06-21	3.0	ELECTRON MICROSCOPY	N	A,B	isoform gnas-2 of guanine nucleotide-binding protein g(s)subunit alpha	ARCPAPFTRDCFDVTSTTYAY
+7f53	2021-06-21	3.0	ELECTRON MICROSCOPY	N	A,B	isoform gnas-2 of guanine nucleotide-binding protein g(s)subunit alpha	ARCPAPFTRDCFDVTSTTYAY
+7na9	2021-06-20	1.76	X-RAY DIFFRACTION	D	A,F	botulinum neurotoxin type b	AADGTASVFNSYASADRNKYNY
+7f4d	2021-06-18	3.0	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(i) subunit alpha-1 | guanine nucl	ARCPAPFTRDCFDVTSTTYAY
+7f1g	2021-06-09	1.5	X-RAY DIFFRACTION	D	A	beta-secretase 2	TSAGR
+7f16	2021-06-08	2.8	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+7n4n	2021-06-04	1.41	X-RAY DIFFRACTION	D	A,G	beta-secretase 2	TSAGR
+7n0r	2021-05-25	1.42	X-RAY DIFFRACTION	C,D	A,B	nucleoprotein	AKYQAAVHQEKEDY
+7n0i	2021-05-25	2.2	X-RAY DIFFRACTION	I,J,K,L	A,B,C,D,E,F,G,H,O	nucleoprotein | nucleoprotein	ATNTRWTYFSPTVPDRYDY
+7evm	2021-05-21	2.5	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+7olz	2021-05-20	1.75	X-RAY DIFFRACTION	B,C	A,D	spike protein s1	AAASDYGLPREDFLYDY
+7my3	2021-05-20	2.9	ELECTRON MICROSCOPY	D,E,H	A,B,C	spike glycoprotein	KTAFPYFGNSCVLDY
+7my2	2021-05-20	2.65	ELECTRON MICROSCOPY	A,D,H	B,C,E	spike glycoprotein	AADRGMGYGDFMDY
+7ept	2021-04-27	3.0	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+7eow	2021-04-23	1.6	X-RAY DIFFRACTION	B	A	von willebrand factor	AAAGVRAEDGRVRTLPSEYTF
+7oay	2021-04-20	2.34	X-RAY DIFFRACTION	B,BBB,D,DDD,F,FFF,H,HHH,J,JJJ,L,LLL	A,AAA,C,CCC,E,EEE,G,GGG,I,III,K,KKK	unknown	AADRGESYYYTRPTEYEF
+7oau	2021-04-20	1.65	X-RAY DIFFRACTION	B,BBB,F,FFF	A,AAA,C,E,EEE	unknown	ALGVTAACSDNPYF
+7oaq	2021-04-20	1.55	X-RAY DIFFRACTION	A,AAA,F,FFF	C,E,EEE	unknown	AAGRFAGRDTWPSSYDY
+7mji	2021-04-20	2.81	ELECTRON MICROSCOPY	E	B	spike glycoprotein	ARDNLGYRPSENLYGMDV
+7mjh	2021-04-20	2.66	ELECTRON MICROSCOPY	D,E,F	A,AU,B,C	spike glycoprotein	ARDNLGYRPSENLYGMDV
+7oap	2021-04-19	1.901	X-RAY DIFFRACTION	A,AAA,F,FFF	C,E,EEE	unknown	AAGRFAGRDTWPSSYDY
+7oao	2021-04-19	1.5	X-RAY DIFFRACTION	F,FFF	E,EEE	unknown	ALGVTAACSDNPYF
+7oan	2021-04-19	3.0	ELECTRON MICROSCOPY	F,G,H	A,B,C	spike glycoprotein	ALGVTAACSDNPYF
+7mfu	2021-04-11	1.7	X-RAY DIFFRACTION	B,C,E,F	A,B,C,D,E,F,H,I,J,L,M,N,O	spike protein s1	YVYVGSSY
+7o3b	2021-04-01	2.4	X-RAY DIFFRACTION	A,B,C	G,H,I	tau-tubulin kinase 2,centrosomal protein of 164 kda	NAVAVAGRAFSY
+7mbx	2021-04-01	1.95	ELECTRON MICROSCOPY	N	A,B,G	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+7o0s	2021-03-26	1.7	X-RAY DIFFRACTION	A	B	centrosomal protein of 164 kda	NAVAVAGRAFSY
+7o06	2021-03-25	1.6	X-RAY DIFFRACTION	A,B	C,D,E	centrosomal protein of 164 kda	NAARPLRPEGGRWLNY
+7nxx	2021-03-19	2.189	X-RAY DIFFRACTION	B	A	superoxide dismutase [cu-zn]	AAGNGALPPGRRLSPQNMDT
+7nx0	2021-03-17	1.95	X-RAY DIFFRACTION	D,E	B,C	leukocyte tyrosine kinase receptor	AAVDRHSPGSAWYNRNFGS
+7nvn	2021-03-15	3.0	ELECTRON MICROSCOPY	N,n	E,e	t-complex protein 1 subunit epsilon	KANRNWGREWDDY
+7nvl	2021-03-15	2.5	ELECTRON MICROSCOPY	N,n	E,e	t-complex protein 1 subunit epsilon	KANRNWGREWDDY
+7m1h	2021-03-13	2.78	X-RAY DIFFRACTION	B,C,D,E,F,G	A,E,F,H	botulinum neurotoxin a light chain	ARAFLACGPVAGWGTEYDY
+7lzp	2021-03-10	2.86	X-RAY DIFFRACTION	B,C,E,F,G,H	A,B,C,D,E,F	botulinum neurotoxin a light chain	AADFSIAYSGTYPPAYAEYDYDY
+7nqa	2021-03-01	2.2	X-RAY DIFFRACTION	C,D	A,B,E,F,G,H	nuclear pore complex protein nup96	NIEADQTKGIGYVVYPY
+7now	2021-02-26	1.85	X-RAY DIFFRACTION	A,C	B,D	nuclear pore complex protein nup96	ASAASSAAYSGAYYYTSYYDY
+7lvw	2021-02-26	2.1	X-RAY DIFFRACTION	G,H,I,J,K,L	A,B,C,D,E,F,R	fusion glycoprotein f0	AAKRGGAVTAAEWYDY
+7nmu	2021-02-23	2.5	X-RAY DIFFRACTION	C,CCC,D,DDD	A,AAA,B,BBB	unknown	ATSPLYSTNDRCISEDYDY
+7nll	2021-02-22	2.89	ELECTRON MICROSCOPY	A,C	B,D	surface glycoprotein	AVGPSFSYTGSTYYRSELPWDYDY
+7nkt	2021-02-18	2.3	X-RAY DIFFRACTION	B,BBB	A,AAA,C,D,E	unknown	AALQGSYYYTGFVANEYDY
+7e53	2021-02-16	2.21	X-RAY DIFFRACTION	B	A	green fluorescent protein	ALRRRGWSNTSGWKQPGWYDY
+7nfr	2021-02-07	1.88	X-RAY DIFFRACTION	B	A,G	polymerase basic protein 2	TKGSNWPYDN
+7nfq	2021-02-07	1.68	X-RAY DIFFRACTION	C,D	A,B	polymerase basic protein 2	VQGRNWPYDY
+7ndf	2021-02-01	2.1	X-RAY DIFFRACTION	C,D	A,B	lipid a abc transporter atp-binding protein/permease msba	NAEGPAGY
+7e14	2021-01-30	2.9	ELECTRON MICROSCOPY	N	A,B	gs | guanine nucleotide-binding protein g(i)/g(s)/g(t) subunitbeta-1 	ARCPAPFTRDCFDVTSTTYAY
+7ljc	2021-01-28	3.0	ELECTRON MICROSCOPY	N	A,B,G	engineered human gs alpha subunit | guanine nucleotide-binding protein	ARCPAPFTRDCFDVTSTTYAY
+7nbb	2021-01-26	1.55	X-RAY DIFFRACTION	D,H	A,B,C,E,F,G,Z	polyubiquitin-b | polyubiquitin-b | polyubiquitin-b	AAGIVGDVVGWIYYLY
+7ldj	2021-01-13	2.36	X-RAY DIFFRACTION	E,F,G,H	A,B,C,D	spike glycoprotein	AAIAATYYSGSYYFQCPHDGMDY
+7dv4	2021-01-12	2.38	X-RAY DIFFRACTION	B,D,F,H	A,B,C,D,E,F,G,H,I,J	cytotoxic t-lymphocyte protein 4	ARAVPHSPSSFDI
+7duq	2021-01-11	2.5	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+7dty	2021-01-06	2.98	ELECTRON MICROSCOPY	N	A,B,G	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+7l6v	2020-12-24	2.01	X-RAY DIFFRACTION	B,C,D,E,F	A,B,D,F,G,H,I	bont/a	SALNLEDMEY
+7b5g	2020-12-03	2.4	X-RAY DIFFRACTION	B,D,F,H	A,C,E,G	lexa repressor	NVGSFYRGNYYGGSS
+7b27	2020-11-26	2.902	X-RAY DIFFRACTION	C,CCC,D,DDD	A,AAA,a,aba	unknown	HAPGVRVGTGERKDV
+7b18	2020-11-24	2.62	ELECTRON MICROSCOPY	D,E,F,G,H,I	A,B,C	spike glycoprotein	ALTVGTYYSGNYHYTCSDDMDY
+7azb	2020-11-16	2.62	X-RAY DIFFRACTION	B	A	discoidin domain-containing receptor 2	APQRSIYQSHKPIY
+7kn5	2020-11-04	1.87	X-RAY DIFFRACTION	C,D,E,F	A,B,H,L,M	spike protein s1	ALTVGTYYSGNYHYTCSDDMDY
+7klw	2020-11-01	2.6	X-RAY DIFFRACTION	B,C	A	spike protein s1	NVKDVGHHYEYYDY
+7kkl	2020-10-27	2.85	ELECTRON MICROSCOPY	B,E,F	A,C,D	sars-cov-2 spike glycoprotein	AADPASPAYGDY
+7kjh	2020-10-26	2.0	X-RAY DIFFRACTION	A,B	C,D,E,F,G,H	surface protein p12p	AARDFGFGNNYDY
+7ar0	2020-10-23	2.139	X-RAY DIFFRACTION	B	A	variant surface glycoprotein mitat 1.2	AATSSWNDMALKSAGWYEY
+7aqz	2020-10-23	1.3	X-RAY DIFFRACTION	C,D	A,B,G,I,J,K	variant surface glycoprotein mitat 1.2	AADLLGSGKDGTSVYEY
+7aqy	2020-10-23	1.9	X-RAY DIFFRACTION	C,D	A,B	variant surface glycoprotein mitat 1.2	AAKLLGSSRYELALAGYDY
+7aqx	2020-10-23	1.499	X-RAY DIFFRACTION	C,D	A,B,H,I	variant surface glycoprotein mitat 1.2	AADLLGEGSRRSEYEY
+7ki1	2020-10-22	2.5	ELECTRON MICROSCOPY	N	A,B,G	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+7ki0	2020-10-22	2.5	ELECTRON MICROSCOPY	N	A,B,G	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+7aqg	2020-10-21	2.27	X-RAY DIFFRACTION	B,C	A	plasminogen activator inhibitor 1	SAVRLPQRY
+7kgk	2020-10-16	2.6	X-RAY DIFFRACTION	B	A	spike protein s1	IVWVGAQY
+7kgj	2020-10-16	2.3	X-RAY DIFFRACTION	B	A	spike glycoprotein	NVKDVGHHYEYYDY
+7apj	2020-10-16	2.05	X-RAY DIFFRACTION	B	A	rac-alpha serine/threonine-protein kinase,non-specificserine/threonine	NTYGRLRRDV
+7anq	2020-10-12	2.2	X-RAY DIFFRACTION	B	A	proprotein convertase subtilisin/kexin type 9	AARQYYSGRVYSTFREEYDY
+7kdu	2020-10-09	2.809	X-RAY DIFFRACTION	C	A,B	ricin chain b | ricin chain a	KATGERGYGDQGYLEV
+7kdm	2020-10-08	2.301	X-RAY DIFFRACTION	C,F	A,B,D,E	ricin chain b | ricin chain a	KGTADGSSSLGYLEV
+7kd2	2020-10-07	2.55	X-RAY DIFFRACTION	C	A,B,Q,R	ricin chain b | ricin chain a	NARDMWDRSHEY
+7kd0	2020-10-07	2.768	X-RAY DIFFRACTION	C	A,B	ricin chain b | ricin chain a	KRPAGRIEDEL
+7d8b	2020-10-07	2.46	X-RAY DIFFRACTION	B,D	A,C	eukaryotic translation initiation factor 4e	GRVAKALNSRSPSFVVNTYSSIGFDY
+7kc9	2020-10-05	2.301	X-RAY DIFFRACTION	C,F	A,B,D,E	ricin chain b | ricin chain a	KGTADGSSSLGYLEV
+7kbk	2020-10-02	2.091	X-RAY DIFFRACTION	C	A,B	ricin | ricin	ALNRGYSGTGYPSKQYEYND
+7d6y	2020-10-02	1.668	X-RAY DIFFRACTION	B	A	eukaryotic translation initiation factor 4e	GRVAKDLNSSSPSFVVNTYSSFGFDY
+7d68	2020-09-29	3.0	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+7d5u	2020-09-28	2.04	X-RAY DIFFRACTION	D	A	beta-secretase 2	TSAGR
+7k84	2020-09-25	2.5	X-RAY DIFFRACTION	B	A,F	botulinum neurotoxin type e	AASHRFSDYPMRSEDGMDY
+7d5b	2020-09-25	1.31	X-RAY DIFFRACTION	D	A,C,H,I	beta-secretase 2	TSAGR
+7d3s	2020-09-20	2.9	ELECTRON MICROSCOPY	N	A,B,G	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+7d30	2020-09-17	2.1	X-RAY DIFFRACTION	A,A1,A2	AD,AH,AI,AJ,AK,AM,AN,AO,AR,AS,AU,AY,AZ,B,BA,BS	spike protein s1	NVKDDGQLAYHYDY
+7d2z	2020-09-17	1.97	X-RAY DIFFRACTION	A	B,F,G	spike protein s1	AVMVGFWY
+7czd	2020-09-08	1.64	X-RAY DIFFRACTION	A,C	B,D,E	programmed cell death 1 ligand 1	AKDPGGYA
+7cz5	2020-09-07	2.6	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+7cz0	2020-09-06	2.77	X-RAY DIFFRACTION	E,F,G,H	A,B,C,D	thermostable green fluorescent protein (tgp)	TVYVGNRY
+7cx4	2020-09-01	2.9	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+7cx3	2020-09-01	2.8	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+7cx2	2020-09-01	2.8	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+7a6o	2020-08-25	2.1	X-RAY DIFFRACTION	B	A,C	unknown	AAAGVRAEDGRVRTLPSEYTF
+7jvq	2020-08-22	3.0	ELECTRON MICROSCOPY	N	A,B,G	engineered mini-gi protein alpha sub-unit | guanine nucleotide-binding	ARCPAPFTRDCFDVTSTTYAY
+7jvp	2020-08-22	2.9	ELECTRON MICROSCOPY	N	A,B,G	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+7a5v	2020-08-22	1.7	ELECTRON MICROSCOPY	O	A,C	gamma-aminobutyric acid receptor subunit beta-3,gamma-aminobutyric aci	AAKGRYSGGLYYPTNYDY
+7jv5	2020-08-20	3.0	ELECTRON MICROSCOPY	N	A,B,G	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+7a50	2020-08-20	1.999	X-RAY DIFFRACTION	A,C	A,B,C,D,G	coiled-coil aph	VADSSPYYRRYDAAQDYDY
+7a4y	2020-08-20	2.157	X-RAY DIFFRACTION	A,B,C	D,E,F,H,I,J	coiled-coil p5 peptide | coiled-coil p6 peptide	SKTRAGTG
+7a4t	2020-08-20	2.124	X-RAY DIFFRACTION	A	B,C,F,G,H	gcn4 isoform 1 | gcn4 isoform 1	NSRGWTTTRGDYDY
+7a4d	2020-08-19	2.694	X-RAY DIFFRACTION	A,B,C,D,G,H,I,J	A,B,C,D,E,F,G,H,I,J,K,L,M,N,O,P	aph coiled-coil	ATACYSSYVTY
+7a48	2020-08-19	1.547	X-RAY DIFFRACTION	A	B	aph colied-coil	AADKDNTGYNY
+7a29	2020-08-16	2.94	ELECTRON MICROSCOPY	D,E,F	A,B,C	spike glycoprotein	AVQVGYWY
+7a17	2020-08-12	2.73	X-RAY DIFFRACTION	B,D,F	A,C,E	isoform 2 of synaptojanin-1	AQSRAIEADDSRGYDY
+7a0v	2020-08-11	2.3	X-RAY DIFFRACTION	B,D,F	A,B,C,D,E,F,I	synaptojanin-1	AQSRAIEADDSRGYDY
+6zxn	2020-07-30	2.93	ELECTRON MICROSCOPY	D,E,F	A,B,C	spike glycoprotein	AIGLNLSSSSV
+6zwk	2020-07-28	1.55	X-RAY DIFFRACTION	A,B,C,D,E,F	G,H,I,J,K,L,M,N,O,P,R,S,T	histone h2ax	AADYGTSRYTRRQSEYEY
+7jjo	2020-07-27	2.6	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+6zrv	2020-07-15	1.88	X-RAY DIFFRACTION	B	A	plasminogen activator inhibitor 1	AADYGSSWCTFNGMDY
+6zqk	2020-07-09	2.2	X-RAY DIFFRACTION	A,B,C,D	A1,A2,C1,C2,M,N,S,T	841 heavy chain|1,2-ETHANEDIOL	VRSGNYEEYAMDY
+7cfn	2020-06-27	3.0	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+7cfm	2020-06-27	3.0	ELECTRON MICROSCOPY	N	A,B,G	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+6zg3	2020-06-18	2.8	X-RAY DIFFRACTION	E,J	A,AB,AC,D,F,I	energy-coupling factor transporter atp-binding proteinecfa1  | putativ	AATPVWYWSCAVKVGPYDY
+6ze1	2020-06-15	2.705	X-RAY DIFFRACTION	B	A,G	cystic fibrosis transmembrane conductance regulator	AAGTSSFLRREYDY
+7can	2020-06-09	2.94	X-RAY DIFFRACTION	A	B	spike glycoprotein	NVYDDGQLAYHYDY
+6zbp	2020-06-08	1.85	X-RAY DIFFRACTION	F,FFF	B,E,EEE	unknown	AQTHYVSYLLSDYATWPYDY
+7c8w	2020-06-03	2.77	X-RAY DIFFRACTION	A	B	spike glycoprotein	NVKDDGQLAYHYDY
+7c8v	2020-06-03	2.15	X-RAY DIFFRACTION	A	B,C,D	spike glycoprotein	YVWVGHTY
+6z6v	2020-05-29	2.19	X-RAY DIFFRACTION	G,H	B,C,E,F	complement c1q subcomponent subunit b | complement c1q subcomponent su	GADENPPGWPSRWSSAYDY
+6x1a	2020-05-18	2.5	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+6x19	2020-05-18	2.1	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+6x18	2020-05-18	2.1	ELECTRON MICROSCOPY	N	A,B,G	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+6x07	2020-05-15	2.1	X-RAY DIFFRACTION	B	A	nucleoporin nic96	NIWAPTTAAITN
+6x05	2020-05-15	2.1	X-RAY DIFFRACTION	K	A	nucleoporin nup133	HGRGRWWGTEGRLDY
+6x04	2020-05-15	2.68	X-RAY DIFFRACTION	B,D,F,H,J,L	A,B,C,D,E,F,G,H,I,J,K,L	nucleoporin nup133	KGVMEVGGVIDEY
+6z20	2020-05-14	2.68	X-RAY DIFFRACTION	B,D	A,C,E,F,G	cd9 antigen	AADERWGTGGKFDY
+6z1v	2020-05-14	1.33	X-RAY DIFFRACTION	B	A,D	cd9 antigen	AATERWGLRAPADWGS
+6wzg	2020-05-13	2.3	ELECTRON MICROSCOPY	N	A,B,G	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+6z10	2020-05-11	2.269	X-RAY DIFFRACTION	B	A	succinate receptor 1	AADPFGERLCIDPNTFAGYLET
+6yz5	2020-05-06	1.8	X-RAY DIFFRACTION	F	E,H,Q,S	spike glycoprotein	ARTENVRSLLSDYATWPYDY
+6yu8	2020-04-25	1.841	X-RAY DIFFRACTION	B	A,AA,C,G,R,T,U,V,X	methyltransferase domain of the l protein	AAGALPRTAHYEYDY
+7bu7	2020-04-04	2.6	X-RAY DIFFRACTION	B	A	endolysin,endolysin,beta-1 adrenergic receptor chimera	NVKDFGAIIYDYDY
+7bu6	2020-04-04	2.7	X-RAY DIFFRACTION	B	A,F	endolysin,endolysin,endolysin,beta-1 adrenergic receptorchimera 	NVKDFGAIIYDYDY
+6waq	2020-03-25	2.2	X-RAY DIFFRACTION	A,C	B,D,F	spike glycoprotein	AAAGLGTVVSEWDYDYDY
+6lz2	2020-02-17	2.03	X-RAY DIFFRACTION	B,D	A,C,K,M	thermostable green fluorescent protein	EVSVGTGY
+6y1r	2020-02-13	1.85	X-RAY DIFFRACTION	A,B,C,D,E	B,C,D,H,I,M,N,Q	Nb22-LBT|TERBIUM(III) ION	AAARRFRAGVVTRADDVDY
+6xzu	2020-02-05	1.5	X-RAY DIFFRACTION	A	B	complement c3	NLLGATTMINTK
+6xzf	2020-02-04	1.8	X-RAY DIFFRACTION	B	A,C	egfp	NVNVGFEY
+6xw7	2020-01-23	2.15	X-RAY DIFFRACTION	C,D,G,H	A,B,E,F,R,S,T,U	capsid protein	AGRGSVYYDV
+6xw6	2020-01-23	1.96	X-RAY DIFFRACTION	C,D	A,B	capsid protein	AARSRFSAMHLAYRRLVDYDD
+6xw5	2020-01-23	1.72	X-RAY DIFFRACTION	C,D	A,B,K,N	capsid protein	AGKGQGGTWDY
+6xw4	2020-01-23	2.19	X-RAY DIFFRACTION	C,D	A,B	capsid protein	AATYSTIAPRTSYDF
+6lr7	2020-01-15	1.67	X-RAY DIFFRACTION	B	A	green fluorescient protein uv	SARSRGYVLSVLRSVDSYDY
+6vbg	2019-12-18	2.8	X-RAY DIFFRACTION	C,D	A,B,J,M,N,O	galactoside permease	AARVGVDYKY
+6v7z	2019-12-10	2.75	X-RAY DIFFRACTION	E,F	A,B,C,D,T	antigen-presenting glycoprotein cd1d | beta-2-microglobulin	AAHVAGFDEYNY
+6v7y	2019-12-10	2.4	X-RAY DIFFRACTION	F	A,I	antigen-presenting glycoprotein cd1d	AARLVPPGIPIPRTSESMRY
+6tej	2019-11-12	2.7	X-RAY DIFFRACTION	C	B	drug abc transporter atp-binding protein	NVKDTGQMRESYDY
+6uva	2019-11-01	2.3	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+6uus	2019-10-31	2.4	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+6uun	2019-10-30	3.0	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+6ul6	2019-10-07	2.02	X-RAY DIFFRACTION	B,B1,B2,C	A	bont/a	NADWKMGAWTAGDYGIDY
+6ui1	2019-09-29	2.20001	X-RAY DIFFRACTION	B,C,D	A	bont/a	RLYGSGDY
+6uht	2019-09-28	2.20001	X-RAY DIFFRACTION	C,D	A,B	botulinum neurotoxin type b	AAAPLAGRYCPASHEYGY
+6uft	2019-09-25	2.90008	X-RAY DIFFRACTION	B	A,C	botulinum neurotoxin type b	GASYFTVCAKSMRKIEYRY
+6uc6	2019-09-15	2.32006	X-RAY DIFFRACTION	C,D	A,B	botulinum neurotoxin type b	AALADCAGYASLTFDFDS
+6ssi	2019-09-07	2.59	X-RAY DIFFRACTION	F,G,H,I,J	A,B,C,D,E	cys-loop ligand-gated ion channel	NVGAS
+6u55	2019-08-26	1.93	X-RAY DIFFRACTION	A	B	nucleoprotein	NAYSSAYDRNY
+6u54	2019-08-26	1.6	X-RAY DIFFRACTION	A	B	nucleoprotein	RLYAEAIY
+6u52	2019-08-26	1.9	X-RAY DIFFRACTION	A,C	A,B,C,D,E,F,G	nucleoprotein	NLNVRTAVAGRNDY
+6u51	2019-08-26	2.52	X-RAY DIFFRACTION	A,C	B,D	nucleoprotein	NLNVRTAVAGRNDY
+6u14	2019-08-15	1.3	X-RAY DIFFRACTION	A,B	A,C,E	SULFATE ION	TLHRFANTWSLGTLNV
+6u12	2019-08-15	1.56	X-RAY DIFFRACTION	B	A	inlb	TLHRFANTWSLGTLNV
+6sge	2019-08-04	1.5	X-RAY DIFFRACTION	B,D	A,C,E,H	rho-related gtp-binding protein rhob	APINNRTMQDSMFLWNY
+6sc9	2019-07-23	2.47	X-RAY DIFFRACTION	B,C	A	e3 ubiquitin-protein ligase rnf31	
+6sc8	2019-07-23	2.106	X-RAY DIFFRACTION	B,C	A	e3 ubiquitin-protein ligase rnf31	
+6sc7	2019-07-23	2.56	X-RAY DIFFRACTION	B,C	A	e3 ubiquitin-protein ligase rnf31	
+6sc6	2019-07-23	2.25	X-RAY DIFFRACTION	B,C	A	e3 ubiquitin-protein ligase rnf31	
+6sc5	2019-07-23	2.1	X-RAY DIFFRACTION	B,C	A	e3 ubiquitin-protein ligase rnf31	
+6s0y	2019-06-18	1.81	X-RAY DIFFRACTION	A,B	B,C,D	matrix protein 2	GAERYNVEGCGYDVAY
+6pb1	2019-06-12	2.8	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short,gu	ARCPAPFTRDCFDVTSTTYAY
+6pb0	2019-06-12	3.0	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short,gu	ARCPAPFTRDCFDVTSTTYAY
+6p9x	2019-06-10	2.91	ELECTRON MICROSCOPY	N	A,B,G	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+6rvc	2019-05-31	2.2	X-RAY DIFFRACTION	D,E,F	A,B,C	protein patched homolog 1	ARKVAGGSYYQKDKYDY
+6rty	2019-05-27	2.1	X-RAY DIFFRACTION	B	A	protein patched homolog 1	SAVLVRFGGLRRSY
+6rtw	2019-05-27	1.9	X-RAY DIFFRACTION	B	A	protein patched homolog 1	SAVLVRFGGLRRSY
+6rqm	2019-05-16	3.0	X-RAY DIFFRACTION	B	A	cytotoxic t-lymphocyte protein 4	AADVIPTETCLGGSWSGPFGY
+6oyh	2019-05-14	2.95	X-RAY DIFFRACTION	E,F,G,H	A,B,C,D	phospho-n-acetylmuramoyl-pentapeptide-transferase	AAFRVAVTTYTSQQANEYNY
+6rnk	2019-05-08	1.94	X-RAY DIFFRACTION	B	A,F	succinate receptor 1	AADPFGERLCIDPNTFAGYLET
+6os2	2019-05-01	2.7	X-RAY DIFFRACTION	D	A,G	type-1 angiotensin ii receptor,soluble cytochrome b562 brilfusion prot	AAVAYPDIPTYFDYDSDNFY
+6os1	2019-05-01	2.794	X-RAY DIFFRACTION	D	A,F	type-1 angiotensin ii receptor,soluble cytochrome b562 brilfusion prot	AAVAYPDIPTYFDYDSDNFY
+6os0	2019-05-01	2.9	X-RAY DIFFRACTION	D	A,F	type-1 angiotensin ii receptor,soluble cytochrome b562 brilfusion prot	AAVAYPDIPTYFDYDSDNFY
+6orv	2019-05-01	3.0	ELECTRON MICROSCOPY	NP	AP,BP	Guanine nucleotide-binding protein G(s) subunit alpha isoforms short|G	ARCPAPFTRDCFDVTSTTYAY
+6oq8	2019-04-25	2.2	X-RAY DIFFRACTION	C,D	A,B	toxin b	ALHNAVSGSS
+6oq7	2019-04-25	2.39	X-RAY DIFFRACTION	C	A	toxin b	KGPEL
+6oq6	2019-04-25	2.97	X-RAY DIFFRACTION	D	A	toxin b	ARRRFSASSVNRWLADDYDV
+6jsz	2019-04-08	1.53	X-RAY DIFFRACTION	D	A,C	beta-secretase 2	TSAGR
+6rai	2019-04-06	2.9	ELECTRON MICROSCOPY	C	B	multidrug resistance abc transporter atp-binding andpermease protein 	ATVTAVLLPGRCVPGKY
+6rah	2019-04-06	2.8	ELECTRON MICROSCOPY	C	B	multidrug resistance abc transporter atp-binding andpermease protein 	ATVTAVLLPGRCVPGKY
+6r7t	2019-03-29	2.682	X-RAY DIFFRACTION	A	B	melanoma-associated antigen b1	AAAAWRVGTYDY
+6ocd	2019-03-22	2.103	X-RAY DIFFRACTION	B,D	A,C,H,L	ricin a chain	AATKYGSSCPIRPYDY
+6oca	2019-03-22	2.113	X-RAY DIFFRACTION	C,D	A,B,J,K	ricin a chain	AAGLRGGTYARTIYEYDY
+6obo	2019-03-21	1.9	X-RAY DIFFRACTION	C,D	A,B,G,H,I,J,L,M,N,O	ricin a chain	NVVGGSYYYDEYNY
+6obm	2019-03-21	2.495	X-RAY DIFFRACTION	B	A	ricin a chain	NAVGGTYYYDEYDY
+6obg	2019-03-20	1.996	X-RAY DIFFRACTION	C,D	A,B,F,O,P	ricin a chain	NVLAGSHYYDEYEY
+6obe	2019-03-20	1.732	X-RAY DIFFRACTION	B	A,E,F	ricin a chain	NAQLWERYVLNDY
+6obc	2019-03-20	1.762	X-RAY DIFFRACTION	B	A,F,G	ricin a chain	NARKWERSVLEDY
+6qup	2019-02-28	1.871	X-RAY DIFFRACTION	B	A,G,H,I,J	lysm type receptor kinase	NARVYFGDRDY
+6o3c	2019-02-26	2.8	X-RAY DIFFRACTION	B	A	smoothened homolog	AAQDLLYYSFPGDHAY
+6jb8	2019-01-25	1.65	X-RAY DIFFRACTION	A	B,C,D,G	lysozyme c	GATRKYVPVRFALDQSSYDY
+6jb5	2019-01-25	1.55	X-RAY DIFFRACTION	A	B,F,G	lysozyme c	GATRKAVPVRFALDQSSYDY
+6jb2	2019-01-25	1.5	X-RAY DIFFRACTION	A	B,C,H	lysozyme c	GATRKAVPVRFALDQSSYDY
+6j7w	2019-01-18	2.6	X-RAY DIFFRACTION	A,B	C,D	tumor necrosis factor receptor superfamily member 17	AKQGENDGPFDH
+6qgy	2019-01-14	2.509	X-RAY DIFFRACTION	B,D	A,C	outer membrane protein assembly factor bama	AAKTGTWATMDRRYDY
+6qgx	2019-01-14	2.2	X-RAY DIFFRACTION	B	A,D	outer membrane protein assembly factor bama	AAKTGTWATLDRRYDY
+6qgw	2019-01-14	1.938	X-RAY DIFFRACTION	B	A	outer membrane protein assembly factor bama	AADPQWSRVRSGADY
+6qfa	2019-01-09	2.49	ELECTRON MICROSCOPY	K,L,M,N,O	A,B,C,D,E,F,G,H,I,J,Q,S,U,W,Y	gamma-aminobutyric acid receptor subunit beta-3,gamma-aminobutyric aci	AAKGRYSGGLYYPTNYDY
+6nbf	2018-12-07	3.0	ELECTRON MICROSCOPY	N	A,B	gs protein alpha subunit | guanine nucleotide-binding protein g(i)/g(s	ARCPAPFTRDCFDVTSTTYAY
+6ibl	2018-11-30	2.7	X-RAY DIFFRACTION	C,D	A,B	thioredoxin 1,beta-1 adrenergic receptor	NVKDYGAVLYEYDY
+6ibb	2018-11-29	2.12	X-RAY DIFFRACTION	B,D	A,C,N	succinate receptor 1	AADPFGERLCIDPNTFAGYLET
+6itq	2018-11-24	1.526	X-RAY DIFFRACTION	A,B,C,D	A,B,C,D,E,F,G,H,I,J	(11ALPHA,14BETA)-11,17,21-TRIHYDROXYPREGN-4-ENE-3,20-DIONE	ASTRFAGRWYRDSEYRA
+6itp	2018-11-24	1.572	X-RAY DIFFRACTION	A,B	A,B,C,D	(11ALPHA,14BETA)-11,17,21-TRIHYDROXYPREGN-4-ENE-3,20-DIONE	ASTRFAGRWYRDSEYRA
+6i8g	2018-11-20	2.344	X-RAY DIFFRACTION	B	A	protein eds1l	AAGWPVKVISSADEYIN
+6i6j	2018-11-15	2.23	X-RAY DIFFRACTION	C	A,B,D	er lumen protein-retaining receptor 2	NVKDEGDFSYWYDY
+6ir2	2018-11-09	1.393	X-RAY DIFFRACTION	B	A	mcherry fluorescent protein	AAAKSGTWWYQRSENDFGS
+6ir1	2018-11-09	1.919	X-RAY DIFFRACTION	B	A	mcherry fluorescent protein	AANLGNYISSNQRLYGY
+6i2g	2018-11-01	1.5	X-RAY DIFFRACTION	A	B,D	n7p-ser-arg-leu-glu-glu-glu-leu-arg-arg-arg-leu-thr-glu-lpd 	HVLEDRVDSFHDY
+6mxt	2018-10-31	2.95934	X-RAY DIFFRACTION	N	A	endolysin, beta-2 adrenergic receptor chimera	NANWDLLSDY
+6hjy	2018-09-04	2.78	X-RAY DIFFRACTION	F,G,H,I,J	A,B,C,D,E	cys-loop ligand-gated ion channel	GARIGGSDRLAPENYGY
+6hjx	2018-09-04	2.5	X-RAY DIFFRACTION	F,G,H,I,J	A,B,C,D,E	cys-loop ligand-gated ion channel	GARIGGSDRLAPENYGY
+6hhu	2018-08-29	2.7	X-RAY DIFFRACTION	G,H	A	s-layer protein sap	NADLGTGGRSYDY
+6hhd	2018-08-28	2.102	X-RAY DIFFRACTION	B,D	A,C,G,J,K,L,M	major prion protein	ARGLGIYIIRARGGYDH
+6her	2018-08-20	1.199	X-RAY DIFFRACTION	B	A,D,F	major prion protein	ARGLGIYIIRARGGYDH
+6h7o	2018-07-31	2.8	X-RAY DIFFRACTION	C,D	A,B	beta-1 adrenergic receptor	NVKDFGAIIYDYDY
+6h7n	2018-07-31	2.5	X-RAY DIFFRACTION	C,D	A,B	beta-1 adrenergic receptor	NVKDFGAIIYDYDY
+6h7m	2018-07-31	2.76	X-RAY DIFFRACTION	C,D	A,B	beta-1 adrenergic receptor	NVKDFGAIIYDYDY
+6h7l	2018-07-31	2.7	X-RAY DIFFRACTION	C,D	A,B	beta-1 adrenergic receptor	NVKDFGAIIYDYDY
+6h7j	2018-07-31	2.8	X-RAY DIFFRACTION	C,D	A,B	beta-1 adrenergic receptor	NVKDYGAVLYEYDY
+6h72	2018-07-30	2.3	X-RAY DIFFRACTION	C,D	A,B	capsid protein vp1	NAYIQLDSTIWFRAY
+6h71	2018-07-30	2.313	X-RAY DIFFRACTION	C,D	A,B	capsid protein vp1	NAYIQLDSTIWFRAY
+6h70	2018-07-30	1.83	X-RAY DIFFRACTION	C,D	A,B,H,L	capsid protein vp1	AARSRFIVGVPQARDLYDY
+6h6z	2018-07-30	2.085	X-RAY DIFFRACTION	C,D	A,B,I,K	capsid protein vp1 | capsid protein vp1	AARSRFIVGVPQARDLYDY
+6h6y	2018-07-30	1.58	X-RAY DIFFRACTION	E,F,G,H	A,B,C,D,V,W,X,Y	capsid protein vp1	AARRLATYDY
+6h1f	2018-07-11	1.9	X-RAY DIFFRACTION	A	B,C	gelsolin	AADLHRPYGPGSQRTDDYDT
+6h16	2018-07-11	2.9	X-RAY DIFFRACTION	B	A	low-density lipoprotein receptor-related protein 6	AAITYTRGIYKY
+6h15	2018-07-11	2.6	X-RAY DIFFRACTION	C,D	A,B,T,U	low-density lipoprotein receptor-related protein 6	AARGRRYFDFTYSDVYDY
+6h02	2018-07-06	2.8	X-RAY DIFFRACTION	B	A	mediator of rna polymerase ii transcription subunit 23	AACAYGTCYYGDRAYEY
+6gwq	2018-06-25	2.32	X-RAY DIFFRACTION	B	A	plasminogen activator inhibitor-1	SAVRLPQRY
+6gwp	2018-06-25	2.28	X-RAY DIFFRACTION	B,C	A	plasminogen activator inhibitor-1	SAVRLPQRY
+6gwn	2018-06-25	2.03	X-RAY DIFFRACTION	B,C	A	plasminogen activator inhibitor 1	SAVRLPQRY
+6gs4	2018-06-13	2.645	X-RAY DIFFRACTION	H	A	dipeptide and tripeptide permease a	AAKQYGSRADYPWDDYDY
+6do1	2018-06-08	2.901	X-RAY DIFFRACTION	C,D,E,F	A,B	type-1 angiotensin ii receptor,soluble cytochrome b562 brilfusion prot	
+6gkd	2018-05-18	2.99	X-RAY DIFFRACTION	B,C,G,H,J,K,M,N,P,Q,S,T	A,AA,AE,AF,AG,AH,AI,AM,B,C,F,G,H,I,J,K,L,M,N,O,P,Q,R,S,T,X	cystic fibrosis transmembrane conductance regulator	HAEITEQSRPFYLTDDY
+6gk4	2018-05-18	2.91	X-RAY DIFFRACTION	B,C,E,F	A,D,I,K	cystic fibrosis transmembrane conductance regulator	HAEITEQSRPFYLTDDY
+6gju	2018-05-17	2.6	X-RAY DIFFRACTION	B,C	A	cystic fibrosis transmembrane conductance regulator	NAAVQVRDYRNY
+6gjs	2018-05-16	1.95	X-RAY DIFFRACTION	B,C	A	cystic fibrosis transmembrane conductance regulator	HAEITEQSRPFYLTDDY
+6gjq	2018-05-16	2.49	X-RAY DIFFRACTION	B,D,F,H	A,C,E,G	cystic fibrosis transmembrane conductance regulator	HATVVVSRYGLTYDY
+6dbg	2018-05-03	1.51	X-RAY DIFFRACTION	C,D	B	internalin b	TLHRFCNTWSLGTLNV
+6dbf	2018-05-03	1.55	X-RAY DIFFRACTION	B	A	listeria virulence factor inlb	TLHRFCNTWSLGTLNV
+6cwg	2018-03-30	2.6	X-RAY DIFFRACTION	B,D	A,C	ricin	AASTTYCSATTYSSDRLYDF
+6fyw	2018-03-12	2.2	X-RAY DIFFRACTION	C	A,B,E,H	hemagglutinin | hemagglutinin	ATTTAGGGLCWDGTTFSRLASS
+6fyu	2018-03-12	2.643	X-RAY DIFFRACTION	C,F,I	A,B,D,E,G,H,K,O,W	hemagglutinin | hemagglutinin	TAQGQWRAAPVAVAAEYEF
+6fyt	2018-03-12	2.8	X-RAY DIFFRACTION	I	A,B,G	hemagglutinin | hemagglutinin	HVSLYRDPLGVAGGMGVY
+6fv0	2018-02-28	2.29	X-RAY DIFFRACTION	F	A	kinesin light chain 1,torsin-1a	ATDMSGTY
+6fuz	2018-02-28	2.7	X-RAY DIFFRACTION	N	A,B	kinesin light chain 1,kinesin light chain 1,c-jun-amino-terminal kinas	ATDMSGTY
+6c9w	2018-01-29	3.0	X-RAY DIFFRACTION	B	A	lactose permease	ARQGTNGGGYSEATSYNY
+6fe4	2017-12-29	3.0	X-RAY DIFFRACTION	F,G,H,I,J	A,B,C,D,E,F,G,H,I,J	shiga-like toxin 2 subunit b	AIGEGGNRNY
+6f2g	2017-11-24	2.92	X-RAY DIFFRACTION	B	A	putative amino acid/polyamine transport protein	AAKNGGAASNYPNDYVY
+6ey6	2017-11-10	2.1	X-RAY DIFFRACTION	I,J,K,L,M,N,O,P	A,B,C,D,E,F,G,H	t9ss component cytoplasmic membrane protein porm	VAGFAGYGSFTSRSARDSDKYDY
+6ey0	2017-11-10	2.4	X-RAY DIFFRACTION	E,F,G,H	A,B,C,D	t9ss component cytoplasmic membrane protein porm	AATPYGSRYYLRELREYDY
+6b20	2017-09-19	2.34	X-RAY DIFFRACTION	E,F	A,B,D,R	guanine nucleotide-binding protein g(i)/g(s)/g(t) subunitbeta-1  | gua	NVGRSRGY
+6ehg	2017-09-13	2.65	X-RAY DIFFRACTION	C	A,B	complement c3 | complement c3	AAGTGWSPQTDNEYNY
+5ovw	2017-08-30	2.653	X-RAY DIFFRACTION	G,H,I,J,K,L	A,B,C,D,E,F,M,N,O,P,Q	vitamin b12-binding protein	AAAHRIFGGCLVIHSSGYVS
+5y80	2017-08-18	2.5	X-RAY DIFFRACTION	B	A	cyclin-g-associated kinase	VRRGYSGDYRPINNP
+5y7z	2017-08-18	2.804	X-RAY DIFFRACTION	C,D	A,B,E,H,J,K	cyclin-g-associated kinase	VRRGYSGDYRPINNP
+6app	2017-08-17	1.75	X-RAY DIFFRACTION	A	B	nucleoprotein	AQGWGIASMRY
+4w2q	2017-08-17	2.7	X-RAY DIFFRACTION	A,C,E,G	B,D,F,H	nucleoprotein	HEDPYGMESLRY
+5omn	2017-08-01	2.682	X-RAY DIFFRACTION	C	B	capsid protein	RDRTLGS
+5omm	2017-08-01	1.7	X-RAY DIFFRACTION	C	A,AB,B	capsid protein | capsid protein	KGTIVVFTTPMHY
+5ocl	2017-07-03	2.2	X-RAY DIFFRACTION	A,B,C,D,E,F,G,H	A,B,C,D,E,F,G,H	anti-vglut nanobody	HTLPRFSHL
+5vxm	2017-05-23	2.05	X-RAY DIFFRACTION	B	A	invasin ipad	AAKSVWFCSVIRSHEFNS
+5vxl	2017-05-23	2.8	X-RAY DIFFRACTION	B	A	invasin ipad	NANLRTNNY
+5vxk	2017-05-23	2.55	X-RAY DIFFRACTION	B	A	invasin ipad	AADRYTSVRQMCTMIEGLHRV
+5vxj	2017-05-23	2.5	X-RAY DIFFRACTION	B,D,F,H,J	A,C,E,G,I	invasin ipad	NAGIFDGNYRTY
+5o2u	2017-05-22	2.76	X-RAY DIFFRACTION	B,D	A,C	capsid protein p24	FAALDTAY
+5o0w	2017-05-17	2.57	X-RAY DIFFRACTION	E,F,G,H	A,B,C,D	fructose-bisphosphate aldolase	ALDTTDRYDSANGRYYCTISSDTYDY
+5o05	2017-05-16	2.0	X-RAY DIFFRACTION	C,D	A,AI,AP,B,E,G	capsid protein	KYIRYSPIHAPLDY
+5o04	2017-05-16	2.3	X-RAY DIFFRACTION	C,D,E,F	A,B,U,V,W,X	capsid protein	KREDYSAYAPPSGS
+5o03	2017-05-16	2.194	X-RAY DIFFRACTION	C,D	A,B,M,U	capsid protein	AADLSSLTTVQAMCVIPRPGFSAKAYDY
+5o02	2017-05-16	1.72	X-RAY DIFFRACTION	C	A	capsid protein	NARRDYGDSWFTAGGGY
+5vnw	2017-05-01	2.6	X-RAY DIFFRACTION	C,D	A,B,L	serum albumin	AVLETRSYSFRY
+5vl2	2017-04-24	1.9	X-RAY DIFFRACTION	A,B,C,D,E,F,G,H	A,B,C,D,E,F,G,H,I,J,K,L,M,N,O,P	N-(4-chlorophenyl)-N'-(3,4-dichlorophenyl)urea	ATRASMAVSTSPRVYPI
+5vaq	2017-03-27	2.606	X-RAY DIFFRACTION	B	A	beta-klotho	AARRINEVLTTAPDYDF
+5van	2017-03-27	2.202	X-RAY DIFFRACTION	B	A	beta-klotho	AARRINEVLTTAPDYDF
+5vak	2017-03-27	1.7	X-RAY DIFFRACTION	B	A	beta-klotho	AARRINEVLTTAPDYDF
+5nbl	2017-03-02	2.8	X-RAY DIFFRACTION	E,F	A,B,C,D	actin | actin-related protein 4	AARNPRATAEDVSAYDY
+5n88	2017-02-23	1.7	X-RAY DIFFRACTION	A,H	D,E	pc4 and sfrs1-interacting protein	ARGGWALGDEIPSSFLEFDY
+5usf	2017-02-13	2.75	X-RAY DIFFRACTION	C,D	A,B	tyrosyl-trna synthetase, putative	ARGLNRYAYDS
+5mzv	2017-02-01	2.8	X-RAY DIFFRACTION	D	A,J	interleukin-12 subunit beta	GETSLFPTSRGSHYDT
+5my6	2017-01-25	2.246	X-RAY DIFFRACTION	B	A	receptor tyrosine-protein kinase erbb-2	AVCYNLETY
+5mwn	2017-01-18	2.2	X-RAY DIFFRACTION	D,E,F,N	A,B,C,G	type vi secretion protein	KAFFRRDYVGYDY
+5mp2	2016-12-15	2.9	X-RAY DIFFRACTION	C,D	A,B	type ii secretion system protein d	AGSVRTTIQPFKGNYYNY
+5u4m	2016-12-05	2.5	X-RAY DIFFRACTION	B	A	ricin	AARLGGWASFSPQEYDY
+5u4l	2016-12-05	2.5	X-RAY DIFFRACTION	B	A,C,D,K	ricin	AARLGGWASFSPQEYDY
+5mje	2016-11-30	2.599	X-RAY DIFFRACTION	B	A	cytotoxic translational repressor of toxin-antitoxinstability system 	YEESRRPLGSRNTY
+5m30	2016-10-13	2.6	X-RAY DIFFRACTION	D,E,F	A,B,C	type vi secretion protein	KAFFRRDYVGYDY
+5m2m	2016-10-13	2.3	X-RAY DIFFRACTION	D,E,F,H,J,N	A,B,C,G,I,M	tumor necrosis factor	AARDGIPTSRSVESYNY
+5m2j	2016-10-13	1.9	X-RAY DIFFRACTION	D	A	tumor necrosis factor	ARSPSGFN
+5m2i	2016-10-13	2.15	X-RAY DIFFRACTION	G,H,I,J,K,L	A,B,C,D,E,F	tumor necrosis factor	AASILPLSDDPGWNTY
+5m15	2016-10-07	1.9	X-RAY DIFFRACTION	C,D	A	maltose-binding periplasmic protein	AAAYWGKQSPLISWDYSY
+5m14	2016-10-07	1.6	X-RAY DIFFRACTION	C,D	A	maltose-binding periplasmic protein	AAAEWGSQSPLTQWFYRY
+5lwf	2016-09-16	2.56	X-RAY DIFFRACTION	C,D	A,B,E,G,H,I	beta-lactamase	VATPYYRGSYYAASTYTY
+5sv3	2016-08-04	2.73	X-RAY DIFFRACTION	A,C	B,D	ricin	AVIANPVYATSRNSDDYGH
+5l21	2016-07-29	1.68	X-RAY DIFFRACTION	B	A	botulinum neurotoxin type a	NVGEF
+5l8l	2016-07-20	1.67	X-RAY DIFFRACTION	B	A	aurora kinase a	
+5l8k	2016-07-20	1.79	X-RAY DIFFRACTION	B	A	aurora kinase a	
+5l8j	2016-07-20	1.68	X-RAY DIFFRACTION	B	A	aurora kinase a	
+5lhr	2016-07-12	2.3	X-RAY DIFFRACTION	B	A	urokinase-type plasminogen activator	AADLASSRDVSSWY
+5lhq	2016-07-12	2.6	X-RAY DIFFRACTION	B	A,M,N,P	urokinase-type plasminogen activator	AAEWVPPGYGATVQALCNNAGYGMEY
+5lhp	2016-07-12	2.63	X-RAY DIFFRACTION	B	A,O,Q,S	urokinase-type plasminogen activator	AAEWVPPGYGATVQALCNNAGYGMEY
+5lhn	2016-07-12	2.55	X-RAY DIFFRACTION	B	A,H,I,K	urokinase-type plasminogen activator	AAEWVPPGYGATVQALCNNAGYGMEY
+5g5x	2016-06-09	2.8	X-RAY DIFFRACTION	B	A	site-2 protease	TAGWGATPRSY
+5g5r	2016-06-02	2.4	X-RAY DIFFRACTION	B	A	site-2 protease	TAGWGATPRSY
+5jmo	2016-04-29	1.998	X-RAY DIFFRACTION	C,D	A,B	furin	AVGMYAAPPW
+5jds	2016-04-17	1.7	X-RAY DIFFRACTION	B	A,E,H	programmed cell death 1 ligand 1	AADSFEDPTCTLVTSSGAFQY
+5ja9	2016-04-12	1.849	X-RAY DIFFRACTION	A,B	C,D,J,K,L	toxin higb-2	VARLSLISDS
+5ja8	2016-04-12	2.49	X-RAY DIFFRACTION	B,D,F,H	A,C,E,G,S,W,X	toxin higb-2	VADFACPLIREYDY
+5j57	2016-04-01	1.7	X-RAY DIFFRACTION	B	A	ricin	AADLEYSQIMPSCRGSYGV
+5j56	2016-04-01	1.8	X-RAY DIFFRACTION	B	A,E,G	ricin	AARLGGWASFSPQEYDY
+5j1t	2016-03-29	1.402	X-RAY DIFFRACTION	C	A,B,F	torsin-1a | torsin-1a-interacting protein 2	NARRNPINGPYYTTAY
+5j1s	2016-03-29	1.399	X-RAY DIFFRACTION	C	A,B,F,I	torsin-1a | torsin-1a-interacting protein 2	NARRNPINGPYYTTAY
+5ivn	2016-03-21	1.0	X-RAY DIFFRACTION	A	B	cadherin derived peptide	AEARGCKRGRYEYDF
+5ip4	2016-03-09	1.81	X-RAY DIFFRACTION	A,B	D,E	neuronal migration protein doublecortin	ALENYY
+5imo	2016-03-06	2.1	X-RAY DIFFRACTION	B	A	protein vsig4	AAGRWDKYGSSFQDEYDY
+5imm	2016-03-06	1.2	X-RAY DIFFRACTION	B	A	protein vsig4	AAGRWDKYGSSFQDEYDY
+5iml	2016-03-06	1.8	X-RAY DIFFRACTION	B	A	v-set and immunoglobulin domain-containing protein 4	AAGRWDKYGSSFQDEYDY
+5imk	2016-03-06	1.227	X-RAY DIFFRACTION	B	A	v-set and immunoglobulin domain-containing protein 4	AAGRWDKYGSSFQDEYDY
+5hvh	2016-01-28	3.0	X-RAY DIFFRACTION	B,C	A,F	carboxypeptidase b2	HVDPRPWGYDVTDYDY
+5hvf	2016-01-28	2.85	X-RAY DIFFRACTION	B	A,E	carboxypeptidase b2	NAWGQDGWLGQYDY
+5fuc	2016-01-25	2.7	X-RAY DIFFRACTION	E,V	A,B,C,D,G,H	interleukin-6 receptor subunit alpha, interleukin-6receptor  | interle	AARPSIRCASFSATEYKD
+5hm1	2016-01-15	2.962	X-RAY DIFFRACTION	A,B,C	D,E,F	gp41	YAPMIYYGGRYSDY
+5hgg	2016-01-08	1.97	X-RAY DIFFRACTION	S,T	A,B,G,H,I,M,S,T	urokinase-type plasminogen activator	AADHPGLCTSESGRRRYLEV
+5f9d	2015-12-09	2.59	X-RAY DIFFRACTION	C	A	adhesin binding fucosylated histo-blood group antigen,adhesin,adhesin 	NRLPNYRS
+5f9a	2015-12-09	2.44	X-RAY DIFFRACTION	C	A	adhesin binding fucosylated histo-blood group antigen,adhesin,adhesin 	NRLPNYRS
+5f97	2015-12-09	2.62	X-RAY DIFFRACTION	E,F,G,H	A,B,C,D	adhesin binding fucosylated histo-blood group antigen,adhesin,adhesin 	NRLPNYRS
+5f93	2015-12-09	2.99	X-RAY DIFFRACTION	C,D,F,H	A,B,E,G	adhesin binding fucosylated histo-blood group antigen,adhesin,adhesin 	NRLPNYRS
+5f8r	2015-12-09	2.44	X-RAY DIFFRACTION	C,D	A,B	adhesin binding fucosylated histo-blood group antigen,adhesin,adhesin 	NRLPNYRS
+5f8q	2015-12-09	2.59	X-RAY DIFFRACTION	C,D	A,B	adhesin binding fucosylated histo-blood group antigen,adhesin,adhesin 	NRLPNYRS
+5f7y	2015-12-08	2.44	X-RAY DIFFRACTION	C,D	A,B	adhesin binding fucosylated histo-blood group antigen	NRLPNYRS
+5f7w	2015-12-08	2.81	X-RAY DIFFRACTION	C,D	A,B	adhesin binding fucosylated histo-blood group antigen	NRLPNYRS
+5f7n	2015-12-08	2.28	X-RAY DIFFRACTION	C,D	A,B	adhesin binding fucosylated histo-blood group antigen	NRLPNYRS
+5f7m	2015-12-08	2.72	X-RAY DIFFRACTION	C,D	A,B	adhesin binding fucosylated histo-blood group antigen	NRLPNYRS
+5f7l	2015-12-08	2.74	X-RAY DIFFRACTION	B,D	A,C	adhesin binding fucosylated histo-blood group antigen	AAYSDRLTDCSNCEADY
+5f7k	2015-12-08	2.17	X-RAY DIFFRACTION	C,D	A,B	adhesin binding fucosylated histo-blood group antigen	NRLPNYRS
+5f21	2015-12-01	1.9	X-RAY DIFFRACTION	B	A,D	adp-ribosyl cyclase/cyclic adp-ribose hydrolase 1	NTASPAVGADT
+5f1o	2015-11-30	2.2	X-RAY DIFFRACTION	B	A	adp-ribosyl cyclase/cyclic adp-ribose hydrolase 1	AARYQPRYYDSGDMDGYEYDN
+5f1k	2015-11-30	2.3	X-RAY DIFFRACTION	C,D	A,B	adp-ribosyl cyclase/cyclic adp-ribose hydrolase 1	AAGRGIVAGRIPAEYAD
+5foj	2015-11-22	2.8	ELECTRON MICROSCOPY	A	B	grapevine fanleaf virus	AAADAIGLAEYWSTPTLSAARYKY
+5e7f	2015-10-12	2.7	X-RAY DIFFRACTION	A,B,C	G,H,I	major structural protein 1	AAATTTVASPPVRHVCNGY
+5e5m	2015-10-08	2.182	X-RAY DIFFRACTION	B,D,F,H	A,C,E,G	cytotoxic t-lymphocyte protein 4	KTGLTN
+5e1h	2015-09-29	2.032	X-RAY DIFFRACTION	B	A	ricin	AGSSIYSDISGAATVWATSYNY
+5e0q	2015-09-29	1.9	X-RAY DIFFRACTION	A	B	nuclear pore complex protein nup98-nup96	AASNRGSLYTLDNQNRYED
+5dmj	2015-09-08	2.79	X-RAY DIFFRACTION	B,E,G	A,D,F	tumor necrosis factor receptor superfamily member 5	AKLPFTFDD
+5c3l	2015-06-17	2.9	X-RAY DIFFRACTION	D	A,B,C	nucleoporin nup62 | nup54 | nucleoporin nup58	ANQYG
+5c2u	2015-06-16	1.55	X-RAY DIFFRACTION	B	A	nup54	AADRRQRWGPYYYLSALEYVY
+5c1m	2015-06-15	2.1	X-RAY DIFFRACTION	B	A	mu-type opioid receptor	AARAPVGQSSSPYDYDY
+5bop	2015-05-27	1.95	X-RAY DIFFRACTION	A,C	B,D	octarellin v.1	AARRWLGGSYFDPGNYDF
+4z9k	2015-04-10	1.5	X-RAY DIFFRACTION	B	A,C	ricin	ASRPCFLGVPLIDFGS
+4yga	2015-02-26	2.94	X-RAY DIFFRACTION	B,D,F,H	A,C,E,G,J,R	calmodulin-domain protein kinase 1	AATREFCSAYVFLYEH
+4y8d	2015-02-16	2.1	X-RAY DIFFRACTION	C,D	A,B,J	cyclin-g-associated kinase	ATTTDCAAFVERATAIT
+4y7m	2015-02-15	1.92	X-RAY DIFFRACTION	A,B	C,D	type vi secretion protein icmf	AAVNAQGIYCTDYIIGPYGMDY
+4xt1	2015-01-22	2.886	X-RAY DIFFRACTION	C	A	g-protein coupled receptor homolog us28	NAEETIVEEADY
+4s10	2015-01-07	2.614	X-RAY DIFFRACTION	A,B	C,D	gelsolin	AADLHRPYGPGSQRTDDYDT
+4x7f	2014-12-09	1.7	X-RAY DIFFRACTION	C,D	A,AD,B	capsid protein	NRGISNP
+4x7e	2014-12-09	2.11	X-RAY DIFFRACTION	C,D	A,B,M	capsid protein	KREDYSAYAPPSGS
+4x7d	2014-12-09	2.15	X-RAY DIFFRACTION	C,D	A,B	vp1	KREDYSAYAPPSGS
+4x7c	2014-12-09	2.0	X-RAY DIFFRACTION	C,D	A,B	vp1	KREDYSAYAPPSGS
+4weu	2014-09-11	2.61	X-RAY DIFFRACTION	D,E	A,B	k88 fimbrial protein ad	AAQKSLNVPAPWDY
+4wen	2014-09-10	1.89	X-RAY DIFFRACTION	B	A	k88 fimbrial protein ac	AATDWGTLLIKGIDH
+4wem	2014-09-10	1.55	X-RAY DIFFRACTION	B	A,D,F	k88 fimbrial protein ac	AASHWGTLLIKGIEH
+4w6y	2014-08-21	1.57	X-RAY DIFFRACTION	B	A,F	f18 fimbrial adhesin ac	AAVREATYSDNRCSVRSYTYDY
+4w6x	2014-08-21	1.88	X-RAY DIFFRACTION	B	A	f18 fimbrial adhesin ac	ALSSNSVCPPGHVAWYND
+4w6w	2014-08-21	2.51	X-RAY DIFFRACTION	B	A	f18 fimbrial adhesin ac	ATGPFVYGRGCLGQAFYSY
+4u3x	2014-07-23	2.26	X-RAY DIFFRACTION	A,C	B,D	lysozyme c	AKYTSPPQNHGFDY
+4tvs	2014-06-27	1.6	X-RAY DIFFRACTION	a,b	A,B,D,F	vhh domain bs-1	AATFTPDGSWYYTRGSSYDY
+4qo1	2014-06-19	1.924	X-RAY DIFFRACTION	A	B	cellular tumor antigen p53	AAHPQRGWGSTLGWTY
+4pgj	2014-05-02	2.6	X-RAY DIFFRACTION	A,C	B,D	lysozyme c	AKYTSPPQNHGFDY
+4pfe	2014-04-29	2.603	X-RAY DIFFRACTION	A,B	A,B	Green fluorescent protein	NVNVGFEY
+4p2c	2014-03-03	2.818	X-RAY DIFFRACTION	G,H,I,J,K	A,B,C,D,E,F,G,H,I,J,K	shiga toxin 2e, subunit b | shiga toxin 2e, subunit a	NANIEAGTYYGPGRDY
+4pou	2014-02-26	1.75	X-RAY DIFFRACTION	B	A	ribonuclease pancreatic	AAGGYQLRDRTYGH
+4orz	2014-02-12	2.0	X-RAY DIFFRACTION	C	B	protein nef	ARRVGSEYDL
+4ocn	2014-01-09	2.25	X-RAY DIFFRACTION	C,F	A,B,D,E	26s proteasome regulatory subunit rpn11 | 26s proteasome regulatory su	AGGTYYGTLSYKYDF
+4ocm	2014-01-09	1.99	X-RAY DIFFRACTION	C,F	A,B,D,E	26s proteasome regulatory subunit rpn11 | 26s proteasome regulatory su	AGGTYYGTLSYKYDF
+4ocl	2014-01-09	2.4	X-RAY DIFFRACTION	C,F	A,B,D,E	26s proteasome regulatory subunit rpn11 | 26s proteasome regulatory su	AGGTYYGTLSYKYDF
+4cdg	2013-10-31	2.794	X-RAY DIFFRACTION	C,D	A,B	bloom syndrome protein	NLVADYDMGFQSF
+4nc2	2013-10-23	2.5	X-RAY DIFFRACTION	B	A	toxin b	AAGLGWDSRYSQSYNY
+4nc1	2013-10-23	2.61	X-RAY DIFFRACTION	C,D,E,F	A,B	cell wall-binding repeat protein	AAAPYGANWYRDEYAY
+4nc0	2013-10-23	2.3	X-RAY DIFFRACTION	B	A	cell wall-binding repeat protein	AVNSQRTRLQDPNEYDY
+4nbz	2013-10-23	1.75	X-RAY DIFFRACTION	B,D	A,C	tcda	AVNSQRTRLQDPNEYDY
+4nby	2013-10-23	2.08	X-RAY DIFFRACTION	B,C	A	cell wall-binding repeat protein	AAAPYGANWYRDEYAY
+4nbx	2013-10-23	1.75	X-RAY DIFFRACTION	B	A	tcda	AAAPYGANWYRDEYAY
+4n9o	2013-10-21	1.5	X-RAY DIFFRACTION	B	A	major prion protein	ARGLGIYIIRARGGYDH
+4n1h	2013-10-04	3.0	X-RAY DIFFRACTION	B,D	A,C	beta-lactamase	AATTYASLSDTYIGEHIYDD
+4c59	2013-09-10	2.8	X-RAY DIFFRACTION	B	A	cyclin-g-associated kinase	ATTTDCAAFVERATAIT
+4c58	2013-09-10	2.16	X-RAY DIFFRACTION	B	A	cyclin-g-associated kinase	ATTTDCAAFVERATAIT
+4c57	2013-09-10	2.55	X-RAY DIFFRACTION	C,D	A,B,H	cyclin-g-associated kinase	VRRGYSGDYRPINNP
+4m3k	2013-08-06	1.48	X-RAY DIFFRACTION	B	A,D	beta-lactamase	NAFMSTNSGRTGSF
+4lhq	2013-07-01	2.3	X-RAY DIFFRACTION	B,D	A,C	ricin	AGSSVYAEMPYADSVKATSYNY
+4lhj	2013-07-01	1.8	X-RAY DIFFRACTION	B	A	ricin	SATFGSRWPYAHSDH
+4lgs	2013-06-28	2.7	X-RAY DIFFRACTION	B	A	ricin	ARSTVFAEITGLAGYQSGSYDY
+4lgr	2013-06-28	1.65	X-RAY DIFFRACTION	B	A	ricin	NADEAGIGGFNDY
+4lgp	2013-06-28	2.4	X-RAY DIFFRACTION	B,D	A,C	ricin	VSGCYSWRGP
+4lde	2013-06-24	2.79	X-RAY DIFFRACTION	B	A	lysozyme, beta-2 adrenergic receptor	NVKDFGAIIYDYDY
+4laj	2013-06-20	2.14	X-RAY DIFFRACTION	H,I,L,M	A,AC,AL,AX,B,C,D,F,G,J,K,T	hiv-1 yu2 gp120 envelope glycoprotein | cd4-mimetic miniprotein m48u1	ATDCTVDPSLLYVMDY
+4krm	2013-05-16	2.655	X-RAY DIFFRACTION	B,D,F,H,J,L	A,AB,AD,C,E,G,I,K,M,N,O,P,Q,R,S,U,X,Z	epidermal growth factor receptor	AAAAGSAWYGTLYEYDY
+4krl	2013-05-16	2.849	X-RAY DIFFRACTION	B	A,C,D,G	epidermal growth factor receptor	AAAAGSAWYGTLYEYDY
+4kml	2013-05-08	1.5	X-RAY DIFFRACTION	B	A	major prion protein	ARGLGIYIIRARGGYDH
+4kfz	2013-04-28	2.8	X-RAY DIFFRACTION	C,D	A,B,F,J	lmo-2	ARGLTESLELTADWFDY
+4kdt	2013-04-25	2.6	X-RAY DIFFRACTION	A,B	C,D	beta-2-microglobulin	
+4bfb	2013-03-18	2.21	X-RAY DIFFRACTION	D,E	A,B	beta-secretase 2	TSAGR
+4bel	2013-03-11	1.85	X-RAY DIFFRACTION	D,E	A,B,C	beta-secretase 2	TSAGR
+3zlq	2013-02-04	2.1	X-RAY DIFFRACTION	C,D	A,B	beta-secretase 2	TSAGR
+3zkx	2013-01-25	2.37	X-RAY DIFFRACTION	B,C	A,D,E	beta-secretase 2	TSAGR
+3zks	2013-01-24	2.11	X-RAY DIFFRACTION	D	A	beta-secretase 2	TSAGR
+3zkq	2013-01-24	1.51	X-RAY DIFFRACTION	D	A,C	beta-secretase 2	TSAGR
+4ios	2013-01-08	2.4	X-RAY DIFFRACTION	D,E,F,G	A,B,C,H	bpp	AATLDWGKTLSDEYDY
+3zhk	2012-12-22	1.962	X-RAY DIFFRACTION	A,B	A,B,C,D	MG2X1 SCAFFOLD ANTIBODY|SULFATE ION	ARHAPSTEAPDY
+3zhd	2012-12-21	1.962	X-RAY DIFFRACTION	A,B	A,B,C	MG8-4 SCAFFOLD ANTIBODY	ARHAPSTEAPDY
+4i1n	2012-11-21	1.888	X-RAY DIFFRACTION	B	A,C	dihydrofolate reductase	AASRISYAVWNTIPYNKLTL
+4i13	2012-11-19	1.6	X-RAY DIFFRACTION	B	A,C	dihydrofolate reductase	AASRISYRVWNTIPYNKLTL
+4i0c	2012-11-16	1.95	X-RAY DIFFRACTION	C,D	A,B,G,L	lysozyme c	AAKTGAFSYGSLWWMSRAYNH
+4hep	2012-10-04	1.75	X-RAY DIFFRACTION	G	A	bpp	AAGRFVTFGSAWSFVGGGPYGIDY
+4hem	2012-10-04	1.65	X-RAY DIFFRACTION	E,F,G	A,B,C	bpp | bpp	AAGDNYYYTRTYEYDY
+4grw	2012-08-27	2.55	X-RAY DIFFRACTION	E,F,G,H,I,J	A,B,C,D	interleukin-12 subunit beta	ARVRTGWGLNAPDYAMDY
+4gft	2012-08-03	1.6	X-RAY DIFFRACTION	B	A,C,D	myosin a tail domain interacting protein	AARVVPVFSDSTKGYVY
+4fhb	2012-06-06	2.8	X-RAY DIFFRACTION	D	A	dihydrofolate reductase	AAPGRPHGSSWSLNKKGQGYDY
+4ej1	2012-04-06	1.75	X-RAY DIFFRACTION	C,D	A,B	dihydrofolate reductase	AADGSQYRSTYSFRDKPDYGS
+4eiz	2012-04-06	2.2	X-RAY DIFFRACTION	C,D	A,B	dihydrofolate reductase	AADGSQYRSTYSFRDKPDYGS
+4eig	2012-04-05	2.5	X-RAY DIFFRACTION	B	A	dihydrofolate reductase	NANRGLAGPAY
+4dka	2012-02-03	1.97	X-RAY DIFFRACTION	A,B	C,D,E,F	rna-editing complex protein mp81 | rna-editing complex protein mp81	AADRFPTMEVVTIMTNEYDY
+4dk6	2012-02-03	2.65	X-RAY DIFFRACTION	A,B	C,D	rna-editing complex protein mp81	AADRFPTMEVVTIMTNEYDY
+4dk3	2012-02-03	2.76	X-RAY DIFFRACTION	A,B	C,D	rna-editing complex protein mp81	AADRFPTMEVVTIMTNEYDY
+3v0a	2011-12-07	2.703	X-RAY DIFFRACTION	C	A,AC	bont/a	ATGYRTDTRIPGGS
+3stb	2011-07-09	2.5	X-RAY DIFFRACTION	A,B	C,D	mp18 rna editing complex protein	AADRFSPVVPGPIPVNTVDS
+3rjq	2011-04-15	2.601	X-RAY DIFFRACTION	B	A	c186 gp120	AAKWRPLRYSDYPSNSDYYD
+3qxu	2011-03-02	1.8	X-RAY DIFFRACTION	A,B,C,D	B,D,E,F,H,J,K,L	FORMIC ACID	AADDNYVTASWRSGPDY
+3qsk	2011-02-21	1.75	X-RAY DIFFRACTION	B	A	ribonuclease pancreatic	AAGGHHLRDHTYGQ
+2xxm	2010-11-10	1.65	X-RAY DIFFRACTION	B	A,D	capsid protein p24	KASGSS
+2xv6	2010-10-22	1.89	X-RAY DIFFRACTION	B,D	A,C	capsid protein p24	KASGSS
+3p9w	2010-10-18	2.41	X-RAY DIFFRACTION	B,D,F,H	A,C,E,G	vascular endothelial growth factor a	YYHYYGWHPGYGLSYS
+2xt1	2010-10-03	1.32	X-RAY DIFFRACTION	B	A,D	gag polyprotein	KASGSS
+3ogo	2010-08-17	2.8	X-RAY DIFFRACTION	E,F,G,H	A,B,C,I	green fluorescent protein	NVNVGFEY
+2x89	2010-03-07	2.16	X-RAY DIFFRACTION	A,B,C	D,E,F,G	beta-2-microglobulin	ATDIPLRCRDIVAKGGDGFRY
+2x6m	2010-02-18	1.62	X-RAY DIFFRACTION	A	B	alpha-synuclein peptide	AAKFSPGYCGGSWSNFGY
+2wzp	2009-12-01	2.6	X-RAY DIFFRACTION	D,E,F,J,K,L	A,B,C,G,H,I	putative receptor binding protein	AARSGGFSSNRELYDG
+3k80	2009-10-13	2.4	X-RAY DIFFRACTION	A,B	C,D	mp18 rna editing complex protein	AGDLYGLGSHMENEYDS
+3k7u	2009-10-13	2.1	X-RAY DIFFRACTION	A	C	mp18 rna editing complex protein	AARPQGDYVTAHYDY
+3k74	2009-10-12	1.95	X-RAY DIFFRACTION	B	A	dihydrofolate reductase	AKDWATGLAK
+3k3q	2009-10-04	2.6	X-RAY DIFFRACTION	A	B,C	botulinum neurotoxin type a | botulinum neurotoxin type a	AADEDVTPRVMGVIPHADH
+3k1k	2009-09-28	2.15	X-RAY DIFFRACTION	C,D	A,B	green fluorescent protein	NVNVGFEY
+3g9a	2009-02-13	1.614	X-RAY DIFFRACTION	B	A	green fluorescent protein	AADSGTQLGYVGAVGLSCLDYVMDY
+9g13	2009-01-08	1.8	X-RAY DIFFRACTION	A,C,E,G	A,B,C,D,E,F,G,H	isoform tau-f of microtubule-associated protein tau	APMTLAETYYEWLISGY
+9b71	2009-01-08	2.7	ELECTRON MICROSCOPY	G,H	A,B	phospho-n-acetylmuramoyl-pentapeptide-transferase	AAFRVAVTTYTSQQANEYNY
+9b70	2009-01-08	2.88	ELECTRON MICROSCOPY	G,H	A,B	phospho-n-acetylmuramoyl-pentapeptide-transferase	AAFRVAVTTYTSQQANEYNY
+8zsv	2009-01-08	2.96	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8zrk	2009-01-08	2.82	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8yut	2009-01-08	2.7	ELECTRON MICROSCOPY	N	A,B	guanine nucleotide-binding protein g(s) subunit alphaisoforms short  |	ARCPAPFTRDCFDVTSTTYAY
+8xof	2009-01-08	2.6	ELECTRON MICROSCOPY	N	A,B	g protein subunit q | guanine nucleotide-binding protein g(i)/g(s)/g(t	ARCPAPFTRDCFDVTSTTYAY
+8xir	2009-01-08	2.52	ELECTRON MICROSCOPY	D	B,C	g-alpha i | guanine nucleotide-binding protein g(i)/g(s)/g(t) subunitb	ARCPAPFTRDCFDVTSTTYAY
+8xiq	2009-01-08	2.71	ELECTRON MICROSCOPY	D	B,C	g-alpha i | guanine nucleotide-binding protein g(i)/g(s)/g(t) subunitb	ARCPAPFTRDCFDVTSTTYAY
+8xio	2009-01-08	2.65	ELECTRON MICROSCOPY	D	B,C	g-alpha-i | guanine nucleotide-binding protein g(i)/g(s)/g(t) subunitb	ARCPAPFTRDCFDVTSTTYAY
+8w1v	2009-01-08	3.0	X-RAY DIFFRACTION	D,F	A,B	beta-2 adrenergic receptor,endolysin	NAKVAGTFSIYDY
+8v5a	2009-01-08	3.0	ELECTRON MICROSCOPY	U,W,Y	A,B,C	fusion glycoprotein f0	YAESFVLNIY
+8owv	2009-01-08	1.73	X-RAY DIFFRACTION	B,BBB,F,FFF	D,E,EEE	unknown	AADRGESYYYTRPTEYEF
+8owt	2009-01-08	2.37	X-RAY DIFFRACTION	A,AAA,C,CCC,D,DDD,F,FFF	B,BBB,E,EEE	unknown	AASVGNYGLPWAHFEYDF
+8en6	2009-01-08	1.6	X-RAY DIFFRACTION	C,D	A,B	gii.17 p domain	NRAKPPTYYSLEP
+8en5	2009-01-08	1.6	X-RAY DIFFRACTION	E,F,G,H	A,AH,AN,AO,AP,AQ,AR,AS,B,C,D,K	gii.4 p domain	AARTFTAGCYSRSIAYPY
+8en4	2009-01-08	2.3	X-RAY DIFFRACTION	C,D	A,B,F	vp1	HAVTGVIASS
+8en1	2009-01-08	2.4	X-RAY DIFFRACTION	C,D	A,B	gii.4 p domain	ASDRDHYSGTYYGRRFVEEYDY
+8emy	2009-01-08	1.7	X-RAY DIFFRACTION	G,H,I,J,K,L	A,AA,AC,AO,AR,AS,AT,AU,B,C,D,E,F,R,U,W	gii.4 p domain	KTQLANRDY
+8dlz	2009-01-08	0.0	ELECTRON MICROSCOPY	H	C	spike glycoprotein	ARVWLYGSGYMDV
+8dlx	2009-01-08	0.0	ELECTRON MICROSCOPY	H	A,C	spike glycoprotein | spike glycoprotein	ARVWLYGSGYMDV
+7zra	2009-01-08	2.8	X-RAY DIFFRACTION	E,F,G,H	A,B,C,D	lexa repressor	KARIEPDSSWGTEYEY
+7stg	2009-01-08	2.7	X-RAY DIFFRACTION	B,D,F,H,J,L,N,P,R,T,V,X,Z,b,d,f	A,C,E,G,I,K,M,O,Q,S,U,W,Y,a,c,e	rpa-related protein radx peptide,beta-2-microglobulin,mhcclass i antig	YGLSYSNDDY
+7st3	2009-01-08	2.78	X-RAY DIFFRACTION	B,D,F,H,J,L,N,P,R,T,V,X,Z,b,d,f	A,C,E,G,I,K,M,O,Q,S,U,W,Y,a,c,e	protein e7 peptide,beta-2-microglobulin,mhc class i antigenchimera 	YGLSYSNDDY
+7ssh	2009-01-08	2.73	X-RAY DIFFRACTION	B,D,F,H,J,L,N,P,R,T,V,X,Z,b,d,f	A,C,E,G,I,K,M,O,Q,S,U,W,Y,a,c,e	protein e7 peptide,beta-2-microglobulin,mhc class i antigenchimera 	YGLSYSNDDY
+7ozt	2009-01-08	1.74	X-RAY DIFFRACTION	A,AAA	B,BBB	unknown	NFAPGLQSVRSGS
+7ocj	2009-01-08	2.7	X-RAY DIFFRACTION	B,E,G,H	A,C,D,F	lexa repressor	KQTQLGYDY
+3ezj	2008-10-22	2.8	X-RAY DIFFRACTION	B,D,F,H	A,B,C,D,E,F,G,H,M,N,O,P,Q,R,S,T	general secretion pathway protein gspd	NANVKTWAGMTRDY
+3eba	2008-08-27	1.85	X-RAY DIFFRACTION	A	B,E,F	lysozyme c	AATEVAGWPLDIGIYDY
+2vyr	2008-07-28	2.0	X-RAY DIFFRACTION	E,F,G,H,I,J,K,L	A,B,C,D,E,F,H,J,K,L,O,P	mdm4 protein	AKPWYPFMASKGSEFDY
+3cfi	2008-03-03	2.58	X-RAY DIFFRACTION	C,F,I,L	B,E,H,K	type ii secretory pathway, pseudopilin epsj	AKWLGGRDWYD
+2z8w	2007-11-27	2.45	X-RAY DIFFRACTION	C,D	A,B	apical membrane antigen 1	
+2z8v	2007-11-27	2.35	X-RAY DIFFRACTION	C,D	A,B	apical membrane antigen 1	
+2p4a	2007-03-11	1.9	X-RAY DIFFRACTION	B,D	A,C	ribonuclease pancreatic	AAGGDALVATRYGR
+2p49	2007-03-11	1.38	X-RAY DIFFRACTION	B	A	ribonuclease pancreatic	AAGGYELRDRTYGQ
+2p48	2007-03-11	2.3	X-RAY DIFFRACTION	B	A,D	ribonuclease pancreatic	AAGGYELRDRTYGQ
+2p47	2007-03-11	2.5	X-RAY DIFFRACTION	B	A	ribonuclease pancreatic	AAGGYELRDRTYGQ
+2p46	2007-03-11	2.5	X-RAY DIFFRACTION	B,D	A,C,N,O	ribonuclease pancreatic	AAGGYELRDRTYGQ
+2p45	2007-03-11	1.1	X-RAY DIFFRACTION	B	A	ribonuclease pancreatic	AAGGYELRDRTYGQ
+2p44	2007-03-11	1.8	X-RAY DIFFRACTION	B	A	ribonuclease pancreatic	AAGGYELRDRTYGQ
+2p43	2007-03-11	1.65	X-RAY DIFFRACTION	B	A	ribonuclease pancreatic	AAGGYELRDRTYGQ
+2p42	2007-03-11	1.8	X-RAY DIFFRACTION	B,D	A,C	ribonuclease pancreatic	AAGGYELRDRTYGQ
+2i26	2007-03-06	2.5	X-RAY DIFFRACTION	N,O,P	L,M,Q	lysozyme c	
+2i25	2007-03-06	1.8	X-RAY DIFFRACTION	N,O	L,M	lysozyme c	
+1zvy	2005-06-03	1.63	X-RAY DIFFRACTION	A	B	lysozyme c	GATRKYVPVRFALDQSSYDY
+1zvh	2005-06-02	1.5	X-RAY DIFFRACTION	A	L	lysozyme c	AAARQGWYIPLNSYGYNY
+1zv5	2005-06-01	2.0	X-RAY DIFFRACTION	A	B,L	lysozyme c	AAGYRNYGQCATRY
+2bse	2005-05-20	2.7	X-RAY DIFFRACTION	D,E,F	A,B,C	receptor binding protein	AARSGGFSSNRELYDG
+1zmy	2005-05-11	3.0	X-RAY DIFFRACTION	A	L	lysozyme c	AADSTIYASYYECGHGLSTGGYGYDS
+1xfp	2004-09-15	1.5	X-RAY DIFFRACTION	A	B,D,G,L	lysozyme c	AADSTIYASYYECGHGLSTGGYGYDS
+1t6v	2004-08-24	1.7	X-RAY DIFFRACTION	N,O	L,M	lysozyme c	
+1sq2	2004-08-24	1.45	X-RAY DIFFRACTION	N	L	lysozyme c	
+1rjc	2003-11-19	1.4	X-RAY DIFFRACTION	A	B,C	lysozyme c	AADTSTWYRGYCGTNPNYFSY
+1ri8	2003-11-17	1.85	X-RAY DIFFRACTION	A	B,C	lysozyme c	AAGWSSLGSCGTNRNRYNY
+1op9	2003-03-05	1.86	X-RAY DIFFRACTION	A	B	lysozyme c	AATEVAGWPLDIGIYDY
+1mvf	2002-09-25	1.65	X-RAY DIFFRACTION	A,B	D,E	pemi-like protein 1	AASSRWMDYSALTAKAYNS
+1kxv	2002-02-01	1.6	X-RAY DIFFRACTION	C,D	A,B	alpha-amylase, pancreatic	KPSLRYGLPGCPIIP
+1kxt	2002-02-01	2.0	X-RAY DIFFRACTION	B,D,F	A,C,E	alpha-amylase, pancreatic	AAGPGSGKLVVAGRTCYGPNY
+1kxq	2002-02-01	1.6	X-RAY DIFFRACTION	E,F,G,H	A,B,C,D	alpha-amylase, pancreatic	ATGNSVRLASWEGYFY
+1jtt	2001-08-22	2.1	X-RAY DIFFRACTION	A	B,C,E,H,K,L,O	lysozyme	AADSTIYASYYECGHGLSTGGYGYDS
+1jtp	2001-08-21	1.9	X-RAY DIFFRACTION	A,B	C,D,E,F,H,I,L,M,N	lysozyme c	AADSTIYASYYECGHGLSTGGYGYDS
+1jto	2001-08-21	2.5	X-RAY DIFFRACTION	A,B	L,M	lysozyme	AADSTIYASYYECGHGLSTGGYGYDS
+1bzq	1998-11-03	2.8	X-RAY DIFFRACTION	K,L,M,N	A,B,C,D	protein (rnase a)	AAGGYELRDRTYGQ
+1mel	1996-06-06	2.5	X-RAY DIFFRACTION	A,B	L,M	lysozyme	AADSTIYASYYECGHGLSTGGYGYDS

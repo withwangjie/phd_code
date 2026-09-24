@@ -249,10 +249,10 @@ REF_QUBO_SIDECHAIN_NAMES = {
 
 
 # --- verbatim from subgraph_to_qubo.py @ 54858e2: _SYMMETRIC_SWAPS
+# (amended: prochiral VAL CG1/CG2 and LEU CD1/CD2 are no longer treated as symmetric)
 REF_QUBO_SYMMETRIC_SWAPS = {
     "ASP": [("OD1", "OD2")], "GLU": [("OE1", "OE2")],
-    "ARG": [("NH1", "NH2")], "VAL": [("CG1", "CG2")],
-    "LEU": [("CD1", "CD2")],
+    "ARG": [("NH1", "NH2")],
     "PHE": [("CD1", "CD2"), ("CE1", "CE2")],
     "TYR": [("CD1", "CD2"), ("CE1", "CE2")],
 }
@@ -295,10 +295,10 @@ REF_EVAL_SIDECHAIN_HEAVY_ATOMS: Dict[str, Tuple[str, ...]] = {
 
 
 # --- verbatim from evaluate_complex_metrics.py @ 54858e2: _SYMMETRIC_SWAPS
+# (amended: prochiral VAL CG1/CG2 and LEU CD1/CD2 are no longer treated as symmetric)
 REF_EVAL_SYMMETRIC_SWAPS: Dict[str, Tuple[Tuple[str, str], ...]] = {
     "ASP": (("OD1", "OD2"),), "GLU": (("OE1", "OE2"),),
-    "ARG": (("NH1", "NH2"),), "VAL": (("CG1", "CG2"),),
-    "LEU": (("CD1", "CD2"),),
+    "ARG": (("NH1", "NH2"),),
     "PHE": (("CD1", "CD2"), ("CE1", "CE2")),
     "TYR": (("CD1", "CD2"), ("CE1", "CE2")),
 }
@@ -390,7 +390,7 @@ def test_identity_wrappers_match_references():
     import nanoqc.experiments.run_real_complex_pilot as pilot
     import nanoqc.model.train_egnn_pruning as train
     build.CDR_H3_IDENTITY_THRESHOLD = CDR_H3_IDENTITY_THRESHOLD
-    build.similarity.cache_clear()
+    build.cdr_h3_loop_identity.cache_clear()
     build._global_identity_cached.cache_clear()
     for a, b in _random_pairs():
         for cov in (0.0, 0.3, 0.7, 0.95):
@@ -399,7 +399,7 @@ def test_identity_wrappers_match_references():
                 ref_build_global_identity(a, b, min_length_coverage=cov)
             assert train._sequence_identity(a, b, min_length_coverage=cov) == \
                 ref_train_sequence_identity(a, b, min_length_coverage=cov)
-        assert build.similarity(a, b) == ref_build_similarity(a, b)
+        assert build.cdr_h3_loop_identity(a, b) == ref_build_similarity(a, b)
         if a and b:
             for threshold in (0.0, 0.4, 0.8):
                 assert pilot.identity_detail(a, b, threshold) == ref_pilot_identity_detail(a, b, threshold)
@@ -516,6 +516,17 @@ def test_orchestrated_scripts_cover_every_executed_local_module():
     assert closure <= set(full.ORCHESTRATED_SCRIPTS), sorted(closure - set(full.ORCHESTRATED_SCRIPTS))
     for name in full.ORCHESTRATED_SCRIPTS:
         assert repo_path(name).is_file(), name
+
+
+def test_benchmark_code_fingerprint_covers_quantum_instance_modules():
+    from nanoqc.experiments.batch_benchmark_hard_set import SHARED_HELPER_MODULES
+    assert {"instance.py", "resource_estimation.py"} <= set(SHARED_HELPER_MODULES)
+
+
+def test_orchestrator_never_passes_the_bare_master_seed_to_statistics():
+    source = (REPO / "src/nanoqc/pipeline/run_full_experiment.py").read_text(encoding="utf-8")
+    assert '"--seed",str(self.config["master_seed"])' not in source
+    assert '"--seed", str(self.config["master_seed"])' not in source
 
 
 def test_build_run_manifest_fails_closed_on_missing_script(tmp_path):

@@ -180,8 +180,8 @@ def test_effective_runtime_config_is_frozen() -> None:
 
 
 def test_singleton_hard_set_pair_similarity_is_zero() -> None:
-    assert dataset_builder.max_pair_similarity([])==0.0
-    assert dataset_builder.max_pair_similarity(["CARDRST"])==0.0
+    assert dataset_builder.max_pair_cdr_h3_loop_identity([])==0.0
+    assert dataset_builder.max_pair_cdr_h3_loop_identity(["CARDRST"])==0.0
 
 
 
@@ -209,7 +209,7 @@ def test_statistics_resume_checks_statistics_subdirectory(tmp_path: Path) -> Non
     qc.mkdir()
     # batch_benchmark_hard_set names matched-time effects "<baseline>_time".
     for mode,baseline in (("outputs","sa"),("time","sa_time")):
-        paired={"effects":[{"baseline":baseline,"metric":"gap","n_clusters":10}],"exclusions":{}}
+        paired={"effects":[{"baseline":baseline,"metric":"log10_qts99","n_clusters":10}],"exclusions":{}}
         (qc/f"statistics_{mode}.json").write_text(json.dumps(paired),encoding="utf-8")
         (qc/f"statistics_{mode}.md").write_text("ok",encoding="utf-8")
     stats=tmp_path/"statistics"
@@ -260,12 +260,12 @@ def test_statistics_resume_checks_statistics_subdirectory(tmp_path: Path) -> Non
     ):
         for valid_mode,valid_baseline in (("outputs","sa"),("time","sa_time")):
             (qc/f"statistics_{valid_mode}.json").write_text(json.dumps({
-                "effects":[{"baseline":valid_baseline,"metric":"gap","n_clusters":10}],
+                "effects":[{"baseline":valid_baseline,"metric":"log10_qts99","n_clusters":10}],
                 "exclusions":{},
             }),encoding="utf-8")
         (qc/f"statistics_{mode}.json").write_text(json.dumps({
             "effects":[{"baseline":"sa" if mode=="outputs" else "sa_time",
-                        "metric":"gap","n_clusters":10}],
+                        "metric":"log10_qts99","n_clusters":10}],
             "exclusions":{reason:1},
         }),encoding="utf-8")
         ok,detail=Orchestrator._validate_completed_stage_artifacts(
@@ -544,4 +544,6 @@ def test_partial_only_run_cannot_pass_global_audit_without_prior_results(tmp_pat
 def test_pair_table_coverage_is_required_before_frozen_clustering() -> None:
     source=inspect.getsource(full.Orchestrator.stage_queue_freeze)
     assert "missing_pair_coverage" in source
-    assert "does not demonstrate query/target coverage" in source
+    assert "not demonstrated as searched" in source
+    # The failure has to name the run whose universe the table must match.
+    assert "foldseek --run-dir" in source

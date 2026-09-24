@@ -95,7 +95,7 @@ def graph_protocol(data: Data) -> Dict[str, Any]:
     )
     missing = [name for name in required if not hasattr(data, name)]
     if missing:
-        raise ValueError(f"Graph lacks protocol metadata {missing}; rebuild with dataset version >=1.6")
+        raise ValueError(f"Graph lacks protocol metadata {missing}; rebuild with dataset version >=1.8")
     protocol = {
         "graph_version": str(data.graph_version),
         "edge_policy": str(data.edge_policy),
@@ -154,7 +154,7 @@ def interface_labels(data: Data) -> Tensor:
     if not hasattr(data, "interface_label"):
         raise ValueError(
             "Graph is missing interface_label; rebuild graphs with "
-            "build_final_pyg_dataset.py version >= 1.6"
+            "build_final_pyg_dataset.py version >= 1.8"
         )
     labels = data.interface_label.detach().cpu().to(torch.float32)
     if labels.shape != (data.num_nodes,):
@@ -224,11 +224,14 @@ def _side_identity(
 
 SPLIT_FOLDS = 5
 VALIDATION_FOLD = 0
+# A component holding more than one fold's share of the pool cannot be held
+# out without becoming most of that fold; it always trains (A11). The floor
+# keeps small pools on the plain hash.
+PIN_MIN_COMPONENT = 50
 
 
-def split_paths(paths: Sequence[Path], seed: int) -> Tuple[List[Path], List[Path]]:
-    """Layered sequence + family/structure component split; no random 90/10 partition."""
-    del seed
+def _split_records(paths: Sequence[Path]) -> List[Tuple]:
+    """Per-graph isolation fields, loaded once and shared by every consumer."""
     records = []
     for path in paths:
         data = torch.load(path, map_location="cpu", weights_only=False)
@@ -244,11 +247,15 @@ def split_paths(paths: Sequence[Path], seed: int) -> Tuple[List[Path], List[Path
         if not family_cluster:
             raise ValueError(
                 f"{path.name} lacks family_structure_cluster; rebuild formal graphs with "
-                "build_final_pyg_dataset.py graph version >=1.6"
+                "build_final_pyg_dataset.py graph version >=1.8"
             )
         anchored = partner_roles_anchored(getattr(data, "subset_source", ""))
         records.append((path, vhh, antigen, cdr3, family_cluster, anchored))
+    return records
 
+
+def _components_from_records(records: Sequence[Tuple]) -> List[List[Path]]:
+    """Union-find over the layered isolation edges between loaded records."""
     parent = list(range(len(records)))
 
     def find(index: int) -> int:
@@ -289,29 +296,57 @@ def split_paths(paths: Sequence[Path], seed: int) -> Tuple[List[Path], List[Path
         components.setdefault(find(index), []).append(index)
     if len(components) < 2:
         raise RuntimeError("Layered VHH/CDR-H3/antigen/family clustering produced fewer than two components")
+    return [[records[i][0] for i in indices]
+            for _, indices in sorted(components.items(),
+                                     key=lambda item: min(records[i][0].name for i in item[1]))]
 
+
+def layered_components(paths: Sequence[Path]) -> List[List[Path]]:
+    """Connected components of the layered isolation relation, ordered by first name.
+
+    Two complexes are joined when any criterion fires: VHH full-chain identity,
+    CDR-H3 loop identity, antigen full-chain identity with coverage, or a shared
+    frozen family/structure cluster. A component may therefore never be split
+    across train, internal validation or the antigen-fold holdout.
+    """
+    return _components_from_records(_split_records(paths))
+
+
+def component_fold(component: Sequence[Path]) -> int:
+    """Deterministic fold of a layered component, from its member file names."""
+    signature = "\n".join(sorted(path.name for path in component)).encode("utf-8")
+    return int.from_bytes(hashlib.sha256(signature).digest()[:8], "big") % SPLIT_FOLDS
+
+
+def pinned_to_training(component: Sequence[Path], pool_size: int) -> bool:
+    """True for a component larger than 1/SPLIT_FOLDS of the pool (and >= PIN_MIN_COMPONENT)."""
+    return len(component) >= PIN_MIN_COMPONENT and len(component) * SPLIT_FOLDS > pool_size
+
+
+def assigned_fold(component: Sequence[Path], pool_size: int) -> Optional[int]:
+    """The component's held-out fold, or None when it is pinned to training."""
+    return None if pinned_to_training(component, pool_size) else component_fold(component)
+
+
+def split_paths(paths: Sequence[Path], seed: int) -> Tuple[List[Path], List[Path]]:
+    """Layered sequence + family/structure component split; no random 90/10 partition."""
+    del seed
+    records = _split_records(paths)
+    ordered_components = _components_from_records(records)
     train_paths: List[Path] = []
     validation_paths: List[Path] = []
-    ordered_components = sorted(
-        components.items(),
-        key=lambda item: min(records[i][0].name for i in item[1]),
-    )
-    for _, indices in ordered_components:
-        signature = "\n".join(sorted(records[i][0].name for i in indices)).encode("utf-8")
-        fold = int.from_bytes(hashlib.sha256(signature).digest()[:8], "big") % SPLIT_FOLDS
-        target = validation_paths if fold == VALIDATION_FOLD else train_paths
-        target.extend(records[i][0] for i in indices)
+    for component in ordered_components:
+        target = validation_paths if assigned_fold(component, len(paths)) == VALIDATION_FOLD else train_paths
+        target.extend(component)
 
     train_paths = sorted(train_paths, key=lambda path: path.name.lower())
     validation_paths = sorted(validation_paths, key=lambda path: path.name.lower())
     if not validation_paths:
-        _, indices = ordered_components[0]
-        chosen = {records[i][0] for i in indices}
+        chosen = set(ordered_components[0])
         validation_paths = sorted(chosen, key=lambda p: p.name.lower())
         train_paths = sorted([p for p in paths if p not in chosen], key=lambda p: p.name.lower())
     if not train_paths:
-        _, indices = ordered_components[-1]
-        chosen = {records[i][0] for i in indices}
+        chosen = set(ordered_components[-1])
         train_paths = sorted(chosen, key=lambda p: p.name.lower())
         validation_paths = sorted([p for p in paths if p not in chosen], key=lambda p: p.name.lower())
     if not train_paths or not validation_paths:
@@ -323,36 +358,38 @@ def split_paths(paths: Sequence[Path], seed: int) -> Tuple[List[Path], List[Path
     max_antigen_cross = 0.0
     train_families=set()
     validation_families=set()
-    for path,_,_,_,family in records:
+    for path, _vhh, _antigen, _cdr, family, _anchored in records:
         if path in train_set:
             train_families.add(family)
         if path in validation_set:
             validation_families.add(family)
     family_overlap=sorted(train_families & validation_families)
-    for train_path, train_vhh, train_antigen, train_cdr, _train_family in records:
+    for train_path, train_vhh, train_antigen, train_cdr, _train_family, train_anchored in records:
         if train_path not in train_set:
             continue
-        for val_path, val_vhh, val_antigen, val_cdr, _val_family in records:
+        for val_path, val_vhh, val_antigen, val_cdr, _val_family, val_anchored in records:
             if val_path not in validation_set:
                 continue
-            max_vhh_cross = max(max_vhh_cross, _side_identity(train_vhh, val_vhh))
+            # Same partner orientations as the component union above, so the
+            # post-hoc audit checks exactly the criterion used to build the split.
+            for lv, rv, la, ra in partner_orientations(
+                    train_vhh, train_antigen, train_anchored,
+                    val_vhh, val_antigen, val_anchored):
+                max_vhh_cross = max(max_vhh_cross, _side_identity(lv, rv))
+                max_antigen_cross = max(
+                    max_antigen_cross,
+                    _side_identity(la, ra, min_length_coverage=ANTIGEN_MIN_LENGTH_COVERAGE),
+                )
             if train_cdr and val_cdr:
                 max_cdr_cross = max(max_cdr_cross, _sequence_identity(train_cdr, val_cdr))
-            max_antigen_cross = max(
-                max_antigen_cross,
-                _side_identity(
-                    train_antigen, val_antigen,
-                    min_length_coverage=ANTIGEN_MIN_LENGTH_COVERAGE,
-                ),
-            )
     if (max_vhh_cross >= VHH_IDENTITY_THRESHOLD
             or max_cdr_cross >= CDR_H3_IDENTITY_THRESHOLD
             or max_antigen_cross >= ANTIGEN_IDENTITY_THRESHOLD
             or family_overlap):
         raise AssertionError(
             "Layered sequence/family leakage across train/validation: "
-            f"max VHH={max_vhh_cross:.3f}, max CDR-H3={max_cdr_cross:.3f}, "
-            f"max antigen={max_antigen_cross:.3f}, family_overlap={family_overlap[:10]}"
+            f"max VHH full-chain={max_vhh_cross:.3f}, max CDR-H3 loop={max_cdr_cross:.3f}, "
+            f"max antigen full-chain={max_antigen_cross:.3f}, family_overlap={family_overlap[:10]}"
         )
     return train_paths, validation_paths
 
