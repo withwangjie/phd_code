@@ -18,7 +18,7 @@ def test_foldseek_requires_length_normalized_tm_score(tmp_path):
         try:
             main()
         except ValueError as exc:
-            assert "require qtmscore or ttmscore" in str(exc)
+            assert "require qtmscore, ttmscore or mintmscore" in str(exc)
         else:
             raise AssertionError("Foldseek fident was accepted as TM-score")
 

@@ -6,8 +6,18 @@ variable domain has the same immunoglobulin fold, so antibody chains would
 link almost every complex into one single-linkage component. This module
 therefore keeps, for each PDB of the clustering universe, only its
 non-antibody protein chains, runs an all-versus-all Foldseek search and writes
-``query<TAB>target<TAB>qtmscore`` with the header ``build_independence_cluster_map.py``
+``query<TAB>target<TAB>mintmscore`` with the header ``build_independence_cluster_map.py``
 requires.
+
+Scores are symmetric (PROTOCOL_AMENDMENTS.md A11). Foldseek's ``qtmscore`` is
+normalized by the query chain alone, so a short chain (a ~57-residue helix
+such as a G-protein gamma subunit) scores high against any protein holding a
+similar helix; under single linkage such chains joined 80% of the study into
+one component. A chain pair therefore counts only through
+``min(qtmscore(q->t), qtmscore(t->q))``, the TM-score normalized by the longer
+chain, which requires the alignment to cover both chains: the structural
+counterpart of the antigen sequence rule's length coverage. A PDB pair takes
+the maximum of that symmetric score over its chain pairs.
 
 A chain annotated as antigen (SNAC ``Chain_Ag``, SAbDab antigen chains of
 external entries) is always kept. Otherwise antibody chains are recognised
@@ -52,6 +62,8 @@ MIN_CHAIN_LENGTH = 20
 # every pair, N^2 rows). Pairs with TM-score >= 0.5 are expected to have
 # E <= 10; override with --foldseek-arg when needed.
 FOLDSEEK_ARGS = ("--exhaustive-search", "1", "-e", "10")
+# Symmetric chain-pair TM-score, normalized by the longer chain (A11).
+SCORE_FIELD = "mintmscore"
 _FR4 = re.compile(r"[WF]G.G")
 
 
@@ -186,6 +198,32 @@ def antigen_structure(pdb: str, sources: Iterable[dict], sabdab_antibody_chains:
     return out, dict(chains=chains, unreadable=unreadable)
 
 
+def symmetric_pdb_scores(raw: Path) -> tuple[dict[tuple[str, str], float], set[str]]:
+    """PDB-pair scores from chain-level Foldseek rows, and every PDB with any hit.
+
+    A chain pair scores ``min`` of its two directed qtmscores; a pair seen in
+    one direction only scores 0 (its reverse alignment fell below the search
+    E-value). A PDB pair keeps the maximum over its chain pairs, in both orders.
+    """
+    directed: dict[tuple[str, str], float] = {}
+    for line in Path(raw).read_text(encoding="utf-8").splitlines():
+        fields = line.split("\t")
+        if len(fields) < 3 or not line.strip():
+            continue
+        key = (fields[0].strip(), fields[1].strip())
+        directed[key] = max(float(fields[2]), directed.get(key, 0.0))
+    best: dict[tuple[str, str], float] = {}
+    seen: set[str] = set()
+    for (query, target), score in directed.items():
+        pair = (norm_id(query), norm_id(target))
+        seen.update(pair)
+        reverse = directed.get((target, query))
+        if reverse is None:
+            continue
+        best[pair] = max(min(score, reverse), best.get(pair, 0.0))
+    return best, seen
+
+
 def resolve_foldseek(value: str) -> str:
     """The Foldseek executable, or a message naming what was found instead."""
     located = shutil.which(value)
@@ -235,9 +273,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--min-chain-length", type=int, default=MIN_CHAIN_LENGTH)
     parser.add_argument("--allow-missing-hits", action="store_true")
     parser.add_argument("--force", action="store_true", help="Overwrite an existing pair table")
+    parser.add_argument("--reuse-raw", type=Path, default=None,
+                        help="Score an existing foldseek_raw.m8 of the same antigen chains instead of searching")
     args = parser.parse_args(argv)
     # Fail before building thousands of antigen structures, not after.
     args.foldseek = resolve_foldseek(args.foldseek)
+    if args.reuse_raw is not None and not args.reuse_raw.is_file():
+        raise SystemExit(f"--reuse-raw {args.reuse_raw} not found")
 
     if args.out.exists() and not args.force:
         raise SystemExit(f"{args.out} exists; the pair table is frozen once used (pass --force to rebuild)")
@@ -283,20 +325,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if entries == 0:
         raise SystemExit("No antigen chains to search")
 
-    raw = run_foldseek(args.foldseek, input_dir, args.work_dir, entries, args.threads,
-                       args.foldseek_arg or FOLDSEEK_ARGS)
-    best: dict[tuple[str, str], float] = {}
-    for line in raw.read_text(encoding="utf-8").splitlines():
-        fields = line.split("\t")
-        if len(fields) < 3 or not line.strip():
-            continue
-        query, target, score = norm_id(fields[0]), norm_id(fields[1]), float(fields[2])
-        best[(query, target)] = max(score, best.get((query, target), 0.0))
-    seen = {pdb for pair in best for pdb in pair}
+    if args.reuse_raw is not None:
+        # The chains written above are the searched input; only the scoring rule changed.
+        raw = args.reuse_raw
+        print(f"[build_foldseek_pairs] reusing the Foldseek search {raw} (no new search)", flush=True)
+    else:
+        raw = run_foldseek(args.foldseek, input_dir, args.work_dir, entries, args.threads,
+                           args.foldseek_arg or FOLDSEEK_ARGS)
+    best, seen = symmetric_pdb_scores(raw)
     unknown = sorted(seen - set(universe))
     if unknown:
         raise SystemExit(f"Foldseek returned entries outside the universe: {unknown[:10]}")
     searched = [pdb for pdb in universe if pdb not in self_only]
+    stray = sorted(seen - set(searched))
+    if stray:
+        raise SystemExit(f"Foldseek output has hits for PDBs with no searched antigen chain: {stray[:10]} "
+                         "(a --reuse-raw file from different inputs?)")
     missing = sorted(set(searched) - seen)
     if missing and not args.allow_missing_hits:
         raise SystemExit(f"Foldseek returned no hit (not even self) for {len(missing)} PDB(s): {missing[:20]}; "
@@ -308,14 +352,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     with args.out.open("w", encoding="utf-8") as handle:
-        handle.write("query\ttarget\tqtmscore\n")
+        handle.write(f"query\ttarget\t{SCORE_FIELD}\n")
         for (query, target), score in sorted(best.items()):
             handle.write(f"{query}\t{target}\t{score:.4f}\n")
     version = subprocess.run([args.foldseek, "version"], capture_output=True, text=True, check=False).stdout.strip()
     manifest = dict(
         schema="foldseek_pairs_v1", pair_table=str(args.out.resolve()), pair_table_sha256=sha256(args.out),
         raw_output_sha256=sha256(raw), foldseek_version=version or None,
-        foldseek_options=list(args.foldseek_arg or FOLDSEEK_ARGS), score="qtmscore",
+        foldseek_options=list(args.foldseek_arg or FOLDSEEK_ARGS), score=SCORE_FIELD,
+        score_rule="PDB pair: max over chain pairs of min(qtmscore(q->t), qtmscore(t->q))",
+        raw_output=str(Path(raw).resolve()), reused_raw_output=args.reuse_raw is not None,
         min_chain_length=args.min_chain_length, universe_size=len(universe),
         universe_sha256=sha256(args.universe), searched_pdbs=len(searched), chains_searched=entries,
         self_only=sorted(self_only + missing), allow_missing_hits=bool(args.allow_missing_hits),

@@ -272,3 +272,41 @@ def test_foldseek_can_bind_the_pair_table_to_one_run_universe(tmp_path, monkeypa
 
     with pytest.raises(SystemExit, match="has not reached queue_freeze"):
         prep.main(common + ["--run-dir", str(tmp_path / "nothing")])
+
+
+def _merge(dataset: Path, count: int, cluster: str = "cluster_giant") -> set[str]:
+    """Put the first `count` training graphs in one structure cluster: one layered component."""
+    names = set()
+    for path in sorted((dataset / "graphs" / "train").glob("*.pt"))[:count]:
+        graph = torch.load(path, weights_only=False)
+        graph.family_structure_cluster = cluster
+        torch.save(graph, path)
+        names.add(path.name)
+    return names
+
+
+def test_a_component_larger_than_one_fold_always_trains(tmp_path, monkeypatch):
+    """A11: a giant component is never the internal validation fold nor the holdout."""
+    monkeypatch.setattr(training, "PIN_MIN_COMPONENT", 2)
+    for fold in range(1, training.SPLIT_FOLDS):
+        root = tmp_path / f"fold{fold}"
+        dataset, audit = _dataset(root)
+        giant = _merge(dataset, 12)  # 12 * 5 > 40
+        payload = _carve(dataset, audit, root / "holdout.json", fold=fold, min_clusters=1)
+        assert payload["pinned_to_training"]["component_sizes"] == [12]
+        assert not giant & {path.name for path in (dataset / "graphs" / "holdout").glob("*.pt")}
+        train, validation = training.split_paths(sorted((dataset / "graphs" / "train").glob("*.pt")), 0)
+        assert giant <= {path.name for path in train} and not giant & {path.name for path in validation}
+
+
+def test_a_component_at_the_pin_boundary_fails_the_carve(tmp_path, monkeypatch):
+    """Not pinned in the full pool (8 * 5 == 40) but pinned in the smaller remaining one."""
+    monkeypatch.setattr(training, "PIN_MIN_COMPONENT", 2)
+    dataset, audit = _dataset(tmp_path)
+    giant = _merge(dataset, 8)
+    paths = sorted((dataset / "graphs" / "train").glob("*.pt"))
+    component = next(c for c in training.layered_components(paths) if {p.name for p in c} == giant)
+    fold = next(f for f in range(1, training.SPLIT_FOLDS) if f != training.component_fold(component)
+                and carve.select_components(training.layered_components(paths), f, len(paths)))
+    with pytest.raises(SystemExit, match="pin boundary"):
+        _carve(dataset, audit, tmp_path / "holdout.json", fold=fold, min_clusters=1)

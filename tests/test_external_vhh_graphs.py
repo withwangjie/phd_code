@@ -338,7 +338,7 @@ def test_foldseek_pairs_use_antigen_chains_only(tmp_path, monkeypatch):
     assert fp.main(argv) == 0
 
     lines = out.read_text().splitlines()
-    assert lines[0] == "query\ttarget\tqtmscore"
+    assert lines[0] == "query\ttarget\tmintmscore"
     pairs = {tuple(line.split("\t")[:2]): float(line.split("\t")[2]) for line in lines[1:]}
     assert pairs[("2def", "2def")] == 1.0 and not any("2def" in p and p != ("2def", "2def") for p in pairs)
     assert pairs[("1abc", "3ghi")] == 0.2
@@ -354,7 +354,7 @@ def test_foldseek_pairs_use_antigen_chains_only(tmp_path, monkeypatch):
     env = dict(os.environ, PYTHONPATH=str(P(__file__).resolve().parents[1] / "src"))
     cluster = tmp_path / "clusters.json"
     subprocess.run([sys.executable, "-m", "nanoqc.data.build_independence_cluster_map", "--pairs", str(out),
-                    "--out-json", str(cluster), "--min-score", "0.5", "--score-semantics", "qtmscore",
+                    "--out-json", str(cluster), "--min-score", "0.5", "--score-semantics", "mintmscore",
                     "--universe", str(universe)], check=True, env=env)
     clusters = json.loads(cluster.read_text())
     assert len(set(clusters.values())) == 4  # 0.2 < 0.5: no edges between different PDBs
@@ -529,3 +529,23 @@ def test_the_foldseek_executable_is_resolved_before_any_work(tmp_path):
     assert resolve_foldseek(str(plain)) == str(plain.resolve())
     with pytest.raises(SystemExit, match="not found; pass the executable"):
         resolve_foldseek(str(tmp_path / "missing"))
+
+
+def test_a_short_chain_cannot_link_complexes_by_a_one_sided_tm_score(tmp_path):
+    """A11: a PDB pair scores min(q->t, t->q) per chain pair, max over chain pairs."""
+    from nanoqc.data.build_foldseek_pairs import symmetric_pdb_scores
+
+    raw = tmp_path / "foldseek_raw.m8"
+    raw.write_text("".join(f"{q}\t{t}\t{s}\n" for q, t, s in [
+        ("1abc.cif_G", "2def.cif_A", 0.92),  # 57-aa helix normalized by itself
+        ("2def.cif_A", "1abc.cif_G", 0.18),  # the same alignment normalized by the 400-aa chain
+        ("1abc.cif_R", "3ghi.cif_R", 0.81),
+        ("3ghi.cif_R", "1abc.cif_R", 0.74),
+        ("1abc.cif_R", "3ghi.cif_B", 0.66),  # one direction only: below the search E-value back
+        ("1abc.cif_R", "1abc.cif_R", 1.0),
+    ]))
+    best, seen = symmetric_pdb_scores(raw)
+    assert best[("1abc", "2def")] == best[("2def", "1abc")] == 0.18
+    assert best[("1abc", "3ghi")] == best[("3ghi", "1abc")] == 0.74
+    assert best[("1abc", "1abc")] == 1.0
+    assert seen == {"1abc", "2def", "3ghi"}

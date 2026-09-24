@@ -213,6 +213,8 @@ def cmd_foldseek(args, config, s) -> int:
     if candidates.is_file():
         argv += ["--external-candidates", str(candidates), "--external-structures", str(s["source_dir"])]
     argv += ["--allow-missing-hits"] * bool(args.allow_missing_hits) + ["--force"] * bool(args.force)
+    if args.reuse_raw:
+        argv += ["--reuse-raw", str(s["prep"] / "foldseek" / "foldseek_raw.m8")]
     run_module("nanoqc.data.build_foldseek_pairs", argv)
     print(f"Next: ./scripts/deploy_launch.sh --stop-after queue_freeze (pair table {s['pair_tsv']}).")
     return 0
@@ -280,6 +282,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                            "matches exactly what queue_freeze will check")
     fold.add_argument("--allow-missing-hits", action="store_true")
     fold.add_argument("--force", action="store_true")
+    fold.add_argument("--reuse-raw", action="store_true",
+                      help="Rescore the previous search (prep/foldseek/foldseek_raw.m8) of the same universe "
+                           "instead of running Foldseek again")
     for name in ("pass1", "pass2"):
         p = sub.add_parser(name)
         p.add_argument("--sabdab-summary", type=Path, nargs="+", required=True)

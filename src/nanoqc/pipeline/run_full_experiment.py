@@ -558,8 +558,8 @@ def _validate_scientific_config(config: Dict[str, Any]) -> None:
             min_score=float(clustering.get("min_score",0.50))
             if not math.isfinite(min_score):
                 raise ValueError("independence_clustering.min_score must be finite")
-            if str(clustering.get("score_semantics","")).lower() not in ("qtmscore","ttmscore"):
-                raise ValueError("independence_clustering.score_semantics must be qtmscore or ttmscore")
+            if str(clustering.get("score_semantics","")).lower() not in ("qtmscore","ttmscore","mintmscore"):
+                raise ValueError("independence_clustering.score_semantics must be qtmscore, ttmscore or mintmscore")
             for key in ("query_column","target_column","score_column"):
                 if int(clustering.get(key,0)) < 0:
                     raise ValueError(f"independence_clustering.{key} must be nonnegative")

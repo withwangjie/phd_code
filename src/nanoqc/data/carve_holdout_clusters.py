@@ -76,8 +76,11 @@ def copy_source_structure(source: dict, pdb: str, destination: Path) -> Path:
     return out
 
 
-def select_components(components: Sequence[Sequence[Path]], fold: int) -> list[list[Path]]:
-    return [list(component) for component in components if training.component_fold(component) == fold]
+def select_components(components: Sequence[Sequence[Path]], fold: int,
+                      pool_size: Optional[int] = None) -> list[list[Path]]:
+    """Components hashed to ``fold``; a component pinned to training (A11) never is."""
+    pool = sum(len(c) for c in components) if pool_size is None else pool_size
+    return [list(component) for component in components if training.assigned_fold(component, pool) == fold]
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -110,8 +113,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if not paths:
         raise SystemExit(f"No training graphs in {train_dir}")
     components = training.layered_components(paths)
-    holdout_components = select_components(components, args.fold)
+    holdout_components = select_components(components, args.fold, len(paths))
     remaining = len(components) - len(holdout_components)
+    pinned = [c for c in components if training.pinned_to_training(c, len(paths))]
+    # Training later splits the smaller remaining pool; the pinned set must not
+    # change with it, or the internal validation split would differ from the
+    # one this carve assumes.
+    remaining_pool = len(paths) - sum(len(c) for c in holdout_components)
+    repinned = [c for c in components if c not in holdout_components
+                and training.pinned_to_training(c, remaining_pool)]
+    if sorted(map(len, repinned)) != sorted(map(len, pinned)):
+        raise SystemExit(f"Components pinned to training differ before ({sorted(map(len, pinned))}) and after "
+                         f"({sorted(map(len, repinned))}) the carve; a component sits at the 1/"
+                         f"{training.SPLIT_FOLDS} pin boundary. Record this and amend the pin rule.")
     if len(holdout_components) < args.min_clusters:
         raise SystemExit(
             f"Antigen-fold holdout has {len(holdout_components)} independent component(s) at fold "
@@ -162,12 +176,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     payload = dict(
         schema="antigen_fold_holdout_v1", split=HOLDOUT_SPLIT, fold=args.fold,
         folds=training.SPLIT_FOLDS, internal_validation_fold=training.VALIDATION_FOLD,
-        selection="layered isolation components whose deterministic name-hash fold equals --fold",
+        selection="layered isolation components whose deterministic name-hash fold equals --fold, "
+                  "except components pinned to training",
         criteria=dict(vhh_full_chain_identity=training.VHH_IDENTITY_THRESHOLD,
                       cdr_h3_identity=training.CDR_H3_IDENTITY_THRESHOLD,
                       antigen_identity=training.ANTIGEN_IDENTITY_THRESHOLD,
                       antigen_min_length_coverage=training.ANTIGEN_MIN_LENGTH_COVERAGE),
         components_total=len(components), holdout_components=len(holdout_components),
+        pinned_to_training=dict(rule=f"component size >= {training.PIN_MIN_COMPONENT} and > 1/"
+                                     f"{training.SPLIT_FOLDS} of the pool (PROTOCOL_AMENDMENTS.md A11)",
+                                pool=len(paths), component_sizes=sorted((len(c) for c in pinned), reverse=True),
+                                graphs=sum(len(c) for c in pinned)),
         training_components_remaining=remaining, min_clusters=args.min_clusters,
         graphs=len(moved), structure_clusters=sorted(by_cluster), graph_dir=str(holdout_dir.resolve()),
         source_structure_dir=str(structures_dir.resolve()),

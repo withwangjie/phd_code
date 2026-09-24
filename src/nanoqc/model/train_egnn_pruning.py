@@ -224,6 +224,10 @@ def _side_identity(
 
 SPLIT_FOLDS = 5
 VALIDATION_FOLD = 0
+# A component holding more than one fold's share of the pool cannot be held
+# out without becoming most of that fold; it always trains (A11). The floor
+# keeps small pools on the plain hash.
+PIN_MIN_COMPONENT = 50
 
 
 def _split_records(paths: Sequence[Path]) -> List[Tuple]:
@@ -314,6 +318,16 @@ def component_fold(component: Sequence[Path]) -> int:
     return int.from_bytes(hashlib.sha256(signature).digest()[:8], "big") % SPLIT_FOLDS
 
 
+def pinned_to_training(component: Sequence[Path], pool_size: int) -> bool:
+    """True for a component larger than 1/SPLIT_FOLDS of the pool (and >= PIN_MIN_COMPONENT)."""
+    return len(component) >= PIN_MIN_COMPONENT and len(component) * SPLIT_FOLDS > pool_size
+
+
+def assigned_fold(component: Sequence[Path], pool_size: int) -> Optional[int]:
+    """The component's held-out fold, or None when it is pinned to training."""
+    return None if pinned_to_training(component, pool_size) else component_fold(component)
+
+
 def split_paths(paths: Sequence[Path], seed: int) -> Tuple[List[Path], List[Path]]:
     """Layered sequence + family/structure component split; no random 90/10 partition."""
     del seed
@@ -322,7 +336,7 @@ def split_paths(paths: Sequence[Path], seed: int) -> Tuple[List[Path], List[Path
     train_paths: List[Path] = []
     validation_paths: List[Path] = []
     for component in ordered_components:
-        target = validation_paths if component_fold(component) == VALIDATION_FOLD else train_paths
+        target = validation_paths if assigned_fold(component, len(paths)) == VALIDATION_FOLD else train_paths
         target.extend(component)
 
     train_paths = sorted(train_paths, key=lambda path: path.name.lower())

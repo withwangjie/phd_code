@@ -259,7 +259,11 @@ recognised from SNAC/SAbDab annotations, SAbDab chain IDs, or an Ig V-domain
 detector (ANARCI when installed); annotated antigen chains are always kept.
 It runs an exhaustive all-versus-all search (E <= 10) and writes the pair
 table, a manifest of every chain's role, and an explicit self row for a PDB
-without an antigen chain of at least 20 residues.
+without an antigen chain of at least 20 residues. Scores are symmetric
+(`mintmscore`, the chain-pair TM-score normalized by the longer chain; A11), so
+a short chain cannot join whole complexes. `--reuse-raw` rescores the previous
+search (`prep/foldseek/foldseek_raw.m8`) without running Foldseek again. A
+layered component larger than one fold's share of the pool always trains (A11).
 
 To score a **genuinely external** VHH set instead, set
 `external_validation.external_vhh.graph_dir` and `source_structure_dir`, and

@@ -33,6 +33,7 @@ formal run is required.
 | A8 | Construction rules for the external VHH set (superseded as the default by A10) | external_validation (input set) | not applicable (no external set existed) |
 | A9 | Foldseek clustering input: antigen chains only | queue_freeze (cluster map, split), all cluster-level statistics | not applicable (no pair table existed) |
 | A10 | External validation becomes an antigen-fold holdout | queue_freeze (split), egnn_train, energy_calibration, external_validation | not applicable (no external set or result existed) |
+| A11 | Symmetric Foldseek score; oversized components always train | queue_freeze (cluster map, split), egnn_train, external_validation | not applicable (data composition only; no split or result existed) |
 
 ## A1. Primary coarse solver endpoint: resource-normalized time-to-solution
 
@@ -324,3 +325,52 @@ they were logged later.
 - **Results inspected before this amendment:** not applicable (no external set
   or result existed; the counts above are data composition, not outcomes).
 
+## A11. Symmetric Foldseek score; oversized components always train
+
+- **Before:** A9 joined two PDBs when any antigen-chain pair had Foldseek
+  `qtmscore >= 0.50`, a TM-score normalized by the query chain alone, under
+  single linkage. A10 held out whole layered components by name hash.
+- **Measured (before any split or outcome):** on the 2852-PDB study universe
+  the query-normalized rule gave 345 clusters, the largest holding **2291
+  (80.3%)**. Its hub PDBs (8vhf, 7wcm, 8wst, 9n29, ...) each linked to ~1800
+  others and shared antigen chains of only 55-58 residues (e.g. G-protein
+  gamma subunits of the Nb35-stabilised GPCR complexes): a short helix
+  normalized by its own length scores high against any protein holding a
+  similar helix. Antibody filtering was not the cause (7902 chains removed by
+  annotation, 2054 by the V-domain motif).
+- **Change 1, symmetric score:** a chain pair now counts through
+  `mintmscore = min(qtmscore(q->t), qtmscore(t->q))`, the TM-score normalized
+  by the longer chain; a pair found in one direction only scores 0. A PDB
+  pair keeps the maximum over its chain pairs; the threshold stays 0.50 [R27].
+  This is the structural counterpart of the antigen sequence rule's length
+  coverage (identity >= 0.30 **and** coverage >= 0.70): a fragment must not
+  make two proteins "the same". Measured on the same Foldseek search: 486
+  clusters, largest **1953 (68.5%)**, 348 singletons.
+- **Why the remaining component is kept:** it is chained through genuine fold
+  families shared by many nanobody targets (7TM receptors, G-protein
+  beta-propellers, ...). Restricting the search to SNAC/SAbDab-annotated
+  antigen chains was previewed and did not break it (annotations exist for
+  1435 of 2852 PDBs). Raising the TM-score threshold would rest on no
+  published fold criterion, so it was not done.
+- **Change 2, oversized components always train:** a layered component with
+  at least 50 complexes and more than 1/5 of the pool being split (one fold's
+  share) is assigned to training, never to the internal validation fold or the
+  antigen-fold holdout. Under the plain hash such a component would land in
+  either with probability 1/5 each and would then be most of that fold. The
+  carve verifies that the pinned set is identical in the full pool and in the
+  smaller pool training later splits, and fails otherwise, so the internal
+  validation split is still exactly the one the carve assumed.
+- **Scientific effect:** the internal validation fold and the antigen-fold
+  holdout are both drawn from complexes outside the dominant fold family; the
+  holdout claim of A10 ("antigen folds never seen in training") is unchanged
+  and, if anything, stricter. The training set contains the dominant family.
+  `antigen_fold_holdout.json` records the pinned component sizes.
+- **Implementation:** `build_foldseek_pairs.py` writes
+  `query<TAB>target<TAB>mintmscore`; `--reuse-raw` rescores an existing search
+  of the same chains. `independence_clustering.score_semantics` is
+  `mintmscore`; tables with the old `qtmscore` header fail provenance checks
+  and must be rebuilt. The pin rule is `train_egnn_pruning.assigned_fold`.
+- **Affected results:** queue_freeze (cluster map, split), egnn_train,
+  energy_calibration, external_validation.
+- **Results inspected before this amendment:** not applicable (cluster sizes
+  are data composition; no split, graph set or outcome existed).

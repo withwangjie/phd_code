@@ -83,6 +83,10 @@ class DSU:
             self.rank[ra] += 1
 
 
+# mintmscore: min of both directions, i.e. normalized by the longer chain (A11).
+TM_SCORE_FIELDS = ("qtmscore", "ttmscore", "mintmscore")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pairs", type=Path, required=True)
@@ -122,10 +126,10 @@ def main() -> int:
                 if header[args.query_column] != "query" or header[args.target_column] != "target":
                     raise ValueError("Pair-table header must identify query and target columns")
                 if args.min_score is not None:
-                    if score_field not in ("qtmscore", "ttmscore"):
+                    if score_field not in TM_SCORE_FIELDS:
                         raise ValueError(
                             f"Score column {args.score_column} is {score_field!r}; "
-                            "require qtmscore or ttmscore normalized by a protein length")
+                            "require qtmscore, ttmscore or mintmscore normalized by a protein length")
                     if args.score_semantics.lower() != score_field:
                         raise ValueError("Configured score semantics must equal the TM-score header field")
                 continue
