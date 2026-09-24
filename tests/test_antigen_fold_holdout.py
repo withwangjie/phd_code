@@ -155,3 +155,35 @@ def test_removing_holdout_components_leaves_the_internal_split_unchanged(tmp_pat
              for path in component}
     assert all(after[name] == before[name] for name in after)
     assert sorted(name for name, fold in after.items() if fold == training.VALIDATION_FOLD) == expected_validation
+
+
+def test_foldseek_step_clusters_the_study_pdbs_alone_without_pass1(tmp_path, monkeypatch):
+    """With the holdout there are no external candidates, so the universe is study_pdb_ids.txt."""
+    import yaml
+    from nanoqc.data import prepare_external_vhh as prep
+
+    prep_dir = tmp_path / "prep"
+    (prep_dir / "audit").mkdir(parents=True)
+    (prep_dir / "study_pdb_ids.txt").write_text("1abc\n2def\n")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(dict(
+        paths=dict(data_root=str(tmp_path / "data"), dataset_dir="dataset"),
+        data_audit=dict(max_resolution_angstrom=3.0),
+        queue_freeze=dict(homology_isolation={}, independence_clustering=dict(pair_tsv=str(tmp_path / "p.tsv"))),
+        external_validation=dict(external_vhh=dict(graph_dir="", source_structure_dir="", min_clusters=10)))))
+
+    seen = {}
+    monkeypatch.setattr(prep, "run_module", lambda module, argv: seen.update(module=module, argv=argv))
+    assert prep.main(["--config", str(config_path), "--prep-dir", str(prep_dir), "foldseek"]) == 0
+    assert seen["module"] == "nanoqc.data.build_foldseek_pairs"
+    assert "--universe" in seen["argv"]
+    assert seen["argv"][seen["argv"].index("--universe") + 1] == str(prep_dir / "study_pdb_ids.txt")
+    assert "--external-candidates" not in seen["argv"]  # nothing external to add
+
+    # A genuinely external pass 1 widens the universe and is used instead.
+    (prep_dir / "foldseek_universe.txt").write_text("1abc\n2def\n9zzz\n")
+    (prep_dir / "selection_pass1").mkdir()
+    (prep_dir / "selection_pass1" / "candidates.json").write_text("{}")
+    prep.main(["--config", str(config_path), "--prep-dir", str(prep_dir), "foldseek"])
+    assert seen["argv"][seen["argv"].index("--universe") + 1] == str(prep_dir / "foldseek_universe.txt")
+    assert "--external-candidates" in seen["argv"]

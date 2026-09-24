@@ -10,11 +10,18 @@ neither pass reads any experimental outcome:
   audit   Standalone data audit with the frozen config's gates, giving the
           study PDB IDs (excluded from the external set and part of the
           Foldseek universe).
+  foldseek  Antigen-chain-only all-versus-all Foldseek over the clustering
+          universe, written as the configured pair table with its header
+          (build_foldseek_pairs.py). With the antigen-fold holdout
+          (PROTOCOL_AMENDMENTS.md A10) the universe is study_pdb_ids.txt and
+          this is the only step needed before the formal run.
+
+The two passes below are for a GENUINELY EXTERNAL VHH set, configured through
+external_validation.external_vhh.graph_dir; they are not used by the holdout.
+
   pass1   Candidate selection without training data, then graph building.
-          Writes foldseek_universe.txt (study + external IDs).
-  foldseek  Antigen-chain-only all-versus-all Foldseek over that universe,
-          written as the configured pair table with its header
-          (build_foldseek_pairs.py).
+          Writes foldseek_universe.txt (study + external IDs), which the
+          foldseek step then prefers over study_pdb_ids.txt.
   (run)   ``deploy_launch.sh --stop-after queue_freeze`` builds the training
           set and cluster map; no model is trained and no outcome exists.
   pass2   Re-selects against that run's training set and cluster map,
@@ -171,14 +178,22 @@ def cmd_pass1(args, config, s) -> int:
 
 
 def cmd_foldseek(args, config, s) -> int:
+    # With the antigen-fold holdout (A10) the universe is the study's own PDBs;
+    # a genuinely external set adds its own, so pass 1 writes a wider universe.
     universe = s["prep"] / "foldseek_universe.txt"
+    candidates = s["prep"] / "selection_pass1" / "candidates.json"
     if not universe.is_file():
-        raise SystemExit("Run pass1 first (foldseek_universe.txt missing)")
+        universe = s["prep"] / "study_pdb_ids.txt"
+        if not universe.is_file():
+            raise SystemExit("Run the 'audit' step first (study_pdb_ids.txt missing)")
+        print(f"[prepare_external_vhh] no external candidates; clustering the {len(universe.read_text().split())} "
+              "study PDBs alone (antigen-fold holdout)")
     data_root = args.data_root or repo_path(os.environ.get("QP_DATA_ROOT") or config["paths"]["data_root"])
     argv = ["--universe", str(universe), "--audit-dir", str(s["prep"] / "audit"), "--data-root", str(data_root),
-            "--external-candidates", str(s["prep"] / "selection_pass1" / "candidates.json"),
-            "--external-structures", str(s["source_dir"]), "--out", str(s["pair_tsv"]),
+            "--out", str(s["pair_tsv"]),
             "--work-dir", str(s["prep"] / "foldseek"), "--foldseek", args.foldseek, "--threads", str(args.threads)]
+    if candidates.is_file():
+        argv += ["--external-candidates", str(candidates), "--external-structures", str(s["source_dir"])]
     argv += ["--allow-missing-hits"] * bool(args.allow_missing_hits) + ["--force"] * bool(args.force)
     run_module("nanoqc.data.build_foldseek_pairs", argv)
     print(f"Next: ./scripts/deploy_launch.sh --stop-after queue_freeze (pair table {s['pair_tsv']}).")

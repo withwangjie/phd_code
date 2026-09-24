@@ -3,13 +3,18 @@
 # prepare_external_vhh.sh -- two-pass preparation of the external VHH set
 # (docs/PROTOCOL_AMENDMENTS.md A8). Run from anywhere; steps in order:
 #
+# With the antigen-fold holdout (the default, PROTOCOL_AMENDMENTS.md A10):
 #   ./scripts/prepare_external_vhh.sh audit
-#   ./scripts/prepare_external_vhh.sh pass1 --sabdab-summary sabdab_nano_summary_all.tsv \
-#         --released-after YYYY-MM-DD --download
 #   ./scripts/prepare_external_vhh.sh foldseek [--foldseek /path/to/foldseek] [--threads N]
+#   ./scripts/deploy_launch.sh
+#
+# For a GENUINELY EXTERNAL VHH set (external_vhh.graph_dir configured), build
+# it first so its PDBs enter the clustering universe:
+#   ./scripts/prepare_external_vhh.sh pass1 --sabdab-summary sabdab_summary_all.tsv --download
+#   ./scripts/prepare_external_vhh.sh foldseek [--foldseek /path/to/foldseek]
 #   ./scripts/deploy_launch.sh --stop-after queue_freeze
-#   ./scripts/prepare_external_vhh.sh pass2 --sabdab-summary sabdab_nano_summary_all.tsv \
-#         --released-after YYYY-MM-DD --run-dir <that run directory>
+#   ./scripts/prepare_external_vhh.sh pass2 --sabdab-summary sabdab_summary_all.tsv \
+#         --run-dir <that run directory>
 #   ./scripts/deploy_launch.sh            # fresh formal run, pair table unchanged
 #
 # Honours QP_DATA_ROOT and QP_EXTERNAL_VHH_SOURCE_DIR. Installs nothing; reads

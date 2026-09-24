@@ -245,34 +245,38 @@ the frozen model.
 External complexes are built with the training-graph definition (graph v1.8,
 biological assembly, 7.5 A SAbDab antigen rule, the same labels and edges):
 
-The formal run needs the external graphs and the Foldseek table before it
-starts, while training-overlap checks need the training set that
-`queue_freeze` builds. `scripts/prepare_external_vhh.sh` breaks this loop in
-two passes. Neither pass reads any experimental outcome:
+With the antigen-fold holdout (the default), the only input a formal run
+needs beyond the raw data is the frozen Foldseek pair table:
 
 ```bash
-./scripts/prepare_external_vhh.sh audit      # standalone audit -> study PDB IDs
-./scripts/prepare_external_vhh.sh pass1 --sabdab-summary sabdab_summary_all.tsv \
-    --download                               # select + build graphs, write foldseek_universe.txt
-./scripts/prepare_external_vhh.sh foldseek --foldseek /path/to/foldseek   # antigen chains only -> pair_tsv
-./scripts/deploy_launch.sh --stop-after queue_freeze   # training set + cluster map, no training
-./scripts/prepare_external_vhh.sh pass2 --sabdab-summary sabdab_summary_all.tsv \
-    --run-dir <that run>                     # drop training overlap, rebuild graphs
-./scripts/deploy_launch.sh                              # fresh formal run, pair table unchanged
+./scripts/prepare_external_vhh.sh audit                     # study PDB IDs from a standalone audit
+./scripts/prepare_external_vhh.sh foldseek --foldseek /path/to/foldseek --threads 32
+./scripts/deploy_launch.sh                                  # queue_freeze carves the holdout
 ```
 
 The `foldseek` step searches antigen chains only. Antibody chains are
 recognised from SNAC/SAbDab annotations, SAbDab chain IDs, or an Ig V-domain
 detector (ANARCI when installed); annotated antigen chains are always kept.
-It runs an exhaustive all-versus-all search (E <= 10)
-and writes the pair table, a manifest of every chain's role, and an explicit
-self row for a PDB without an antigen chain of at least 20 residues.
+It runs an exhaustive all-versus-all search (E <= 10) and writes the pair
+table, a manifest of every chain's role, and an explicit self row for a PDB
+without an antigen chain of at least 20 residues.
+
+To score a **genuinely external** VHH set instead, set
+`external_validation.external_vhh.graph_dir` and `source_structure_dir`, and
+build that set with the two passes below before the Foldseek step, so its
+PDBs enter the clustering universe:
+
+```bash
+./scripts/prepare_external_vhh.sh pass1 --sabdab-summary sabdab_summary_all.tsv --download
+./scripts/prepare_external_vhh.sh foldseek --foldseek /path/to/foldseek
+./scripts/deploy_launch.sh --stop-after queue_freeze
+./scripts/prepare_external_vhh.sh pass2 --sabdab-summary sabdab_summary_all.tsv --run-dir <that run>
+./scripts/deploy_launch.sh
+```
 
 `--released-after YYYY-MM-DD` adds a temporal holdout when PDB releases
-postdate the training snapshot; independence itself comes from excluding the
-study's PDB IDs and from the sequence and structure-cluster checks.
-
-Pass 2 refuses to run if the pair table changed after pass 1, because
+postdate the training snapshot. Pass 2 refuses to run if the pair table
+changed after pass 1, because
 external PDBs can link internal clusters. With the table unchanged, the fresh
 run rebuilds the identical training/test split.
 
