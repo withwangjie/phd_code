@@ -504,3 +504,28 @@ def test_an_empty_candidate_set_reports_why(tmp_path):
         candidates=[dict(pdb_id="9zzz", selected=True, representative=False)])))
     with pytest.raises(SystemExit, match="none is its group's representative"):
         ext.main(argv + ["--representatives-only"])
+
+
+def test_the_foldseek_executable_is_resolved_before_any_work(tmp_path):
+    from nanoqc.data.build_foldseek_pairs import resolve_foldseek
+
+    # The usual mistake: pass the extracted directory, whose exec fails with EACCES.
+    bundle = tmp_path / "foldseek"
+    (bundle / "bin").mkdir(parents=True)
+    with pytest.raises(SystemExit, match=r"is a directory; pass the executable"):
+        resolve_foldseek(str(bundle))
+    binary = bundle / "bin" / "foldseek"
+    binary.write_text("#!/bin/sh\n")
+    with pytest.raises(SystemExit, match="is a directory"):  # present but not executable
+        resolve_foldseek(str(bundle))
+    binary.chmod(0o755)
+    assert resolve_foldseek(str(bundle)) == str(binary.resolve())
+
+    plain = tmp_path / "fs"
+    plain.write_text("#!/bin/sh\n")
+    with pytest.raises(SystemExit, match="is not executable; chmod"):
+        resolve_foldseek(str(plain))
+    plain.chmod(0o755)
+    assert resolve_foldseek(str(plain)) == str(plain.resolve())
+    with pytest.raises(SystemExit, match="not found; pass the executable"):
+        resolve_foldseek(str(tmp_path / "missing"))

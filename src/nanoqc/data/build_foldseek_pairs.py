@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -185,6 +186,24 @@ def antigen_structure(pdb: str, sources: Iterable[dict], sabdab_antibody_chains:
     return out, dict(chains=chains, unreadable=unreadable)
 
 
+def resolve_foldseek(value: str) -> str:
+    """The Foldseek executable, or a message naming what was found instead."""
+    located = shutil.which(value)
+    if located:
+        return located
+    path = Path(value)
+    if path.is_dir():
+        for candidate in (path / "bin" / "foldseek", path / "foldseek"):
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate.resolve())
+        raise SystemExit(f"--foldseek {value} is a directory; pass the executable, e.g. {path / 'bin' / 'foldseek'}")
+    if not path.exists():
+        raise SystemExit(f"--foldseek {value} not found; pass the executable's path or put it on PATH")
+    if not os.access(path, os.X_OK):
+        raise SystemExit(f"--foldseek {value} is not executable; chmod +x it")
+    return str(path.resolve())
+
+
 def run_foldseek(foldseek: str, input_dir: Path, work: Path, entries: int, threads: int,
                  extra: Sequence[str]) -> Path:
     raw = work / "foldseek_raw.m8"
@@ -217,6 +236,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--allow-missing-hits", action="store_true")
     parser.add_argument("--force", action="store_true", help="Overwrite an existing pair table")
     args = parser.parse_args(argv)
+    # Fail before building thousands of antigen structures, not after.
+    args.foldseek = resolve_foldseek(args.foldseek)
 
     if args.out.exists() and not args.force:
         raise SystemExit(f"{args.out} exists; the pair table is frozen once used (pass --force to rebuild)")

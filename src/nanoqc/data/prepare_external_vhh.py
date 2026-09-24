@@ -180,8 +180,13 @@ def cmd_pass1(args, config, s) -> int:
 def cmd_foldseek(args, config, s) -> int:
     # With the antigen-fold holdout (A10) the universe is the study's own PDBs;
     # a genuinely external set adds its own, so pass 1 writes a wider universe.
-    universe = s["prep"] / "foldseek_universe.txt"
-    candidates = s["prep"] / "selection_pass1" / "candidates.json"
+    # Pass-1 artifacts belong to a GENUINELY EXTERNAL set. With the
+    # antigen-fold holdout they may still be lying around from an earlier
+    # attempt, and must not silently widen the universe.
+    external_configured = bool(((config.get("external_validation", {}) or {})
+                                .get("external_vhh", {}) or {}).get("graph_dir"))
+    universe = s["prep"] / "foldseek_universe.txt" if external_configured else Path("")
+    candidates = s["prep"] / "selection_pass1" / "candidates.json" if external_configured else Path("")
     if not universe.is_file():
         universe = s["prep"] / "study_pdb_ids.txt"
         if not universe.is_file():

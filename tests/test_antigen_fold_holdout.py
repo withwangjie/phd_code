@@ -180,10 +180,19 @@ def test_foldseek_step_clusters_the_study_pdbs_alone_without_pass1(tmp_path, mon
     assert seen["argv"][seen["argv"].index("--universe") + 1] == str(prep_dir / "study_pdb_ids.txt")
     assert "--external-candidates" not in seen["argv"]  # nothing external to add
 
-    # A genuinely external pass 1 widens the universe and is used instead.
+    # Stale pass-1 artifacts must not widen the universe while the holdout is in use.
     (prep_dir / "foldseek_universe.txt").write_text("1abc\n2def\n9zzz\n")
     (prep_dir / "selection_pass1").mkdir()
     (prep_dir / "selection_pass1" / "candidates.json").write_text("{}")
+    prep.main(["--config", str(config_path), "--prep-dir", str(prep_dir), "foldseek"])
+    assert seen["argv"][seen["argv"].index("--universe") + 1] == str(prep_dir / "study_pdb_ids.txt")
+    assert "--external-candidates" not in seen["argv"]
+
+    # A configured external set does use pass 1's wider universe.
+    external = yaml.safe_load(config_path.read_text())
+    external["external_validation"]["external_vhh"].update(
+        graph_dir=str(tmp_path / "ext" / "graphs"), source_structure_dir=str(tmp_path / "ext" / "structures"))
+    config_path.write_text(yaml.safe_dump(external))
     prep.main(["--config", str(config_path), "--prep-dir", str(prep_dir), "foldseek"])
     assert seen["argv"][seen["argv"].index("--universe") + 1] == str(prep_dir / "foldseek_universe.txt")
     assert "--external-candidates" in seen["argv"]
