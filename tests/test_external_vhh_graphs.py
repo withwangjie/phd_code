@@ -486,3 +486,21 @@ def test_the_release_date_cutoff_is_optional(tmp_path, monkeypatch):
     payload = json.loads((out / "candidates.json").read_text())
     assert payload["released_after"] is None and payload["holdout"] == "homology" and payload["selected"] == 1
     assert "no release-date cutoff" in (out / "selection_report.md").read_text()
+
+
+def test_an_empty_candidate_set_reports_why(tmp_path):
+    candidates = tmp_path / "candidates.json"
+    candidates.write_text(json.dumps(dict(
+        entries=3, selected=0,
+        rejection_counts={"raw_structure_missing": 3, "in_study_universe": 1},
+        candidates=[dict(pdb_id="9zzz", selected=False, reasons=["raw_structure_missing"])])))
+    argv = ["--candidates", str(candidates), "--structures-dir", str(tmp_path), "--out-dir", str(tmp_path / "g")]
+    with pytest.raises(SystemExit, match=r"none of the 3 candidate\(s\) passed.*raw_structure_missing=3"):
+        ext.main(argv)
+
+    # Everything passed, but no group representative was requested to be built.
+    candidates.write_text(json.dumps(dict(
+        entries=1, selected=1, rejection_counts={},
+        candidates=[dict(pdb_id="9zzz", selected=True, representative=False)])))
+    with pytest.raises(SystemExit, match="none is its group's representative"):
+        ext.main(argv + ["--representatives-only"])

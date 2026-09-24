@@ -268,10 +268,21 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     from nanoqc.data.audit_external_vhh_independence import source_structure_for_pdb
     payload = json.loads(args.candidates.read_text(encoding="utf-8"))
-    selected = [row for row in payload["candidates"] if row.get("selected")
-                and (row.get("representative", True) or not args.representatives_only)]
+    passing = [row for row in payload["candidates"] if row.get("selected")]
+    selected = [row for row in passing if row.get("representative", True) or not args.representatives_only]
     if not selected:
-        raise ValueError("No selected candidates in the candidate file")
+        # Say which gate emptied the set: the candidate file records every reason.
+        counts = payload.get("rejection_counts") or {}
+        top = ", ".join(f"{reason}={count}" for reason, count
+                        in sorted(counts.items(), key=lambda item: -item[1])[:6]) or "none recorded"
+        detail = (f"{len(passing)} candidate(s) passed every gate but none is its group's representative"
+                  if passing else
+                  f"none of the {payload.get('entries', len(payload['candidates']))} candidate(s) passed every gate")
+        raise SystemExit(
+            f"{args.candidates}: {detail}. Most common rejection reasons: {top}. "
+            "See selection_report.md next to it. 'raw_structure_missing' means the structures were never "
+            "fetched (re-run the selection step with --download); 'in_study_universe' means the entries are "
+            "already part of this study's own data.")
     args.out_dir.mkdir(parents=True, exist_ok=True)
     stale = sorted(args.out_dir.glob("*.pt"))
     if stale:
