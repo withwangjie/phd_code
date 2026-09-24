@@ -434,3 +434,14 @@ def test_all_atom_consumers_rebuild_exactly_the_graph_complex(tmp_path):
         audit.materialize_graph_complex(
             path, SimpleNamespace(structure_source="biological_assembly:author_determined:1", chain_ids=["A"]),
             tmp_path / "bad.cif")
+
+
+def test_structure_stage_never_accepts_stale_outputs_after_current_subprocess_failure() -> None:
+    source=inspect.getsource(full.Orchestrator.stage_structure_experiment)
+    validation_guard=source.index("if returncode != 0:")
+    validation_summary=source.index('summary_path = out_dir / "run_summary.json"', validation_guard)
+    assert validation_guard < validation_summary
+    assert "refusing any pre-existing" in source
+    dev_guard=source.index("if returncode != 0:", source.index("structure_experiment_dev_"))
+    dev_summary=source.index('summary_path = out_dir / pdb / "run_summary.json"', source.index("structure_experiment_dev_"))
+    assert dev_guard < source.index('if summary_path.is_file():', dev_summary)
