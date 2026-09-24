@@ -34,6 +34,7 @@ formal run is required.
 | A9 | Foldseek clustering input: antigen chains only | queue_freeze (cluster map, split), all cluster-level statistics | not applicable (no pair table existed) |
 | A10 | External validation becomes an antigen-fold holdout | queue_freeze (split), egnn_train, energy_calibration, external_validation | not applicable (no external set or result existed) |
 | A11 | Symmetric Foldseek score; oversized components always train | queue_freeze (cluster map, split), egnn_train, external_validation | not applicable (data composition only; no split or result existed) |
+| A12 | Entry resolution from curation metadata; pipeline staging not audited | audit, dataset (admission) | not applicable (audit fields only; no graph or result existed) |
 
 ## A1. Primary coarse solver endpoint: resource-normalized time-to-solution
 
@@ -374,3 +375,26 @@ they were logged later.
   energy_calibration, external_validation.
 - **Results inspected before this amendment:** not applicable (cluster sizes
   are data composition; no split, graph set or outcome existed).
+
+## A12. Entry resolution from curation metadata; pipeline staging not audited
+
+- **Before:** the structure-quality gate (resolution <= 3.0 A, required)
+  read the resolution only from the structure file.
+- **Measured:** SNAC-DB's curated complex files carry no resolution record, so
+  all 3634 `snac_db` rows failed with `unknown_resolution` and the hard test
+  pool was empty; 993 of 2424 `sabdab_vhh` files also reported none. This is a
+  missing field, not a quality outcome.
+- **After:** when the file reports none, the audit takes the entry's
+  resolution from the SNAC curation summaries (`Resolution`) and, failing
+  that, from SAbDab summary tables (`resolution`) under the data root, keyed
+  by PDB ID; the value's origin is recorded as `resolution_source`
+  (`structure_file`, `snac_curation_summary`, `sabdab_summary`). An entry
+  with no resolution anywhere (e.g. NMR, "Resolution is Missing") still
+  fails. The threshold and every other quality gate are unchanged.
+- **Also:** `data/external_vhh/` (external-VHH staging: downloaded candidates
+  and the Foldseek antigen-only input structures) is no longer discovered as a
+  study subset; it had entered the audit as 2672 `extra_external_vhh` rows.
+- **Affected results:** audit, dataset admission (training pool, hard test
+  pool), everything downstream.
+- **Results inspected before this amendment:** not applicable (the dataset
+  stage had produced no graph).

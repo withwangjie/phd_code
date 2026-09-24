@@ -28,6 +28,10 @@ BASE = REPO_ROOT  # standalone-run defaults (data/, outputs) are relative to the
 ANNOTATIONS = {}
 PDB_ANNOTATIONS = collections.defaultdict(list)
 CHAIN_ANNOTATIONS = {}
+# Entry-level resolution by PDB ID from curation metadata (SNAC curation
+# summaries, SAbDab summary tables). SNAC's curated complex files carry no
+# REMARK 2, so the structure file alone reports no resolution for any of them.
+RESOLUTION_BY_PDB = {}
 BACKBONE = set(BACKBONE_ATOMS)
 SIDECHAIN_HEAVY = {name: set(atoms) for name, atoms in SIDECHAIN_HEAVY_ATOMS.items()}
 MAX_RESOLUTION_ANGSTROM = 3.0
@@ -43,15 +47,33 @@ def literal(s, default):
     except (ValueError, SyntaxError, TypeError):
         return default
 
+def parse_resolution(value):
+    """First positive finite number in a metadata field ('2.5', '2.5, 2.7'); None for 'Resolution is Missing', 'NOT'."""
+    match = re.search(r'\d+(?:\.\d+)?', str(value or ''))
+    if not match:
+        return None
+    resolution = float(match.group(0))
+    return resolution if math.isfinite(resolution) and resolution > 0 else None
+
+
+def _record_resolution(pdb, value, source):
+    resolution = parse_resolution(value)
+    pdb = str(pdb or '').strip().upper()
+    if resolution is not None and re.fullmatch(r'[0-9A-Z]{4}', pdb):
+        RESOLUTION_BY_PDB.setdefault(pdb, (resolution, source))
+
+
 def load_annotations(root):
     ANNOTATIONS.clear()
     PDB_ANNOTATIONS.clear()
     CHAIN_ANNOTATIONS.clear()
+    RESOLUTION_BY_PDB.clear()
     for path in sorted(root.rglob('*_curation_summary.csv')):
         if path.parent.name not in ('curated_structures', 'benchmark_dataset'):
             continue
         for row in csv.DictReader(path.open(encoding='utf-8-sig', newline='')):
             ANNOTATIONS[(str(path.parent), row['Name'])] = row
+            _record_resolution(row.get('PDB_ID'), row.get('Resolution'), 'snac_curation_summary')
             for field, old_id, typ in [('VH', 'Chain_VH_old_id', 'VHH' if path.name.startswith('nb_') else 'VH'), ('VL', 'Chain_VL_old_id', 'VL')]:
                 seq = row.get('Sequence_' + field, '')
                 if not seq or seq.lower() == 'nan':
@@ -63,6 +85,13 @@ def load_annotations(root):
                            cdr2=regions.get('cdr2', ''), chain=row.get(old_id, ''), source=row['Name'])
                 if rec not in PDB_ANNOTATIONS[row['PDB_ID'].upper()]:
                     PDB_ANNOTATIONS[row['PDB_ID'].upper()].append(rec)
+    for path in sorted(root.rglob('*sabdab*summary*.tsv')):
+        with path.open(encoding='utf-8-sig', newline='') as handle:
+            reader = csv.DictReader(handle, delimiter='\t')
+            if not reader.fieldnames or not {'pdb', 'resolution'} <= set(reader.fieldnames):
+                continue
+            for row in reader:
+                _record_resolution(row.get('pdb'), row.get('resolution'), 'sabdab_summary')
     for path in root.rglob('all_input_PDB_files_parsed_file_chains.csv'):
         with path.open(encoding='utf-8-sig', newline='') as handle:
             for row in csv.DictReader(handle):
@@ -84,6 +113,13 @@ def pdb_compat(raw, task):
 def structural(name):
     return name.lower().endswith(('.pdb', '.cif', '.cif.gz'))
 
+# Pipeline staging under the data root, never a study subset: the external-VHH
+# preparation writes thousands of antigen-only structures (Foldseek input) and
+# downloaded candidates there, which would otherwise enter the audit and the
+# clustering universe as 'extra_external_vhh'.
+PIPELINE_WORK_DIRS = frozenset({'external_vhh'})
+
+
 def discover(root):
     tasks, ignored = [], []
     mapping = {'rcsb_non_redundant_dataset': 'train_rcsb', 'sabdab_all_sd_h_structures': 'sabdab_vhh', 'sabdab_all_single_domain_structures': 'sabdab_vhh', 'benchmark5.5': 'test_db55'}
@@ -94,6 +130,8 @@ def discover(root):
             ignored.append(str(path.relative_to(root)))
             continue
         parts = path.relative_to(root).parts
+        if parts[0] in PIPELINE_WORK_DIRS:
+            continue
         subset = mapping.get(parts[0], parts[0] if parts[0] in ('train_rcsb', 'sabdab_vhh', 'snac_db', 'test_db55') else 'extra_' + parts[0])
         if parts[0] == 'SNAC-DataBase':
             subset = 'snac_db' if 'curated_structures' in parts and 'nb_complexes' in parts else 'extra_SNAC_loose'
@@ -406,7 +444,7 @@ def audit(task):
     out = dict(task, valid=False, error='', residues=0, missing_residues=0, missing_examples=[], chains=0,
         interface_status='not_applicable', max_contact_residues=None, weak_pairs=0, pairs=[],
         models_first_only=False, vhh_status='not_applicable', cdr3_lengths=[],
-        resolution_angstrom=None, structure_quality_status='not_evaluated',
+        resolution_angstrom=None, resolution_source=None, structure_quality_status='not_evaluated',
         structure_quality_reasons=[], interface_missing_sidechain_residues=0,
         interface_altloc_residues=0, interface_min_occupancy=None,
         interface_mean_bfactor=None)
@@ -421,13 +459,14 @@ def audit(task):
         pdbid = re.search(r'pdb_0000([a-zA-Z0-9]{4})', name)
         pdbid = pdbid.group(1).upper() if pdbid else name[:4].upper()
         resolution=float(getattr(st,'resolution',0.0) or 0.0)
+        resolution_source='structure_file'
         if not math.isfinite(resolution) or resolution<=0:
-            resolution=None
+            resolution,resolution_source=RESOLUTION_BY_PDB.get(pdbid,(None,None))
         out.update(valid=True, pdb_id=pdbid, chains=len(chains), residues=total,
             missing_residues=missing, missing_examples=details[:20],
             models_first_only=multi or len(st)>1,
             legacy_pdb_tail=task.get('_legacy_pdb_tail',False),
-            resolution_angstrom=resolution)
+            resolution_angstrom=resolution, resolution_source=resolution_source)
         allowed = None
         if task['subset'] in ('sabdab_vhh', 'snac_db') or task['subset'].startswith('extra_snac_'):
             features, allowed = nano_features(task, chains, pdbid)
@@ -593,7 +632,7 @@ def main():
             rows.append(r);handle.write(json.dumps(r,ensure_ascii=False)+'\n')
             if len(rows)%250==0:handle.flush();print(f'{len(rows)}/{len(tasks)} audited, {time.time()-start:.0f}s',flush=True)
     pairs=db55_pairs(tasks)
-    fields=['subset','id','pdb_id','valid','error','chains','residues','missing_residues','interface_status','max_contact_residues','weak_pairs','vhh_status','vhh_reason','cdr3_lengths','models_first_only','legacy_pdb_tail','resolution_angstrom','structure_quality_status','structure_quality_reasons','interface_missing_sidechain_residues','interface_altloc_residues','interface_min_occupancy','interface_mean_bfactor']
+    fields=['subset','id','pdb_id','valid','error','chains','residues','missing_residues','interface_status','max_contact_residues','weak_pairs','vhh_status','vhh_reason','cdr3_lengths','models_first_only','legacy_pdb_tail','resolution_angstrom','resolution_source','structure_quality_status','structure_quality_reasons','interface_missing_sidechain_residues','interface_altloc_residues','interface_min_occupancy','interface_mean_bfactor']
     with (args.out/'data_audit_details.csv').open('w',encoding='utf-8-sig',newline='') as handle:
         writer=csv.DictWriter(handle,fieldnames=fields,extrasaction='ignore');writer.writeheader();writer.writerows(rows)
     (args.out/'data_audit_db55_pairs.json').write_text(json.dumps(pairs,ensure_ascii=False,indent=2),encoding='utf-8')
