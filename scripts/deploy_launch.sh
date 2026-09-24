@@ -37,14 +37,26 @@ fail() { echo "[deploy_launch] ERROR: $*" >&2; exit 1; }
 # ---------------------------------------------------------------------------
 SHARED_VENV="${QP_VENV:-/data/quantum-protein/.venv}"
 if [ "${1:-}" = "--venv" ]; then
+    [ "$#" -ge 2 ] || fail "--venv requires a path"
     SHARED_VENV="$2"
     shift 2
 fi
 
-if [ -e "${REPO_ROOT}/.venv" ]; then
-    log "Environment link already present: ${REPO_ROOT}/.venv -> $(readlink -f "${REPO_ROOT}/.venv" 2>/dev/null || echo '?')"
-elif [ -f "${SHARED_VENV}/bin/activate" ] || [ -f "${SHARED_VENV}/Scripts/activate" ]; then
-    ln -s "$SHARED_VENV" "${REPO_ROOT}/.venv"
+venv_usable() {
+    [ -f "$1/bin/activate" ] || [ -f "$1/Scripts/activate" ]
+}
+
+if [ -L "${REPO_ROOT}/.venv" ] && ! venv_usable "${REPO_ROOT}/.venv"; then
+    log "Removing stale/broken environment symlink: ${REPO_ROOT}/.venv"
+    rm -f "${REPO_ROOT}/.venv"
+fi
+
+if venv_usable "${REPO_ROOT}/.venv"; then
+    log "Environment available: ${REPO_ROOT}/.venv -> $(readlink -f "${REPO_ROOT}/.venv" 2>/dev/null || printf '%s' "${REPO_ROOT}/.venv")"
+elif [ -e "${REPO_ROOT}/.venv" ]; then
+    fail "${REPO_ROOT}/.venv exists but is not a usable virtual environment; move/remove it or set QP_VENV."
+elif venv_usable "${SHARED_VENV}"; then
+    ln -s "${SHARED_VENV}" "${REPO_ROOT}/.venv"
     log "Linked this deployment to the existing shared environment: ${SHARED_VENV}"
 else
     fail "No virtual environment found at ${SHARED_VENV}. Set QP_VENV, use --venv /path/to/existing/.venv, or create/restore that environment first."
