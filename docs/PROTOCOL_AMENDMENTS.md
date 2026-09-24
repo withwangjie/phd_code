@@ -192,6 +192,15 @@ they were logged later.
     interface is chosen; this depends only on structure. Other antibody chains
     are never antigen, and entries with a VH/VL chain are excluded (as in the
     training audit).
+  - **Antigen eligibility:** an entry qualifies when at least one antigen
+    chain is of SAbDab type protein or peptide. `antigen_type` is the
+    deduplicated set of types over the antigen chains, so `protein | sugar`,
+    `ion | protein` and the like denote a polypeptide antigen accompanied by
+    another entity and are kept; `ion`, `hapten | ion` and `carbohydrate`
+    have no polypeptide antigen and are rejected. Ions, glycans and ligands
+    are never encoded in a graph, and SNAC-DB [R34] curates the protein
+    complex the same way, so requiring their absence would make the external
+    set stricter than the training set it validates.
   - **Graphs:** the graph-v1.8 definition (biological assembly, 7.5 A antigen
     rule [R33], 5 A labels) and the audit's quality gates.
   - **CDR-H3:** IMGT 105-117, like the training SNAC annotation. ANARCI is

@@ -70,5 +70,5 @@ def test_converted_file_feeds_the_selector_unchanged(tmp_path):
     assert entry["reasons"] == [] and entry["vhh_chains"] == ["A", "C"]
     assert entry["release_date"] == "2026-02-12" and entry["resolution"] == 1.65
     mixed = sel.metadata_gate("7xyz", grouped["7xyz"], released_after=cutoff, excluded=set(), max_resolution=3.0)
-    # protein+sugar is currently rejected; the resolution gate is unchanged.
-    assert "non_protein_antigen" in mixed["reasons"] and "resolution_above_limit" in mixed["reasons"]
+    # "protein | sugar" still has a polypeptide antigen chain; only resolution rejects it.
+    assert mixed["reasons"] == ["resolution_above_limit"]

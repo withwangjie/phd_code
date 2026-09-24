@@ -13,7 +13,7 @@ audit.
 1. Metadata (same rules as the training ``sabdab_vhh`` subset):
    - released after ``--released-after``, and absent from ``--exclude-pdbs``
      (the study's audited PDB universe);
-   - protein or peptide antigen, no scFv;
+   - at least one protein or peptide antigen chain, no scFv;
    - at least one VHH chain and no VH/VL antibody chain in the entry;
    - numeric resolution <= the audit limit.
 2. Structure: builds the biological assembly, annotates the CDRs, keeps the
@@ -102,9 +102,17 @@ def metadata_gate(pdb: str, rows: list[dict], *, released_after: dt.date, exclud
     antigen_rows = [r for r in rows if _present(r.get("antigen_chain"))]
     if not antigen_rows:
         reasons.append("no_antigen")
+    # SAbDab's antigen_type is the DEDUPLICATED SET of types over the antigen
+    # chains, not one token per chain (e.g. five chains -> "ION|HAPTEN|PROTEIN").
+    # The rule is therefore "at least one polypeptide antigen chain", as in
+    # recent SAbDab-derived benchmarks, not "nothing but polypeptide": the
+    # graph encodes only amino-acid residues, so ions, glycans and ligands are
+    # ignored anyway, and SNAC-DB [R34] likewise curates the protein complex.
+    # Requiring their absence would make the external set stricter than the
+    # training set it validates.
     types = {t.strip().lower() for r in antigen_rows for t in str(r.get("antigen_type", "")).split("|")}
-    if antigen_rows and not types <= {"protein", "peptide"}:
-        reasons.append("non_protein_antigen")
+    if antigen_rows and not types & {"protein", "peptide"}:
+        reasons.append("no_polypeptide_antigen")
     try:
         released = min(parse_date(r["date"]) for r in rows)
         if released <= released_after:

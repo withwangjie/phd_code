@@ -133,7 +133,18 @@ def test_metadata_gate_mirrors_training_vhh_rules():
     assert "contains_vh_vl_antibody" in fab["reasons"]
     old = sel.metadata_gate("9abc", [_sabdab(date="2025-06-01", resolution="NA", antigen_type="carbohydrate")],
                             released_after=cutoff, excluded={"9abc"}, max_resolution=3.0)
-    assert {"released_before_cutoff", "unknown_resolution", "non_protein_antigen", "in_study_universe"} <= set(old["reasons"])
+    assert {"released_before_cutoff", "unknown_resolution", "no_polypeptide_antigen",
+            "in_study_universe"} <= set(old["reasons"])
+    # SAbDab lists the deduplicated SET of antigen-chain types: a glycoprotein or
+    # metalloprotein antigen still has a polypeptide chain and is kept.
+    for combination in ("protein | sugar", "ion | protein", "hapten | protein", "peptide | ion"):
+        kept = sel.metadata_gate("9abc", [_sabdab(antigen_type=combination)], released_after=cutoff,
+                                 excluded=set(), max_resolution=3.0)
+        assert kept["reasons"] == [], combination
+    for combination in ("ion", "hapten | ion", "carbohydrate", "NA | hapten"):
+        dropped = sel.metadata_gate("9abc", [_sabdab(antigen_type=combination)], released_after=cutoff,
+                                    excluded=set(), max_resolution=3.0)
+        assert dropped["reasons"] == ["no_polypeptide_antigen"], combination
 
 
 def test_independent_groups_use_the_layered_rule_and_structure_clusters():
