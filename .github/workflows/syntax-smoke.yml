@@ -1,0 +1,24 @@
+name: syntax-smoke
+
+on:
+  push:
+    branches:
+      - claude/blissful-heisenberg-3n2jf3
+  workflow_dispatch:
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Shell syntax
+        run: |
+          bash -n scripts/run_full_experiment.sh
+          bash -n scripts/formal_preflight.sh
+          bash -n scripts/deploy_launch.sh
+          bash -n scripts/prepare_external_vhh.sh
+      - name: Python syntax
+        run: python -m compileall -q src/nanoqc tests
