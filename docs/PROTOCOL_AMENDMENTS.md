@@ -31,6 +31,7 @@ formal run is required.
 | A6 | Development-only EGNN training-seed sensitivity | egnn_train (descriptive) | not applicable |
 | A7 | Quantum-intrinsic primary endpoint; `quantum_exploration` stage | qc_benchmark, statistics, quantum_exploration, final_report | to be completed |
 | A8 | Construction rules for the external VHH set | external_validation (input set) | not applicable (no external set existed) |
+| A9 | Foldseek clustering input: antigen chains only | queue_freeze (cluster map, split), all cluster-level statistics | not applicable (no pair table existed) |
 
 ## A1. Primary coarse solver endpoint: resource-normalized time-to-solution
 
@@ -208,4 +209,36 @@ they were logged later.
   complexes.
 - **Affected results:** external_validation.
 - **Results inspected before this amendment:** not applicable (no external set or result existed).
+
+## A9. Foldseek clustering input: antigen chains only
+
+- **Before:** the protocol required a frozen Foldseek pair table
+  (`qtmscore`, TM-score >= 0.50, single linkage), but did not say which
+  chains are searched. No pair table had been built.
+- **After:** `build_foldseek_pairs.py` searches only non-antibody protein
+  chains of at least 20 residues from every PDB in the clustering universe,
+  all-versus-all and exhaustively.
+  - **Antibody chains** are recognised from SNAC/SAbDab annotation (the
+    audit's sequence-match rule), SAbDab chain IDs for external entries, or
+    an Ig V-domain detector: ANARCI when installed, otherwise the conserved
+    C23/W41/C104 anchors plus the J-region [WF]GxG motif. The method is
+    recorded for every chain.
+  - **DB5.5** uses bound files only.
+  - **A PDB with no antigen chain** gets an explicit self row and is listed
+    as `self_only`.
+  - **A searched PDB with no Foldseek hit** stops the build unless the
+    investigator explicitly allows it.
+- **Why:** structure clusters are meant to separate antigen families. VHH,
+  VH/VL and TCR variable domains all share the immunoglobulin fold with
+  TM-score well above 0.5, so including them would put almost every complex
+  into one component. Leakage on the antibody side is controlled separately
+  by the VHH full-chain (0.80) and CDR-H3 (0.50) identity thresholds [R23,R24].
+- **Limitations:**
+  - The motif detector can miss unusual V domains, which would then be kept
+    as antigen. This is conservative: extra edges, fewer clusters.
+  - Peptide antigens have no structure family; they remain covered by the
+    antigen sequence threshold.
+- **Affected results:** cluster map, train/test isolation, cluster adequacy,
+  every cluster-level test.
+- **Results inspected before this amendment:** not applicable (no pair table or result existed).
 

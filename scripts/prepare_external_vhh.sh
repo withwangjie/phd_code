@@ -6,7 +6,7 @@
 #   ./scripts/prepare_external_vhh.sh audit
 #   ./scripts/prepare_external_vhh.sh pass1 --sabdab-summary sabdab_nano_summary_all.tsv \
 #         --released-after YYYY-MM-DD --download
-#   (Foldseek over data/external_vhh/prep/foldseek_universe.txt -> the configured pair_tsv)
+#   ./scripts/prepare_external_vhh.sh foldseek [--foldseek /path/to/foldseek] [--threads N]
 #   ./scripts/deploy_launch.sh --stop-after queue_freeze
 #   ./scripts/prepare_external_vhh.sh pass2 --sabdab-summary sabdab_nano_summary_all.tsv \
 #         --released-after YYYY-MM-DD --run-dir <that run directory>

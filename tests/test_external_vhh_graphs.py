@@ -265,3 +265,98 @@ def test_two_pass_preparation_keeps_the_universe_and_pair_table_fixed(tmp_path, 
     pairs.write_text(pairs.read_text() + "1abc\t9zzz\t0.1\n")  # the table must not change between passes
     with pytest.raises(SystemExit, match="pair table differs"):
         prep.main(common + ["pass2", *select, "--run-dir", str(run)])
+
+
+FAKE_FOLDSEEK = r'''#!{python}
+import sys, pathlib, gemmi
+if sys.argv[1] == "version":
+    print("fake-foldseek 1"); sys.exit(0)
+assert sys.argv[1] == "easy-search"
+inputs, out = pathlib.Path(sys.argv[2]), pathlib.Path(sys.argv[4])
+entries = [(f.name, c.name) for f in sorted(inputs.iterdir()) for c in gemmi.read_structure(str(f))[0]]
+with out.open("w") as handle:
+    for qf, qc in entries:
+        for tf, tc in entries:
+            handle.write(f"{qf}_{qc}\t{tf}_{tc}\t{1.0 if qf == tf else 0.2}\n")
+'''
+
+
+def test_foldseek_pairs_use_antigen_chains_only(tmp_path, monkeypatch):
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path as P
+    from nanoqc.data import build_foldseek_pairs as fp
+
+    monkeypatch.setitem(sys.modules, "anarci", None)
+    raw = tmp_path / "raw"
+    raw.mkdir()
+
+    def write(name, chains):
+        lines, serial = [], 0
+        for chain, sequence, z in chains:
+            more, serial = _atoms(chain, sequence, 0.0, z, serial)
+            lines += more + ["TER"]
+        (raw / name).write_text("\n".join(lines + ["END"]) + "\n")
+        return str(raw / name)
+
+    antigen = "MKTAYIAKQRQISFVKSHFSRQ"
+    rows = [dict(pdb_id="1ABC", path=write("1abc.pdb", [("H", VHH_TAIL, 0.0), ("A", antigen, 6.0)]), subset="train_rcsb"),
+            dict(pdb_id="2DEF", path=write("2def.pdb", [("H", VHH_TAIL, 0.0)]), subset="sabdab_vhh"),
+            dict(pdb_id="3GHI", path=write("3ghi_r_b.pdb", [("R", antigen, 0.0)]), subset="test_db55"),
+            dict(pdb_id="3GHI", path=write("3ghi_r_u.pdb", [("U", "G" * 30, 0.0)]), subset="test_db55")]
+    audit_dir = tmp_path / "audit"
+    audit_dir.mkdir()
+    (audit_dir / "data_audit_details.jsonl").write_text(
+        "".join(json.dumps(dict(r, member="", id=P(r["path"]).name)) + "\n" for r in rows))
+    structures = tmp_path / "structures"
+    structures.mkdir()
+    (structures / "9zzz.pdb").write_text(_complex_pdb(104.5, 100.0))
+    candidates = tmp_path / "candidates.json"
+    candidates.write_text(json.dumps(dict(candidates=[dict(pdb_id="9zzz", selected=True, vhh_chain="H",
+                                                            vhh_chains=["H"])])))
+    universe = tmp_path / "universe.txt"
+    universe.write_text("1abc\n2def\n3ghi\n9zzz\n")
+    fake = tmp_path / "foldseek"
+    fake.write_text(FAKE_FOLDSEEK.replace("{python}", sys.executable))
+    fake.chmod(0o755)
+    out = tmp_path / "pairs.tsv"
+    argv = ["--universe", str(universe), "--audit-dir", str(audit_dir), "--data-root", str(tmp_path / "none"),
+            "--external-candidates", str(candidates), "--external-structures", str(structures),
+            "--out", str(out), "--work-dir", str(tmp_path / "work"), "--foldseek", str(fake)]
+    assert fp.main(argv) == 0
+
+    lines = out.read_text().splitlines()
+    assert lines[0] == "query\ttarget\tqtmscore"
+    pairs = {tuple(line.split("\t")[:2]): float(line.split("\t")[2]) for line in lines[1:]}
+    assert pairs[("2def", "2def")] == 1.0 and not any("2def" in p and p != ("2def", "2def") for p in pairs)
+    assert pairs[("1abc", "3ghi")] == 0.2
+    manifest = json.loads(out.with_suffix(".manifest.json").read_text())
+    assert manifest["self_only"] == ["2def", "9zzz"] and manifest["foldseek_version"] == "fake-foldseek 1"
+    roles = {(pdb, c["chain"]): (c["role"], c["method"]) for pdb, r in manifest["per_pdb"].items() for c in r["chains"]}
+    assert roles[("1abc", "H")] == ("antibody", "v_domain_motif")
+    assert roles[("1abc", "A")] == ("antigen", "v_domain_motif")
+    assert roles[("9zzz", "H")] == ("antibody", "sabdab_chain_id")
+    assert roles[("9zzz", "A")] == ("skipped", "shorter_than_20")
+    assert ("3ghi", "U") not in roles  # DB5.5: bound files only
+
+    env = dict(os.environ, PYTHONPATH=str(P(__file__).resolve().parents[1] / "src"))
+    cluster = tmp_path / "clusters.json"
+    subprocess.run([sys.executable, "-m", "nanoqc.data.build_independence_cluster_map", "--pairs", str(out),
+                    "--out-json", str(cluster), "--min-score", "0.5", "--score-semantics", "qtmscore",
+                    "--universe", str(universe)], check=True, env=env)
+    clusters = json.loads(cluster.read_text())
+    assert len(set(clusters.values())) == 4  # 0.2 < 0.5: no edges between different PDBs
+    assert manifest["per_pdb"]["9zzz"]["self_only_reason"] == "no_antigen_chain_for_structure_search"
+
+    with pytest.raises(SystemExit, match="frozen"):
+        fp.main(argv)
+
+
+def test_v_domain_motif_separates_antibodies_from_ig_superfamily_antigens():
+    from nanoqc.data.build_foldseek_pairs import ig_variable_domain_by_motif as detect
+    vl = ("DIQMTQSPSSLSASVGDRVTITCRASQDVNTAVAWYQQKPGKAPKLLIYSASFLYSGVPSRFSGSRSGTDFTLTISSLQPEDFATYYCQQHYT"
+          "TPPTFGQGTKVEIK")
+    pd1 = ("PGWFLDSPDRPWNPPTFSPALLVVTEGDNATFTCSFSNTSESFVLNWYRMSPSNQTDKLAAFPEDRSQPGQDCRFRVTQLPNGRDFHMSVVRA"
+           "RRNDSGTYLCGAISLAPKAQIKESLRAELRVTERRAE")
+    assert detect(VHH_TAIL) and detect(vl) and not detect(pd1)

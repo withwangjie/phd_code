@@ -11,8 +11,10 @@ neither pass reads any experimental outcome:
           study PDB IDs (excluded from the external set and part of the
           Foldseek universe).
   pass1   Candidate selection without training data, then graph building.
-          Writes foldseek_universe.txt (study + external IDs). The Foldseek
-          pair table must cover this universe.
+          Writes foldseek_universe.txt (study + external IDs).
+  foldseek  Antigen-chain-only all-versus-all Foldseek over that universe,
+          written as the configured pair table with its header
+          (build_foldseek_pairs.py).
   (run)   ``deploy_launch.sh --stop-after queue_freeze`` builds the training
           set and cluster map; no model is trained and no outcome exists.
   pass2   Re-selects against that run's training set and cluster map,
@@ -158,8 +160,23 @@ def cmd_pass1(args, config, s) -> int:
     print(f"[prepare_external_vhh] pass 1: {len(external)} external graphs, "
           f"{selection['independent_groups']} independent groups (required {s['min_clusters']}).")
     print(f"Next: Foldseek over the {len(universe)} PDB IDs in {s['prep'] / 'foldseek_universe.txt'} "
-          f"-> {s['pair_tsv']}, then ./scripts/deploy_launch.sh --stop-after queue_freeze, "
-          "then this script's pass2 with that run directory.")
+          f"-> {s['pair_tsv']} (this script's 'foldseek' step), then "
+          "./scripts/deploy_launch.sh --stop-after queue_freeze, then pass2 with that run directory.")
+    return 0
+
+
+def cmd_foldseek(args, config, s) -> int:
+    universe = s["prep"] / "foldseek_universe.txt"
+    if not universe.is_file():
+        raise SystemExit("Run pass1 first (foldseek_universe.txt missing)")
+    data_root = args.data_root or repo_path(os.environ.get("QP_DATA_ROOT") or config["paths"]["data_root"])
+    argv = ["--universe", str(universe), "--audit-dir", str(s["prep"] / "audit"), "--data-root", str(data_root),
+            "--external-candidates", str(s["prep"] / "selection_pass1" / "candidates.json"),
+            "--external-structures", str(s["source_dir"]), "--out", str(s["pair_tsv"]),
+            "--work-dir", str(s["prep"] / "foldseek"), "--foldseek", args.foldseek, "--threads", str(args.threads)]
+    argv += ["--allow-missing-hits"] * bool(args.allow_missing_hits) + ["--force"] * bool(args.force)
+    run_module("nanoqc.data.build_foldseek_pairs", argv)
+    print(f"Next: ./scripts/deploy_launch.sh --stop-after queue_freeze (pair table {s['pair_tsv']}).")
     return 0
 
 
@@ -211,6 +228,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     audit = sub.add_parser("audit", help="Standalone data audit -> study_pdb_ids.txt")
     audit.add_argument("--data-root", type=Path, default=None)
+    fold = sub.add_parser("foldseek", help="Antigen-chain Foldseek pair table over foldseek_universe.txt")
+    fold.add_argument("--foldseek", default="foldseek")
+    fold.add_argument("--threads", type=int, default=8)
+    fold.add_argument("--data-root", type=Path, default=None)
+    fold.add_argument("--allow-missing-hits", action="store_true")
+    fold.add_argument("--force", action="store_true")
     for name in ("pass1", "pass2"):
         p = sub.add_parser(name)
         p.add_argument("--sabdab-summary", type=Path, nargs="+", required=True)
@@ -222,12 +245,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         else:
             p.add_argument("--run-dir", type=Path, required=True, help="The --stop-after queue_freeze run")
     args = parser.parse_args(argv)
-    if args.command != "audit":
+    if args.command in ("pass1", "pass2"):
         dt.date.fromisoformat(args.released_after)
     config = load_config(args.config)
     s = settings(config, args.prep_dir)
     s["prep"].mkdir(parents=True, exist_ok=True)
-    return dict(audit=cmd_audit, pass1=cmd_pass1, pass2=cmd_pass2)[args.command](args, config, s)
+    return dict(audit=cmd_audit, pass1=cmd_pass1, foldseek=cmd_foldseek,
+                pass2=cmd_pass2)[args.command](args, config, s)
 
 
 if __name__ == "__main__":
