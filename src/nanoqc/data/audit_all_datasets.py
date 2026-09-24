@@ -110,16 +110,18 @@ def load_annotations(root):
                            cdr2=regions.get('cdr2', ''), chain=row.get(old_id, ''), source=row['Name'])
                 if rec not in PDB_ANNOTATIONS[row['PDB_ID'].upper()]:
                     PDB_ANNOTATIONS[row['PDB_ID'].upper()].append(rec)
-    for path in sorted(root.rglob('*sabdab*summary*.tsv')):
-        if _staging(root, path):
-            continue
-        with path.open(encoding='utf-8-sig', newline='') as handle:
-            reader = csv.DictReader(handle, delimiter='\t')
-            if not reader.fieldnames or not {'pdb', 'resolution'} <= set(reader.fieldnames):
+    for pattern, kind in (('*sabdab*summary*.tsv', 'sabdab_summary'),
+                          ('*entry_resolution.tsv', 'rcsb_entry_resolution')):
+        for path in sorted(root.rglob(pattern)):
+            if _staging(root, path):
                 continue
-            _record_source_file(root, path, 'sabdab_summary')
-            for row in reader:
-                _record_resolution(row.get('pdb'), row.get('resolution'), 'sabdab_summary')
+            with path.open(encoding='utf-8-sig', newline='') as handle:
+                reader = csv.DictReader(handle, delimiter='\t')
+                if not reader.fieldnames or not {'pdb', 'resolution'} <= set(reader.fieldnames):
+                    continue
+                _record_source_file(root, path, kind)
+                for row in reader:
+                    _record_resolution(row.get('pdb'), row.get('resolution'), kind)
     for path in root.rglob('all_input_PDB_files_parsed_file_chains.csv'):
         with path.open(encoding='utf-8-sig', newline='') as handle:
             for row in csv.DictReader(handle):

@@ -121,3 +121,26 @@ def test_an_asymmetric_unit_without_assembly_annotation_still_fails_closed(tmp_p
     task = dict(path=str(path), member="", subset="train_rcsb", id=path.name)
     with pytest.raises(ValueError, match="no biological assembly annotation"):
         read_structure(task)
+
+
+def test_an_rcsb_entry_resolution_table_feeds_the_gate(tmp_path):
+    """A15: files with no resolution record get it from a declared table."""
+    (tmp_path / "rcsb_non_redundant_dataset").mkdir()
+    (tmp_path / "rcsb_non_redundant_dataset" / "rcsb_entry_resolution.tsv").write_text(
+        "pdb\tresolution\tmethod\n10BT\t2.1\tX-RAY DIFFRACTION\n10CY\t\tSOLUTION NMR\n")
+    audit.load_annotations(tmp_path)
+    try:
+        assert audit.RESOLUTION_BY_PDB["10BT"] == (2.1, "rcsb_entry_resolution")
+        assert "10CY" not in audit.RESOLUTION_BY_PDB  # NMR: no resolution, still excluded
+        assert [f["kind"] for f in audit.RESOLUTION_SOURCE_FILES] == ["rcsb_entry_resolution"]
+    finally:
+        audit.load_annotations(tmp_path / "none")
+
+
+def test_the_fetcher_reads_ids_and_the_worst_resolution():
+    from nanoqc.data import fetch_entry_resolution as fetch
+
+    assert fetch.entry_ids(["10bt", "10bt_assembly1.cif", " 6VXX ", "junk"]) == ["10BT", "6VXX"]
+    assert fetch.resolution_of({"rcsb_entry_info": {"resolution_combined": [2.1, 2.4]}}) == 2.4
+    assert fetch.resolution_of({"rcsb_entry_info": {"resolution_combined": []}}) is None
+    assert fetch.resolution_of({}) is None
