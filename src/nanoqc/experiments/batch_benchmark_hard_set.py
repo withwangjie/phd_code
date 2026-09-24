@@ -2289,7 +2289,8 @@ def _allatom_experiment_main(argv: Optional[Sequence[str]] = None) -> int:
                     writer=csv.DictWriter(handle,fieldnames=list(row),extrasaction="ignore");writer.writeheader()
                 writer.writerow(row);handle.flush();os.fsync(handle.fileno());records.append(row)
         lines=["# All-atom fixed-backbone experiment", "", "Protocol: "+case["protocol"],
-            "Amber14 vacuum potential; not binding free energy. Input-conditioned distal chi, uniform chi1 grid; not a full rotamer library.",
+            f"Amber14 potential ({qubo.metadata.get('solvent')}); not binding free energy. "
+            f"Candidate states: {qubo.metadata.get('model')}; pair decomposition: {qubo.metadata.get('pair_decomposition')}.",
             "Same output count and same relaxation conditions; not equal total computational cost. The native reference never enters candidate selection or energy ranking.",
             "Only the lowest discrete-energy sampled state per method is relaxed; no reference-based selection. Iteration cap does not guarantee convergence.",
             "Sampling uses classical exact-subspace simulation. These results do not establish quantum advantage.",

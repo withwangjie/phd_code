@@ -126,6 +126,47 @@ def test_every_homology_consumer_uses_partner_orientations():
     assert "partner_roles_anchored" in inspect.getsource(pilot.main)
 
 
+
+def _write_split_graph(path: Path, vhh: str, antigen: str, cdr3: str, family: str, source: str) -> Path:
+    import torch
+    from torch_geometric.data import Data
+    graph = Data(x=torch.zeros(1, 3))
+    graph.vhh_sequences = [vhh]
+    graph.antigen_sequences = [antigen]
+    graph.cdr3_seq = cdr3
+    graph.family_structure_cluster = family
+    graph.subset_source = source
+    torch.save(graph, path)
+    return path
+
+
+def test_split_paths_runs_end_to_end_and_keeps_swapped_roles_together(tmp_path):
+    import random
+    rng = random.Random(7)
+    residues = "ACDEFGHIKLMNPQRSTVWY"
+
+    def sequence(length: int) -> str:
+        return "".join(rng.choice(residues) for _ in range(length))
+
+    paths = []
+    for index in range(12):
+        paths.append(_write_split_graph(
+            tmp_path / f"g{index:02d}.pt", sequence(120), sequence(200), sequence(12),
+            f"fam{index}", "sabdab_vhh"))
+    # An unanchored complex whose partners are stored swapped relative to g00.
+    import torch
+    first = torch.load(paths[0], weights_only=False)
+    swapped = _write_split_graph(
+        tmp_path / "swapped.pt", first.antigen_sequences[0], first.vhh_sequences[0],
+        "", "fam_swapped", "train_rcsb")
+    paths.append(swapped)
+
+    train_paths, validation_paths = train.split_paths(paths, 0)
+    assert train_paths and validation_paths
+    assert set(train_paths) | set(validation_paths) == set(paths)
+    assert not set(train_paths) & set(validation_paths)
+    assert (paths[0] in train_paths) == (swapped in train_paths)
+
 # ------------------------------------------------ GBN2 / calibration / external
 def test_gbn2_is_a_recorded_pairwise_approximation_and_vacuum_stays_exact():
     build = inspect.getsource(qubo.AllAtomInterfaceQUBOBuilder.build)

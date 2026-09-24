@@ -323,28 +323,30 @@ def split_paths(paths: Sequence[Path], seed: int) -> Tuple[List[Path], List[Path
     max_antigen_cross = 0.0
     train_families=set()
     validation_families=set()
-    for path,_,_,_,family in records:
+    for path, _vhh, _antigen, _cdr, family, _anchored in records:
         if path in train_set:
             train_families.add(family)
         if path in validation_set:
             validation_families.add(family)
     family_overlap=sorted(train_families & validation_families)
-    for train_path, train_vhh, train_antigen, train_cdr, _train_family in records:
+    for train_path, train_vhh, train_antigen, train_cdr, _train_family, train_anchored in records:
         if train_path not in train_set:
             continue
-        for val_path, val_vhh, val_antigen, val_cdr, _val_family in records:
+        for val_path, val_vhh, val_antigen, val_cdr, _val_family, val_anchored in records:
             if val_path not in validation_set:
                 continue
-            max_vhh_cross = max(max_vhh_cross, _side_identity(train_vhh, val_vhh))
+            # Same partner orientations as the component union above, so the
+            # post-hoc audit checks exactly the criterion used to build the split.
+            for lv, rv, la, ra in partner_orientations(
+                    train_vhh, train_antigen, train_anchored,
+                    val_vhh, val_antigen, val_anchored):
+                max_vhh_cross = max(max_vhh_cross, _side_identity(lv, rv))
+                max_antigen_cross = max(
+                    max_antigen_cross,
+                    _side_identity(la, ra, min_length_coverage=ANTIGEN_MIN_LENGTH_COVERAGE),
+                )
             if train_cdr and val_cdr:
                 max_cdr_cross = max(max_cdr_cross, _sequence_identity(train_cdr, val_cdr))
-            max_antigen_cross = max(
-                max_antigen_cross,
-                _side_identity(
-                    train_antigen, val_antigen,
-                    min_length_coverage=ANTIGEN_MIN_LENGTH_COVERAGE,
-                ),
-            )
     if (max_vhh_cross >= VHH_IDENTITY_THRESHOLD
             or max_cdr_cross >= CDR_H3_IDENTITY_THRESHOLD
             or max_antigen_cross >= ANTIGEN_IDENTITY_THRESHOLD

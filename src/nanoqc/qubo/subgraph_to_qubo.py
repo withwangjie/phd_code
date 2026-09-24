@@ -2362,7 +2362,9 @@ class AllAtomInterfaceQUBOBuilder:
             raise FloatingPointError(f"All-atom coefficient dynamic range exceeds 0.001 kcal/mol precision budget: {roundoff_bound}")
         ising_error=validate_qubo_ising_equivalence(q,offset,h,j,ising_offset,tolerance=roundoff_bound)
         return QUBOResult(q,records,self.site_to_variables,penalty,penalty,offset,singles,pairs,
-            dict(model="Amber14 all-atom fixed-backbone chi1 grid",energy_unit="kcal/mol",
+            dict(model=("Amber14 all-atom fixed-backbone Dunbrack full chi1..chiN rotamer states"
+                   if self.rotamer_mode=="dunbrack2010" and self.chi1_angles_override is None
+                   else "Amber14 all-atom fixed-backbone chi1 grid"),energy_unit="kcal/mol",
                 physical_constant_offset=baseline,all_atom_equivalence_max_error=max_error,
                 all_atom_equivalence_rms_error=rms_error,all_atom_equivalence_samples=12,
                 pair_decomposition=("exact" if exact else "pairwise_approximation"),
