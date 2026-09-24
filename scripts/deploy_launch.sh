@@ -50,5 +50,5 @@ else
     fail "No virtual environment found at ${SHARED_VENV}. Set QP_VENV, use --venv /path/to/existing/.venv, or create/restore that environment first."
 fi
 
-log "Handing off to run_full_experiment.sh (formal pipeline: data_audit -> queue_freeze -> egnn_train -> qc_benchmark -> structure_experiment -> statistics -> final_report; smoke_check is disabled in configs/full_experiment_config.yaml for this deployment)."
+log "Handing off to run_full_experiment.sh (formal pipeline uses the stage toggles frozen in configs/full_experiment_config.yaml; current source config includes smoke_check before data_audit)."
 exec bash "${SCRIPT_DIR}/run_full_experiment.sh" "$@"
