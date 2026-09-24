@@ -237,18 +237,25 @@ the frozen model.
 External complexes are built with the training-graph definition (graph v1.8,
 biological assembly, 7.5 A SAbDab antigen rule, the same labels and edges):
 
+The formal run needs the external graphs and the Foldseek table before it
+starts, while training-overlap checks need the training set that
+`queue_freeze` builds. `scripts/prepare_external_vhh.sh` breaks this loop in
+two passes. Neither pass reads any experimental outcome:
+
 ```bash
-# 1. Select candidates from the SAbDab nanobody summary and count independent groups.
-python -m nanoqc.data.select_external_vhh_candidates \
-    --sabdab-summary sabdab_nano_summary_all.tsv --released-after 2026-01-01 \
-    --structures-dir data/external_vhh/structures --download \
-    --exclude-pdbs study_pdb_ids.txt [--training-dataset <dataset>] [--cluster-map <map>] \
-    --out-dir data/external_vhh/selection
-# 2. Build graphs for the selected entries.
-python -m nanoqc.data.build_external_vhh_graphs \
-    --candidates data/external_vhh/selection/candidates.json \
-    --structures-dir data/external_vhh/structures --out-dir data/external_vhh/graphs
+./scripts/prepare_external_vhh.sh audit      # standalone audit -> study PDB IDs
+./scripts/prepare_external_vhh.sh pass1 --sabdab-summary sabdab_nano_summary_all.tsv \
+    --released-after YYYY-MM-DD --download   # select + build graphs, write foldseek_universe.txt
+# Foldseek over data/external_vhh/prep/foldseek_universe.txt -> queue_freeze.independence_clustering.pair_tsv
+./scripts/deploy_launch.sh --stop-after queue_freeze   # training set + cluster map, no training
+./scripts/prepare_external_vhh.sh pass2 --sabdab-summary sabdab_nano_summary_all.tsv \
+    --released-after YYYY-MM-DD --run-dir <that run>   # drop training overlap, rebuild graphs
+./scripts/deploy_launch.sh                              # fresh formal run, pair table unchanged
 ```
+
+Pass 2 refuses to run if the pair table changed after pass 1, because
+external PDBs can link internal clusters. With the table unchanged, the fresh
+run rebuilds the identical training/test split.
 
 Each graph is one VHH-antigen complex, as in the SNAC-DB per-VHH complexes
 behind the training and hard test sets. Entries with several nanobodies give
@@ -279,12 +286,14 @@ the validation queue never chooses its solvent model after inspecting results.
 configs/   full_experiment_config.yaml (frozen scientific protocol), server_config.yaml (infrastructure only)
 docs/      METHODS_EVIDENCE.md (design-to-literature register), RESULTS_CONTRACT.md (required outputs),
            PROTOCOL_AMENDMENTS.md (dated post-freeze protocol changes)
-scripts/   deploy_launch.sh, run_full_experiment.sh, formal_preflight.sh, check_status.sh, repair_openmm_cuda.sh
+scripts/   deploy_launch.sh, run_full_experiment.sh, formal_preflight.sh, check_status.sh, repair_openmm_cuda.sh,
+           prepare_external_vhh.sh
 src/nanoqc/
   pipeline/     run_full_experiment.py (end-to-end orchestrator), resolve_server_config.py
   data/         audit_all_datasets.py, build_final_pyg_dataset.py (audited graphs + split),
                 build_independence_cluster_map.py, audit_external_vhh_independence.py, sequence_identity.py,
-                select_external_vhh_candidates.py, build_external_vhh_graphs.py (external VHH set)
+                select_external_vhh_candidates.py, build_external_vhh_graphs.py,
+                prepare_external_vhh.py (external VHH set)
   model/        model_egnn_pruning.py (interface scoring, Active-site selection, checkpoint loading),
                 train_egnn_pruning.py (leakage-controlled training),
                 egnn_seed_sensitivity.py (development-only seed variance)
