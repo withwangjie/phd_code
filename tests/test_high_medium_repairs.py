@@ -544,4 +544,6 @@ def test_partial_only_run_cannot_pass_global_audit_without_prior_results(tmp_pat
 def test_pair_table_coverage_is_required_before_frozen_clustering() -> None:
     source=inspect.getsource(full.Orchestrator.stage_queue_freeze)
     assert "missing_pair_coverage" in source
-    assert "does not demonstrate query/target coverage" in source
+    assert "not demonstrated as searched" in source
+    # The failure has to name the run whose universe the table must match.
+    assert "foldseek --run-dir" in source

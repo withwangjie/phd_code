@@ -243,3 +243,32 @@ def test_smoke_check_reads_this_run_dataset_and_skips_before_queue_freeze():
     from nanoqc.experiments import run_real_complex_pilot as pilot
     assert "dataset_clean_500" in inspect.getsource(pilot.main)  # still the standalone default
     assert "dataset_clean_500" not in source  # but never what the orchestrator relies on
+
+
+def test_foldseek_can_bind_the_pair_table_to_one_run_universe(tmp_path, monkeypatch):
+    """A standalone audit and a run's own audit can disagree; --run-dir removes the gap."""
+    import yaml
+    from nanoqc.data import prepare_external_vhh as prep
+
+    prep_dir = tmp_path / "prep"
+    (prep_dir / "audit").mkdir(parents=True)
+    (prep_dir / "study_pdb_ids.txt").write_text("1abc\n2def\n")
+    run = tmp_path / "run"
+    (run / "audit").mkdir(parents=True)
+    (run / "audit" / "cluster_universe.txt").write_text("1abc\n2def\n9shv\n")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(dict(
+        paths=dict(data_root=str(tmp_path / "data"), dataset_dir="dataset"),
+        data_audit=dict(max_resolution_angstrom=3.0),
+        queue_freeze=dict(homology_isolation={}, independence_clustering=dict(pair_tsv=str(tmp_path / "p.tsv"))),
+        external_validation=dict(external_vhh=dict(graph_dir="", source_structure_dir="", min_clusters=10)))))
+
+    seen = {}
+    monkeypatch.setattr(prep, "run_module", lambda module, argv: seen.update(argv=argv))
+    common = ["--config", str(config_path), "--prep-dir", str(prep_dir), "foldseek"]
+    assert prep.main(common + ["--run-dir", str(run)]) == 0
+    assert seen["argv"][seen["argv"].index("--universe") + 1] == str(run / "audit" / "cluster_universe.txt")
+    assert seen["argv"][seen["argv"].index("--audit-dir") + 1] == str(run / "audit")
+
+    with pytest.raises(SystemExit, match="has not reached queue_freeze"):
+        prep.main(common + ["--run-dir", str(tmp_path / "nothing")])

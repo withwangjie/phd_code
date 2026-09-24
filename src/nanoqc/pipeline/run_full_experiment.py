@@ -1974,8 +1974,11 @@ class Orchestrator:
             if missing_pair_coverage:
                 return StageResult(
                     "queue_freeze","failed",started,utc_timestamp(),None,
-                    "Frozen structure-similarity pair table does not demonstrate query/target coverage "
-                    f"for the complete internal+external universe: {missing_pair_coverage[:20]}"
+                    f"Frozen structure-similarity pair table {pair_path} covers "
+                    f"{len(universe_ids) - len(missing_pair_coverage)} of this run's {len(universe_ids)} "
+                    f"universe PDBs; {len(missing_pair_coverage)} are not demonstrated as searched, e.g. "
+                    f"{missing_pair_coverage[:20]}. Rebuild it against THIS run's universe: "
+                    f"prepare_external_vhh.sh foldseek --run-dir {self.run_dir} --force"
                 )
 
         if not cluster_map_path.is_file():

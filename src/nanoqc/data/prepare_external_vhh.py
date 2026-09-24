@@ -187,14 +187,27 @@ def cmd_foldseek(args, config, s) -> int:
                                 .get("external_vhh", {}) or {}).get("graph_dir"))
     universe = s["prep"] / "foldseek_universe.txt" if external_configured else Path("")
     candidates = s["prep"] / "selection_pass1" / "candidates.json" if external_configured else Path("")
-    if not universe.is_file():
+    audit_dir = s["prep"] / "audit"
+    if args.run_dir is not None:
+        # Bind the table to one run's frozen universe, so queue_freeze's
+        # coverage check cannot fail on a handful of PDBs that appeared
+        # between a standalone audit and the run's own.
+        run_dir = args.run_dir.resolve()
+        universe = run_dir / "audit" / "cluster_universe.txt"
+        audit_dir = run_dir / "audit"
+        if not universe.is_file():
+            raise SystemExit(f"{universe} missing: that run has not reached queue_freeze's universe step")
+        print(f"[prepare_external_vhh] clustering the {len(universe.read_text().split())} PDBs of "
+              f"{run_dir.name}")
+    elif not universe.is_file():
         universe = s["prep"] / "study_pdb_ids.txt"
         if not universe.is_file():
             raise SystemExit("Run the 'audit' step first (study_pdb_ids.txt missing)")
         print(f"[prepare_external_vhh] no external candidates; clustering the {len(universe.read_text().split())} "
-              "study PDBs alone (antigen-fold holdout)")
+              "study PDBs alone (antigen-fold holdout). Pass --run-dir <run> to bind the table to a run's "
+              "own universe instead.")
     data_root = args.data_root or repo_path(os.environ.get("QP_DATA_ROOT") or config["paths"]["data_root"])
-    argv = ["--universe", str(universe), "--audit-dir", str(s["prep"] / "audit"), "--data-root", str(data_root),
+    argv = ["--universe", str(universe), "--audit-dir", str(audit_dir), "--data-root", str(data_root),
             "--out", str(s["pair_tsv"]),
             "--work-dir", str(s["prep"] / "foldseek"), "--foldseek", args.foldseek, "--threads", str(args.threads)]
     if candidates.is_file():
@@ -262,6 +275,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     fold.add_argument("--foldseek", default="foldseek")
     fold.add_argument("--threads", type=int, default=8)
     fold.add_argument("--data-root", type=Path, default=None)
+    fold.add_argument("--run-dir", type=Path, default=None,
+                      help="Use this run's audit/cluster_universe.txt and audit directory, so the pair table "
+                           "matches exactly what queue_freeze will check")
     fold.add_argument("--allow-missing-hits", action="store_true")
     fold.add_argument("--force", action="store_true")
     for name in ("pass1", "pass2"):
