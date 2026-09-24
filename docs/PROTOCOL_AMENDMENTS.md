@@ -19,7 +19,22 @@ All amendments below were made on 2026-09-24 on branch
 them changes code hashes, so no earlier run directory can be resumed; a fresh
 formal run is required.
 
+## Summary
+
+| ID | Change | Affected stages | Inspection status |
+|---|---|---|---|
+| A1 | Resource-normalized time-to-solution (`log10_qts99`) replaces best-of-N gap (secondary since A7) | qc_benchmark, statistics, external_validation, final_report | to be completed |
+| A2 | Pre-specified non-estimable RQ5 outcomes | statistics (structural), final_report | to be completed |
+| A3 | Code-level fixes preceding A1 (seeds, symmetry, full-complex environment, biological assembly) | dataset through final_report | to be completed |
+| A4 | Serial gatekeeping replaces one flat Holm family | statistics (QC), final_report | to be completed |
+| A5 | Outcome-free cluster adequacy gate at queue freeze | queue_freeze (gate only) | not applicable |
+| A6 | Development-only EGNN training-seed sensitivity | egnn_train (descriptive) | not applicable |
+| A7 | Quantum-intrinsic primary endpoint; `quantum_exploration` stage | qc_benchmark, statistics, quantum_exploration, final_report | to be completed |
+
 ## A1. Primary coarse solver endpoint: resource-normalized time-to-solution
+
+> **Partly superseded by A7:** `log10_qts99` is now a *secondary* QAOA-vs-classical
+> effect, and the scaling response is QAOA exact ground-state amplification.
 
 - **Before:** primary QAOA-vs-SA contrast on best-of-N energy gap at 1000
   matched outputs; scaling response = QAOA-minus-SA gap.
@@ -63,6 +78,23 @@ formal run is required.
   plans should pre-specify how undefined estimates are handled [R39].
 - **Affected results:** statistics (structural), final report.
 - **Results inspected before this amendment:** _to be completed by the investigator_.
+
+## A3. Code-level amendments preceding A1 (2026-09-24)
+
+These commits were made first, before A1, and are numbered A3 only because
+they were logged later.
+
+| Commit | Change | Scientific effect |
+|---|---|---|
+| `a851f34` | Quantum modules in code hashes; child seeds for external statistics and calibration; unified ground-energy tolerance (1e-9) | Different random draws in calibration/external statistics; `hit` stricter |
+| `d982002` | EGNN train/validation split crash fixed | Formal EGNN training could not run before |
+| `34334ee` | VAL/LEU methyls no longer treated as symmetric; dataset checks survive `python -O` | Side-chain RMSD and chi recovery at VAL/LEU sites (primary structural endpoint) |
+| `5373dbe` | Identity fields named by region (full chain vs CDR-H3 loop) | None (naming only) |
+| `0e824aa` | Coarse antigen term uses the full complex antigen [R31,R32] | Coarse energies, candidate screening, calibration |
+| `769d80e` | Coarse fixed-VHH term uses the full complex; phi/psi undefined at chain breaks; graph v1.7 | Coarse energies, Active-site eligibility, rotamer candidates |
+| `e5e2e88` | Raw-PDB subsets built from the biological assembly with SAbDab antigen-chain rule [R33-R36]; graph v1.8 | Training set composition, interface labels, EGNN, calibration |
+
+**Results inspected before these amendments:** _to be completed by the investigator_.
 
 ## A4. Serial gatekeeping replaces one flat Holm family
 
@@ -142,17 +174,3 @@ formal run is required.
 - **Affected results:** qc_benchmark (new row fields and transfer rows),
   statistics (primary family), new quantum_exploration stage, final report.
 - **Results inspected before this amendment:** _to be completed by the investigator_.
-
-## A3. Earlier amendments on 2026-09-24
-
-| Commit | Change | Scientific effect |
-|---|---|---|
-| `a851f34` | Quantum modules in code hashes; child seeds for external statistics and calibration; unified ground-energy tolerance (1e-9) | Different random draws in calibration/external statistics; `hit` stricter |
-| `d982002` | EGNN train/validation split crash fixed | Formal EGNN training could not run before |
-| `34334ee` | VAL/LEU methyls no longer treated as symmetric; dataset checks survive `python -O` | Side-chain RMSD and chi recovery at VAL/LEU sites (primary structural endpoint) |
-| `5373dbe` | Identity fields named by region (full chain vs CDR-H3 loop) | None (naming only) |
-| `0e824aa` | Coarse antigen term uses the full complex antigen [R31,R32] | Coarse energies, candidate screening, calibration |
-| `769d80e` | Coarse fixed-VHH term uses the full complex; phi/psi undefined at chain breaks; graph v1.7 | Coarse energies, Active-site eligibility, rotamer candidates |
-| `e5e2e88` | Raw-PDB subsets built from the biological assembly with SAbDab antigen-chain rule [R33-R36]; graph v1.8 | Training set composition, interface labels, EGNN, calibration |
-
-**Results inspected before these amendments:** _to be completed by the investigator_.

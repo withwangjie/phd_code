@@ -42,6 +42,7 @@ fail construction. This PDB-level reservation is not a homology claim.
 Required run-local independence outputs:
 - `independence/pdb_family_clusters.json`
 - `independence/pdb_family_clusters.provenance.json`
+- `audit/cluster_universe.txt`
 
 Similarity edges use connected components (single linkage). A chain of edges
 can merge endpoints with no direct high-similarity edge. This is conservative
@@ -50,7 +51,6 @@ for leakage prevention and may reduce the number of independent clusters;
 Every non-comment pair row must contain valid identifiers and a numeric score;
 malformed rows abort map construction. Formal queue freezing also rejects older
 maps whose provenance reports skipped rows.
-- `audit/cluster_universe.txt`
 
 The clustering universe contains both internal study PDBs and required external-VHH PDBs. The frozen pair table/source map must cover this complete universe. When a pair TSV is the formal structure-similarity source, every universe PDB must appear in its query or target columns; an absent PDB is treated as "not demonstrated as searched", not as an independent singleton.
 
@@ -83,6 +83,11 @@ Required:
 The best checkpoint SHA256 must match the training summary and strict reload must
 be recorded as verified.
 
+The resolved DDP rank count is a result-affecting runtime parameter: rank seeds
+and sampler partitions can change the EGNN checkpoint even at fixed global
+batch size. `runtime_resolution.ddp_ranks` and the resolved-config hash bind
+each run to the chosen rank count.
+
 When `egnn_train.seed_replicates > 0` (development-only seed sensitivity,
 PROTOCOL_AMENDMENTS.md A6) it also requires `checkpoints/seed_replicates/r<i>/`
 checkpoints and `checkpoints/seed_sensitivity/summary.json` + `summary.md`
@@ -97,6 +102,9 @@ Required:
 - `calibration/calibration_report.md`
 
 The frozen calibration must pass all configured acceptance gates.
+Calibration rows are buffered per training complex and committed only after
+that complex completes; calibration uses the same fixed three-chi1-well state
+policy as the formal scaling benchmark.
 
 ### method_sensitivity
 Every configured shots × CVaR-alpha sub-run requires:
@@ -142,17 +150,22 @@ directory contains separate case runs plus `summary.csv`, `summary.json`, and
 `summary.md`.
 These solver metrics do not establish native chi1/chi2 or all-atom recovery.
 
+Endpoint fields. Every benchmark row records `ground_hits`,
+`success_probability_jeffreys`, `resource_fixed_units`,
+`resource_units_per_sample`, `queries_to_solution_99` and `log10_qts99`
+(resource-normalized queries-to-solution, PROTOCOL_AMENDMENTS.md A1). Every
+QAOA row additionally records `exact_ground_probability`,
+`log10_ground_amplification_exact` (the primary quantum-intrinsic endpoint,
+A7), `log10_ground_amplification` (Jeffreys, shot-based),
+`log10_qts99_execution` (training shots excluded), and the optimization's
+`parameter_scale` and `internal_gammas`.
+
 ### quantum_exploration
 Exploratory and descriptive (PROTOCOL_AMENDMENTS.md A7). Required:
 - `quantum_exploration/transfer_fit/p<d>/` benchmark runs on `graphs/train`
 - `quantum_exploration/transfer_parameters/p<d>.json` (`qaoa_transfer_parameters_v1`, `fit_split: train`)
 - `quantum_exploration/hard_set/p<d>/` benchmark runs with trained `qaoa` and untrained `qaoa_transfer` rows
 - `quantum_exploration/summary.json` and `summary.md` covering exactly the configured depths
-
-Every QAOA benchmark row additionally records `exact_ground_probability`,
-`log10_ground_amplification_exact`, `log10_ground_amplification` (Jeffreys),
-`log10_qts99_execution`, and the optimization's `parameter_scale` and
-`internal_gammas`.
 
 ### structure_experiment
 Both `dev_queue/` and `validation_queue/` require:
@@ -205,6 +218,10 @@ External structural baseline requires:
 - `structural_baselines/external_baseline_metrics.csv`
 - `structural_baselines/external_baseline_report.md`
 
+The external FASPR comparison uses an Active-only packing scope: backbone and
+non-Active side-chain coordinates are restored from the perturbed input before
+scoring.
+
 ### statistics
 
 All statistical analyses must consume the exact run-local
@@ -222,24 +239,16 @@ Required:
 - `statistics/structure_statistics.json`
 - `statistics/structure_statistics.md`
 
-RQ5 completion requires the configured minimum independent clusters and either a
-declared `estimability` of `not_estimable_*` (constant cluster-level difference,
-pre-specified in PROTOCOL_AMENDMENTS.md A2; reported descriptively and excluded
-from the Holm family) or finite Spearman rho, permutation p value, bootstrap confidence limits, and Holm-adjusted
-p value. An undefined rho without a declared non-estimable status still fails the
-statistics stage. Resume
-validation applies the same gate to previously written results.
 Resume also rechecks the original coarse and scaling cluster minima, primary
 structural cluster minimum, failed QAOA/pair exclusions, benchmark failure
 fraction, and zero failed targets in the formal validation queue.
 
-The primary coarse solver metric is `statistics.primary_qc_metric` (`log10_qts99`,
-resource-normalized queries-to-solution; see PROTOCOL_AMENDMENTS.md A1). Every
-benchmark row records `ground_hits`, `success_probability_jeffreys`,
-`resource_fixed_units`, `resource_units_per_sample`, `queries_to_solution_99`
-and `log10_qts99`. Time-matched effects measure classical emulation cost of
-QAOA and are descriptive.
-The primary coarse solver inference is restricted to the frozen primary pruning path,
+#### Coarse QC and scaling inference
+
+`statistics.primary_qc_metric` (`log10_qts99`) names the QAOA-vs-classical
+matched-output contrast, which is secondary since A7. Time-matched effects
+measure classical emulation cost of QAOA and are descriptive.
+The coarse solver inference is restricted to the frozen primary pruning path,
 radius, QAOA depth, optimization-evaluation budget, active-site size, output budget,
 QAOA objective/restarts, and requires the configured minimum independent clusters.
 The paired-statistics output records all exclusion counts and a separate
@@ -250,8 +259,9 @@ invalid time budgets, excessive time overruns, or nonfinite analyzed metrics.
 Time-mode diversity metrics are intentionally not analyzed, so their
 nonfinite values are not denominator failures. Scaling inference also rejects
 an incomplete primary denominator.
-The scaling response is QAOA-minus-baseline `log10_qts99`.
-Scaling inference uses the pre-declared active-site levels under the same frozen primary
+The confirmatory scaling response is QAOA `log10_ground_amplification_exact`
+(A7); QAOA-minus-baseline `log10_qts99` and `log10_qts99_execution` slopes are
+descriptive. Scaling inference uses the pre-declared active-site levels under the same frozen primary
 radius/depth/evaluation budget and a cluster-aware within-PDB slope analysis with
 log10(feasible configuration count) as the primary complexity axis.
 
@@ -263,16 +273,17 @@ effect is secondary and gated behind it
 (`gatekeeping_family`, `p_gatekeeping_adjusted`); raw p values are retained. Structural primary
 and RQ5 tests retain their separate two-test Holm family.
 
-The external FASPR comparison uses an Active-only packing scope: backbone and
-non-Active side-chain coordinates are restored from the perturbed input before
-scoring. Energy-calibration rows are buffered per training complex and committed
-only after that complex completes; calibration uses the same fixed three-chi1-well
-state policy as the formal scaling benchmark.
+#### Structural inference (primary structural endpoint and RQ5)
 
-The resolved DDP rank count is a result-affecting runtime parameter: rank seeds
-and sampler partitions can change the EGNN checkpoint even at fixed global
-batch size. `runtime_resolution.ddp_ranks` and the resolved-config hash bind
-each run to the chosen rank count.
+The primary structural endpoint is post-relaxation, symmetry-corrected
+Active-side-chain heavy-atom RMSD with QAOA-vs-SA as the contrast; all-zero
+paired differences give a sign-flip p of 1. RQ5 completion requires the configured minimum independent clusters and either a
+declared `estimability` of `not_estimable_*` (constant cluster-level difference,
+pre-specified in PROTOCOL_AMENDMENTS.md A2; reported descriptively and excluded
+from the Holm family) or finite Spearman rho, permutation p value, bootstrap
+confidence limits, and Holm-adjusted p value. An undefined rho without a
+declared non-estimable status still fails the statistics stage. Resume
+validation applies the same gate to previously written results.
 
 ### final_report
 Required:
@@ -289,7 +300,6 @@ Every formal run terminates with:
 
 `RUN_SUMMARY.json.status` may be `completed` only when no stage failed and
 `EXPERIMENT_RESULTS_AUDIT.json.all_required_results_present` is true.
-
 
 ## Partial reruns
 
