@@ -75,16 +75,32 @@ def parse_date(value: str) -> dt.date:
 
 
 def read_sabdab(paths: Iterable[Path]) -> dict[str, list[dict]]:
-    """SAbDab summary rows grouped by lower-case PDB ID (duplicates kept once)."""
+    """SAbDab summary rows grouped by lower-case PDB ID (duplicates kept once).
+
+    A file that yields no usable row is an error, not an empty selection: a
+    silently empty table looks exactly like "every entry was rejected".
+    """
     grouped: dict[str, list[dict]] = defaultdict(list)
     for path in paths:
+        before = sum(len(rows) for rows in grouped.values())
         with path.open(encoding="utf-8-sig", newline="") as handle:
-            for row in csv.DictReader(handle, delimiter="\t"):
+            reader = csv.DictReader(handle, delimiter="\t")
+            fields = reader.fieldnames or []
+            if "pdb" not in fields:
+                hint = (" It looks like a SAbDab2 export: convert it first with "
+                        "nanoqc.data.convert_sabdab2_summary." if any("PDB" in (f or "") for f in fields)
+                        else "")
+                raise ValueError(
+                    f"{path}: not a tab-separated SAbDab summary (no 'pdb' column; "
+                    f"first columns: {fields[:4]}).{hint}")
+            for row in reader:
                 pdb = str(row.get("pdb", "")).strip().lower()
                 if len(pdb) != 4:
                     continue
                 if row not in grouped[pdb]:
                     grouped[pdb].append(row)
+        if sum(len(rows) for rows in grouped.values()) == before:
+            raise ValueError(f"{path}: no row carries a four-character PDB ID")
     return grouped
 
 

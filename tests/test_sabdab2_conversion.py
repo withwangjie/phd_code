@@ -72,3 +72,18 @@ def test_converted_file_feeds_the_selector_unchanged(tmp_path):
     mixed = sel.metadata_gate("7xyz", grouped["7xyz"], released_after=cutoff, excluded=set(), max_resolution=3.0)
     # "protein | sugar" still has a polypeptide antigen chain; only resolution rejects it.
     assert mixed["reasons"] == ["resolution_above_limit"]
+
+
+def test_an_unconverted_or_empty_summary_fails_loudly(tmp_path):
+    """A silently empty table is indistinguishable from 'every entry was rejected'."""
+    raw = _write(tmp_path)  # the SAbDab2 CSV itself, not the converted TSV
+    with pytest.raises(ValueError, match="convert it first with nanoqc.data.convert_sabdab2_summary"):
+        sel.read_sabdab([raw])
+    other = tmp_path / "other.tsv"
+    other.write_text("name\tvalue\nx\t1\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="no 'pdb' column"):
+        sel.read_sabdab([other])
+    empty = tmp_path / "empty.tsv"
+    empty.write_text("pdb\tHchain\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="no row carries a four-character PDB ID"):
+        sel.read_sabdab([empty])
