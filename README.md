@@ -66,11 +66,13 @@ prediction.
 1. How faithfully can the constrained rotamer-assignment problem be encoded as
    an auditable one-hot QUBO/Ising instance for gate-based quantum optimization?
 2. How does feasibility-preserving XY-QAOA compare with classical baselines in
-   energy gap, low-energy coverage, sampling diversity, and resource use under
-   matched-output and matched-time protocols?
-3. How does the QAOA-versus-classical performance difference change as feasible
-   configuration count, logical qubit count, and logical two-qubit-gate count
-   grow across the preregistered problem-size axis?
+   resource-normalized time-to-solution (primary: log10 shots/energy queries to
+   reach the ground state with 99% probability, optimization shots included
+   [R37]), and secondarily in energy gap, low-energy coverage, sampling
+   diversity, and matched-output/matched-time behaviour?
+3. How does the QAOA-versus-classical difference in log10 time-to-solution
+   change as feasible configuration count, logical qubit count, and logical
+   two-qubit-gate count grow across the preregistered problem-size axis?
 4. Does finite-shot CVaR improve the low-energy sampling behavior of the
    variational quantum solver relative to mean-energy optimization?
 5. Do solver-level discrete energy gains propagate to all-atom structural
@@ -81,6 +83,11 @@ prediction.
    components, not the primary research object.
 
 ## Interpretation limits
+
+- Protocol changes after the original freeze are listed, with reasons and
+  inspection status, in `docs/PROTOCOL_AMENDMENTS.md`.
+- Matched-time comparisons measure the classical cost of emulating QAOA, not
+  quantum runtime; they are descriptive.
 
 - Coarse antigen interaction scores are not binding free energies.
 - Contact number is a geometry baseline, not an affinity estimator.

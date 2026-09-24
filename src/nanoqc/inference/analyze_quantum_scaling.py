@@ -20,6 +20,10 @@ from nanoqc.common.repo_io import sha256_file as sha256
 from nanoqc.common.seed_streams import DEFAULT_MASTER_SEED
 from nanoqc.inference.paired_statistics import bootstrap_sign_flip
 
+# Primary scaling response (see docs/PROTOCOL_AMENDMENTS.md A1).
+RESPONSE = "delta_log10_qts99"
+
+
 def _slope(xs:list[float],ys:list[float]) -> Optional[float]:
     x=np.asarray(xs,float);y=np.asarray(ys,float)
     if len(x)<3 or not np.isfinite(x).all() or not np.isfinite(y).all():
@@ -138,6 +142,12 @@ def main(argv:Optional[Sequence[str]]=None)->int:
         qaoa_two_qubit_gates=int(q.get("qaoa_two_qubit_gates",0) or 0)
         if config_count<=0 or num_bits<=0:
             failures.append(f"{path.name}: invalid complexity metadata");continue
+        try:
+            qts_values=(float(q["log10_qts99"]),float(b["log10_qts99"]))
+        except (KeyError,TypeError,ValueError):
+            failures.append(f"{path.name}: missing log10_qts99 (re-run the benchmark with resource accounting)");continue
+        if not all(math.isfinite(v) for v in qts_values):
+            failures.append(f"{path.name}: nonfinite log10_qts99");continue
         if qaoa_parameter_count<=0 or qaoa_xy_gates<=0 or qaoa_two_qubit_gates<=0:
             failures.append(f"{path.name}: missing/invalid QAOA logical-resource metadata");continue
         if qaoa_two_qubit_gates != qaoa_xy_gates + qaoa_zz_gates:
@@ -157,6 +167,8 @@ def main(argv:Optional[Sequence[str]]=None)->int:
             qaoa_xy_gates=qaoa_xy_gates,
             qaoa_zz_gates=qaoa_zz_gates,
             qaoa_two_qubit_gates=qaoa_two_qubit_gates,
+            qaoa_log10_qts99=float(q["log10_qts99"]),baseline_log10_qts99=float(b["log10_qts99"]),
+            delta_log10_qts99=float(q["log10_qts99"])-float(b["log10_qts99"]),
             qaoa_gap=float(q["gap"]),baseline_gap=float(b["gap"]),
             delta_gap=float(q["gap"])-float(b["gap"]),
             qaoa_hit=float(q["hit"]),baseline_hit=float(b["hit"]),
@@ -189,6 +201,7 @@ def main(argv:Optional[Sequence[str]]=None)->int:
                 qaoa_xy_gates=float(np.mean([r["qaoa_xy_gates"] for r in group])),
                 qaoa_zz_gates=float(np.mean([r["qaoa_zz_gates"] for r in group])),
                 qaoa_two_qubit_gates=float(np.mean([r["qaoa_two_qubit_gates"] for r in group])),
+                delta_log10_qts99=float(np.mean([r["delta_log10_qts99"] for r in group])),
                 delta_gap=float(np.mean([r["delta_gap"] for r in group])),
                 delta_hit=float(np.mean([r["delta_hit"] for r in group])),
                 repeats=len(group),
@@ -197,12 +210,14 @@ def main(argv:Optional[Sequence[str]]=None)->int:
             pdb_id=pdb,cluster=cluster_map[pdb],points=points,
             slope_log10_configuration_count=_slope(
                 [x["log10_configuration_count"] for x in points],
-                [x["delta_gap"] for x in points]),
-            slope_num_bits=_slope([x["num_bits"] for x in points],[x["delta_gap"] for x in points]),
-            slope_num_qubits=_slope([x["num_qubits"] for x in points],[x["delta_gap"] for x in points]),
+                [x[RESPONSE] for x in points]),
+            slope_num_bits=_slope([x["num_bits"] for x in points],[x[RESPONSE] for x in points]),
+            slope_num_qubits=_slope([x["num_qubits"] for x in points],[x[RESPONSE] for x in points]),
             slope_two_qubit_gates=_slope(
-                [x["qaoa_two_qubit_gates"] for x in points],[x["delta_gap"] for x in points]),
-            slope_active_sites=_slope([x["active_sites"] for x in points],[x["delta_gap"] for x in points]),
+                [x["qaoa_two_qubit_gates"] for x in points],[x[RESPONSE] for x in points]),
+            slope_active_sites=_slope([x["active_sites"] for x in points],[x[RESPONSE] for x in points]),
+            descriptive_gap_slope_log10_configuration_count=_slope(
+                [x["log10_configuration_count"] for x in points],[x["delta_gap"] for x in points]),
         ))
     if any(row["slope_log10_configuration_count"] is None for row in per_pdb):
         bad=[r["pdb_id"] for r in per_pdb if r["slope_log10_configuration_count"] is None]
@@ -233,12 +248,13 @@ def main(argv:Optional[Sequence[str]]=None)->int:
             mean_qaoa_xy_gates=float(np.mean([r["qaoa_xy_gates"] for r in rows])),
             mean_qaoa_zz_gates=float(np.mean([r["qaoa_zz_gates"] for r in rows])),
             mean_qaoa_two_qubit_gates=float(np.mean([r["qaoa_two_qubit_gates"] for r in rows])),
+            mean_delta_log10_qts99=float(np.mean([r["delta_log10_qts99"] for r in rows])),
             mean_delta_gap=float(np.mean([r["delta_gap"] for r in rows])),
             mean_delta_hit=float(np.mean([r["delta_hit"] for r in rows])),
         ))
     payload=dict(
-        definition="within-PDB slope of QAOA-minus-classical energy gap versus log10 feasible configuration count under a fixed three-chi1-well state policy; PDB slopes averaged within family/structure cluster",
-        sign_interpretation="negative slope means QAOA relative gap improves versus the classical baseline as complexity increases",
+        definition="within-PDB slope of QAOA-minus-classical log10 queries-to-solution (99%, Ronnow et al. 2014; QAOA optimization shots included) versus log10 feasible configuration count under a fixed three-chi1-well state policy; PDB slopes averaged within family/structure cluster",
+        sign_interpretation="negative slope means QAOA's resource cost to reach the ground state grows more slowly than the classical baseline's as complexity increases",
         simulator_scope="classical exact-subspace finite-shot QAOA; not hardware quantum speedup",
         primary_predictor="log10_configuration_count",
         descriptive_resource_axes=[
@@ -248,7 +264,8 @@ def main(argv:Optional[Sequence[str]]=None)->int:
             "logical pre-transpilation gates for the implemented penalty-free cost "
             "Hamiltonian plus local XY mixer; W-state StatePrep decomposition excluded"
         ),
-        primary_response=f"qaoa_gap_minus_{args.baseline}_gap",
+        primary_response=f"qaoa_log10_qts99_minus_{args.baseline}_log10_qts99",
+        descriptive_responses=["delta_gap","delta_hit"],
         primary_pruning=args.primary_pruning,baseline=args.baseline,
         primary_outputs=args.primary_outputs,primary_objective=args.primary_objective,
         primary_restarts=args.primary_restarts,primary_depth=args.primary_depth,
@@ -269,13 +286,13 @@ def main(argv:Optional[Sequence[str]]=None)->int:
         f"Primary predictor: log10(feasible configuration count). Active-site levels: {sizes}.",
         "Descriptive quantum-resource axes: logical qubits and pre-transpilation two-qubit "
         "gates (ZZ cost + XY mixer); W-state StatePrep decomposition is excluded.",
-        "Negative slope means QAOA's energy-gap difference relative to the classical baseline becomes more favorable as complexity increases.",
+        "Response: QAOA minus baseline log10 queries-to-solution (99%), with QAOA optimization shots charged. Negative slope means QAOA's resource cost to reach the ground state grows more slowly than the baseline's. Best-of-N gap/hit are descriptive only because they saturate.",
         "",
         f"Independent family/structure clusters: {primary['n_clusters']}; mean cluster slope: {primary['mean_slope']}; "
         f"95% bootstrap CI: [{primary['ci_low']}, {primary['ci_high']}]; sign-flip p={primary['p_value']}.",
         "",
-        "| Active sites | Rows | PDBs | Mean logical qubits | Mean 2q gates | Mean XY gates | Mean ZZ gates | Mean log10(|Omega|) | Mean QAOA-baseline gap | Mean QAOA-baseline hit |",
-        "|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| Active sites | Rows | PDBs | Mean logical qubits | Mean 2q gates | Mean XY gates | Mean ZZ gates | Mean log10(|Omega|) | Mean QAOA-baseline log10 QTS99 | Mean QAOA-baseline gap | Mean QAOA-baseline hit |",
+        "|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for row in size_summary:
         lines.append(
@@ -283,6 +300,7 @@ def main(argv:Optional[Sequence[str]]=None)->int:
             f"{row['mean_num_qubits']:.6g} | {row['mean_qaoa_two_qubit_gates']:.6g} | "
             f"{row['mean_qaoa_xy_gates']:.6g} | {row['mean_qaoa_zz_gates']:.6g} | "
             f"{row['mean_log10_configuration_count']:.6g} | "
+            f"{row['mean_delta_log10_qts99']:.6g} | "
             f"{row['mean_delta_gap']:.6g} | {row['mean_delta_hit']:.6g} |"
         )
     lines += ["",

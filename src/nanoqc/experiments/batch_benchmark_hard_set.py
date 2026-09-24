@@ -1031,6 +1031,34 @@ def _ablation_classical_counts(sampler: Any, reads: int, seed: int,
     return dict(counts), evaluations
 
 
+QTS_TARGET_CONFIDENCE = 0.99
+
+
+def queries_to_solution(counts: dict, energies: dict, ground: float, *,
+                        fixed_units: float, units_per_sample: float) -> dict:
+    """Resource-normalized time-to-solution in energy-query/measurement units.
+
+    Following the time-to-solution definition of Ronnow et al. (Science 2014),
+    R99 = fixed + c * ln(1-0.99)/ln(1-p), the resources needed to observe a
+    ground state at least once with 99% probability. One unit is one
+    measurement shot or one single-state energy query, so QAOA optimization
+    shots (fixed) and SA per-read energy queries (c) are charged alike.
+    p uses the Jeffreys estimate (k+1/2)/(n+1) (Brown, Cai & DasGupta 2001),
+    which stays finite for k=0 or k=n; unlike best-of-N gap/hit it does not
+    saturate when a baseline always reaches the ground state.
+    """
+    n = int(sum(counts.values()))
+    if n <= 0 or not math.isfinite(fixed_units) or fixed_units < 0 or not math.isfinite(units_per_sample) or units_per_sample <= 0:
+        raise ValueError("queries_to_solution needs samples and finite nonnegative resources")
+    k = int(sum(c for s, c in counts.items() if abs(energies[s] - ground) <= GROUND_ENERGY_TOLERANCE))
+    p = (k + 0.5) / (n + 1.0)
+    repetitions = max(1.0, math.log(1.0 - QTS_TARGET_CONFIDENCE) / math.log(1.0 - p))
+    total = float(fixed_units) + float(units_per_sample) * repetitions
+    return dict(ground_hits=k, success_probability_jeffreys=p,
+                resource_fixed_units=float(fixed_units), resource_units_per_sample=float(units_per_sample),
+                queries_to_solution_99=total, log10_qts99=math.log10(total))
+
+
 def _ablation_summarize(counts: dict, energies: dict, ground: float, window: float) -> dict:
     """Matched-output metrics; report low-energy mass separately from entropy."""
     n = sum(counts.values())
@@ -1156,6 +1184,8 @@ def _ablation_run_case(data: Any, scorer: Any, config: dict, args: Any, artifact
                     if sum(counts.values()) != outputs or any(s not in energies for s in counts):
                         raise AssertionError("Sample count or local one-hot constraint violated.")
                     metrics = _ablation_summarize(counts, energies, truth.energy, args.energy_window)
+                    metrics.update(queries_to_solution(counts, energies, truth.energy,
+                        fixed_units=float(opt.total_opt_shots), units_per_sample=1.0))
                     # metrics owns outputs: it is the verified measured count.
                     resources=estimate_qaoa_resources(
                         quantum_instance,p=config["depth"],
@@ -1210,6 +1240,10 @@ def _ablation_run_case(data: Any, scorer: Any, config: dict, args: Any, artifact
                 if sum(counts.values()) != outputs or any(s not in energies for s in counts):
                     raise AssertionError("Sample count or local one-hot constraint violated.")
                 metrics = _ablation_summarize(counts, energies, truth.energy, args.energy_window)
+                metrics.update(queries_to_solution(counts, energies, truth.energy,
+                    # >=1 unit/sample: an unevaluated uniform draw cannot be recognised
+                    # as a ground state, just as each QAOA output costs one shot.
+                    fixed_units=0.0, units_per_sample=max(1.0, float(queries)/float(outputs))))
                 # Do not pass outputs twice; _ablation_summarize supplies it.
                 records.append(dict(config, solver=solver,
                     method_role="classical_baseline",
@@ -1242,6 +1276,8 @@ def _ablation_run_case(data: Any, scorer: Any, config: dict, args: Any, artifact
                     counts, elapsed, queries = _time_budget_counts(sampler, method, budget,
                         sample_seed+10001, args.sa_passes, args.greedy_passes)
                     metrics = _ablation_summarize(counts, energies, truth.energy, args.energy_window)
+                    metrics.update(queries_to_solution(counts, energies, truth.energy,
+                        fixed_units=0.0, units_per_sample=max(1.0, float(queries)/float(sum(counts.values())))))
                     row = dict(donor_row)
                     row.update(metrics, solver=method+"_time", method_role="classical_baseline",
                         reference_outputs=outputs, solver_seconds=elapsed,
@@ -1871,7 +1907,7 @@ def _paired_statistics_main(argv: Optional[Sequence[str]] = None) -> int:
         parser.error("No case JSON artifacts")
     cluster_map=json.loads(args.cluster_map.read_text()) if args.cluster_map else None
     grouped={}; skipped=Counter(); pair_count=Counter()
-    metrics=("gap","hit","ground_probability","low_energy_mass","low_energy_coverage","entropy")
+    metrics=("gap","hit","ground_probability","low_energy_mass","low_energy_coverage","entropy","log10_qts99")
     for path in paths:
         case=json.loads(path.read_text())
         # Explicit primary output-budget contrast; never silently overwrite
@@ -1931,7 +1967,7 @@ def _paired_statistics_main(argv: Optional[Sequence[str]] = None) -> int:
             pair_count[name]+=1
             for metric in metrics:
                 # Unequal read counts bias empirical diversity/coverage; do not test them in time mode.
-                if args.budget_mode=="time" and metric not in ("gap","hit"):
+                if args.budget_mode=="time" and metric not in ("gap","hit","log10_qts99"):
                     continue
                 av,bv=a.get(metric),b.get(metric)
                 if av is None or bv is None or not np.isfinite([av,bv]).all():

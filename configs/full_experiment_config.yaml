@@ -460,7 +460,12 @@ external_validation:
 statistics:
   resamples: 10000
   primary_qc_baseline: "sa"
-  primary_qc_metric: "gap"
+  # Resource-normalized time-to-solution (Ronnow et al. 2014): log10 of the
+  # measurement shots / energy queries needed to see a ground state with 99%
+  # probability, QAOA optimization shots included. Best-of-N gap/hit saturate
+  # (SA reaches the ground state in every case at <=10 sites), so they are
+  # reported as secondary effects only. See docs/PROTOCOL_AMENDMENTS.md.
+  primary_qc_metric: "log10_qts99"
   min_qc_clusters: 10  # adequacy gate for the frozen coarse QAOA-vs-classical primary contrast
   min_scaling_clusters: 10  # independent family/structure clusters for the fixed-p=2 scaling slope
   min_primary_clusters: 10  # adequacy gate, not a formal power guarantee

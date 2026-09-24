@@ -763,8 +763,16 @@ def section_structural_benefit(ctx: ReportContext) -> List[str]:
             f"- RQ5 energy-to-structure transfer: Spearman rho={_fmt(rq5.get('spearman_rho'))}; "
             f"95% cluster-bootstrap CI=[{_fmt(rq5.get('ci_low'))}, {_fmt(rq5.get('ci_high'))}]; "
             f"raw cluster-aware permutation p={_fmt(rq5.get('p_value'))}; "
-            f"Holm-adjusted p={_fmt(rq5.get('p_holm_confirmatory_family'))}."
+            f"Holm-adjusted p={_fmt(rq5.get('p_holm_confirmatory_family'))}; "
+            f"estimability={rq5.get('estimability', 'estimable')}."
         )
+        if str(rq5.get("estimability", "")).startswith("not_estimable_"):
+            lines.append(
+                "- RQ5 is not estimable under the pre-specified rule (a cluster-level difference is constant; "
+                f"mean delta energy={_fmt(rq5.get('mean_delta_energy'))}, "
+                f"mean delta RMSD={_fmt(rq5.get('mean_delta_rmsd'))}). It is reported descriptively and is "
+                "excluded from the Holm family; it is neither a positive nor a negative finding."
+            )
         lines.append(
             "- These are the only inferential structural results. Additional method/metric tables below "
             "are descriptive and are not separate hypothesis tests."

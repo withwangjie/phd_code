@@ -197,15 +197,23 @@ Required:
 - `statistics/structure_statistics.json`
 - `statistics/structure_statistics.md`
 
-RQ5 completion requires the configured minimum independent clusters and finite
-Spearman rho, permutation p value, bootstrap confidence limits, and Holm-adjusted
-p value. A constant cluster-level energy or RMSD difference makes rho undefined;
-the statistics stage fails and reports the missing fields in that case. Resume
+RQ5 completion requires the configured minimum independent clusters and either a
+declared `estimability` of `not_estimable_*` (constant cluster-level difference,
+pre-specified in PROTOCOL_AMENDMENTS.md A2; reported descriptively and excluded
+from the Holm family) or finite Spearman rho, permutation p value, bootstrap confidence limits, and Holm-adjusted
+p value. An undefined rho without a declared non-estimable status still fails the
+statistics stage. Resume
 validation applies the same gate to previously written results.
 Resume also rechecks the original coarse and scaling cluster minima, primary
 structural cluster minimum, failed QAOA/pair exclusions, benchmark failure
 fraction, and zero failed targets in the formal validation queue.
 
+The primary coarse solver metric is `statistics.primary_qc_metric` (`log10_qts99`,
+resource-normalized queries-to-solution; see PROTOCOL_AMENDMENTS.md A1). Every
+benchmark row records `ground_hits`, `success_probability_jeffreys`,
+`resource_fixed_units`, `resource_units_per_sample`, `queries_to_solution_99`
+and `log10_qts99`. Time-matched effects measure classical emulation cost of
+QAOA and are descriptive.
 The primary coarse solver inference is restricted to the frozen primary pruning path,
 radius, QAOA depth, optimization-evaluation budget, active-site size, output budget,
 QAOA objective/restarts, and requires the configured minimum independent clusters.
@@ -217,6 +225,7 @@ invalid time budgets, excessive time overruns, or nonfinite analyzed metrics.
 Time-mode diversity metrics are intentionally not analyzed, so their
 nonfinite values are not denominator failures. Scaling inference also rejects
 an incomplete primary denominator.
+The scaling response is QAOA-minus-baseline `log10_qts99`.
 Scaling inference uses the pre-declared active-site levels under the same frozen primary
 radius/depth/evaluation budget and a cluster-aware within-PDB slope analysis with
 log10(feasible configuration count) as the primary complexity axis.

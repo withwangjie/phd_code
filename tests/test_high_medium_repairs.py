@@ -209,7 +209,7 @@ def test_statistics_resume_checks_statistics_subdirectory(tmp_path: Path) -> Non
     qc.mkdir()
     # batch_benchmark_hard_set names matched-time effects "<baseline>_time".
     for mode,baseline in (("outputs","sa"),("time","sa_time")):
-        paired={"effects":[{"baseline":baseline,"metric":"gap","n_clusters":10}],"exclusions":{}}
+        paired={"effects":[{"baseline":baseline,"metric":"log10_qts99","n_clusters":10}],"exclusions":{}}
         (qc/f"statistics_{mode}.json").write_text(json.dumps(paired),encoding="utf-8")
         (qc/f"statistics_{mode}.md").write_text("ok",encoding="utf-8")
     stats=tmp_path/"statistics"
@@ -260,12 +260,12 @@ def test_statistics_resume_checks_statistics_subdirectory(tmp_path: Path) -> Non
     ):
         for valid_mode,valid_baseline in (("outputs","sa"),("time","sa_time")):
             (qc/f"statistics_{valid_mode}.json").write_text(json.dumps({
-                "effects":[{"baseline":valid_baseline,"metric":"gap","n_clusters":10}],
+                "effects":[{"baseline":valid_baseline,"metric":"log10_qts99","n_clusters":10}],
                 "exclusions":{},
             }),encoding="utf-8")
         (qc/f"statistics_{mode}.json").write_text(json.dumps({
             "effects":[{"baseline":"sa" if mode=="outputs" else "sa_time",
-                        "metric":"gap","n_clusters":10}],
+                        "metric":"log10_qts99","n_clusters":10}],
             "exclusions":{reason:1},
         }),encoding="utf-8")
         ok,detail=Orchestrator._validate_completed_stage_artifacts(

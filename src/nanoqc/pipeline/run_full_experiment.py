@@ -144,6 +144,10 @@ def rq5_inference_failures(rq5: dict, min_clusters: int) -> list[str]:
         failures.append(
             f"RQ5 energy-structure inference has {clusters} clusters; requires >= {min_clusters}"
         )
+    # Pre-specified non-estimable outcomes (constant cluster-level difference)
+    # are reported results, not failures; see docs/PROTOCOL_AMENDMENTS.md A2.
+    if str(rq5.get("estimability","")).startswith("not_estimable_"):
+        return failures
     missing=[]
     for field in ("spearman_rho","p_value","ci_low","ci_high","p_holm_confirmatory_family"):
         try:
@@ -523,8 +527,8 @@ def _validate_scientific_config(config: Dict[str, Any]) -> None:
         raise ValueError("statistics.min_scaling_clusters must be >=2")
     if str(stats.get("primary_qc_baseline","sa")) not in ("sa","uniform","greedy"):
         raise ValueError("statistics.primary_qc_baseline must be sa, uniform, or greedy")
-    if str(stats.get("primary_qc_metric","gap")) not in (
-        "gap","hit","ground_probability","low_energy_mass","low_energy_coverage","entropy"
+    if str(stats.get("primary_qc_metric","log10_qts99")) not in (
+        "gap","hit","ground_probability","low_energy_mass","low_energy_coverage","entropy","log10_qts99"
     ):
         raise ValueError("Invalid statistics.primary_qc_metric")
     if int(stats.get("min_primary_clusters",10)) < 2:
@@ -1485,7 +1489,7 @@ class Orchestrator:
                 effect=next((entry for entry in paired.get("effects",[])
                              if entry.get("baseline")==primary_qc_effect_name(
                                  cfg.get("primary_qc_baseline","sa"),mode)
-                             and entry.get("metric")==str(cfg.get("primary_qc_metric","gap"))),None)
+                             and entry.get("metric")==str(cfg.get("primary_qc_metric","log10_qts99"))),None)
                 clusters=0 if effect is None else int(effect.get("n_clusters",0) or 0)
                 if clusters<int(cfg.get("min_qc_clusters",10)):
                     return False,f"{mode} primary coarse contrast has insufficient clusters: {clusters}"
@@ -3305,16 +3309,17 @@ class Orchestrator:
                                     failures.append(
                                         "External VHH paired-statistics denominator is incomplete: "
                                         f"{ext_denominator_failures}")
-                                sa_gap=next(
+                                primary_metric=str(self.config.get("statistics",{}).get("primary_qc_metric","log10_qts99"))
+                                sa_primary=next(
                                     (e for e in stats_payload.get("effects",[])
-                                     if e.get("baseline")=="sa" and e.get("metric")=="gap"),
+                                     if e.get("baseline")=="sa" and e.get("metric")==primary_metric),
                                     None,
                                 )
-                                observed_clusters=0 if sa_gap is None else int(sa_gap.get("n_clusters",0) or 0)
+                                observed_clusters=0 if sa_primary is None else int(sa_primary.get("n_clusters",0) or 0)
                                 required_clusters=int(ext.get("min_clusters",10))
                                 if observed_clusters < required_clusters:
                                     failures.append(
-                                        f"External VHH QAOA-vs-SA gap contrast has {observed_clusters} "
+                                        f"External VHH QAOA-vs-SA {primary_metric} contrast has {observed_clusters} "
                                         f"independent clusters; requires >= {required_clusters}"
                                     )
 
@@ -3480,7 +3485,7 @@ class Orchestrator:
                         (e for e in stats_payload.get("effects",[])
                          if e.get("baseline")==primary_qc_effect_name(
                              cfg.get("primary_qc_baseline","sa"),budget_mode)
-                         and e.get("metric")==str(cfg.get("primary_qc_metric","gap"))),
+                         and e.get("metric")==str(cfg.get("primary_qc_metric","log10_qts99"))),
                         None,
                     )
                     observed_clusters=0 if primary_effect is None else int(
@@ -3489,7 +3494,7 @@ class Orchestrator:
                     if observed_clusters < min_qc_clusters:
                         failures.append(
                             f"{results_dir.name}/{budget_mode}: primary coarse contrast "
-                            f"{cfg.get('primary_qc_baseline','sa')}/{cfg.get('primary_qc_metric','gap')} "
+                            f"{cfg.get('primary_qc_baseline','sa')}/{cfg.get('primary_qc_metric','log10_qts99')} "
                             f"has {observed_clusters} independent clusters; requires >= {min_qc_clusters}")
         scaling_json=self.run_dir/"statistics"/"quantum_scaling_statistics.json"
         scaling_md=self.run_dir/"statistics"/"quantum_scaling_statistics.md"
@@ -3652,6 +3657,7 @@ def save_derived_child(streams: Dict[str, int], stream_name: str, *labels: str) 
 def build_run_manifest(config: Dict[str, Any], repo_root: Path) -> Dict[str, Any]:
     evidence_path=repo_root/DOCS_DIR/"METHODS_EVIDENCE.md"
     results_contract_path=repo_root/DOCS_DIR/"RESULTS_CONTRACT.md"
+    amendments_path=repo_root/DOCS_DIR/"PROTOCOL_AMENDMENTS.md"
     # Fail closed: a missing orchestrated file must never silently drop out of
     # the code fingerprint that resume compares against.
     missing=[name for name in ORCHESTRATED_SCRIPTS if not repo_path(name, repo_root).is_file()]
@@ -3665,6 +3671,10 @@ def build_run_manifest(config: Dict[str, Any], repo_root: Path) -> Dict[str, Any
         methods_evidence_sha256=sha256_of(evidence_path) if evidence_path.is_file() else None,
         results_contract_sha256=(
             sha256_of(results_contract_path) if results_contract_path.is_file() else None
+        ),
+        # Binds each run to the protocol amendments in force when it launched.
+        protocol_amendments_sha256=(
+            sha256_of(amendments_path) if amendments_path.is_file() else None
         ),
         config=config,
     )
@@ -3861,9 +3871,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             if (previous.get("code_sha256") != current["code_sha256"]
                     or previous.get("methods_evidence_sha256") != current["methods_evidence_sha256"]
                     or previous.get("results_contract_sha256") != current["results_contract_sha256"]
+                    or previous.get("protocol_amendments_sha256") != current["protocol_amendments_sha256"]
                     or previous.get("config") != current["config"]):
                 raise SystemExit(
-                    "Refusing to resume: orchestrated code, methods evidence, results contract, or config differs from the original launch. "
+                    "Refusing to resume: orchestrated code, methods evidence, results contract, protocol amendments, or config differs from the original launch. "
                     "Start a fresh run directory for changed code/evidence/config (this repository's established "
                     "rule: a changed source hash, literature-evidence hash, or configuration always gets a new output directory)."
                 )

@@ -132,6 +132,7 @@ if [ "$FRESH_RUN" -eq 1 ]; then
     cp "$SERVER_REPORT" "$RUN_DIR/provenance/server_resolution.json"
     [ -f "${REPO_ROOT}/docs/METHODS_EVIDENCE.md" ] && cp "${REPO_ROOT}/docs/METHODS_EVIDENCE.md" "$RUN_DIR/provenance/METHODS_EVIDENCE.md"
     [ -f "${REPO_ROOT}/docs/RESULTS_CONTRACT.md" ] && cp "${REPO_ROOT}/docs/RESULTS_CONTRACT.md" "$RUN_DIR/provenance/RESULTS_CONTRACT.md"
+    [ -f "${REPO_ROOT}/docs/PROTOCOL_AMENDMENTS.md" ] && cp "${REPO_ROOT}/docs/PROTOCOL_AMENDMENTS.md" "$RUN_DIR/provenance/PROTOCOL_AMENDMENTS.md"
     git rev-parse HEAD > "$RUN_DIR/provenance/git_head.txt" 2>/dev/null || true
     python -m pip freeze > "$RUN_DIR/provenance/pip_freeze.txt" 2>/dev/null || true
     {

@@ -24,15 +24,16 @@ SIGN_FLIP_EXACT_MAX_CLUSTERS = 16
 
 PAIRED_OUTPUT_METRICS = (
     "gap", "hit", "ground_probability", "low_energy_mass",
-    "low_energy_coverage", "entropy",
+    "low_energy_coverage", "entropy", "log10_qts99",
 )
+PAIRED_TIME_METRICS = ("gap", "hit", "log10_qts99")
 
 
 def paired_denominator_failures(exclusions: dict, budget_mode: str) -> dict[str, int]:
     """Return paired-case exclusions that invalidate formal inference.
 
     All reported QAOA-vs-classical contrasts are part of the paired-statistics
-    family. In time mode only gap/hit are analyzed; same-output diversity
+    family. In time mode only gap/hit/log10_qts99 are analyzed; same-output diversity
     metrics are intentionally omitted and therefore are not denominator losses.
     """
     if budget_mode not in ("outputs", "time"):
@@ -59,7 +60,7 @@ def paired_denominator_failures(exclusions: dict, budget_mode: str) -> dict[str,
         else:
             add(name + ":invalid_budget")
             add(name + ":overrun")
-            metrics = ("gap", "hit")
+            metrics = PAIRED_TIME_METRICS
         for metric in metrics:
             add(name + ":" + metric + ":nonfinite")
     return invalid

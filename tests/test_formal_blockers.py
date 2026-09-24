@@ -12,7 +12,7 @@ from nanoqc.pipeline.run_full_experiment import Orchestrator, rq5_inference_fail
 from nanoqc.inference.analyze_structure_recovery import rq5_energy_structure
 
 
-def test_rq5_constant_energy_fails_despite_sufficient_clusters() -> None:
+def test_rq5_identical_solver_energies_are_a_prespecified_nonestimable_result() -> None:
     rows=[]
     clusters={}
     for index in range(12):
@@ -27,8 +27,29 @@ def test_rq5_constant_energy_fails_despite_sufficient_clusters() -> None:
     rq5=rq5_energy_structure(rows,clusters,"qaoa_vs_sa",1000,42)
     assert rq5["n_clusters"]==12
     assert rq5["spearman_rho"] is None
-    failures=rq5_inference_failures(rq5,10)
-    assert any("spearman_rho" in failure for failure in failures)
+    assert rq5["estimability"]=="not_estimable_identical_discrete_energies"
+    assert rq5_inference_failures(rq5,10)==[]
+    # Still gated on the cluster minimum.
+    assert any("clusters" in failure for failure in rq5_inference_failures(rq5,20))
+    # An undefined rho without a declared non-estimable status still fails.
+    incomplete={k:v for k,v in rq5.items() if k!="estimability"}
+    assert any("spearman_rho" in failure for failure in rq5_inference_failures(incomplete,10))
+
+
+def test_rq5_constant_rmsd_difference_is_named() -> None:
+    rows=[]
+    clusters={}
+    for index in range(12):
+        target=f"target_{index}"
+        clusters[target]=f"cluster_{index}"
+        rows.extend([
+            {"target":target,"seed":42,"method":"qaoa",
+             "discrete_energy_kcal":-10-index,"final_rmsd":2.0},
+            {"target":target,"seed":42,"method":"sa",
+             "discrete_energy_kcal":-10,"final_rmsd":2.0},
+        ])
+    rq5=rq5_energy_structure(rows,clusters,"qaoa_vs_sa",1000,42)
+    assert rq5["estimability"]=="not_estimable_constant_rmsd_difference"
 
 
 def test_rq5_finite_inference_passes_gate() -> None:
