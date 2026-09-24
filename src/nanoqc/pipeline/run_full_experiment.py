@@ -935,6 +935,7 @@ class Orchestrator:
             "energy_calibration":[self.run_dir/"calibration"],
             "method_sensitivity":[self.run_dir/"method_sensitivity"],
             "qc_benchmark":[self.run_dir/"qc_benchmark"],
+            "quantum_exploration":[self.run_dir/"quantum_exploration"],
             "structure_experiment":[
                 self.run_dir/"dev_queue",self.run_dir/"validation_queue",
                 *sorted(self.run_dir.glob("dev_queue_solvent_*")),
