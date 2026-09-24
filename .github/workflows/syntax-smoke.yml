@@ -20,5 +20,7 @@ jobs:
           bash -n scripts/formal_preflight.sh
           bash -n scripts/deploy_launch.sh
           bash -n scripts/prepare_external_vhh.sh
+          bash -n scripts/check_status.sh
+          bash -n scripts/repair_openmm_cuda.sh
       - name: Python syntax
         run: python -m compileall -q src/nanoqc tests
