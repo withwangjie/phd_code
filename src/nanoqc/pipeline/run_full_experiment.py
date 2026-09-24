@@ -1781,9 +1781,16 @@ class Orchestrator:
             print("[smoke_check] qc_benchmark input_dir not yet built; skipping that sub-check "
                   "(expected before queue_freeze has run).")
 
+        # Like the benchmark sub-check above, this one reads THIS run's dataset;
+        # without --dataset the pilot falls back to its standalone default path.
+        # smoke_check runs before queue_freeze, so on a fresh run there is
+        # nothing to read yet and the sub-check is skipped rather than failed.
         smoke_target = smoke_cfg.get("recovery_pilot_pdb_id")
+        smoke_manifest = self.dataset_dir() / "graph_manifest.csv"
         smoke_argv = [
             self.venv_python, "-m", module_name("run_real_complex_pilot.py"),
+            "--dataset", str(self.dataset_dir()),
+            "--data-root", str(resolve_path(self.config, self.config["paths"]["data_root"])),
             "--out-dir", str(smoke_dir / "real_complex"),
             "--targets", str(smoke_cfg.get("recovery_pilot_targets", 1)),
             "--sites", str(smoke_cfg.get("recovery_pilot_sites", 6)),
@@ -1796,7 +1803,11 @@ class Orchestrator:
         ]
         if smoke_target:
             smoke_argv += ["--pdb-id", str(smoke_target)]
-        checks.append(("real_complex_smoke", smoke_argv))
+        if smoke_manifest.is_file():
+            checks.append(("real_complex_smoke", smoke_argv))
+        else:
+            print("[smoke_check] dataset graph manifest not yet built; skipping the recovery sub-check "
+                  "(expected before queue_freeze has run).")
 
         failures = []
         for name, argv in checks:
@@ -1804,7 +1815,10 @@ class Orchestrator:
             if returncode != 0:
                 failures.append(f"{name} exited {returncode} (see {log_path})")
         status = "completed" if not failures else "failed"
-        detail = "All smoke checks passed." if not failures else "; ".join(failures)
+        detail = ("; ".join(failures) if failures else
+                  f"All {len(checks)} smoke check(s) passed." if checks else
+                  "No smoke check could run yet: this run has no dataset, which is expected before "
+                  "queue_freeze. Re-run with --only smoke_check --resume <run> to exercise them.")
         atomic_write_json(smoke_dir/"smoke_summary.json",{
             "status":status,
             "checks":[{"name":name,"argv":argv} for name,argv in checks],

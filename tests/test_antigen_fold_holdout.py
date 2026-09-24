@@ -226,3 +226,19 @@ def test_cluster_adequacy_counts_the_holdout_before_any_training(tmp_path):
     cluster_map.write_text(json.dumps({row["pdb_id"]: f"c_{row['pdb_id']}" for row in manifest}))
     ok = full.cluster_adequacy(config, dataset, selected, cluster_map)
     assert ok["adequate"] and ok["holdout_clusters"] == 10
+
+
+def test_smoke_check_reads_this_run_dataset_and_skips_before_queue_freeze():
+    """The recovery sub-check must not fall back to the pilot's standalone default path."""
+    import inspect
+    from nanoqc.pipeline import run_full_experiment as full
+
+    source = inspect.getsource(full.Orchestrator.stage_smoke_check)
+    assert '"--dataset", str(self.dataset_dir())' in source
+    assert '"--data-root"' in source
+    # Skipped, not failed, while the dataset does not exist yet.
+    assert 'if smoke_manifest.is_file():' in source
+    assert "No smoke check could run yet" in source
+    # The pilot's own default is the legacy standalone path that caused the fallback.
+    pilot_default = inspect.getsource(full).count("dataset_clean_500")
+    assert pilot_default == 0
