@@ -445,3 +445,12 @@ def test_structure_stage_never_accepts_stale_outputs_after_current_subprocess_fa
     dev_guard=source.index("if returncode != 0:", source.index("structure_experiment_dev_"))
     dev_summary=source.index('summary_path = out_dir / pdb / "run_summary.json"', source.index("structure_experiment_dev_"))
     assert dev_guard < source.index('if summary_path.is_file():', dev_summary)
+
+
+def test_quantum_exploration_has_results_manifest_root(tmp_path: Path) -> None:
+    orchestrator = Orchestrator.__new__(Orchestrator)
+    orchestrator.run_dir = tmp_path
+    orchestrator.config = {"final_report": {}}
+    assert orchestrator._stage_result_roots("quantum_exploration") == [
+        tmp_path / "quantum_exploration"
+    ]
