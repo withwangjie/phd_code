@@ -669,7 +669,11 @@ def select_chi1_well_representatives(states: Sequence[RotamerState], count: int 
 
 @dataclass(frozen=True)
 class VariableRecord:
-    """Trace one QUBO bit to its residue and rotamer state."""
+    """Trace one QUBO bit to its residue and rotamer state.
+
+    ``node_index``/``original_node_index`` are PyG graph node indices for the
+    coarse builder and -1 for all-atom (mmCIF-derived) candidates.
+    """
 
     variable_index: int
     site_index: int
@@ -2331,9 +2335,13 @@ class AllAtomInterfaceQUBOBuilder:
         q=pairs.copy(); np.fill_diagonal(q,singles-penalty)
         for group in self.site_to_variables.values():
             for a,b in _combinations(group): q[a,b]+=2*penalty
-        records=tuple(VariableRecord(v,c["site"],c["site"],c["site"],c["residue_id"],
+        # All-atom candidates come from an mmCIF, not a PyG graph: there is no
+        # graph node, so node_index/original_node_index are -1 (residue_id is
+        # the identity). prior_probability is the candidate's own Dunbrack
+        # (or legacy-override) prior, not a uniform placeholder.
+        records=tuple(VariableRecord(v,c["site"],-1,-1,c["residue_id"],
             __import__("gemmi").find_tabulated_residue(c["residue_name"]).one_letter_code,
-            list(self.site_to_variables[c["site"]]).index(v),c["angle"],1/len(self.site_to_variables[c["site"]]),float(singles[v]))
+            list(self.site_to_variables[c["site"]]).index(v),c["angle"],float(c["prior_probability"]),float(singles[v]))
             for v,c in enumerate(self.candidates))
         # Vacuum/NoCutoff Amber14 is exactly pair-decomposable over side-chain
         # choices, so the QUBO must reproduce the full energy (1e-4 kcal/mol).

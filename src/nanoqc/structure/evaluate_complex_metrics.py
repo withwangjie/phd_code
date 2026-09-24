@@ -64,9 +64,9 @@ Metric definitions
   error, per residue, exactly as :data:`_SYMMETRIC_SWAPS` in
   ``subgraph_to_qubo.py`` already does for chi1 recovery scoring elsewhere
   in this pipeline. The same table's other entries (ASP/GLU carboxylate
-  O-O, ARG guanidinium N-N, VAL/LEU methyl-pair symmetry) are included for
-  consistency with that established convention; they do not change PHE/TYR
-  behavior and only ever apply if such a residue is itself declared Active.
+  O-O, ARG guanidinium N-N) are genuine symmetries and are treated the same
+  way. VAL CG1/CG2 and LEU CD1/CD2 are prochiral (stereochemically distinct)
+  and are never swapped.
 
 Stereochemical severe-clash filter
 ------------------------------------

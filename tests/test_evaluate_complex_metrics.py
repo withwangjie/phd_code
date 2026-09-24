@@ -150,6 +150,23 @@ class EvaluateComplexMetricsTests(unittest.TestCase):
         result = self._evaluate(ref, pred, active_residues=["H:2"])
         self.assertGreater(result["active_sidechain_rmsd_angstrom"], 0.3)
 
+    def test_val_prochiral_methyl_swap_is_not_corrected(self):
+        # VAL CG1/CG2 are stereochemically distinct; exchanging them is a real
+        # ~120-degree chi1 error and must be scored, not hidden as a symmetry.
+        ref = _make_complex()
+        entry = ref["H:2"]
+        entry["name"] = "VAL"
+        cb = np.array(entry["atoms"]["CB"])
+        entry["atoms"] = {**entry["atoms"],
+                          "CG1": _vec(*(cb + [1.2, 0.8, 0.3])),
+                          "CG2": _vec(*(cb + [-1.1, 0.9, -0.4]))}
+        pred = copy.deepcopy(ref)
+        atoms = pred["H:2"]["atoms"]
+        atoms["CG1"], atoms["CG2"] = atoms["CG2"], atoms["CG1"]
+        result = self._evaluate(ref, pred, active_residues=["H:2"])
+        self.assertGreater(result["active_sidechain_rmsd_angstrom"], 1.0)
+        self.assertFalse(result["active_sidechain_per_residue"][0]["symmetry_corrected"])
+
     def test_unswapped_active_residue_scores_true_error(self):
         ref = _make_complex()
         pred = copy.deepcopy(ref)

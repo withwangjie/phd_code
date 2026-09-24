@@ -167,6 +167,16 @@ def test_split_paths_runs_end_to_end_and_keeps_swapped_roles_together(tmp_path):
     assert not set(train_paths) & set(validation_paths)
     assert (paths[0] in train_paths) == (swapped in train_paths)
 
+
+def test_dataset_isolation_checks_survive_python_optimize_mode():
+    import ast
+    import pytest
+    tree = ast.parse(inspect.getsource(dataset_builder))
+    assert not [node.lineno for node in ast.walk(tree) if isinstance(node, ast.Assert)]
+    with pytest.raises(AssertionError, match="overlap"):
+        dataset_builder._require(False, "train/test overlap")
+    dataset_builder._require(True, "unused")
+
 # ------------------------------------------------ GBN2 / calibration / external
 def test_gbn2_is_a_recorded_pairwise_approximation_and_vacuum_stays_exact():
     build = inspect.getsource(qubo.AllAtomInterfaceQUBOBuilder.build)

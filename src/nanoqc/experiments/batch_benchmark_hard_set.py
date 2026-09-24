@@ -2069,7 +2069,7 @@ def _structure_evaluation_main(argv: Optional[Sequence[str]] = None) -> int:
         report=["# Real-atom structural validation", "",f"Requested: {len(cases)}; successful: {len(rows)}; failed: {failures}.",
             "Validation controls are implementation checks, not structure prediction results.",
             "Alignment uses declared non-Active N/CA/C/O atoms. Active side chains are not independently fitted.",
-            "Symmetry correction covers ASP/GLU/ARG/VAL/LEU/PHE/TYR; aromatic paired swaps are coupled.",
+            "Symmetry correction covers ASP/GLU/ARG/PHE/TYR; aromatic paired swaps are coupled. Prochiral VAL/LEU methyls are not swapped.",
             "Chi1 is a partial torsion metric, not full rotamer recovery. Gly has no side-chain heavy atoms; Ala/Gly lack chi1.",
             "Contact precision/recall concern declared Active-partner residue pairs; partner selection defines the denominator.",
             "Severe proximity counts are geometric <2 A (unless configured) sidechain/partner pairs, not MolProbity clashscore or force-field energy.",

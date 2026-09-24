@@ -412,42 +412,47 @@ def make_graph(row, split, pair=None, family_structure_cluster=''):
     memory_sample()
     return graph
 
+def _require(condition, message):
+    """Explicit validation that, unlike ``assert``, still runs under ``python -O``."""
+    if not condition:
+        raise AssertionError(message)
+
 def validate_graph(g):
     n=g.num_nodes;e=g.edge_index
-    assert isinstance(g,Data) and g.pos.shape==(n,3) and g.pos.dtype==torch.float32
-    assert g.x.shape==(n,21) and g.x.dtype==torch.float32 and e.dtype==torch.long and e.shape[0]==2
-    assert g.backbone_phi.shape==(n,) and g.backbone_psi.shape==(n,)
-    assert torch.all(torch.isfinite(g.backbone_phi)|torch.isnan(g.backbone_phi))
-    assert torch.all(torch.isfinite(g.backbone_psi)|torch.isnan(g.backbone_psi))
-    assert torch.isfinite(g.pos).all() and torch.isfinite(g.x).all()
-    assert torch.all(g.x[:,:20].sum(1)==1) and torch.all((g.x==0)|(g.x==1))
-    assert set(g.x[:,20].tolist())=={0.0,1.0}
-    assert e.shape[1]%2==0 and e.shape[1]>0 and e.min()>=0 and e.max()<n
+    _require(isinstance(g,Data) and g.pos.shape==(n,3) and g.pos.dtype==torch.float32, 'validation failed: isinstance(g,Data) and g.pos.shape==(n,3) and g.pos.dtype==torch.float32')
+    _require(g.x.shape==(n,21) and g.x.dtype==torch.float32 and e.dtype==torch.long and e.shape[0]==2, 'validation failed: g.x.shape==(n,21) and g.x.dtype==torch.float32 and e.dtype==torch.long and e.shape[0]==2')
+    _require(g.backbone_phi.shape==(n,) and g.backbone_psi.shape==(n,), 'validation failed: g.backbone_phi.shape==(n,) and g.backbone_psi.shape==(n,)')
+    _require(torch.all(torch.isfinite(g.backbone_phi)|torch.isnan(g.backbone_phi)), 'validation failed: torch.all(torch.isfinite(g.backbone_phi)|torch.isnan(g.backbone_phi))')
+    _require(torch.all(torch.isfinite(g.backbone_psi)|torch.isnan(g.backbone_psi)), 'validation failed: torch.all(torch.isfinite(g.backbone_psi)|torch.isnan(g.backbone_psi))')
+    _require(torch.isfinite(g.pos).all() and torch.isfinite(g.x).all(), 'validation failed: torch.isfinite(g.pos).all() and torch.isfinite(g.x).all()')
+    _require(torch.all(g.x[:,:20].sum(1)==1) and torch.all((g.x==0)|(g.x==1)), 'validation failed: torch.all(g.x[:,:20].sum(1)==1) and torch.all((g.x==0)|(g.x==1))')
+    _require(set(g.x[:,20].tolist())=={0.0,1.0}, 'validation failed: set(g.x[:,20].tolist())=={0.0,1.0}')
+    _require(e.shape[1]%2==0 and e.shape[1]>0 and e.min()>=0 and e.max()<n, 'validation failed: e.shape[1]%2==0 and e.shape[1]>0 and e.min()>=0 and e.max()<n')
     m=e.shape[1]//2
-    assert torch.equal(e[:,:m].flip(0),e[:,m:]) and torch.all(e[0]!=e[1])
+    _require(torch.equal(e[:,:m].flip(0),e[:,m:]) and torch.all(e[0]!=e[1]), 'validation failed: torch.equal(e[:,:m].flip(0),e[:,m:]) and torch.all(e[0]!=e[1])')
     first=e[:,:m].numpy();codes=first[0]*n+first[1]
-    assert len(np.unique(codes))==m
+    _require(len(np.unique(codes))==m, 'validation failed: len(np.unique(codes))==m')
     pos=g.pos.numpy().astype(np.float64);d=pos[first[0]]-pos[first[1]];d2=np.einsum('ij,ij->i',d,d)
     chain=g.node_chain_id.numpy();group=g.x[:,-1].numpy()
     same_chain=chain[first[0]]==chain[first[1]]
     cross_partner=group[first[0]]!=group[first[1]]
-    assert np.all(same_chain|cross_partner)
+    _require(np.all(same_chain|cross_partner), 'validation failed: np.all(same_chain|cross_partner)')
     ca_cutoff=float(getattr(g,'intra_chain_ca_cutoff_angstrom',0.0))
     label_cutoff=float(getattr(g,'interface_label_cutoff_angstrom',0.0))
     min_interface=int(getattr(g,'min_interface_residues',0))
-    assert ca_cutoff>0 and label_cutoff>0 and min_interface>0
-    assert np.all(d2[same_chain]<ca_cutoff**2)
-    assert getattr(g,'edge_policy','')=='intra_chain_ca_radius_plus_cross_partner_knn'
-    assert getattr(g,'label_policy','')=='cross_partner_heavy_atom_cutoff'
-    assert int(getattr(g,'cross_partner_knn_k',0))>0
+    _require(ca_cutoff>0 and label_cutoff>0 and min_interface>0, 'validation failed: ca_cutoff>0 and label_cutoff>0 and min_interface>0')
+    _require(np.all(d2[same_chain]<ca_cutoff**2), 'validation failed: np.all(d2[same_chain]<ca_cutoff**2)')
+    _require(getattr(g,'edge_policy','')=='intra_chain_ca_radius_plus_cross_partner_knn', "validation failed: getattr(g,'edge_policy','')=='intra_chain_ca_radius_plus_cross_partner_knn'")
+    _require(getattr(g,'label_policy','')=='cross_partner_heavy_atom_cutoff', "validation failed: getattr(g,'label_policy','')=='cross_partner_heavy_atom_cutoff'")
+    _require(int(getattr(g,'cross_partner_knn_k',0))>0, "validation failed: int(getattr(g,'cross_partner_knn_k',0))>0")
     for node in range(n):
         mask=(first[0]==node)|(first[1]==node)
-        assert np.any(mask & cross_partner), f'node {node} lacks threshold-independent cross-partner context'
-    assert len(getattr(g,'vhh_sequences',[]))>=1 and len(getattr(g,'antigen_sequences',[]))>=1
-    assert g.num_interface_residues>=min_interface and len(g.cdr3_seq)==g.cdr3_len
+        _require(np.any(mask & cross_partner), f'node {node} lacks threshold-independent cross-partner context')
+    _require(len(getattr(g,'vhh_sequences',[]))>=1 and len(getattr(g,'antigen_sequences',[]))>=1, "validation failed: len(getattr(g,'vhh_sequences',[]))>=1 and len(getattr(g,'antigen_sequences',[]))>=1")
+    _require(g.num_interface_residues>=min_interface and len(g.cdr3_seq)==g.cdr3_len, 'validation failed: g.num_interface_residues>=min_interface and len(g.cdr3_seq)==g.cdr3_len')
     if getattr(g,'split','') in ('train','test_snac_hard'):
-        assert str(getattr(g,'family_structure_cluster','')), 'formal VHH graph lacks family/structure cluster ID'
-    assert g.validate(raise_on_error=True)
+        _require(str(getattr(g,'family_structure_cluster','')), 'formal VHH graph lacks family/structure cluster ID')
+    _require(g.validate(raise_on_error=True), 'validation failed: g.validate(raise_on_error=True)')
 
 def save_graph(row, split, output, pair=None, cluster_id='', family_structure_cluster=''):
     try:
@@ -858,18 +863,18 @@ def main():
         train_records=retained_train
         if not train_records:
             raise ValueError('Layered train/test homology isolation removed every training graph')
-        assert not ({r['pdb_id'] for r in train_records}&(dbids|hardids))
-        assert not (dbids&hardids)
+        _require(not ({r['pdb_id'] for r in train_records}&(dbids|hardids)), "validation failed: not ({r['pdb_id'] for r in train_records}&(dbids|hardids))")
+        _require(not (dbids&hardids), 'validation failed: not (dbids&hardids)')
         maxhard=max_pair_similarity(hardseqs)
-        assert maxhard<CDR_H3_IDENTITY_THRESHOLD
+        _require(maxhard<CDR_H3_IDENTITY_THRESHOLD, 'validation failed: maxhard<CDR_H3_IDENTITY_THRESHOLD')
         maxtrain=max((seqsim(s,t) for r in train_records for s in known_train_cdr[r['source_id']] for t in hardseqs),default=0)
-        assert maxtrain<CDR_H3_IDENTITY_THRESHOLD
-        assert len(list((output/'graphs').rglob('*.pt')))==len(manifest)
-        assert sum(r['split']=='test_db55' for r in manifest)==248
+        _require(maxtrain<CDR_H3_IDENTITY_THRESHOLD, 'validation failed: maxtrain<CDR_H3_IDENTITY_THRESHOLD')
+        _require(len(list((output/'graphs').rglob('*.pt')))==len(manifest), "validation failed: len(list((output/'graphs').rglob('*.pt')))==len(manifest)")
+        _require(sum(r['split']=='test_db55' for r in manifest)==248, "validation failed: sum(r['split']=='test_db55' for r in manifest)==248")
         for split in ['train','test_db55','test_snac_hard']:
             sample_rows=[r for r in manifest if r['split']==split][:2]
             sample=[torch.load(output/r['path'],weights_only=False,map_location='cpu') for r in sample_rows]
-            batched=Batch.from_data_list(sample);assert batched.num_nodes==sum(g.num_nodes for g in sample)
+            batched=Batch.from_data_list(sample);_require(batched.num_nodes==sum(g.num_nodes for g in sample),f'PyG batch read-back failed for split {split}')
         summary.update(validation=dict(all_graphs_read_back=True,db55_count_248=True,pdb_split_overlap=0,
             hard_max_pair_identity=maxhard,known_train_hard_max_identity=maxtrain,
             hard_layered_pair_max=hard_pair_max,train_hard_layered_cross_max=cross_max,

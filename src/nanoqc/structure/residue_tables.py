@@ -28,10 +28,13 @@ SIDECHAIN_HEAVY_ATOMS: Dict[str, Tuple[str, ...]] = {
 
 # Atom-name pairs exchanged together by a physically valid local symmetry
 # (for PHE/TYR: the single 180-degree ring flip moving CD1<->CD2 and CE1<->CE2).
+# VAL CG1/CG2 and LEU CD1/CD2 are prochiral, stereochemically distinct methyls
+# (IUPAC naming fixes which is which), so they are deliberately NOT swapped:
+# doing so would both lower side-chain RMSD and let a ~120-degree chi error
+# count as recovered.
 SYMMETRIC_SWAPS: Dict[str, Tuple[Tuple[str, str], ...]] = {
     "ASP": (("OD1", "OD2"),), "GLU": (("OE1", "OE2"),),
-    "ARG": (("NH1", "NH2"),), "VAL": (("CG1", "CG2"),),
-    "LEU": (("CD1", "CD2"),),
+    "ARG": (("NH1", "NH2"),),
     "PHE": (("CD1", "CD2"), ("CE1", "CE2")),
     "TYR": (("CD1", "CD2"), ("CE1", "CE2")),
 }

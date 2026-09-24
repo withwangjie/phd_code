@@ -249,10 +249,10 @@ REF_QUBO_SIDECHAIN_NAMES = {
 
 
 # --- verbatim from subgraph_to_qubo.py @ 54858e2: _SYMMETRIC_SWAPS
+# (amended: prochiral VAL CG1/CG2 and LEU CD1/CD2 are no longer treated as symmetric)
 REF_QUBO_SYMMETRIC_SWAPS = {
     "ASP": [("OD1", "OD2")], "GLU": [("OE1", "OE2")],
-    "ARG": [("NH1", "NH2")], "VAL": [("CG1", "CG2")],
-    "LEU": [("CD1", "CD2")],
+    "ARG": [("NH1", "NH2")],
     "PHE": [("CD1", "CD2"), ("CE1", "CE2")],
     "TYR": [("CD1", "CD2"), ("CE1", "CE2")],
 }
@@ -295,10 +295,10 @@ REF_EVAL_SIDECHAIN_HEAVY_ATOMS: Dict[str, Tuple[str, ...]] = {
 
 
 # --- verbatim from evaluate_complex_metrics.py @ 54858e2: _SYMMETRIC_SWAPS
+# (amended: prochiral VAL CG1/CG2 and LEU CD1/CD2 are no longer treated as symmetric)
 REF_EVAL_SYMMETRIC_SWAPS: Dict[str, Tuple[Tuple[str, str], ...]] = {
     "ASP": (("OD1", "OD2"),), "GLU": (("OE1", "OE2"),),
-    "ARG": (("NH1", "NH2"),), "VAL": (("CG1", "CG2"),),
-    "LEU": (("CD1", "CD2"),),
+    "ARG": (("NH1", "NH2"),),
     "PHE": (("CD1", "CD2"), ("CE1", "CE2")),
     "TYR": (("CD1", "CD2"), ("CE1", "CE2")),
 }
