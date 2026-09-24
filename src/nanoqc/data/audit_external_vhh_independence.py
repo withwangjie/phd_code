@@ -85,10 +85,25 @@ def source_structure_for_pdb(source_dir: Path, pdb: str) -> Path:
 
 
 def verify_graph_against_source(graph: object, source: Path) -> None:
-    """Bind every encoded residue and CA position to an independent raw file."""
+    """Bind every encoded residue and CA position to an independent raw file.
+
+    Graphs built from the biological assembly (``structure_source`` starting
+    with ``biological_assembly:``) are checked against the same assembly
+    rebuilt from the raw file, so symmetry-generated chains (``A-2``) are
+    verified rather than reported as absent.
+    """
     structure=gemmi.read_structure(str(source))
     if not len(structure):
         raise ValueError(f"Raw structure has no model: {source}")
+    while len(structure)>1:
+        del structure[1]
+    recorded=str(getattr(graph,"structure_source","") or "")
+    if recorded.startswith("biological_assembly:"):
+        from nanoqc.data.audit_all_datasets import STRUCTURE_SOURCE_KEY, biological_assembly_structure
+        structure=biological_assembly_structure(structure)
+        rebuilt=dict(structure.info).get(STRUCTURE_SOURCE_KEY)
+        if rebuilt!=recorded:
+            raise ValueError(f"Assembly choice {rebuilt} differs from graph provenance {recorded}: {source}")
     residues={}
     for chain in structure[0]:
         for residue in chain:
@@ -146,6 +161,54 @@ def side_max(left: list[str], right: list[str], coverage: float = 0.0) -> tuple[
     return best
 
 
+def max_training_identities(ext: dict, train: list[dict], antigen_min_length_coverage: float) -> dict:
+    """Largest layered identities of one external complex against every training graph.
+
+    External partner roles are verified (CDR-H3 inside the encoded VHH chain);
+    training complexes without anchored roles are also compared with their
+    partners swapped (see sequence_identity.partner_orientations).
+    """
+    max_vhh=0.0;max_cdr=0.0;max_ag=0.0;ag_cov=0.0
+    for tr in train:
+        for ev,tv,ea,ta in partner_orientations(
+                ext["vhh"],ext["antigen"],True,
+                tr["vhh"],tr["antigen"],partner_roles_anchored(tr["subset_source"])):
+            value,_=side_max(ev,tv)
+            max_vhh=max(max_vhh,value)
+            value,cov=side_max(ea,ta,antigen_min_length_coverage)
+            if value>max_ag:
+                max_ag=value;ag_cov=cov
+        value,_=identity(ext["cdr_h3"],tr["cdr_h3"]) if ext["cdr_h3"] and tr["cdr_h3"] else (0.0,0.0)
+        max_cdr=max(max_cdr,value)
+    return dict(max_vhh_full_chain_identity=max_vhh,max_cdr_h3_loop_identity=max_cdr,
+                max_antigen_full_chain_identity=max_ag,antigen_length_coverage=ag_cov)
+
+
+def load_training_sequences(training_dataset: Path) -> list[dict]:
+    """Sequence records of every hash-verified training graph in a frozen dataset."""
+    manifest_path=training_dataset/"graph_manifest.json"
+    graph_manifest=json.loads(manifest_path.read_text(encoding="utf-8"))
+    train_rows=[row for row in graph_manifest if row.get("split")=="train"]
+    if not train_rows:
+        raise ValueError("No training rows in graph manifest")
+    train=[]
+    root=training_dataset.resolve()
+    for row in train_rows:
+        relative=row.get("path")
+        if not isinstance(relative,str) or not relative or Path(relative).is_absolute():
+            raise ValueError(f"Training graph manifest path must be relative: {relative!r}")
+        path=(root/relative.replace("\\","/")).resolve()
+        if not path.is_relative_to(root):
+            raise ValueError(f"Training graph manifest path escapes dataset: {relative}")
+        if not path.is_file() or sha256(path)!=row["sha256"]:
+            raise ValueError(f"Training graph missing/hash mismatch: {path}")
+        item=graph_sequences(path)
+        if item["pdb_id"]!=str(row.get("pdb_id","")).lower():
+            raise ValueError(f"Training graph PDB ID differs from frozen manifest: {path}")
+        train.append(item)
+    return train
+
+
 def graph_sequences(path: Path, source_dir: Path | None = None) -> dict:
     digest=sha256(path)
     graph=load_graph(path)
@@ -200,26 +263,8 @@ def main() -> int:
     if not cluster_map:
         raise ValueError("Cluster map is empty")
 
-    graph_manifest=json.loads(manifest_path.read_text(encoding="utf-8"))
-    train_rows=[row for row in graph_manifest if row.get("split")=="train"]
-    if not train_rows:
-        raise ValueError("No training rows in graph manifest")
-    train=[]
-    train_pdb=set()
-    for row in train_rows:
-        relative=row.get("path")
-        if not isinstance(relative,str) or not relative or Path(relative).is_absolute():
-            raise ValueError(f"Training graph manifest path must be relative: {relative!r}")
-        root=args.training_dataset.resolve()
-        path=(root/relative.replace("\\","/")).resolve()
-        if not path.is_relative_to(root):
-            raise ValueError(f"Training graph manifest path escapes dataset: {relative}")
-        if not path.is_file() or sha256(path)!=row["sha256"]:
-            raise ValueError(f"Training graph missing/hash mismatch: {path}")
-        item=graph_sequences(path)
-        if item["pdb_id"]!=str(row.get("pdb_id","")).lower():
-            raise ValueError(f"Training graph PDB ID differs from frozen manifest: {path}")
-        train.append(item);train_pdb.add(item["pdb_id"])
+    train=load_training_sequences(args.training_dataset)
+    train_pdb={item["pdb_id"] for item in train}
     missing_train=sorted(train_pdb-set(cluster_map))
     if missing_train:
         raise ValueError(f"Cluster map missing training PDBs: {missing_train[:20]}")
@@ -240,21 +285,11 @@ def main() -> int:
         external_pdbs.add(pdb)
         if pdb not in cluster_map:
             raise ValueError(f"Cluster map missing external PDB {pdb}")
-        max_vhh=0.0;max_cdr=0.0;max_ag=0.0;ag_cov=0.0
-        for tr in train:
-            # External roles are verified (CDR-H3 inside the encoded VHH chain);
-            # training complexes without anchored roles are also compared with
-            # their partners swapped (see sequence_identity.partner_orientations).
-            for ev,tv,ea,ta in partner_orientations(
-                    ext["vhh"],ext["antigen"],True,
-                    tr["vhh"],tr["antigen"],partner_roles_anchored(tr["subset_source"])):
-                value,_=side_max(ev,tv)
-                max_vhh=max(max_vhh,value)
-                value,cov=side_max(ea,ta,args.antigen_min_length_coverage)
-                if value>max_ag:
-                    max_ag=value;ag_cov=cov
-            value,_=identity(ext["cdr_h3"],tr["cdr_h3"]) if ext["cdr_h3"] and tr["cdr_h3"] else (0.0,0.0)
-            max_cdr=max(max_cdr,value)
+        overlap=max_training_identities(ext,train,args.antigen_min_length_coverage)
+        max_vhh=overlap["max_vhh_full_chain_identity"]
+        max_cdr=overlap["max_cdr_h3_loop_identity"]
+        max_ag=overlap["max_antigen_full_chain_identity"]
+        ag_cov=overlap["antigen_length_coverage"]
         family_overlap=cluster_map[pdb] in train_clusters
         audits.append(dict(
             pdb_id=pdb,

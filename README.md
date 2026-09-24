@@ -232,6 +232,33 @@ the same family/structure cluster map, then writes a per-target auditable
 manifest. The external-validation stage verifies that manifest before running
 the frozen model.
 
+### Preparing the external VHH set
+
+External complexes are built with the training-graph definition (graph v1.8,
+biological assembly, 7.5 A SAbDab antigen rule, the same labels and edges):
+
+```bash
+# 1. Select candidates from the SAbDab nanobody summary and count independent groups.
+python -m nanoqc.data.select_external_vhh_candidates \
+    --sabdab-summary sabdab_nano_summary_all.tsv --released-after 2026-01-01 \
+    --structures-dir data/external_vhh/structures --download \
+    --exclude-pdbs study_pdb_ids.txt [--training-dataset <dataset>] [--cluster-map <map>] \
+    --out-dir data/external_vhh/selection
+# 2. Build graphs for the selected entries.
+python -m nanoqc.data.build_external_vhh_graphs \
+    --candidates data/external_vhh/selection/candidates.json \
+    --structures-dir data/external_vhh/structures --out-dir data/external_vhh/graphs
+```
+
+Selection applies the training `sabdab_vhh` rules: exactly one VHH chain, no
+VH/VL chain, a protein or peptide antigen, resolution <= 3.0 A, and the
+audit's interface quality gates. It then groups the complexes by the layered
+homology rule and reports whether `min_clusters` independent groups exist.
+CDRs use ANARCI IMGT numbering when ANARCI is installed. Otherwise CDR-H3 is
+located between the IMGT 104 cysteine and 118 tryptophan motifs, and the
+paratope falls back to the whole VHH chain. Every formal run re-certifies
+independence against its own frozen training set and cluster map.
+
 The primary all-atom protocol uses vacuum/NoCutoff Amber14 packing energy.
 GBN2 energies are not exactly pair-decomposable (Born radii depend on every atom), so
 the GBN2 QUBO is a recorded pairwise approximation (`pair_decomposition`,
@@ -250,7 +277,8 @@ scripts/   deploy_launch.sh, run_full_experiment.sh, formal_preflight.sh, check_
 src/nanoqc/
   pipeline/     run_full_experiment.py (end-to-end orchestrator), resolve_server_config.py
   data/         audit_all_datasets.py, build_final_pyg_dataset.py (audited graphs + split),
-                build_independence_cluster_map.py, audit_external_vhh_independence.py, sequence_identity.py
+                build_independence_cluster_map.py, audit_external_vhh_independence.py, sequence_identity.py,
+                select_external_vhh_candidates.py, build_external_vhh_graphs.py (external VHH set)
   model/        model_egnn_pruning.py (interface scoring, Active-site selection, checkpoint loading),
                 train_egnn_pruning.py (leakage-controlled training),
                 egnn_seed_sensitivity.py (development-only seed variance)

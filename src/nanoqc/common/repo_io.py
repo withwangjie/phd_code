@@ -37,6 +37,8 @@ MODULE_LAYOUT = {
     "build_final_pyg_dataset.py": "src/nanoqc/data/build_final_pyg_dataset.py",
     "build_independence_cluster_map.py": "src/nanoqc/data/build_independence_cluster_map.py",
     "audit_external_vhh_independence.py": "src/nanoqc/data/audit_external_vhh_independence.py",
+    "build_external_vhh_graphs.py": "src/nanoqc/data/build_external_vhh_graphs.py",
+    "select_external_vhh_candidates.py": "src/nanoqc/data/select_external_vhh_candidates.py",
     "sequence_identity.py": "src/nanoqc/data/sequence_identity.py",
     "safe_graph_load.py": "src/nanoqc/data/safe_graph_load.py",
     "model_egnn_pruning.py": "src/nanoqc/model/model_egnn_pruning.py",

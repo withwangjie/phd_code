@@ -124,7 +124,8 @@ def test_partner_orientations_cover_swapped_unanchored_roles():
 def test_every_homology_consumer_uses_partner_orientations():
     assert "partner_orientations" in inspect.getsource(dataset_builder.layered_graph_homology)
     assert "partner_orientations" in inspect.getsource(train.split_paths)
-    assert "partner_orientations" in inspect.getsource(external_audit.main)
+    assert "partner_orientations" in inspect.getsource(external_audit.max_training_identities)
+    assert "max_training_identities" in inspect.getsource(external_audit.main)
     assert "partner_roles_anchored" in inspect.getsource(pilot.main)
 
 

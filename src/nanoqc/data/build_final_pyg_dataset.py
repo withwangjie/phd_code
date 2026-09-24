@@ -392,8 +392,10 @@ def select_contacting_partner_chains(chains,row,meta):
               antigen_contact_basis=basis,dropped_chains=dropped)
     return kept,meta
 
-def make_graph(row, split, pair=None, family_structure_cluster=''):
-    chains=extract(row,pair);memory_sample()
+def make_graph(row, split, pair=None, family_structure_cluster='', chains=None):
+    # ``chains`` lets callers with their own complex definition (external VHH
+    # graphs) reuse the identical labelling, edge and validation code.
+    chains=extract(row,pair) if chains is None else chains;memory_sample()
     complex_meta=chains[0].get('complex_meta',dict(
         structure_source='db55_bound_receptor_ligand_files',
         antigen_chain_rule='DB5.5 bound receptor/ligand files as paired by the benchmark',
