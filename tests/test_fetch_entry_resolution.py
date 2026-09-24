@@ -6,6 +6,7 @@ The fixture is the verbatim body RCSB returned for
 from __future__ import annotations
 
 import io
+import os
 import json
 import urllib.error
 
@@ -226,3 +227,17 @@ def test_with_no_arguments_it_finds_the_latest_audit_and_the_data_root(tmp_path,
 def test_the_data_root_follows_the_configured_one(tmp_path, monkeypatch):
     monkeypatch.setenv("QP_DATA_ROOT", str(tmp_path / "elsewhere"))
     assert fetch.data_root() == tmp_path / "elsewhere"
+
+
+def test_it_runs_as_a_plain_file_from_any_directory(tmp_path):
+    """python .../fetch_entry_resolution.py works without PYTHONPATH or an install."""
+    import subprocess
+    import sys as _sys
+    from pathlib import Path as _P
+
+    script = _P(fetch.__file__).resolve()
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    done = subprocess.run([_sys.executable, str(script), "--help"], cwd=str(script.parent),
+                          capture_output=True, text=True, env=env)
+    assert done.returncode == 0, done.stderr
+    assert "entry_resolution.tsv" in done.stdout

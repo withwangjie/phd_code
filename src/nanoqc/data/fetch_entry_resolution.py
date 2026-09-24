@@ -37,10 +37,15 @@ import time
 import urllib.error
 import urllib.request
 import os
+import sys
 from pathlib import Path
 from typing import Iterable, Optional, Sequence
 
-from nanoqc.common.repo_io import REPO_ROOT
+try:
+    from nanoqc.common.repo_io import REPO_ROOT
+except ModuleNotFoundError:  # run as a plain file: python src/nanoqc/data/fetch_entry_resolution.py
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from nanoqc.common.repo_io import REPO_ROOT
 
 ENDPOINT = "https://data.rcsb.org/graphql"
 # Verified response shape:
