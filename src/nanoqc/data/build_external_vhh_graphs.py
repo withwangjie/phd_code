@@ -52,19 +52,23 @@ CDR3_MAX_LENGTH = 40
 
 
 def cdr3_by_motif(sequence: str) -> str:
-    """CDR-H3 (IMGT 105-117) between the FR3 cysteine and the FR4 tryptophan.
+    """CDR-H3 (IMGT 105-117) of the first variable domain.
 
-    Uses the last W-G-x-G motif and the earliest FR3 motif whose cysteine lies
-    3..CDR3_MAX_LENGTH residues before it; raises when no such pair exists.
+    Takes the earliest FR3 Y-[YFHW]-C motif that has a W-G-x-G motif
+    3..CDR3_MAX_LENGTH residues after its cysteine, and the last such FR4
+    motif in that window. A W-G-x-G inside CDR-H3 therefore does not shorten
+    the loop, and a second domain of a tandem construct lies outside the
+    window (ANARCI likewise reports the first domain). Raises when no pair
+    exists.
     """
     ends = [m.start() for m in _FR4_MOTIF.finditer(sequence)]
     if not ends:
         raise ValueError("no FR4 W-G-x-G motif; CDR-H3 cannot be located")
-    end = ends[-1]
     for match in _FR3_MOTIF.finditer(sequence):
         start = match.end()  # first residue after the conserved cysteine
-        if 3 <= end - start <= CDR3_MAX_LENGTH:
-            return sequence[start:end]
+        window = [end for end in ends if 3 <= end - start <= CDR3_MAX_LENGTH]
+        if window:
+            return sequence[start:max(window)]
     raise ValueError("no FR3 cysteine motif within CDR-H3 range of FR4; CDR-H3 cannot be located")
 
 
@@ -232,11 +236,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--structures-dir", type=Path, required=True,
                         help="Raw <pdb>.cif/.pdb files (the formal external source_structure_dir)")
     parser.add_argument("--out-dir", type=Path, required=True, help="Graph directory (formal graph_dir)")
+    parser.add_argument("--representatives-only", action="store_true",
+                        help="Build one graph per independent group (the final formal set)")
     args = parser.parse_args(argv)
 
     from nanoqc.data.audit_external_vhh_independence import source_structure_for_pdb
     payload = json.loads(args.candidates.read_text(encoding="utf-8"))
-    selected = [row for row in payload["candidates"] if row.get("selected")]
+    selected = [row for row in payload["candidates"] if row.get("selected")
+                and (row.get("representative", True) or not args.representatives_only)]
     if not selected:
         raise ValueError("No selected candidates in the candidate file")
     args.out_dir.mkdir(parents=True, exist_ok=True)

@@ -197,6 +197,10 @@ they were logged later.
   - **CDR-H3:** IMGT 105-117, like the training SNAC annotation. ANARCI is
     used when installed; otherwise CDR-H3 comes from the IMGT 104/118 anchor
     motifs, and its agreement with the training annotation is reported.
+  - **Redundancy:** the final set keeps one representative per layered
+    homology group (the largest interface, then PDB ID), like the hard-set
+    de-redundancy. Complexes sharing a VHH are therefore not counted as
+    independent when Foldseek separates their antigens (e.g. peptides).
   - **Adequacy:** the number of independent groups is checked against
     `min_clusters` before any run.
   - The formal external audit now verifies assembly-built graphs against the
@@ -224,8 +228,14 @@ they were logged later.
     C23/W41/C104 anchors plus the J-region [WF]GxG motif. The method is
     recorded for every chain.
   - **DB5.5** uses bound files only.
+  - **Annotated antigens:** chains annotated as antigen (SNAC `Chain_Ag`,
+    SAbDab antigen chains) are always kept, so the detector cannot remove an
+    Ig-superfamily antigen.
+  - **Search options:** exhaustive search with E <= 10, which bounds the
+    output instead of writing all N^2 pairs.
   - **A PDB with no antigen chain** gets an explicit self row and is listed
-    as `self_only`.
+    as `self_only`. This also covers files the audit could not parse, which
+    never become graphs.
   - **A searched PDB with no Foldseek hit** stops the build unless the
     investigator explicitly allows it.
 - **Why:** structure clusters are meant to separate antigen families. VHH,

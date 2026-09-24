@@ -9,7 +9,9 @@ non-antibody protein chains, runs an all-versus-all Foldseek search and writes
 ``query<TAB>target<TAB>qtmscore`` with the header ``build_independence_cluster_map.py``
 requires.
 
-Antibody chains are recognised by, in order:
+A chain annotated as antigen (SNAC ``Chain_Ag``, SAbDab antigen chains of
+external entries) is always kept. Otherwise antibody chains are recognised
+by, in order:
   1. SNAC/SAbDab annotation: the chain sequence matches an annotated VH, VL,
      VHH or TCR sequence of that PDB (the audit's rule: observed >= 70
      residues, >= 70% of the annotated length, subsequence);
@@ -45,7 +47,10 @@ from nanoqc.common.repo_io import sha256_file as sha256
 from nanoqc.data.build_independence_cluster_map import norm_id
 
 MIN_CHAIN_LENGTH = 20
-FOLDSEEK_ARGS = ("--exhaustive-search", "1", "-e", "inf")
+# Exhaustive all-versus-all; E <= 10 bounds the output (-e inf would write
+# every pair, N^2 rows). Pairs with TM-score >= 0.5 are expected to have
+# E <= 10; override with --foldseek-arg when needed.
+FOLDSEEK_ARGS = ("--exhaustive-search", "1", "-e", "10")
 _FR4 = re.compile(r"[WF]G.G")
 
 
@@ -87,8 +92,21 @@ def annotated_antibody(pdb: str, sequence: str) -> bool:
                for record in audit.PDB_ANNOTATIONS.get(pdb.upper(), []))
 
 
+def annotated_antigen_chains(source: dict) -> set[str]:
+    """SNAC ``Chain_Ag`` of a curated complex file, found the way the audit finds it."""
+    name = Path(source.get("member") or source["path"]).stem
+    parent = Path(source["path"]).parent
+    row = audit.ANNOTATIONS.get((str(parent), name))
+    if row is None and not source.get("member"):
+        row = audit.ANNOTATIONS.get((str(parent.parent), name))
+    return set(audit.literal(row.get("Chain_Ag"), [])) if row else set()
+
+
 def audit_sources(audit_jsonl: Path) -> dict[str, list[dict]]:
-    """Audited structure files per four-character PDB ID (DB5.5: bound files only)."""
+    """Readable audited structure files per four-character PDB ID (DB5.5: bound files only).
+
+    IDs whose every file failed the audit's parse map to an empty list.
+    """
     sources: dict[str, list[dict]] = defaultdict(list)
     for line in audit_jsonl.read_text(encoding="utf-8").splitlines():
         if not line.strip():
@@ -100,20 +118,29 @@ def audit_sources(audit_jsonl: Path) -> dict[str, list[dict]]:
         name = Path(row.get("member") or row["path"]).name.lower()
         if row.get("subset") == "test_db55" and "_b." not in name:
             continue
+        sources.setdefault(pdb, [])
+        if not row.get("valid", True):
+            continue
         sources[pdb].append(dict(path=row["path"], member=row.get("member", ""), subset=row.get("subset", ""),
                                  id=row.get("id", "")))
     return sources
 
 
 def antigen_structure(pdb: str, sources: Iterable[dict], sabdab_antibody_chains: Iterable[str],
-                      min_length: int) -> tuple[Optional[gemmi.Structure], dict]:
+                      min_length: int, sabdab_antigen_chains: Iterable[str] = ()) -> tuple[Optional[gemmi.Structure], dict]:
     """One structure holding the PDB's non-antibody chains, and the per-chain record."""
     sabdab = set(sabdab_antibody_chains)
     model = gemmi.Model("1")
     kept_sequences: dict[str, str] = {}
     chains = []
+    unreadable = []
     for source in sources:
-        structure, _ = audit._read_raw_structure(dict(source))
+        try:
+            structure, _ = audit._read_raw_structure(dict(source))
+        except Exception as exc:
+            unreadable.append(dict(source=source.get("id") or source["path"], error=f"{type(exc).__name__}: {exc}"))
+            continue
+        antigen_annotated = annotated_antigen_chains(source) | set(sabdab_antigen_chains)
         while len(structure) > 1:
             del structure[1]
         structure.setup_entities()
@@ -123,7 +150,9 @@ def antigen_structure(pdb: str, sources: Iterable[dict], sabdab_antibody_chains:
             if not sequence:
                 continue
             record = dict(source=source.get("id") or source["path"], chain=chain.name, length=len(sequence))
-            if annotated_antibody(pdb, sequence):
+            if chain.name in antigen_annotated:
+                record.update(role="antigen", method="antigen_annotation")
+            elif annotated_antibody(pdb, sequence):
                 record.update(role="antibody", method="annotation")
             elif chain.name in sabdab:
                 record.update(role="antibody", method="sabdab_chain_id")
@@ -149,11 +178,11 @@ def antigen_structure(pdb: str, sources: Iterable[dict], sabdab_antibody_chains:
                     record["written_as"] = name
             chains.append(record)
     if not len(model):
-        return None, dict(chains=chains)
+        return None, dict(chains=chains, unreadable=unreadable)
     out = gemmi.Structure()
     out.add_model(model)
     out.setup_entities()
-    return out, dict(chains=chains)
+    return out, dict(chains=chains, unreadable=unreadable)
 
 
 def run_foldseek(foldseek: str, input_dir: Path, work: Path, entries: int, threads: int,
@@ -211,16 +240,21 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     for pdb in universe:
         pdb_sources = list(sources.get(pdb, []))
         antibody_chains: list[str] = []
+        antigen_chains: list[str] = []
         if pdb in external:
             path = source_structure_for_pdb(args.external_structures, pdb)
             pdb_sources = [dict(path=str(path), member="", subset="external_vhh", id=str(path))]
             antibody_chains = list(external[pdb].get("vhh_chains") or [external[pdb]["vhh_chain"]])
-        if not pdb_sources:
+            antigen_chains = list(external[pdb].get("sabdab_antigen_chains") or [])
+        if pdb not in sources and pdb not in external:
             raise SystemExit(f"No audited or external structure for universe PDB {pdb}")
-        structure, record = antigen_structure(pdb, pdb_sources, antibody_chains, args.min_chain_length)
+        structure, record = antigen_structure(pdb, pdb_sources, antibody_chains, args.min_chain_length,
+                                              antigen_chains)
         if structure is None:
             self_only.append(pdb)
-            record["self_only_reason"] = "no_antigen_chain_for_structure_search"
+            # Unparseable files never become graphs; they are in the universe only for coverage.
+            record["self_only_reason"] = ("no_readable_structure" if not record["chains"]
+                                          else "no_antigen_chain_for_structure_search")
         else:
             structure.make_mmcif_document().write_file(str(input_dir / f"{pdb}.cif"))
             entries += len(structure[0])

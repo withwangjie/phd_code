@@ -259,7 +259,7 @@ def test_two_pass_preparation_keeps_the_universe_and_pair_table_fixed(tmp_path, 
 
     assert prep.main(common + ["pass2", *select, "--run-dir", str(run)]) == 0
     record = json.loads((prep_dir / "pass2_record.json").read_text())
-    assert record["external_pdb_ids"] == ["9zzz"] and record["dropped_after_training_check"] == []
+    assert record["external_pdb_ids"] == ["9zzz"] and record["dropped_after_training_check_or_redundancy"] == []
     assert list((tmp_path / "graphs").glob("*.pt")) and list(prep_dir.glob("graphs_backup_*"))
 
     pairs.write_text(pairs.read_text() + "1abc\t9zzz\t0.1\n")  # the table must not change between passes
@@ -360,3 +360,58 @@ def test_v_domain_motif_separates_antibodies_from_ig_superfamily_antigens():
     pd1 = ("PGWFLDSPDRPWNPPTFSPALLVVTEGDNATFTCSFSNTSESFVLNWYRMSPSNQTDKLAAFPEDRSQPGQDCRFRVTQLPNGRDFHMSVVRA"
            "RRNDSGTYLCGAISLAPKAQIKESLRAELRVTERRAE")
     assert detect(VHH_TAIL) and detect(vl) and not detect(pd1)
+
+
+def test_cdr3_motif_handles_internal_wgxg_and_tandem_domains():
+    internal = VHH_TAIL.replace("AAGRYGSSWYPDSYDY", "AAWGSGRYDY")
+    assert ext.cdr3_by_motif(internal) == "AAWGSGRYDY"
+    tandem = VHH_TAIL + "GGGGSGGGGS" + OTHER_VHH[20:]
+    assert ext.cdr3_by_motif(tandem) == "AAGRYGSSWYPDSYDY"  # first domain, as ANARCI reports
+
+
+def test_one_representative_per_group_is_built(tmp_path, monkeypatch):
+    import sys
+    monkeypatch.setitem(sys.modules, "anarci", None)
+    structures = tmp_path / "structures"
+    structures.mkdir()
+    for pdb in ("9zzz", "9zzw"):  # same VHH and antigen: one layered group
+        (structures / f"{pdb}.pdb").write_text(_complex_pdb(104.5, 100.0))
+    summary = tmp_path / "sabdab.tsv"
+    rows = [_sabdab(pdb="9zzz", Hchain="H"), _sabdab(pdb="9zzw", Hchain="H")]
+    keys = list(rows[0])
+    summary.write_text("\t".join(keys) + "\n" + "".join("\t".join(r[k] for k in keys) + "\n" for r in rows))
+    out = tmp_path / "selection"
+    sel.main(["--sabdab-summary", str(summary), "--released-after", "2026-01-01",
+              "--structures-dir", str(structures), "--out-dir", str(out)])
+    payload = json.loads((out / "candidates.json").read_text())
+    assert payload["selected"] == 2 and payload["independent_groups"] == 1
+    assert [c["pdb_id"] for c in payload["candidates"] if c["representative"]] == ["9zzw"]  # tie: PDB order
+    graphs = tmp_path / "graphs"
+    ext.main(["--candidates", str(out / "candidates.json"), "--structures-dir", str(structures),
+              "--out-dir", str(graphs), "--representatives-only"])
+    assert [p.name for p in graphs.glob("*.pt")] == ["external_vhh__9ZZW.pt"]
+
+
+def test_foldseek_inputs_keep_annotated_antigens_and_skip_unreadable_files(tmp_path, monkeypatch):
+    import sys
+    from nanoqc.data import build_foldseek_pairs as fp
+    monkeypatch.setitem(sys.modules, "anarci", None)
+    lines, serial = [], 0
+    for chain, sequence in (("H", VHH_TAIL), ("K", OTHER_VHH)):  # K: an Ig antigen (anti-idiotype)
+        more, serial = _atoms(chain, sequence, 0.0, 6.0 * len(lines and [1]), serial)
+        lines += more + ["TER"]
+    path = tmp_path / "9aaa.pdb"
+    path.write_text("\n".join(lines + ["END"]) + "\n")
+    source = dict(path=str(path), member="", subset="external_vhh", id="9aaa")
+    structure, record = fp.antigen_structure("9aaa", [source], ["H"], 20, sabdab_antigen_chains=["K"])
+    roles = {c["chain"]: (c["role"], c["method"]) for c in record["chains"]}
+    assert roles == {"H": ("antibody", "sabdab_chain_id"), "K": ("antigen", "antigen_annotation")}
+    assert [c.name for c in structure[0]] == ["K"]
+
+    audit_jsonl = tmp_path / "audit.jsonl"
+    audit_jsonl.write_text(json.dumps(dict(pdb_id="7BAD", path=str(tmp_path / "missing.pdb"), member="",
+                                           subset="train_rcsb", id="missing.pdb", valid=False)) + "\n")
+    sources = fp.audit_sources(audit_jsonl)
+    assert sources == {"7bad": []}
+    none, rec = fp.antigen_structure("7bad", sources["7bad"], [], 20)
+    assert none is None and rec["chains"] == []

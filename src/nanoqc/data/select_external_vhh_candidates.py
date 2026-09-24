@@ -303,6 +303,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                                 antigen=args.antigen_threshold, coverage=args.antigen_min_length_coverage)
     for entry in selected:
         entry["external_group"] = groups[entry["pdb_id"]]
+    # One representative per group, as for the hard test set: layered-homologous
+    # complexes (e.g. one VHH on two antigens) are not independent even when
+    # Foldseek puts their antigens in different clusters. Structure-only choice.
+    representatives = {}
+    for entry in sorted(selected, key=lambda e: (-e["interface_residues"], e["pdb_id"])):
+        representatives.setdefault(entry["external_group"], entry["pdb_id"])
+    for entry in candidates:
+        entry["representative"] = entry["pdb_id"] in set(representatives.values())
     n_groups = len(set(groups.values()))
     reason_counts: dict[str, int] = defaultdict(int)
     for entry in candidates:
@@ -325,7 +333,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args.out_dir.mkdir(parents=True, exist_ok=True)
     (args.out_dir / "candidates.json").write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n",
                                                    encoding="utf-8")
-    fields = ["pdb_id", "selected", "external_group", "vhh_chain", "antigen_chains", "antigen_name",
+    fields = ["pdb_id", "selected", "external_group", "representative", "vhh_chain", "antigen_chains", "antigen_name",
               "release_date", "method", "resolution", "cdr3", "cdr_annotation_method", "interface_residues", "reasons"]
     with (args.out_dir / "candidates.tsv").open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields, delimiter="\t", extrasaction="ignore")
@@ -346,9 +354,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             f"({', '.join(cdr_agreement['methods']) or 'n/a'})" if cdr_agreement else "not checked")), "",
         "## Rejections", "", "| Reason | Entries |", "|---|---:|",
         *[f"| {k} | {v} |" for k, v in sorted(reason_counts.items(), key=lambda kv: -kv[1])], "",
-        "## Selected", "", "| PDB | Group | VHH | Antigen chains | Antigen | CDR-H3 | Interface residues |",
-        "|---|---|---|---|---|---|---:|",
-        *[f"| {c['pdb_id']} | {c['external_group']} | {c['vhh_chain']} | {','.join(c['antigen_chains'])} | "
+        "## Selected", "", "| PDB | Group | Representative | VHH | Antigen chains | Antigen | CDR-H3 | Interface residues |",
+        "|---|---|---|---|---|---|---|---:|",
+        *[f"| {c['pdb_id']} | {c['external_group']} | {'yes' if c['representative'] else ''} | {c['vhh_chain']} | "
+          f"{','.join(c['antigen_chains'])} | "
           f"{c['antigen_name']} | {c['cdr3']} | {c['interface_residues']} |" for c in selected], "",
         "Formal independence is re-certified in every run by audit_external_vhh_independence.py.",
     ]

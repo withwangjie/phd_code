@@ -132,14 +132,15 @@ def _select(args, s, out: Path, extra: list[str]) -> dict:
     return json.loads((out / "candidates.json").read_text(encoding="utf-8"))
 
 
-def _build(s, candidates: Path) -> dict:
+def _build(s, candidates: Path, representatives_only: bool) -> dict:
     graph_dir = s["graph_dir"]
     if graph_dir.exists() and any(graph_dir.iterdir()):
         backup = s["prep"] / f"graphs_backup_{dt.datetime.now(dt.timezone.utc):%Y%m%dT%H%M%SZ}"
         shutil.move(str(graph_dir), str(backup))
         print(f"[prepare_external_vhh] previous graphs moved to {backup}")
     run_module("nanoqc.data.build_external_vhh_graphs", [
-        "--candidates", str(candidates), "--structures-dir", str(s["source_dir"]), "--out-dir", str(graph_dir)])
+        "--candidates", str(candidates), "--structures-dir", str(s["source_dir"]), "--out-dir", str(graph_dir),
+        *(["--representatives-only"] if representatives_only else [])])
     return json.loads((graph_dir / "external_graph_manifest.json").read_text(encoding="utf-8"))
 
 
@@ -147,13 +148,16 @@ def cmd_pass1(args, config, s) -> int:
     out = s["prep"] / "selection_pass1"
     extra = ["--training-dataset", str(args.training_dataset)] if args.training_dataset else []
     selection = _select(args, s, out, extra)
-    manifest = _build(s, out / "candidates.json")
+    # Pass 1 builds every eligible complex so that the Foldseek universe
+    # contains any representative pass 2 may choose after training checks.
+    manifest = _build(s, out / "candidates.json", representatives_only=False)
     external = sorted(g["pdb_id"] for g in manifest["graphs"])
     study = (s["prep"] / "study_pdb_ids.txt").read_text(encoding="utf-8").split()
     universe = sorted(set(study) | set(external))
     (s["prep"] / "foldseek_universe.txt").write_text("".join(f"{i}\n" for i in universe), encoding="utf-8")
     write_json(s["prep"] / "pass1_record.json", dict(
-        released_after=args.released_after, selected=selection["selected"],
+        released_after=args.released_after, sabdab_summaries=selection["sabdab_summaries"],
+        selected=selection["selected"],
         independent_groups=selection["independent_groups"], graphs=len(external),
         build_failures=manifest["failures"], external_pdb_ids=external,
         candidates_sha256=sha256(out / "candidates.json"), universe_size=len(universe)))
@@ -195,23 +199,28 @@ def cmd_pass2(args, config, s) -> int:
                          "restore the pass-1 table before pass 2")
     if args.released_after != pass1["released_after"]:
         raise SystemExit(f"--released-after must stay {pass1['released_after']} (pass 1)")
+    summaries = sorted(sha256(path) for path in args.sabdab_summary)
+    if summaries != sorted(pass1["sabdab_summaries"].values()):
+        raise SystemExit("The SAbDab summary differs from pass 1; use the same file(s)")
     out = s["prep"] / "selection_pass2"
     selection = _select(args, s, out, ["--training-dataset", str(dataset), "--cluster-map", str(cluster_map)])
-    manifest = _build(s, out / "candidates.json")
+    chosen = sorted(c["pdb_id"] for c in selection["candidates"] if c.get("selected") and c.get("representative"))
+    added = sorted(set(chosen) - set(pass1["external_pdb_ids"]))
+    if added:  # checked before the pass-1 graphs are replaced
+        raise SystemExit(f"pass 2 chose PDBs absent from the pass-1 Foldseek universe: {added}")
+    manifest = _build(s, out / "candidates.json", representatives_only=True)
     kept = sorted(g["pdb_id"] for g in manifest["graphs"])
     dropped = sorted(set(pass1["external_pdb_ids"]) - set(kept))
-    added = sorted(set(kept) - set(pass1["external_pdb_ids"]))
-    if added:
-        raise SystemExit(f"pass 2 added PDBs absent from the pass-1 Foldseek universe: {added}")
     write_json(s["prep"] / "pass2_record.json", dict(
         queue_freeze_run=str(run_dir), training_graph_manifest_sha256=sha256(dataset / "graph_manifest.json"),
         cluster_map_sha256=sha256(cluster_map), pair_tsv_sha256=frozen_pairs,
         selected=selection["selected"], independent_groups=selection["independent_groups"],
         adequate=selection["adequate"], cdr3_agreement_with_training=selection.get("cdr3_agreement_with_training"),
-        external_pdb_ids=kept, dropped_after_training_check=dropped, build_failures=manifest["failures"],
+        external_pdb_ids=kept, dropped_after_training_check_or_redundancy=dropped, build_failures=manifest["failures"],
         candidates_sha256=sha256(out / "candidates.json")))
     agreement = selection.get("cdr3_agreement_with_training") or {}
-    print(f"[prepare_external_vhh] pass 2: {len(kept)} external graphs ({len(dropped)} dropped for training overlap); "
+    print(f"[prepare_external_vhh] pass 2: {len(kept)} external graphs, one per independent group "
+          f"({len(dropped)} pass-1 complexes dropped: training overlap or redundancy); "
           f"{selection['independent_groups']} independent groups (required {s['min_clusters']}): "
           f"{'adequate' if selection['adequate'] else 'NOT adequate'}.")
     if agreement.get("compared"):

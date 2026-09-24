@@ -255,7 +255,8 @@ two passes. Neither pass reads any experimental outcome:
 
 The `foldseek` step searches antigen chains only. Antibody chains are
 recognised from SNAC/SAbDab annotations, SAbDab chain IDs, or an Ig V-domain
-detector (ANARCI when installed). It runs an exhaustive all-versus-all search
+detector (ANARCI when installed); annotated antigen chains are always kept.
+It runs an exhaustive all-versus-all search (E <= 10)
 and writes the pair table, a manifest of every chain's role, and an explicit
 self row for a PDB without an antigen chain of at least 20 residues.
 
@@ -267,7 +268,8 @@ Each graph is one VHH-antigen complex, as in the SNAC-DB per-VHH complexes
 behind the training and hard test sets. Entries with several nanobodies give
 one complex per PDB: the VHH with the largest passing interface. Other
 antibody chains are never antigen, and entries with a VH/VL chain are
-excluded. Selection also requires a protein or peptide antigen, resolution
+excluded. The final set (pass 2) keeps one representative per layered
+homology group. Selection also requires a protein or peptide antigen, resolution
 <= 3.0 A, and the audit's interface quality gates. It then groups the complexes by the layered
 homology rule and reports whether `min_clusters` independent groups exist.
 CDR-H3 follows IMGT (105-117), like the training SNAC `Region_Split_VH.cdr3`;
