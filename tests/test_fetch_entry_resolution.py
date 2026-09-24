@@ -199,3 +199,30 @@ def test_the_fetch_can_be_restricted_to_one_subset(tmp_path, monkeypatch):
     assert fetch.main(["--missing-from-audit", str(audit_dir), "--subset", "train_rcsb",
                        "--out", str(out)]) == 0
     assert queries == [fetch.QUERY % '"10BT"']
+
+
+def test_with_no_arguments_it_finds_the_latest_audit_and_the_data_root(tmp_path, monkeypatch):
+    """The whole job for this repository: no paths to type, nothing to guess."""
+    monkeypatch.setattr(fetch, "REPO_ROOT", tmp_path)
+    monkeypatch.delenv("QP_DATA_ROOT", raising=False)
+    (tmp_path / "data").mkdir()
+    for name, pdb in (("run_old", "9OLD"), ("run_new", "10BT")):
+        d = tmp_path / "runs" / name / "audit"
+        d.mkdir(parents=True)
+        (d / "data_audit_details.jsonl").write_text(
+            json.dumps(dict(subset="train_rcsb", pdb_id=pdb, valid=True, resolution_angstrom=None)) + "\n")
+    newest = tmp_path / "runs" / "run_new" / "audit" / "data_audit_details.jsonl"
+    newest.touch()
+    assert fetch.latest_audit_dir() == newest.parent
+    assert fetch.data_root() == tmp_path / "data"
+
+    queries = []
+    monkeypatch.setattr(fetch.urllib.request, "urlopen", _server([REAL_RESPONSE], queries))
+    assert fetch.main([]) == 0
+    assert queries == [fetch.QUERY % '"10BT"']
+    assert (tmp_path / "data" / "entry_resolution.tsv").is_file()
+
+
+def test_the_data_root_follows_the_configured_one(tmp_path, monkeypatch):
+    monkeypatch.setenv("QP_DATA_ROOT", str(tmp_path / "elsewhere"))
+    assert fetch.data_root() == tmp_path / "elsewhere"

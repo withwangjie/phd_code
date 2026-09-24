@@ -18,15 +18,14 @@ Run it once and keep the table under the data root: the audit then never needs
 the network, and the values are fixed by the recorded hash rather than by
 whatever RCSB serves later. ``--resume`` continues an interrupted fetch.
 
-``--missing-from-audit`` asks a finished audit which entries it could not date,
-so one table covers every subset that needs one, whatever the reason::
+With no arguments it does the whole job for this repository: it finds the most
+recent run's audit, takes every valid structure that audit could not date
+(whatever the subset), and writes the data root's ``entry_resolution.tsv``::
 
-    python -m nanoqc.data.fetch_entry_resolution \\
-        --missing-from-audit runs/<run>/audit \\
-        --out data/entry_resolution.tsv
+    python -m nanoqc.data.fetch_entry_resolution
 
-``--ids`` and ``--from-dir`` fetch a named set instead (an ID list, or the PDB
-IDs in structure file names).
+``--missing-from-audit`` names a different audit, and ``--ids`` / ``--from-dir``
+fetch a named set instead (an ID list, or the PDB IDs in structure file names).
 """
 from __future__ import annotations
 
@@ -37,8 +36,11 @@ import re
 import time
 import urllib.error
 import urllib.request
+import os
 from pathlib import Path
 from typing import Iterable, Optional, Sequence
+
+from nanoqc.common.repo_io import REPO_ROOT
 
 ENDPOINT = "https://data.rcsb.org/graphql"
 # Verified response shape:
@@ -50,6 +52,21 @@ USER_AGENT = "nanoqc-fetch-entry-resolution/1 (+https://data.rcsb.org)"
 OUT_SUFFIX = "entry_resolution.tsv"  # any *entry_resolution.tsv under the data root is read
 FIELDS = ("pdb", "resolution", "method")
 _PDB_ID = re.compile(r"[0-9][A-Za-z0-9]{3}")
+
+
+def data_root() -> Path:
+    """The configured raw data root (``QP_DATA_ROOT``), else ``<repo>/data``."""
+    return Path(os.environ.get("QP_DATA_ROOT") or (REPO_ROOT / "data"))
+
+
+def latest_audit_dir(runs_dir: Optional[Path] = None) -> Optional[Path]:
+    """The newest run directory's audit, when it holds a finished audit."""
+    runs = runs_dir if runs_dir is not None else REPO_ROOT / "runs"
+    if not runs.is_dir():
+        return None
+    candidates = [d / "audit" for d in runs.iterdir() if d.is_dir()]
+    candidates = [a for a in candidates if (a / "data_audit_details.jsonl").is_file()]
+    return max(candidates, key=lambda a: a.stat().st_mtime) if candidates else None
 
 
 def entry_ids(values: Iterable[str]) -> list[str]:
@@ -142,16 +159,26 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--from-dir", type=Path, help="Take IDs from the structure file names in this directory")
     parser.add_argument("--subset", action="append", default=None, metavar="NAME",
                         help="With --missing-from-audit, restrict to these audited subsets (repeatable)")
-    parser.add_argument("--out", type=Path, required=True,
-                        help=f"Table to write; the name must end with '{OUT_SUFFIX}', which is what the audit reads")
+    parser.add_argument("--out", type=Path, default=None,
+                        help=f"Table to write; the name must end with '{OUT_SUFFIX}', which is what the audit "
+                             f"reads. Default: <data root>/{OUT_SUFFIX}")
     parser.add_argument("--resume", action="store_true", help="Keep rows already in --out and fetch only the rest")
     parser.add_argument("--chunk", type=int, default=CHUNK, help="Entries per request")
     parser.add_argument("--timeout", type=float, default=60.0)
     parser.add_argument("--retries", type=int, default=3)
     args = parser.parse_args(argv)
 
+    if not (args.missing_from_audit or args.ids or args.from_dir):
+        # No source named: do the whole job for this repository.
+        args.missing_from_audit = latest_audit_dir()
+        if args.missing_from_audit is None:
+            parser.error("no finished audit under runs/; run the audit first, or pass --ids/--from-dir")
+        print(f"[fetch_entry_resolution] using the most recent audit {args.missing_from_audit}", flush=True)
     if args.subset and not args.missing_from_audit:
         parser.error("--subset needs --missing-from-audit")
+    if args.out is None:
+        args.out = data_root() / OUT_SUFFIX
+        print(f"[fetch_entry_resolution] writing {args.out}", flush=True)
     if not args.out.name.endswith(OUT_SUFFIX):
         parser.error(f"--out must end with '{OUT_SUFFIX}'; that suffix is what the audit reads")
     if args.chunk < 1:

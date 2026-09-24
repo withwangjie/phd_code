@@ -250,10 +250,11 @@ reads by PDB ID. Ask a finished audit which entries those are, so one table
 covers every subset, and fetch them once:
 
 ```bash
-python -m nanoqc.data.fetch_entry_resolution \
-    --missing-from-audit runs/<that run>/audit \
-    --out data/entry_resolution.tsv        # --resume continues an interrupted fetch
+python -m nanoqc.data.fetch_entry_resolution      # --resume continues an interrupted fetch
 ```
+
+With no arguments it takes the most recent run's audit and writes the data
+root's `entry_resolution.tsv`; `--missing-from-audit` names a different audit.
 
 Any `*entry_resolution.tsv` under the data root (outside pipeline staging) is
 read, listed in the audit report with its SHA-256, and needs no network again.
