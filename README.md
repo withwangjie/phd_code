@@ -88,6 +88,12 @@ prediction.
   inspection status, in `docs/PROTOCOL_AMENDMENTS.md`.
 - Matched-time comparisons measure the classical cost of emulating QAOA, not
   quantum runtime; they are descriptive.
+- Coarse QC multiplicity uses serial gatekeeping: only the primary QC contrast
+  and primary scaling slope are confirmatory at first; secondary effects are
+  confirmatory only after both are rejected.
+- Independent-cluster adequacy is checked at queue freeze, before any outcome
+  (`--stop-after queue_freeze`), and EGNN training-seed variance is reported
+  from development-only replicates.
 
 - Coarse antigen interaction scores are not binding free energies.
 - Contact number is a geometry baseline, not an affinity estimator.

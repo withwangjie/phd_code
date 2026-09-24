@@ -54,6 +54,13 @@ maps whose provenance reports skipped rows.
 
 The clustering universe contains both internal study PDBs and required external-VHH PDBs. The frozen pair table/source map must cover this complete universe. When a pair TSV is the formal structure-similarity source, every universe PDB must appear in its query or target columns; an absent PDB is treated as "not demonstrated as searched", not as an independent singleton.
 
+Required outcome-free cluster adequacy check (PROTOCOL_AMENDMENTS.md A5):
+- `independence/cluster_adequacy.json` with `adequate: true` — independent
+  clusters among `test_snac_hard` graphs and the frozen validation queue meet
+  the statistics minima. It is computed before any training or outcome; a
+  shortfall fails `queue_freeze`. `--stop-after queue_freeze` runs only up to
+  this check.
+
 Required frozen-validation outputs:
 - `validation_queue/freeze/selected_targets.json`
 - `validation_queue/freeze/eligibility.json`
@@ -75,6 +82,12 @@ Required:
 
 The best checkpoint SHA256 must match the training summary and strict reload must
 be recorded as verified.
+
+When `egnn_train.seed_replicates > 0` (development-only seed sensitivity,
+PROTOCOL_AMENDMENTS.md A6) it also requires `checkpoints/seed_replicates/r<i>/`
+checkpoints and `checkpoints/seed_sensitivity/summary.json` + `summary.md`
+covering exactly `seed_replicates + 1` models against the primary checkpoint's
+SHA256.
 
 ### energy_calibration
 Required:
@@ -230,8 +243,10 @@ Scaling inference uses the pre-declared active-site levels under the same frozen
 radius/depth/evaluation budget and a cluster-aware within-PDB slope analysis with
 log10(feasible configuration count) as the primary complexity axis.
 
-The matched-output QC effects and the primary scaling slope form one Holm-adjusted
-inferential family; raw and adjusted p values are both retained. Structural primary
+Coarse QC multiplicity uses serial gatekeeping (PROTOCOL_AMENDMENTS.md A4): the
+primary family {primary QC contrast, primary scaling slope} is Holm-adjusted alone;
+every other matched-output effect is secondary and gated behind it
+(`gatekeeping_family`, `p_gatekeeping_adjusted`); raw p values are retained. Structural primary
 and RQ5 tests retain their separate two-test Holm family.
 
 The external FASPR comparison uses an Active-only packing scope: backbone and

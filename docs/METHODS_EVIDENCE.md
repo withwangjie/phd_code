@@ -47,6 +47,9 @@ The formal manuscript/report must not turn category 2 or 3 into a claim that the
 | Quantum scaling analysis | primary predictor log10 feasible-state count; qubits and logical two-qubit gates are descriptive resource axes | Literature-informed preregistration | [R20,R29] motivate size-stratified, resource-aware quantum/classical benchmarking. The exact active-site levels and the choice of log10 feasible-state count as the single confirmatory predictor remain study-specific preregistration; qubit/gate axes are reported descriptively to avoid post-hoc multiplicity. |
 | Quantum-advantage wording | simulator-level relative performance only; no hardware quantum advantage claim | Direct methodological basis | Quantum-optimization reviews emphasize rigorous benchmarking and distinguish empirical algorithm comparisons from demonstrations of hardware quantum advantage [R20]. |
 | CAPRI-style contact metrics | Fnat/contact at 5 Å; iRMSD/LRMSD definitions kept explicit | Direct literature basis | CAPRI uses 5 Å interpartner atom contacts and standard interface/ligand RMSD concepts [R4]. Project-specific DockQ-like fields remain explicitly distinguished from official DockQ. |
+| Confirmatory multiplicity (coarse QC) | serial gatekeeping: primary family {primary QC contrast, primary scaling slope} Holm-adjusted alone; secondary effects gated behind it | Direct literature basis | Gatekeeping procedures test hierarchically ordered families while controlling FWER strongly [R41]; regulatory guidance recommends a pre-specified primary/secondary hierarchy with gatekeeping or fixed-sequence testing [R42] (PROTOCOL_AMENDMENTS.md A4). |
+| Cluster adequacy before outcomes | independent-cluster minima checked at queue freeze | Literature-informed preregistration | Inference with few clusters is unreliable [R43]; the numerical minima remain preregistered adequacy gates, not power guarantees (PROTOCOL_AMENDMENTS.md A5). |
+| EGNN seed variance | development-only replicate training; ROC-AUC spread and Active-site Jaccard stability | Direct methodological basis | Random-seed variance materially changes learned-benchmark results and should be reported [R44] (PROTOCOL_AMENDMENTS.md A6). |
 | Holm multiplicity adjustment | Holm correction | Direct literature basis | Holm's sequentially rejective procedure controls family-wise error [R21]. |
 | Family/structure-cluster statistical unit | repeated PDBs aggregated within frozen family clusters | Literature-informed preregistration | Independence is enforced by the frozen homology/structure clustering protocol; exact minimum cluster counts are preregistered adequacy gates, not literature power guarantees. |
 
@@ -140,3 +143,11 @@ The formal manuscript/report must not turn category 2 or 3 into a claim that the
 **[R39]** Gamble, C., Krishan, A., Stocken, D., et al. (2017). Guidelines for the content of statistical analysis plans in clinical trials. *JAMA*, 318(23), 2337-2343. https://doi.org/10.1001/jama.2017.18556
 
 **[R40]** Nosek, B. A., Ebersole, C. R., DeHaven, A. C., & Mellor, D. T. (2018). The preregistration revolution. *Proceedings of the National Academy of Sciences*, 115(11), 2600-2606. https://doi.org/10.1073/pnas.1708274114
+
+**[R41]** Dmitrienko, A., & Tamhane, A. C. (2007). Gatekeeping procedures with clinical trial applications. *Pharmaceutical Statistics*, 6(3), 171-180. https://doi.org/10.1002/pst.291
+
+**[R42]** U.S. Food and Drug Administration (2022). *Multiple Endpoints in Clinical Trials: Guidance for Industry*. https://www.fda.gov/media/162416/download
+
+**[R43]** Cameron, A. C., & Miller, D. L. (2015). A practitioner's guide to cluster-robust inference. *Journal of Human Resources*, 50(2), 317-372. https://doi.org/10.3368/jhr.50.2.317
+
+**[R44]** Bouthillier, X., Delaunay, P., Bronzi, M., et al. (2021). Accounting for variance in machine learning benchmarks. *Proceedings of Machine Learning and Systems*, 3, 747-769.

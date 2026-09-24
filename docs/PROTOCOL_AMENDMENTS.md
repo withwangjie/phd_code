@@ -64,6 +64,54 @@ formal run is required.
 - **Affected results:** statistics (structural), final report.
 - **Results inspected before this amendment:** _to be completed by the investigator_.
 
+## A4. Serial gatekeeping replaces one flat Holm family
+
+- **Before:** the primary QC contrast, the primary scaling slope and all 18+
+  exploratory matched-output effects were Holm-adjusted as one family, which
+  diluted the two preregistered confirmatory tests.
+- **After:** serial gatekeeping with Holm inside each family [R41,R42]. The
+  primary family {primary QC contrast (`primary_qc_baseline`/
+  `primary_qc_metric`, matched outputs), primary scaling slope} is
+  Holm-adjusted alone at full alpha. Every other matched-output effect is
+  secondary: its adjusted p is max(largest primary adjusted p, Holm-adjusted p
+  within the secondary family), so it can be claimed only after both primary
+  hypotheses are rejected; strong FWER control holds across both families.
+  The per-report all-effects Holm column is kept as descriptive. The
+  structural two-test Holm family (primary structural endpoint, RQ5) is
+  unchanged.
+- **Affected results:** statistics (QC family), final report.
+- **Results inspected before this amendment:** _to be completed by the investigator_.
+
+## A5. Outcome-free cluster adequacy gate at queue freeze
+
+- **Before:** too few independent clusters surfaced only in the statistics
+  stage, after all training, benchmark and structure computation.
+- **After:** `queue_freeze` counts independent family/structure clusters among
+  `test_snac_hard` graphs and the frozen validation queue, writes
+  `independence/cluster_adequacy.json`, and fails if any preregistered minimum
+  (`min_qc_clusters`, `min_scaling_clusters`, `min_primary_clusters`,
+  `min_rq5_clusters`) cannot be met. Cluster-level inference is unreliable
+  with few clusters [R43]. The check uses only data composition, never an
+  outcome, so it is compatible with preregistration.
+  `run_full_experiment.py --stop-after queue_freeze` runs just this far.
+- **Affected results:** none (gate only); earlier failure when inadequate.
+- **Results inspected before this amendment:** not applicable (no outcome involved).
+
+## A6. Development-only EGNN training-seed sensitivity
+
+- **Before:** Active-site selection depended on a single EGNN training run;
+  seed variance (initialization, data order, DDP partitions, AMP/TF32
+  non-determinism) was not assessed.
+- **After:** `egnn_train.seed_replicates` (default 2) extra models are trained
+  on the same split with derived seeds. `egnn_seed_sensitivity.py` reports
+  the spread of best internal-validation ROC-AUC and the Jaccard stability of
+  the formal Active-site selection on the internal validation fold, following
+  the recommendation to account for seed variance in learned benchmarks
+  [R44]. Only training-split data are used; the primary checkpoint stays the
+  only formal model and replicates are never used for model selection.
+- **Affected results:** egnn_train (additional descriptive outputs; extra compute).
+- **Results inspected before this amendment:** not applicable (development data only).
+
 ## A3. Earlier amendments on 2026-09-24
 
 | Commit | Change | Scientific effect |

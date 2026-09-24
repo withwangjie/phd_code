@@ -244,6 +244,12 @@ egnn_train:
   amp: true
   pin_memory: true
   # Uses queue_freeze.homology_isolation exactly; no independent threshold.
+  # Development-only seed sensitivity (Bouthillier et al., MLSys 2021): this
+  # many extra EGNN models on the same split with derived training seeds.
+  # Reported as ROC-AUC spread and Active-site Jaccard stability on the
+  # internal validation fold; the primary checkpoint stays the only formal
+  # model. Costs this many extra training runs. 0 disables.
+  seed_replicates: 2
   device: "cuda"
   threads: 4      # runtime fallback; auto-resolved
   num_workers: 8  # runtime fallback; auto-resolved

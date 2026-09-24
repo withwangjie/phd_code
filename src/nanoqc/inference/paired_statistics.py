@@ -136,6 +136,34 @@ def holm_step_down(pvalues: Sequence[float]) -> list[float]:
     return adjusted.tolist()
 
 
+def serial_gatekeeping(primary: dict, secondary: dict) -> dict:
+    """Serial gatekeeping with Holm inside each family (Dmitrienko & Tamhane 2007).
+
+    The primary (confirmatory) family is Holm-adjusted on its own at the full
+    alpha. Secondary hypotheses are tested only after every primary
+    hypothesis is rejected; their adjusted p value is
+    max(largest primary adjusted p, Holm-adjusted p within the secondary
+    family), which controls the family-wise error rate strongly across both
+    families. Missing/non-finite p values stay None, and a missing primary p
+    leaves the whole secondary family untestable (None).
+    """
+    def holm(pvalues: dict) -> dict:
+        valid = {k: float(v) for k, v in pvalues.items()
+                 if v is not None and np.isfinite(float(v))}
+        names = sorted(valid)
+        adjusted = dict(zip(names, holm_step_down([valid[n] for n in names]))) if names else {}
+        return {k: adjusted.get(k) for k in pvalues}
+
+    primary_adjusted = holm(primary)
+    if not primary or any(value is None for value in primary_adjusted.values()):
+        return {**primary_adjusted, **{k: None for k in secondary}}
+    gate = max(primary_adjusted.values())
+    secondary_adjusted = {
+        k: (None if v is None else max(gate, v)) for k, v in holm(secondary).items()
+    }
+    return {**primary_adjusted, **secondary_adjusted}
+
+
 # Call-site wrappers (formerly batch_benchmark_hard_set._paired_effect /
 # _holm_adjust, which remain importable there under their old names).
 

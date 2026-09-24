@@ -41,6 +41,7 @@ MODULE_LAYOUT = {
     "safe_graph_load.py": "src/nanoqc/data/safe_graph_load.py",
     "model_egnn_pruning.py": "src/nanoqc/model/model_egnn_pruning.py",
     "train_egnn_pruning.py": "src/nanoqc/model/train_egnn_pruning.py",
+    "egnn_seed_sensitivity.py": "src/nanoqc/model/egnn_seed_sensitivity.py",
     "subgraph_to_qubo.py": "src/nanoqc/qubo/subgraph_to_qubo.py",
     "qaoa_interface_sampler.py": "src/nanoqc/solvers/qaoa_interface_sampler.py",
     "instance.py": "src/nanoqc/quantum/instance.py",

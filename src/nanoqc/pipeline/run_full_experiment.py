@@ -83,7 +83,7 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from nanoqc.common.seed_streams import derive_streams, derive_child_seed, save_stream_map, verify_stream_map, DEFAULT_MASTER_SEED  # noqa: E402
 from nanoqc.common.repo_io import sha256_file as sha256_of, repo_path, module_name, DOCS_DIR, CONFIGS_DIR  # noqa: E402
-from nanoqc.inference.paired_statistics import paired_denominator_failures, holm_step_down  # noqa: E402
+from nanoqc.inference.paired_statistics import serial_gatekeeping, paired_denominator_failures, holm_step_down  # noqa: E402
 
 
 # Detail prefix of the failure recorded when a stage is refused because a
@@ -129,6 +129,48 @@ def primary_qc_effect_name(baseline: str, budget_mode: str) -> str:
     ``_paired_statistics_main``.
     """
     return str(baseline) if budget_mode == "outputs" else f"{baseline}_time"
+
+
+def cluster_adequacy(config: Dict[str, Any], dataset_dir: Path, selected_targets_path: Path,
+                     cluster_map_path: Path) -> Dict[str, Any]:
+    """Outcome-free count of independent clusters available to each inference.
+
+    Cluster-level inference is unreliable with few clusters (Cameron & Miller
+    2015), and the statistics stage enforces preregistered minima. Counting
+    the clusters once the queue and split are frozen -- before any EGNN
+    training, benchmark or structure run -- turns a late, costly failure into
+    an early one without looking at any result (PROTOCOL_AMENDMENTS.md A5).
+    """
+    cluster_map={str(k).lower():str(v) for k,v in
+                 json.loads(Path(cluster_map_path).read_text(encoding="utf-8")).items()}
+    manifest=json.loads((Path(dataset_dir)/"graph_manifest.json").read_text(encoding="utf-8"))
+    hard_pdbs=sorted({str(r.get("pdb_id","")).lower() for r in manifest if r.get("split")=="test_snac_hard"})
+    selected=json.loads(Path(selected_targets_path).read_text(encoding="utf-8"))
+    validation_pdbs=sorted({str((e.get("target") or e.get("pdb_id")) if isinstance(e,dict) else e).lower()
+                            for e in selected})
+    def clusters(pdbs):
+        missing=[p for p in pdbs if p not in cluster_map]
+        return len({cluster_map[p] for p in pdbs if p in cluster_map}),missing
+    hard_clusters,hard_missing=clusters(hard_pdbs)
+    validation_clusters,validation_missing=clusters(validation_pdbs)
+    stats=config.get("statistics",{}) or {}
+    requirements=[
+        ("coarse primary QC contrast (test_snac_hard)",hard_clusters,int(stats.get("min_qc_clusters",10))),
+        ("scaling slope (test_snac_hard)",hard_clusters,int(stats.get("min_scaling_clusters",10))),
+        ("structural primary endpoint (validation queue)",validation_clusters,int(stats.get("min_primary_clusters",10))),
+        ("RQ5 (validation queue)",validation_clusters,int(stats.get("min_rq5_clusters",10))),
+    ]
+    shortfalls=[f"{name}: {have} independent clusters < required {need}"
+                for name,have,need in requirements if have<need]
+    if hard_missing or validation_missing:
+        shortfalls.append(f"cluster map lacks PDBs: {(hard_missing+validation_missing)[:20]}")
+    return dict(
+        schema="cluster_adequacy_v1",outcome_free=True,
+        test_snac_hard_pdbs=len(hard_pdbs),test_snac_hard_clusters=hard_clusters,
+        validation_queue_pdbs=len(validation_pdbs),validation_queue_clusters=validation_clusters,
+        requirements=[dict(inference=n,available=h,required=r) for n,h,r in requirements],
+        adequate=not shortfalls,shortfalls=shortfalls,
+    )
 
 
 def rq5_inference_failures(rq5: dict, min_clusters: int) -> list[str]:
@@ -181,6 +223,7 @@ ORCHESTRATED_SCRIPTS: List[str] = [
     "build_final_pyg_dataset.py",
     "build_independence_cluster_map.py",
     "train_egnn_pruning.py",
+    "egnn_seed_sensitivity.py",
     "generate_energy_calibration_dataset.py",
     "batch_benchmark_hard_set.py",
     "run_real_complex_pilot.py",
@@ -687,8 +730,10 @@ class StageResult:
 
 class Orchestrator:
     def __init__(self, config: Dict[str, Any], run_dir: Path, *, only: Optional[str] = None,
-                 smoke_only: bool = False, force_restage: Optional[List[str]] = None):
+                 smoke_only: bool = False, force_restage: Optional[List[str]] = None,
+                 stop_after: Optional[str] = None):
         self.config = config
+        self.stop_after = stop_after
         self.run_dir = run_dir
         self.only = only
         self.smoke_only = smoke_only
@@ -1165,8 +1210,13 @@ class Orchestrator:
                 cluster_path,cluster_provenance,universe,
                 freeze/"selected_targets.json",freeze/"eligibility.json",freeze/"run_manifest.json",
                 freeze/"freeze_manifest.json",
+                self.run_dir/"independence"/"cluster_adequacy.json",
             ])
             if not ok:return ok,detail
+            adequacy,error=read_json(self.run_dir/"independence"/"cluster_adequacy.json")
+            if error:return False,error
+            if not adequacy.get("adequate"):
+                return False,"cluster_adequacy.json reports insufficient independent clusters: "+"; ".join(adequacy.get("shortfalls",[]))
             summary,error=read_json(dataset/"run_summary.json")
             if error:return False,error
             if not summary.get("complete"):
@@ -1246,6 +1296,17 @@ class Orchestrator:
                 return False,"training_summary.json has no checkpoint sha256"
             if sha256_of(checkpoint)!=expected_sha:
                 return False,"EGNN checkpoint sha256 mismatch"
+            replicates=int((self.config.get("egnn_train",{}) or {}).get("seed_replicates",0) or 0)
+            if replicates>0:
+                sensitivity=self.checkpoint_dir()/"seed_sensitivity"
+                ok,detail=require([sensitivity/"summary.json",sensitivity/"summary.md"])
+                if not ok:return ok,detail
+                payload,error=read_json(sensitivity/"summary.json")
+                if error:return False,error
+                if int(payload.get("models",0) or 0)!=replicates+1:
+                    return False,f"seed sensitivity covers {payload.get('models')} models; expected {replicates+1}"
+                if (payload.get("checkpoints",{}).get("primary",{}) or {}).get("sha256")!=expected_sha:
+                    return False,"seed sensitivity was computed against a different primary checkpoint"
             return True,"EGNN checkpoint and training summary verified"
         if stage=="energy_calibration":
             qc=self.config.get("qc_benchmark",{}) or {}
@@ -2045,6 +2106,17 @@ class Orchestrator:
                 sha256_of(universe_path) if universe_path.is_file() else None),
         )
         atomic_write_json(freeze_manifest_path,freeze_manifest)
+        if not cluster_map_path.is_file():
+            return StageResult("queue_freeze","failed",started,utc_timestamp(),1,
+                               f"Cluster adequacy check needs the run-local cluster map: {cluster_map_path}",
+                               graph_argv + ["&&"] + vq_argv, f"{graph_log};{vq_log}", False)
+        adequacy=cluster_adequacy(self.config,dataset_dir,selected_path,cluster_map_path)
+        atomic_write_json(self.run_dir/"independence"/"cluster_adequacy.json",adequacy)
+        if not adequacy["adequate"]:
+            return StageResult("queue_freeze","failed",started,utc_timestamp(),1,
+                               "Insufficient independent clusters for preregistered inference, detected "
+                               "before any training or outcome: "+"; ".join(adequacy["shortfalls"]),
+                               graph_argv + ["&&"] + vq_argv, f"{graph_log};{vq_log}", False)
         selected = json.loads(selected_path.read_text(encoding="utf-8"))
         cap_label = vq_cfg.get("target_count", 0) or "unlimited (all qualifying targets)"
         detail = (f"Graph build: {graph_detail} Validation queue: {len(selected)} targets frozen "
@@ -2105,9 +2177,63 @@ class Orchestrator:
         expected = [checkpoint_dir / name for name in ("best_egnn_pruning.pt", "training_summary.json")]
         ok, detail = self._artifacts_present(expected)
         status = "completed" if (returncode == 0 and ok) else "failed"
+        argvs = [argv]; logs = [str(log_path)]
+        replicates = int(cfg.get("seed_replicates", 0) or 0)
+        if status == "completed" and replicates > 0:
+            # Development-only seed sensitivity (Bouthillier et al. 2021;
+            # PROTOCOL_AMENDMENTS.md A6): same split, different training
+            # seeds. The primary checkpoint above stays the only formal model.
+            replicate_checkpoints = []
+            for index in range(1, replicates + 1):
+                replicate_dir = checkpoint_dir / "seed_replicates" / f"r{index}"
+                seed_position = argv.index("--seed") + 1
+                replicate_argv = list(argv)
+                replicate_argv[seed_position] = str(
+                    derive_child_seed(streams["train"], "egnn_seed_replicate", str(index)))
+                replicate_argv[replicate_argv.index("--checkpoint-dir") + 1] = str(replicate_dir)
+                if "--resume" in replicate_argv:
+                    replicate_argv.remove("--resume")
+                if (replicate_dir / "last_egnn_pruning.pt").is_file():
+                    replicate_argv += ["--resume"]
+                rc, replicate_log = self._run_subprocess(f"egnn_train_seed_replicate_{index}", replicate_argv)
+                argvs.append(replicate_argv); logs.append(str(replicate_log))
+                if rc != 0 or not (replicate_dir / "best_egnn_pruning.pt").is_file():
+                    status = "failed"
+                    detail += f"; seed replicate {index} failed (see {replicate_log})"
+                    break
+                replicate_checkpoints.append(replicate_dir / "best_egnn_pruning.pt")
+            if status == "completed":
+                sensitivity_dir = checkpoint_dir / "seed_sensitivity"
+                qc = self.config.get("qc_benchmark", {}) or {}
+                analysis_argv = [
+                    self.venv_python, "-m", module_name("egnn_seed_sensitivity.py"),
+                    "--data-dir", str(train_data_dir),
+                    "--primary-checkpoint", str(checkpoint_dir / "best_egnn_pruning.pt"),
+                    "--replicate-checkpoints", *[str(p) for p in replicate_checkpoints],
+                    "--active-sites", str(self.config.get("statistics", {}).get("primary_active_sites", 6)),
+                    "--antigen-guidance-weight", str(qc.get("antigen_guidance_weight", 0.25)),
+                    "--antigen-proximity-scale", str(qc.get("antigen_proximity_scale_angstrom", 6.0)),
+                    "--contact-ca-cutoff", str(qc.get("contact_ca_cutoff_angstrom", 8.0)),
+                    "--vhh-identity-threshold", str(homology.get("vhh_full_chain_identity", 0.80)),
+                    "--cdr-h3-identity-threshold", str(homology.get("cdr_h3_identity", 0.50)),
+                    "--antigen-identity-threshold", str(homology.get("antigen_identity", 0.30)),
+                    "--antigen-min-length-coverage", str(homology.get("antigen_min_length_coverage", 0.70)),
+                    "--seed", str(derive_child_seed(streams["train"], "egnn_seed_sensitivity")),
+                    "--out-json", str(sensitivity_dir / "summary.json"),
+                    "--out-md", str(sensitivity_dir / "summary.md"),
+                ]
+                rc, analysis_log = self._run_subprocess("egnn_seed_sensitivity", analysis_argv)
+                argvs.append(analysis_argv); logs.append(str(analysis_log))
+                sens_ok, sens_detail = self._artifacts_present(
+                    [sensitivity_dir / "summary.json", sensitivity_dir / "summary.md"])
+                if rc != 0 or not sens_ok:
+                    status = "failed"
+                    detail += f"; seed-sensitivity analysis failed: {sens_detail} (see {analysis_log})"
+                else:
+                    detail += f"; seed sensitivity: {replicates} replicate(s), {sensitivity_dir / 'summary.md'}"
         return StageResult("egnn_train", status, started, utc_timestamp(), returncode,
                             f"{detail} (train stream seed {streams['train']}, {len(graphs)} training graphs)",
-                            argv, str(log_path), ok)
+                            argvs if len(argvs) > 1 else argv, ";".join(logs), status == "completed")
 
     # ================================================================
     # Stage 5: TRAIN-only coarse-to-Amber energy calibration
@@ -3531,35 +3657,48 @@ class Orchestrator:
                     failures.append(
                         f"Scaling inference has {scaling_clusters} independent clusters; "
                         f"requires >= {min_scaling}")
-                # Put the scaling slope in the same matched-output inferential
-                # family as the QC effects. This prevents the scaling result
-                # from being presented as an unadjusted confirmatory test.
+                # Serial gatekeeping (Dmitrienko & Tamhane 2007; FDA 2022
+                # multiple-endpoints guidance; PROTOCOL_AMENDMENTS.md A4):
+                # the two pre-registered confirmatory QC hypotheses (primary
+                # matched-output contrast and primary scaling slope) are
+                # Holm-adjusted on their own; every other matched-output
+                # effect is secondary and gated behind them.
                 output_stats_path=self.run_dir / "qc_benchmark" / "statistics_outputs.json"
                 if output_stats_path.is_file():
                     output_payload=json.loads(output_stats_path.read_text(encoding="utf-8"))
-                    p_entries=[]
-                    for effect in output_payload.get("effects",[]):
-                        value=effect.get("p_value")
-                        if value is not None and math.isfinite(float(value)):
-                            p_entries.append(("qc:"+str(effect.get("baseline"))+":"+str(effect.get("metric")),effect))
+                    primary_name=(str(cfg.get("primary_qc_baseline","sa")),
+                                  str(cfg.get("primary_qc_metric","log10_qts99")))
                     scaling_primary=scaling_payload.get("primary",{}) or {}
-                    scaling_p=scaling_primary.get("p_value")
-                    if scaling_p is not None and math.isfinite(float(scaling_p)):
-                        p_entries.append(("scaling:primary",scaling_primary))
-                    if p_entries:
-                        adjusted=holm_step_down([float(item[1].get("p_value")) for item in p_entries])
-                        for (_, target), value in zip(p_entries, adjusted):
-                            target["p_holm_global_qc_scaling"]=value
-                        output_payload["multiplicity_family"]="matched-output QC effects plus primary scaling slope"
-                        output_payload["multiplicity_n_tests"]=len(p_entries)
-                        output_stats_path.write_text(json.dumps(output_payload,indent=2,sort_keys=True)+"\n",encoding="utf-8")
-                        scaling_payload["multiplicity_family"]="matched-output QC effects plus primary scaling slope"
-                        scaling_payload["multiplicity_n_tests"]=len(p_entries)
-                        scaling_payload["primary"]=scaling_primary
-                        scaling_json.write_text(json.dumps(scaling_payload,indent=2,sort_keys=True)+"\n",encoding="utf-8")
-                        scaling_md.write_text(scaling_md.read_text(encoding="utf-8")+
-                            f"\nHolm family: matched-output QC effects plus primary scaling slope (n={len(p_entries)}); "
-                            f"adjusted scaling p={scaling_primary.get('p_holm_global_qc_scaling')}.\n",encoding="utf-8")
+                    primary_family={"scaling:primary":scaling_primary.get("p_value")}
+                    secondary_family={}
+                    targets={"scaling:primary":scaling_primary}
+                    for effect in output_payload.get("effects",[]):
+                        key="qc:"+str(effect.get("baseline"))+":"+str(effect.get("metric"))
+                        targets[key]=effect
+                        is_primary=(str(effect.get("baseline")),str(effect.get("metric")))==primary_name
+                        (primary_family if is_primary else secondary_family)[key]=effect.get("p_value")
+                        effect["gatekeeping_family"]="primary" if is_primary else "secondary"
+                    scaling_primary["gatekeeping_family"]="primary"
+                    if not any(k.startswith("qc:") for k in primary_family):
+                        failures.append(
+                            f"Primary QC contrast {primary_name[0]}/{primary_name[1]} missing from matched-output statistics")
+                    adjusted=serial_gatekeeping(primary_family,secondary_family)
+                    for key,value in adjusted.items():
+                        targets[key]["p_gatekeeping_adjusted"]=value
+                    family_note=(
+                        "serial gatekeeping: primary family {primary QC contrast, primary scaling slope} "
+                        "Holm-adjusted alone; secondary matched-output effects tested only after both "
+                        "primary hypotheses are rejected")
+                    output_payload["multiplicity_procedure"]=family_note
+                    output_payload["multiplicity_primary_family"]=sorted(primary_family)
+                    output_stats_path.write_text(json.dumps(output_payload,indent=2,sort_keys=True)+"\n",encoding="utf-8")
+                    scaling_payload["multiplicity_procedure"]=family_note
+                    scaling_payload["multiplicity_primary_family"]=sorted(primary_family)
+                    scaling_payload["primary"]=scaling_primary
+                    scaling_json.write_text(json.dumps(scaling_payload,indent=2,sort_keys=True)+"\n",encoding="utf-8")
+                    scaling_md.write_text(scaling_md.read_text(encoding="utf-8")+
+                        f"\nMultiplicity: {family_note}; gatekeeping-adjusted scaling p="
+                        f"{scaling_primary.get('p_gatekeeping_adjusted')}.\n",encoding="utf-8")
         else:
             failures.append(f"Quantum scaling statistics require run-local cluster map: {cluster_path}")
 
@@ -3641,6 +3780,8 @@ class Orchestrator:
             results[stage] = self.run_stage(
                 stage, STAGE_PREREQUISITES[stage], getattr(self, f"stage_{stage}"))
             if stage == "smoke_check" and self.smoke_only:
+                return results
+            if self.stop_after is not None and stage == self.stop_after:
                 return results
         return results
 
@@ -3837,6 +3978,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--force-restage", type=str, nargs="+", default=[],
                          choices=STAGE_ORDER,
                          help="Re-run these stage(s) even if already marked completed/failed.")
+    parser.add_argument("--stop-after", type=str, default=None, choices=STAGE_ORDER,
+                         help="Stop after this stage (e.g. queue_freeze to check independent-cluster "
+                              "adequacy before training). The run is resumable with --resume and is "
+                              "not a completed formal run.")
     parser.add_argument("--smoke-only", action="store_true",
                          help="Run only env_check + smoke_check, then stop (for a fast preflight pass).")
     args = parser.parse_args(list(argv) if argv is not None else None)
@@ -3911,8 +4056,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print(f"Derived seed streams: {streams}")
 
         orchestrator = Orchestrator(config, run_dir, only=args.only, smoke_only=args.smoke_only,
-                                     force_restage=args.force_restage)
+                                     force_restage=args.force_restage, stop_after=args.stop_after)
         results = orchestrator.run_all()
+        if args.stop_after is not None:
+            stopped_ok = all(r.status != "failed" for r in results.values())
+            print(f"\nStopped after {args.stop_after} (not a completed formal run; resume with --resume {run_dir.name}).")
+            for stage, result in results.items():
+                print(f"  {stage:24s} {result.status}")
+            adequacy = run_dir/"independence"/"cluster_adequacy.json"
+            if adequacy.is_file():
+                print(f"Cluster adequacy: {adequacy}")
+            return 0 if stopped_ok else 1
 
         print("\n=== Stage summary ===")
         overall_ok = True

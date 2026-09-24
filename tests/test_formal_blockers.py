@@ -276,6 +276,8 @@ def test_queue_freeze_resume_rejects_tampered_selected_targets(tmp_path: Path) -
     independence=tmp_path/"independence"; independence.mkdir()
     cluster=independence/"pdb_family_clusters.json"
     cluster.write_text(json.dumps({"1abc":"cluster_1"}),encoding="utf-8")
+    (independence/"cluster_adequacy.json").write_text(
+        json.dumps({"adequate":True,"shortfalls":[]}),encoding="utf-8")
     cluster_prov=independence/"pdb_family_clusters.provenance.json"
     cluster_prov.write_text(json.dumps({"status":"frozen"}),encoding="utf-8")
 

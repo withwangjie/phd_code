@@ -565,11 +565,11 @@ def section_search_performance(ctx: ReportContext) -> List[str]:
             f"95% cluster-bootstrap CI=[{_fmt(primary_scaling.get('ci_low'))}, "
             f"{_fmt(primary_scaling.get('ci_high'))}]; "
             f"raw sign-flip p={_fmt(primary_scaling.get('p_value'))}; "
-            f"Holm-adjusted p={_fmt(primary_scaling.get('p_holm_global_qc_scaling'))}."
+            f"gatekeeping-adjusted p (primary family)={_fmt(primary_scaling.get('p_gatekeeping_adjusted'))}."
         )
         lines.append(
-            "Negative slope means the QAOA-minus-classical energy-gap difference becomes more favorable "
-            "to QAOA as the feasible configuration space grows. Every scaling size uses three states "
+            "Negative slope means QAOA's log10 queries-to-solution grows more slowly than the classical "
+            "baseline's as the feasible configuration space grows. Every scaling size uses three states "
             "per site, one from each chi1 well; the analysis rejects cases lacking this policy. "
             "QAOA depth and optimizer evaluations stay fixed, so the slope estimates fixed-resource "
             "scaling rather than equal-compute scaling. This simulator-level analysis does "
@@ -648,19 +648,24 @@ def section_search_performance(ctx: ReportContext) -> List[str]:
             f"restarts={payload.get('primary_restarts')}; "
             f"cluster unit: {payload.get('cluster_unit','n/a')}.")
         lines.append("")
-        lines.append("| Baseline | Metric | Clusters | Mean QAOA-classical difference | 95% CI | p | Holm p (QC family) | Holm p (QC+scaling) |")
-        lines.append("|---|---|---:|---:|---|---:|---:|---:|")
+        lines.append("| Baseline | Metric | Family | Clusters | Mean QAOA-classical difference | 95% CI | p | Holm p (all effects, descriptive) | Gatekeeping-adjusted p |")
+        lines.append("|---|---|---|---:|---:|---|---:|---:|---:|")
         effects=payload.get("effects") or []
         if effects:
             for effect in effects:
                 lines.append(
-                    f"| {effect.get('baseline')} | {effect.get('metric')} | {effect.get('n_clusters',0)} | "
+                    f"| {effect.get('baseline')} | {effect.get('metric')} | {effect.get('gatekeeping_family','n/a')} | {effect.get('n_clusters',0)} | "
                     f"{_fmt(effect.get('mean_difference'))} | "
                     f"{_fmt(effect.get('ci_low'))}, {_fmt(effect.get('ci_high'))} | "
                     f"{_fmt(effect.get('p_value'))} | {_fmt(effect.get('p_holm'))} | "
-                    f"{_fmt(effect.get('p_holm_global_qc_scaling'))} |")
+                    f"{_fmt(effect.get('p_gatekeeping_adjusted'))} |")
         else:
-            lines.append("| — | — | 0 | n/a | n/a | n/a | n/a | n/a |")
+            lines.append("| — | — | — | 0 | n/a | n/a | n/a | n/a | n/a |")
+        lines.append("")
+        lines.append(
+            "Multiplicity: serial gatekeeping. The primary family (primary QC contrast and primary "
+            "scaling slope) is Holm-adjusted alone; secondary effects are confirmatory only after both "
+            "primary hypotheses are rejected. The all-effects Holm column is descriptive.")
         lines.append("")
         lines.append(f"Paired-case counts: `{json.dumps(payload.get('paired_cases',{}),sort_keys=True)}`.")
         lines.append(f"Exclusions: `{json.dumps(payload.get('exclusions',{}),sort_keys=True)}`.")
