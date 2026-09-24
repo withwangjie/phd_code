@@ -3203,6 +3203,14 @@ class Orchestrator:
                     returncode, log_path = self._run_subprocess(f"structure_experiment_dev_{pdb}", sub_argv)
                     logs.append(str(log_path)); argvs.append(sub_argv)
                     summary_path = out_dir / pdb / "run_summary.json"
+                    if returncode != 0:
+                        # Never accept stale artifacts from a previous protocol/run.
+                        dev_failed.append(pdb.lower())
+                        failures.append(
+                            f"dev target {pdb} exited {returncode}; refusing any pre-existing "
+                            f"summary/metrics in {out_dir / pdb} (see {log_path})"
+                        )
+                        continue
                     if summary_path.is_file():
                         summary=json.loads(summary_path.read_text(encoding="utf-8"))
                         dev_summaries[pdb]=summary
@@ -3212,8 +3220,7 @@ class Orchestrator:
                             dev_failed.append(pdb.lower())
                     else:
                         dev_failed.append(pdb.lower())
-                    if returncode not in (0,) and not (out_dir / pdb / "real_complex_metrics.csv").is_file():
-                        failures.append(f"dev target {pdb} exited {returncode} with no usable metrics (see {log_path})")
+                        failures.append(f"dev target {pdb} returned 0 but produced no run_summary.json")
                 planned=[p.lower() for p in explicit_targets]
                 dev_closed=(
                     set(dev_completed)|set(dev_failed)==set(planned)
@@ -3317,12 +3324,21 @@ class Orchestrator:
                      "--pdb-allowlist-file", str(frozen_targets)]
             returncode, log_path = self._run_subprocess(f"structure_experiment_{label}", argv)
             logs.append(str(log_path)); argvs.append(argv)
+            # Non-zero subprocess status is authoritative. A previous run may
+            # have left closed summaries/metrics in this directory; those must
+            # never mask a protocol mismatch or current execution failure.
+            if returncode != 0:
+                failures.append(
+                    f"{label}: subprocess exited {returncode}; refusing any pre-existing "
+                    f"run_summary.json/metrics in {out_dir} (see {log_path})"
+                )
+                continue
             # (requirement #5) Reconciled against run_real_complex_pilot.py's
             # own run_summary.json (selected vs. completed vs. failed target
-            # counts), never inferred from returncode or CSV existence alone.
+            # counts) after successful subprocess exit.
             summary_path = out_dir / "run_summary.json"
             if not summary_path.is_file():
-                failures.append(f"{label}: no run_summary.json produced (cannot confirm completion; see {log_path})")
+                failures.append(f"{label}: exit 0 but no run_summary.json produced (see {log_path})")
                 continue
             summary = json.loads(summary_path.read_text(encoding="utf-8"))
             if not summary.get("closed"):
