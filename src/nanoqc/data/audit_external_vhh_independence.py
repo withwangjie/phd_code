@@ -263,9 +263,9 @@ def main() -> int:
             source_structure_sha256=ext["source_structure_sha256"],
             family_cluster=cluster_map[pdb],
             family_cluster_overlap=family_overlap,
-            max_vhh_identity=max_vhh,
-            max_cdr_h3_identity=max_cdr,
-            max_antigen_identity=max_ag,
+            max_vhh_full_chain_identity=max_vhh,
+            max_cdr_h3_loop_identity=max_cdr,
+            max_antigen_full_chain_identity=max_ag,
             antigen_length_coverage=ag_cov,
             passes=bool(
                 max_vhh < args.vhh_threshold

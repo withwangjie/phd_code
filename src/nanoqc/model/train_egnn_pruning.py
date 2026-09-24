@@ -353,8 +353,8 @@ def split_paths(paths: Sequence[Path], seed: int) -> Tuple[List[Path], List[Path
             or family_overlap):
         raise AssertionError(
             "Layered sequence/family leakage across train/validation: "
-            f"max VHH={max_vhh_cross:.3f}, max CDR-H3={max_cdr_cross:.3f}, "
-            f"max antigen={max_antigen_cross:.3f}, family_overlap={family_overlap[:10]}"
+            f"max VHH full-chain={max_vhh_cross:.3f}, max CDR-H3 loop={max_cdr_cross:.3f}, "
+            f"max antigen full-chain={max_antigen_cross:.3f}, family_overlap={family_overlap[:10]}"
         )
     return train_paths, validation_paths
 

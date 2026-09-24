@@ -157,9 +157,15 @@ queue_freeze:
     # Literature-supported anti-leakage precedents:
     # VHH/antibody non-redundancy at 0.80 [R24]; CDR-H3 clustering at 0.50 [R23];
     # protein train/test filtering at 0.30 identity with 0.70 coverage [R25].
-    vhh_full_chain_identity: 0.80
-    cdr_h3_identity: 0.50
-    antigen_identity: 0.30
+    # Region of each identity: VHH and antigen are FULL-CHAIN global NW
+    # identities; cdr_h3_identity is computed on the CDR-H3 LOOP sequence only.
+    # Measured values in outputs carry the region in their names
+    # (*_vhh_full_chain_identity, *_cdr_h3_loop_identity,
+    # *_antigen_full_chain_identity). Key names here are kept for checkpoint
+    # and frozen-config compatibility.
+    vhh_full_chain_identity: 0.80   # full VHH chain
+    cdr_h3_identity: 0.50           # CDR-H3 loop only
+    antigen_identity: 0.30          # full antigen chain(s)
     antigen_min_length_coverage: 0.70
   graph_build:
     workers: 8  # runtime fallback; auto-resolved from server CPU resources

@@ -3176,16 +3176,16 @@ class Orchestrator:
                             if (audit.get("source_structure")!=str(source.resolve())
                                     or audit.get("source_structure_sha256")!=sha256_of(source)):
                                 ext_failures.append(f"{pdb}: raw structure provenance mismatch")
-                            if float(audit["max_vhh_identity"]) >= expected_homology["vhh_full_chain_identity"]:
-                                ext_failures.append(f"{pdb}: VHH identity overlap")
-                            if float(audit["max_cdr_h3_identity"]) >= expected_homology["cdr_h3_identity"]:
-                                ext_failures.append(f"{pdb}: CDR-H3 identity overlap")
+                            if float(audit["max_vhh_full_chain_identity"]) >= expected_homology["vhh_full_chain_identity"]:
+                                ext_failures.append(f"{pdb}: VHH full-chain identity overlap")
+                            if float(audit["max_cdr_h3_loop_identity"]) >= expected_homology["cdr_h3_identity"]:
+                                ext_failures.append(f"{pdb}: CDR-H3 loop identity overlap")
                             if (
-                                float(audit["max_antigen_identity"]) >= expected_homology["antigen_identity"]
+                                float(audit["max_antigen_full_chain_identity"]) >= expected_homology["antigen_identity"]
                                 and float(audit.get("antigen_length_coverage",1.0))
                                     >= expected_homology["antigen_min_length_coverage"]
                             ):
-                                ext_failures.append(f"{pdb}: antigen identity overlap")
+                                ext_failures.append(f"{pdb}: antigen full-chain identity overlap")
                             if bool(audit.get("family_cluster_overlap",True)):
                                 ext_failures.append(f"{pdb}: family/structure cluster overlap or unverified")
                         except (KeyError,TypeError,ValueError) as exc:

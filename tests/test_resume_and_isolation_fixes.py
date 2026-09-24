@@ -177,6 +177,24 @@ def test_dataset_isolation_checks_survive_python_optimize_mode():
         dataset_builder._require(False, "train/test overlap")
     dataset_builder._require(True, "unused")
 
+
+def test_measured_identities_name_full_chain_versus_cdr_h3_loop():
+    from torch_geometric.data import Data
+    left, right = Data(), Data()
+    for graph, vhh, antigen, cdr in ((left, "QVQLVESGGGLVQ", "KVFGRCELAAAMK", "CARDRST"),
+                                     (right, "EVQLLESGGGLVQ", "KVFGRCELAAAMR", "CAKDRSY")):
+        graph.vhh_sequences, graph.antigen_sequences, graph.cdr3_seq = [vhh], [antigen], cdr
+        graph.subset_source = "sabdab_vhh"
+    detail = dataset_builder.layered_graph_homology(left, right)
+    assert {"vhh_full_chain_identity", "cdr_h3_loop_identity", "antigen_full_chain_identity"} <= set(detail)
+    assert not {"vhh_identity", "cdr_h3_identity", "antigen_identity"} & set(detail)
+    assert detail["cdr_h3_loop_identity"] == dataset_builder.cdr_h3_loop_seqsim("CARDRST", "CAKDRSY")
+    for module in (pilot, external_audit):
+        source = inspect.getsource(module)
+        assert "max_vhh_full_chain_identity" in source
+        assert "max_cdr_h3_loop_identity" in source
+        assert "max_vhh_identity" not in source and "cdr3_identity=" not in source
+
 # ------------------------------------------------ GBN2 / calibration / external
 def test_gbn2_is_a_recorded_pairwise_approximation_and_vacuum_stays_exact():
     build = inspect.getsource(qubo.AllAtomInterfaceQUBOBuilder.build)

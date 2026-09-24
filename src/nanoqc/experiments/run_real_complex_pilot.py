@@ -536,7 +536,7 @@ def main(argv=None) -> int:
                 _ablation_atomic_json(out/"eligibility.json",decisions)
                 continue
             work=out/"prepared"/pdb;work.mkdir(parents=True,exist_ok=True)
-            chain_identity_audit=[];cdr3_identity=None
+            chain_identity_audit=[];max_cdr_h3_loop_identity=None
             independence_status=("sequence_and_family_structure_isolated" if cluster_map is not None
                                  else "sequence_isolated_family_structure_unconfirmed")
             development_exposed=pdb in dev_exposed_pdb
@@ -569,8 +569,8 @@ def main(argv=None) -> int:
                     rotamer_mode=args.rotamer_mode,
                     allowed_residues=frozen_pool)
                 chain_identity_audit=[]
-                max_vhh_identity=0.0
-                max_antigen_identity=0.0
+                max_vhh_full_chain_identity=0.0
+                max_antigen_full_chain_identity=0.0
                 for chain_id,seq in zip(graph.chain_ids,graph.chain_sequences):
                     role="vhh" if dict(zip(graph.chain_ids,graph.chain_groups)).get(chain_id)==0 else "antigen"
                     if role=="vhh":
@@ -588,31 +588,31 @@ def main(argv=None) -> int:
                             best=detail
                     chain_identity_audit.append(dict(
                         chain_id=chain_id,role=role,length=len(seq),
-                        best_identity=best["identity"],best_coverage=best["coverage"],
+                        identity_region="full_chain",best_full_chain_identity=best["identity"],best_coverage=best["coverage"],
                         threshold=float(threshold),min_length_coverage=float(coverage_gate)))
                     if role=="vhh":
-                        max_vhh_identity=max(max_vhh_identity,best["identity"])
+                        max_vhh_full_chain_identity=max(max_vhh_full_chain_identity,best["identity"])
                     else:
-                        max_antigen_identity=max(max_antigen_identity,best["identity"])
+                        max_antigen_full_chain_identity=max(max_antigen_full_chain_identity,best["identity"])
 
-                cdr3_identity=max(
+                max_cdr_h3_loop_identity=max(
                     (identity_detail(graph.cdr3_seq,c,0.0)["identity"] for c in (train_cdr+selected_cdr)),
                     default=0.0,
                 )
-                if max_vhh_identity>=args.vhh_identity_threshold:
-                    independence_status="excluded_high_vhh_identity"
+                if max_vhh_full_chain_identity>=args.vhh_identity_threshold:
+                    independence_status="excluded_high_vhh_full_chain_identity"
                     raise ValueError(
-                        f"VHH full-chain identity {max_vhh_identity:.3f} >= {args.vhh_identity_threshold:.2f}"
+                        f"VHH full-chain identity {max_vhh_full_chain_identity:.3f} >= {args.vhh_identity_threshold:.2f}"
                     )
-                if cdr3_identity>=args.cdr_h3_identity_threshold:
-                    independence_status="excluded_high_cdr_h3_identity"
+                if max_cdr_h3_loop_identity>=args.cdr_h3_identity_threshold:
+                    independence_status="excluded_high_cdr_h3_loop_identity"
                     raise ValueError(
-                        f"CDR-H3 identity {cdr3_identity:.3f} >= {args.cdr_h3_identity_threshold:.2f}"
+                        f"CDR-H3 loop identity {max_cdr_h3_loop_identity:.3f} >= {args.cdr_h3_identity_threshold:.2f}"
                     )
-                if max_antigen_identity>=args.antigen_identity_threshold:
-                    independence_status="excluded_high_antigen_identity"
+                if max_antigen_full_chain_identity>=args.antigen_identity_threshold:
+                    independence_status="excluded_high_antigen_full_chain_identity"
                     raise ValueError(
-                        f"Antigen identity {max_antigen_identity:.3f} >= {args.antigen_identity_threshold:.2f} "
+                        f"Antigen full-chain identity {max_antigen_full_chain_identity:.3f} >= {args.antigen_identity_threshold:.2f} "
                         f"with minimum length coverage {args.antigen_min_length_coverage:.2f}"
                     )
                 config["preparation_changes"].extend(complete_terminal_oxygen(work/"native.cif"))
@@ -664,8 +664,8 @@ def main(argv=None) -> int:
                     graph_path=row["path"].replace("\\","/"),source_id=graph.source_id,
                     raw_sha256=_ablation_digest(raw),native_sha256=_ablation_digest(work/"native.cif"),
                     development_exposed=development_exposed,chain_identity_audit=chain_identity_audit,
-                    cdr3_identity=cdr3_identity,max_vhh_identity=max_vhh_identity,
-                    max_antigen_identity=max_antigen_identity,homology_isolation=homology,
+                    max_cdr_h3_loop_identity=max_cdr_h3_loop_identity,max_vhh_full_chain_identity=max_vhh_full_chain_identity,
+                    max_antigen_full_chain_identity=max_antigen_full_chain_identity,homology_isolation=homology,
                     family_structure_cluster=family_cluster,
                     frozen_compatible_residue_pool=(
                         sorted(frozen_pool) if frozen_pool is not None else None
@@ -681,10 +681,10 @@ def main(argv=None) -> int:
                     independence_status=independence_status,
                     independence=(
                         f"{independence_status}: PDB-disjoint and below layered homology thresholds "
-                        f"VHH<{args.vhh_identity_threshold:.2f}, CDR-H3<{args.cdr_h3_identity_threshold:.2f}, "
-                        f"antigen<{args.antigen_identity_threshold:.2f} with coverage>={args.antigen_min_length_coverage:.2f}; "
-                        f"observed max VHH={max_vhh_identity:.4f}, CDR-H3={cdr3_identity:.4f}, "
-                        f"antigen={max_antigen_identity:.4f}; "
+                        f"VHH full-chain<{args.vhh_identity_threshold:.2f}, CDR-H3 loop<{args.cdr_h3_identity_threshold:.2f}, "
+                        f"antigen full-chain<{args.antigen_identity_threshold:.2f} with coverage>={args.antigen_min_length_coverage:.2f}; "
+                        f"observed max VHH full-chain={max_vhh_full_chain_identity:.4f}, CDR-H3 loop={max_cdr_h3_loop_identity:.4f}, "
+                        f"antigen full-chain={max_antigen_full_chain_identity:.4f}; "
                         f"family/structure cluster={family_cluster}; cluster-map checked={cluster_map is not None}; "
                         f"development_exposed={development_exposed}.") )
                 _ablation_atomic_json(work/"recovery_manifest.json",config)
@@ -697,13 +697,13 @@ def main(argv=None) -> int:
                     selected_cdr.append(graph.cdr3_seq)
                 decisions.append(dict(pdb_id=pdb,status="selected",reason="",
                     development_exposed=development_exposed,independence_status=independence_status,
-                    max_vhh_identity=max_vhh_identity,max_antigen_identity=max_antigen_identity,
-                    cdr3_identity=cdr3_identity,homology_isolation=homology,
+                    max_vhh_full_chain_identity=max_vhh_full_chain_identity,max_antigen_full_chain_identity=max_antigen_full_chain_identity,
+                    max_cdr_h3_loop_identity=max_cdr_h3_loop_identity,homology_isolation=homology,
                     chain_identity_audit=chain_identity_audit))
             except Exception as exc:
                 decisions.append(dict(pdb_id=pdb,status="excluded",reason=str(exc),
                     development_exposed=development_exposed,independence_status=independence_status,
-                    chain_identity_audit=chain_identity_audit,cdr3_identity=cdr3_identity))
+                    chain_identity_audit=chain_identity_audit,max_cdr_h3_loop_identity=max_cdr_h3_loop_identity))
             _ablation_atomic_json(out/"eligibility.json",decisions)
         _ablation_atomic_json(out/"selected_targets.json",selected)
         if not selected:

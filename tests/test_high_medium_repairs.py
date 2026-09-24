@@ -180,8 +180,8 @@ def test_effective_runtime_config_is_frozen() -> None:
 
 
 def test_singleton_hard_set_pair_similarity_is_zero() -> None:
-    assert dataset_builder.max_pair_similarity([])==0.0
-    assert dataset_builder.max_pair_similarity(["CARDRST"])==0.0
+    assert dataset_builder.max_pair_cdr_h3_loop_identity([])==0.0
+    assert dataset_builder.max_pair_cdr_h3_loop_identity(["CARDRST"])==0.0
 
 
 

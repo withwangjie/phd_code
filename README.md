@@ -14,8 +14,8 @@ prediction.
    - Interface labels: cross-partner heavy-atom contact < 5 A, following antibody-antigen/CAPRI-style contact definitions [R3,R4].
    - Graph edges: intra-chain CA radius < 8 A plus fixed cross-partner KNN. An 8 A C-alpha residue-graph cutoff has direct protein-GNN precedent [R22]; the cross-partner KNN degree k=3 remains a study-specific leakage-control choice rather than a literature-optimal constant.
    - EGNN train/validation split: layered connected components. Complexes are
-     joined if VHH full-chain identity >=80% [R24], CDR-H3 identity >=50% [R23], or
-     antigen identity >=30% with >=70% minimum length coverage [R25]; no random 90/10 split.
+     joined if VHH full-chain identity >=80% [R24], CDR-H3 loop-only identity >=50% [R23], or
+     antigen full-chain identity >=30% with >=70% minimum length coverage [R25]; no random 90/10 split.
      Complexes whose partner roles are not annotation-anchored (e.g. `train_rcsb`, where
      group 0 is the first chain of the strongest contact pair) are also compared with
      their partners swapped, so a nanobody stored in the antigen slot is still checked

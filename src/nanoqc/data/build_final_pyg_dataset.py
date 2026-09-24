@@ -64,24 +64,25 @@ def write_csv(path, records, fields):
         w=csv.DictWriter(f,fieldnames=fields,extrasaction='ignore');w.writeheader();w.writerows(records)
 
 @functools.lru_cache(maxsize=300000)
-def similarity(a,b):
-    """Symmetric global identity, exact matches / alignment length incl. gaps."""
+def cdr_h3_loop_identity(a,b):
+    """CDR-H3 LOOP identity (never full-chain): exact matches / alignment length incl. gaps."""
     if a==b:return 1.0
     if not a or not b or length_coverage(a,b) < CDR_H3_IDENTITY_THRESHOLD:return 0.0
     return nw_identity(a,b,saturation_message='alignment score saturation')
 
-def seqsim(a,b):
-    return similarity(*sorted((a,b)))
+def cdr_h3_loop_seqsim(a,b):
+    """Order-independent CDR-H3 loop identity."""
+    return cdr_h3_loop_identity(*sorted((a,b)))
 
 
-def max_pair_similarity(sequences):
-    """Maximum pairwise sequence identity; empty/singleton sets have no pair."""
-    return max((seqsim(s,t) for s,t in itertools.combinations(sequences,2)), default=0.0)
+def max_pair_cdr_h3_loop_identity(sequences):
+    """Maximum pairwise CDR-H3 loop identity; empty/singleton sets have no pair."""
+    return max((cdr_h3_loop_seqsim(s,t) for s,t in itertools.combinations(sequences,2)), default=0.0)
 
 
 @functools.lru_cache(maxsize=500000)
 def _global_identity_cached(a: str, b: str) -> float:
-    """Symmetric Needleman-Wunsch identity over alignment length."""
+    """Symmetric Needleman-Wunsch identity over alignment length (full-chain or loop, as passed)."""
     if a == b:
         return 1.0
     if not a or not b:
@@ -174,7 +175,7 @@ def cluster_long(rows):
             seq_j=sequences[j]
             if min(len(seq_i),len(seq_j))/max(len(seq_i),len(seq_j)) < CDR_H3_IDENTITY_THRESHOLD:
                 continue
-            if seqsim(seq_i,seq_j)>=CDR_H3_IDENTITY_THRESHOLD:
+            if cdr_h3_loop_seqsim(seq_i,seq_j)>=CDR_H3_IDENTITY_THRESHOLD:
                 union(i,j)
 
     components=collections.defaultdict(list)
@@ -512,9 +513,11 @@ def layered_graph_homology(left: Data, right: Data) -> dict:
         antigen=max(antigen,side_identity(la,ra,min_length_coverage=ANTIGEN_MIN_LENGTH_COVERAGE))
     cdr_id=global_identity(left_cdr,right_cdr) if left_cdr and right_cdr else 0.0
     return dict(
-        vhh_identity=float(vhh),
-        cdr_h3_identity=float(cdr_id),
-        antigen_identity=float(antigen),
+        # Measured values; region is explicit in every key: VHH and antigen are
+        # full-chain global identities, CDR-H3 is the loop sequence only.
+        vhh_full_chain_identity=float(vhh),
+        cdr_h3_loop_identity=float(cdr_id),
+        antigen_full_chain_identity=float(antigen),
         violates_vhh=bool(vhh>=VHH_IDENTITY_THRESHOLD),
         violates_cdr_h3=bool(cdr_id>=CDR_H3_IDENTITY_THRESHOLD),
         violates_antigen=bool(antigen>=ANTIGEN_IDENTITY_THRESHOLD),
@@ -552,7 +555,7 @@ def delivery_report(output,manifest,exclusions,failures,summary,complete):
         '- 训练候选按审计清单中的全部DB5.5配对PDB ID保守排除，即使对应备用图构建失败也不放回训练池；PDB ID排除不构成序列同源独立性证明。',
         f'- SNAC长CDR-H3：{summary.get("long_eligible",0)}条非DB5.5重叠候选，{summary.get("unique_long_cdr",0)}条唯一序列，{CDR_H3_IDENTITY_THRESHOLD*100:.0f}%代表簇 {summary.get("clusters",0)} 个；固定随机种子 {SEED} 选取目标400个，实际 {sum(r["split"]=="test_snac_hard" for r in manifest)}。',
         '- SNAC候选首先按CDR-H3做代表簇选择；最终图级隔离进一步统一检查VHH全链、CDR-H3和抗原序列。',
-        f'- 分层阈值：VHH全链<{VHH_IDENTITY_THRESHOLD:.2f}、CDR-H3<{CDR_H3_IDENTITY_THRESHOLD:.2f}、抗原<{ANTIGEN_IDENTITY_THRESHOLD:.2f}（抗原最小长度覆盖{ANTIGEN_MIN_LENGTH_COVERAGE:.2f}）。任一阈值触发即判为同源并隔离。',
+        f'- 分层阈值：VHH全链<{VHH_IDENTITY_THRESHOLD:.2f}、CDR-H3 loop<{CDR_H3_IDENTITY_THRESHOLD:.2f}、抗原全链<{ANTIGEN_IDENTITY_THRESHOLD:.2f}（抗原最小长度覆盖{ANTIGEN_MIN_LENGTH_COVERAGE:.2f}）。任一阈值触发即判为同源并隔离。',
         '- 同源计算使用全局Needleman–Wunsch、BLOSUM62、gap-open=10、gap-extend=1；训练与SNAC hard test在最终图级再次审计。',
         '- 硬过滤和隔离的数量可能重叠；逐样本多原因记录见 `excluded_samples.csv`。',
         '- Formal协议除分层序列阈值外还要求冻结PDB→family/structure cluster map，并在train↔hard及EGNN train↔validation中保持cluster不跨split。独立性声明仅限该cluster输入及其相似性定义，不外推为对所有可能远缘同源关系的绝对排除。',
@@ -715,7 +718,7 @@ def main():
         long=[r for r in pool if r['subset']=='snac_db' and len(cdr(r))>=16]
         clusters=cluster_long(long);order=list(range(len(clusters)));random.Random(partition_seed).shuffle(order)
         summary.update(long_eligible=len(long),unique_long_cdr=len({cdr(r) for r in long}),clusters=len(clusters))
-        print(f'Hard pool: {len(long)} structures / {len(clusters)} CDR-H3 identity clusters',flush=True)
+        print(f'Hard pool: {len(long)} structures / {len(clusters)} CDR-H3 loop identity clusters',flush=True)
         chosen=[];used_ids=set()
         for index in order:
             cl=clusters[index]
@@ -739,7 +742,7 @@ def main():
         # VHH/CDR-H3/antigen protocol later used for train/test isolation.
         hard_records=[r for r in manifest if r['split']=='test_snac_hard']
         kept_hard_records=[]; kept_hard_graphs=[]; removed_hard_ids=set(); kept_hard_clusters=set()
-        hard_pair_max=dict(vhh_identity=0.0,cdr_h3_identity=0.0,antigen_identity=0.0)
+        hard_pair_max=dict(vhh_full_chain_identity=0.0,cdr_h3_loop_identity=0.0,antigen_full_chain_identity=0.0)
         for record in hard_records:
             graph=torch.load(output/record['path'],map_location='cpu',weights_only=False)
             violation=None
@@ -752,7 +755,7 @@ def main():
                 if family_cluster in kept_hard_clusters:
                     violation=('family_cluster',dict(
                         violates_vhh=False,violates_cdr_h3=False,violates_antigen=False,
-                        vhh_identity=0.0,cdr_h3_identity=0.0,antigen_identity=0.0))
+                        vhh_full_chain_identity=0.0,cdr_h3_loop_identity=0.0,antigen_full_chain_identity=0.0))
             if violation is None:
                 for other_record,other_graph in zip(kept_hard_records,kept_hard_graphs):
                     homologous,detail=layered_graph_homologous(graph,other_graph)
@@ -775,7 +778,7 @@ def main():
                 if other_record=='family_cluster': reasons.append('family_cluster_overlap_snac_hard')
                 if detail['violates_vhh']: reasons.append('vhh_full_chain_overlap_snac_hard')
                 if detail['violates_cdr_h3']: reasons.append('cdr3_overlap_snac_hard_threshold')
-                if detail['violates_antigen']: reasons.append('antigen_overlap_snac_hard')
+                if detail['violates_antigen']: reasons.append('antigen_full_chain_overlap_snac_hard')
                 exclusions.append(exclusion(source,reasons))
         if removed_hard_ids:
             manifest[:]=[r for r in manifest if not (r['split']=='test_snac_hard' and r['source_id'] in removed_hard_ids)]
@@ -796,7 +799,7 @@ def main():
             if r['pdb_id'].upper() in hardids:reasons.append('pdb_overlap_snac_hard')
             seqs={cdr(r)} if cdr(r) else set()
             if r['subset']=='train_rcsb':seqs.update(x['cdr3'] for x in audit.PDB_ANNOTATIONS.get(r['pdb_id'].upper(),[]) if x['kind']=='VHH' and x['cdr3'])
-            if any(seqsim(s,t)>=CDR_H3_IDENTITY_THRESHOLD for s in seqs for t in hardseqs):reasons.append('cdr3_overlap_snac_hard_threshold')
+            if any(cdr_h3_loop_seqsim(s,t)>=CDR_H3_IDENTITY_THRESHOLD for s in seqs for t in hardseqs):reasons.append('cdr3_overlap_snac_hard_threshold')
             if reasons:exclusions.append(exclusion(r,reasons))
             else:train.append(r);known_train_cdr[r['id']]=sorted(seqs)
         print(f'Building {len(train)} train graphs; hard test {len(chosen)}',flush=True)
@@ -824,7 +827,7 @@ def main():
                 hard_clusters.add(cluster_map[key])
         train_records=[r for r in manifest if r['split']=='train']
         retained_train=[]; removed_train=set()
-        cross_max=dict(vhh_identity=0.0,cdr_h3_identity=0.0,antigen_identity=0.0)
+        cross_max=dict(vhh_full_chain_identity=0.0,cdr_h3_loop_identity=0.0,antigen_full_chain_identity=0.0)
         for record in train_records:
             graph=torch.load(output/record['path'],map_location='cpu',weights_only=False)
             violation_details=[]
@@ -835,7 +838,7 @@ def main():
                 if cluster_map[pdb_key] in hard_clusters:
                     violation_details.append(('family_cluster',dict(
                         violates_vhh=False,violates_cdr_h3=False,violates_antigen=False,
-                        vhh_identity=0.0,cdr_h3_identity=0.0,antigen_identity=0.0)))
+                        vhh_full_chain_identity=0.0,cdr_h3_loop_identity=0.0,antigen_full_chain_identity=0.0)))
             for hard_record,hard_graph in zip(hard_records,hard_graphs):
                 homologous,detail=layered_graph_homologous(graph,hard_graph)
                 for key in cross_max:
@@ -848,7 +851,7 @@ def main():
                     if source=='family_cluster': reasons.add('family_cluster_overlap_snac_hard')
                     if detail['violates_vhh']: reasons.add('vhh_full_chain_overlap_snac_hard')
                     if detail['violates_cdr_h3']: reasons.add('cdr3_overlap_snac_hard_threshold')
-                    if detail['violates_antigen']: reasons.add('antigen_overlap_snac_hard')
+                    if detail['violates_antigen']: reasons.add('antigen_full_chain_overlap_snac_hard')
                 source=next((row for row in train if row['id']==record['source_id']),
                             dict(id=record['source_id'],pdb_id=record['pdb_id'],subset=record['subset_source']))
                 exclusions.append(exclusion(source,sorted(reasons)))
@@ -865,9 +868,9 @@ def main():
             raise ValueError('Layered train/test homology isolation removed every training graph')
         _require(not ({r['pdb_id'] for r in train_records}&(dbids|hardids)), "validation failed: not ({r['pdb_id'] for r in train_records}&(dbids|hardids))")
         _require(not (dbids&hardids), 'validation failed: not (dbids&hardids)')
-        maxhard=max_pair_similarity(hardseqs)
+        maxhard=max_pair_cdr_h3_loop_identity(hardseqs)
         _require(maxhard<CDR_H3_IDENTITY_THRESHOLD, 'validation failed: maxhard<CDR_H3_IDENTITY_THRESHOLD')
-        maxtrain=max((seqsim(s,t) for r in train_records for s in known_train_cdr[r['source_id']] for t in hardseqs),default=0)
+        maxtrain=max((cdr_h3_loop_seqsim(s,t) for r in train_records for s in known_train_cdr[r['source_id']] for t in hardseqs),default=0)
         _require(maxtrain<CDR_H3_IDENTITY_THRESHOLD, 'validation failed: maxtrain<CDR_H3_IDENTITY_THRESHOLD')
         _require(len(list((output/'graphs').rglob('*.pt')))==len(manifest), "validation failed: len(list((output/'graphs').rglob('*.pt')))==len(manifest)")
         _require(sum(r['split']=='test_db55' for r in manifest)==248, "validation failed: sum(r['split']=='test_db55' for r in manifest)==248")
@@ -876,7 +879,7 @@ def main():
             sample=[torch.load(output/r['path'],weights_only=False,map_location='cpu') for r in sample_rows]
             batched=Batch.from_data_list(sample);_require(batched.num_nodes==sum(g.num_nodes for g in sample),f'PyG batch read-back failed for split {split}')
         summary.update(validation=dict(all_graphs_read_back=True,db55_count_248=True,pdb_split_overlap=0,
-            hard_max_pair_identity=maxhard,known_train_hard_max_identity=maxtrain,
+            hard_max_pair_cdr_h3_loop_identity=maxhard,known_train_hard_max_cdr_h3_loop_identity=maxtrain,
             hard_layered_pair_max=hard_pair_max,train_hard_layered_cross_max=cross_max,
             layered_train_hard_isolation=True,
             family_cluster_map_used=cluster_map is not None,

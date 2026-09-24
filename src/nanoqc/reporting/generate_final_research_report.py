@@ -219,10 +219,10 @@ def section_data_reliability(ctx: ReportContext) -> List[str]:
     lines.append(f"- Admission by source: {json.dumps(run_summary.get('admission', {}))}")
     lines.append(f"- CDR-H3 >=16aa eligible pool: {run_summary.get('long_eligible', 'n/a')}; "
                   f"unique CDR sequences: {run_summary.get('unique_long_cdr', 'n/a')}; "
-                  f"{cdr_h3_threshold*100:.0f}%-CDR-H3-identity initial clusters: {run_summary.get('clusters', 'n/a')}.")
+                  f"{cdr_h3_threshold*100:.0f}%-CDR-H3-loop-identity initial clusters: {run_summary.get('clusters', 'n/a')}.")
     lines.append(
-        f"- Final layered graph-level isolation: VHH<{vhh_threshold:.2f}, "
-        f"CDR-H3<{cdr_h3_threshold:.2f}, antigen<{antigen_threshold:.2f} "
+        f"- Final layered graph-level isolation: VHH full-chain<{vhh_threshold:.2f}, "
+        f"CDR-H3 loop<{cdr_h3_threshold:.2f}, antigen full-chain<{antigen_threshold:.2f} "
         f"with antigen length coverage>={antigen_coverage:.2f}. "
         f"Observed train-hard maxima: "
         f"{json.dumps((run_summary.get('validation', {}) or {}).get('train_hard_layered_cross_max', {}))}"
@@ -285,16 +285,16 @@ def section_data_reliability(ctx: ReportContext) -> List[str]:
         f"{validation_meta.get('family_cluster_train_hard_overlap')}."
     )
     if selected:
-        vhh_ids = [float(d.get("max_vhh_identity", 0.0)) for d in selected]
-        antigen_ids = [float(d.get("max_antigen_identity", 0.0)) for d in selected]
-        cdr_ids = [float(d.get("cdr3_identity", 0.0)) for d in selected]
+        vhh_ids = [float(d.get("max_vhh_full_chain_identity", 0.0)) for d in selected]
+        antigen_ids = [float(d.get("max_antigen_full_chain_identity", 0.0)) for d in selected]
+        cdr_ids = [float(d.get("max_cdr_h3_loop_identity", 0.0)) for d in selected]
         if vhh_ids:
             lines.append(
-                f"- Layered homology isolation: VHH < {vhh_threshold:.2f}, "
-                f"CDR-H3 < {cdr_h3_threshold:.2f}, antigen < {antigen_threshold:.2f} "
+                f"- Layered homology isolation: VHH full-chain < {vhh_threshold:.2f}, "
+                f"CDR-H3 loop < {cdr_h3_threshold:.2f}, antigen full-chain < {antigen_threshold:.2f} "
                 f"with minimum length coverage {antigen_coverage:.2f}. "
-                f"Selected-target maxima: VHH {max(vhh_ids):.3f}, "
-                f"CDR-H3 {max(cdr_ids):.3f}, antigen {max(antigen_ids):.3f}."
+                f"Selected-target maxima: VHH full-chain {max(vhh_ids):.3f}, "
+                f"CDR-H3 loop {max(cdr_ids):.3f}, antigen full-chain {max(antigen_ids):.3f}."
             )
     lines.append("")
     return lines
@@ -1064,9 +1064,9 @@ def section_applicability_boundary(ctx: ReportContext) -> List[str]:
         "- A small queue (see section 1.3 for its actual selected count) supports stability/sanity checking, "
         "not a general statistical-power guarantee.",
         f"- Independence checking is PDB-disjoint plus layered sequence isolation using published anti-leakage precedents: "
-        f"VHH < {100.0 * float((((ctx.frozen_config.get('queue_freeze', {}) or {}).get('homology_isolation', {}) or {}).get('vhh_full_chain_identity', 0.80))):.0f}%, "
-        f"CDR-H3 < {100.0 * float((((ctx.frozen_config.get('queue_freeze', {}) or {}).get('homology_isolation', {}) or {}).get('cdr_h3_identity', 0.50))):.0f}%, "
-        f"antigen < {100.0 * float((((ctx.frozen_config.get('queue_freeze', {}) or {}).get('homology_isolation', {}) or {}).get('antigen_identity', 0.30))):.0f}% "
+        f"VHH full-chain < {100.0 * float((((ctx.frozen_config.get('queue_freeze', {}) or {}).get('homology_isolation', {}) or {}).get('vhh_full_chain_identity', 0.80))):.0f}%, "
+        f"CDR-H3 loop < {100.0 * float((((ctx.frozen_config.get('queue_freeze', {}) or {}).get('homology_isolation', {}) or {}).get('cdr_h3_identity', 0.50))):.0f}%, "
+        f"antigen full-chain < {100.0 * float((((ctx.frozen_config.get('queue_freeze', {}) or {}).get('homology_isolation', {}) or {}).get('antigen_identity', 0.30))):.0f}% "
         f"with minimum length coverage {100.0 * float((((ctx.frozen_config.get('queue_freeze', {}) or {}).get('homology_isolation', {}) or {}).get('antigen_min_length_coverage', 0.70))):.0f}%. "
         "Formal runs additionally require the frozen family/structure cluster map recorded in section 1; "
         "independence claims are limited to those explicitly encoded sequence and cluster criteria, not arbitrary remote homology.",
