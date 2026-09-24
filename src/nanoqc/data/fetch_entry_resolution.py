@@ -56,7 +56,7 @@ CHUNK = 150
 USER_AGENT = "nanoqc-fetch-entry-resolution/1 (+https://data.rcsb.org)"
 OUT_SUFFIX = "entry_resolution.tsv"  # any *entry_resolution.tsv under the data root is read
 FIELDS = ("pdb", "resolution", "method")
-_PDB_ID = re.compile(r"[0-9][A-Za-z0-9]{3}")
+_PDB_ID = re.compile(r"^(?:pdb_0000|pdb)?([0-9][A-Za-z0-9]{3})(?=$|[_.-])", re.IGNORECASE)
 
 
 def data_root() -> Path:
@@ -78,9 +78,11 @@ def entry_ids(values: Iterable[str]) -> list[str]:
     """Distinct four-character PDB IDs, upper case, from lines or file names."""
     seen: dict[str, None] = {}
     for value in values:
-        match = _PDB_ID.search(str(value).strip())
+        # Match the filename/ID boundary. An unanchored search reads the
+        # zero-padding of SAbDab2 names (pdb_000010zo.cif) as PDB ID 0000.
+        match = _PDB_ID.match(Path(str(value).strip()).name)
         if match:
-            seen.setdefault(match.group(0).upper(), None)
+            seen.setdefault(match.group(1).upper(), None)
     return list(seen)
 
 

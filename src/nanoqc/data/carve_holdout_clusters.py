@@ -31,6 +31,7 @@ import csv
 import gzip
 import json
 import shutil
+import tempfile
 import zipfile
 from collections import defaultdict
 from pathlib import Path
@@ -74,6 +75,31 @@ def copy_source_structure(source: dict, pdb: str, destination: Path) -> Path:
     out = destination / f"{pdb}{suffix}"
     out.write_bytes(payload)
     return out
+
+
+def write_outputs(manifest_path: Path, manifest: list[dict], out_json: Path, payload: dict) -> None:
+    """Restore earlier metadata if any output write fails."""
+    manifest_csv = manifest_path.with_suffix(".csv")
+    paths = [manifest_path, out_json]
+    if manifest_csv.is_file() and manifest:
+        paths.append(manifest_csv)
+    originals = {path: path.read_bytes() if path.is_file() else None for path in paths}
+    try:
+        manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        if manifest_csv in paths:
+            with manifest_csv.open("w", encoding="utf-8", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=list(manifest[0]))
+                writer.writeheader()
+                writer.writerows(manifest)
+        out_json.parent.mkdir(parents=True, exist_ok=True)
+        out_json.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    except Exception:
+        for path, original in originals.items():
+            if original is None:
+                path.unlink(missing_ok=True)
+            else:
+                path.write_bytes(original)
+        raise
 
 
 def parse_folds(value: str) -> list[int]:
@@ -174,13 +200,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     holdout_paths = sorted((path for component in holdout_components for path in component),
                            key=lambda path: path.name.lower())
     sources = source_files_by_pdb(args.audit_dir / "data_audit_details.jsonl")
-    holdout_dir.mkdir(parents=True, exist_ok=True)
     structures_dir = args.dataset_dir / "holdout_source_structures"
-    structures_dir.mkdir(parents=True, exist_ok=True)
-
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     by_relative = {str(row.get("path", "")).replace("\\", "/"): row for row in manifest}
-    moved, structures = [], {}
+    plan = []
     for path in holdout_paths:
         relative = f"graphs/train/{path.name}"
         row = by_relative.get(relative)
@@ -189,23 +212,43 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         pdb = str(row.get("pdb_id", "")).lower()
         if pdb not in sources:
             raise SystemExit(f"No audited raw structure for holdout PDB {pdb}")
-        if pdb not in structures:
-            structures[pdb] = copy_source_structure(sources[pdb], pdb, structures_dir)
-        destination = holdout_dir / path.name
-        shutil.move(str(path), str(destination))
-        row["split"] = HOLDOUT_SPLIT
-        row["path"] = f"graphs/{HOLDOUT_SPLIT}/{path.name}"
-        row["sha256"] = sha256(destination)
-        moved.append(dict(pdb_id=pdb, path=row["path"], sha256=row["sha256"],
-                          family_structure_cluster=row.get("family_structure_cluster", "")))
-    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    manifest_csv = args.dataset_dir / "graph_manifest.csv"
-    if manifest_csv.is_file() and manifest:
-        with manifest_csv.open("w", encoding="utf-8", newline="") as handle:
-            writer = csv.DictWriter(handle, fieldnames=list(manifest[0]))
-            writer.writeheader()
-            writer.writerows(manifest)
+        if sha256(path) != row.get("sha256"):
+            raise SystemExit(f"Training graph differs from the frozen manifest: {relative}")
+        plan.append((path, row, pdb))
 
+    # Read/decompress every raw source before touching the training split. If
+    # a later source is absent or corrupt, the original dataset remains usable.
+    with tempfile.TemporaryDirectory(prefix=".holdout_sources_", dir=args.dataset_dir) as staging:
+        staged = {}
+        for _, _, pdb in plan:
+            if pdb not in staged:
+                staged[pdb] = copy_source_structure(sources[pdb], pdb, Path(staging))
+        if structures_dir.exists() and any(structures_dir.iterdir()):
+            raise SystemExit(f"{structures_dir} already holds raw structures; inspect the previous carve")
+        holdout_dir.mkdir(parents=True, exist_ok=True)
+        structures_dir.mkdir(parents=True, exist_ok=True)
+        moved, structures, moved_graphs, moved_sources = [], {}, [], []
+        try:
+            for pdb, path in staged.items():
+                destination = structures_dir / path.name
+                shutil.move(str(path), str(destination))
+                structures[pdb] = destination
+                moved_sources.append(destination)
+            for path, row, pdb in plan:
+                destination = holdout_dir / path.name
+                shutil.move(str(path), str(destination))
+                moved_graphs.append((destination, path))
+                row["split"] = HOLDOUT_SPLIT
+                row["path"] = f"graphs/{HOLDOUT_SPLIT}/{path.name}"
+                row["sha256"] = sha256(destination)
+                moved.append(dict(pdb_id=pdb, path=row["path"], sha256=row["sha256"],
+                                  family_structure_cluster=row.get("family_structure_cluster", "")))
+        except Exception:
+            for destination, original in reversed(moved_graphs):
+                shutil.move(str(destination), str(original))
+            for destination in moved_sources:
+                destination.unlink()
+            raise
     by_cluster: dict[str, list[str]] = defaultdict(list)
     for row in moved:
         by_cluster[row["family_structure_cluster"]].append(row["pdb_id"])
@@ -234,8 +277,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         scope=("outcome-free: components are chosen by a hash of their member file names, "
                "before any training, benchmark or structural result exists"),
     )
-    args.out_json.parent.mkdir(parents=True, exist_ok=True)
-    args.out_json.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    try:
+        write_outputs(manifest_path, manifest, args.out_json, payload)
+    except Exception:
+        for destination, original in reversed(moved_graphs):
+            shutil.move(str(destination), str(original))
+        for destination in moved_sources:
+            destination.unlink()
+        raise
     print(f"[carve_holdout_clusters] held out {len(moved)} graph(s) in {len(holdout_components)} "
           f"independent component(s) at fold {args.fold}; {remaining} component(s) remain for training")
     return 0

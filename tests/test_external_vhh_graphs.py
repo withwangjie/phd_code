@@ -331,6 +331,10 @@ def test_foldseek_pairs_use_antigen_chains_only(tmp_path, monkeypatch):
     fake = tmp_path / "foldseek"
     fake.write_text(FAKE_FOLDSEEK.replace("{python}", sys.executable))
     fake.chmod(0o755)
+    if os.name == "nt":
+        wrapper = tmp_path / "foldseek.cmd"
+        wrapper.write_text(f'@"{sys.executable}" "{fake}" %*\n')
+        fake = wrapper
     out = tmp_path / "pairs.tsv"
     argv = ["--universe", str(universe), "--audit-dir", str(audit_dir), "--data-root", str(tmp_path / "none"),
             "--external-candidates", str(candidates), "--external-structures", str(structures),
@@ -507,6 +511,7 @@ def test_an_empty_candidate_set_reports_why(tmp_path):
 
 
 def test_the_foldseek_executable_is_resolved_before_any_work(tmp_path):
+    import os
     from nanoqc.data.build_foldseek_pairs import resolve_foldseek
 
     # The usual mistake: pass the extracted directory, whose exec fails with EACCES.
@@ -514,6 +519,17 @@ def test_the_foldseek_executable_is_resolved_before_any_work(tmp_path):
     (bundle / "bin").mkdir(parents=True)
     with pytest.raises(SystemExit, match=r"is a directory; pass the executable"):
         resolve_foldseek(str(bundle))
+    if os.name == "nt":
+        binary = bundle / "bin" / "foldseek.cmd"
+        binary.write_text("@echo off\n")
+        assert resolve_foldseek(str(bundle)) == str(binary.resolve())
+        plain = tmp_path / "fs"
+        plain.write_text("#!/bin/sh\n")
+        with pytest.raises(SystemExit, match="not a Windows executable"):
+            resolve_foldseek(str(plain))
+        with pytest.raises(SystemExit, match="not found; pass the executable"):
+            resolve_foldseek(str(tmp_path / "missing"))
+        return
     binary = bundle / "bin" / "foldseek"
     binary.write_text("#!/bin/sh\n")
     with pytest.raises(SystemExit, match="is a directory"):  # present but not executable
@@ -529,6 +545,32 @@ def test_the_foldseek_executable_is_resolved_before_any_work(tmp_path):
     assert resolve_foldseek(str(plain)) == str(plain.resolve())
     with pytest.raises(SystemExit, match="not found; pass the executable"):
         resolve_foldseek(str(tmp_path / "missing"))
+
+
+def test_reused_foldseek_search_is_bound_to_antigen_inputs(tmp_path):
+    from nanoqc.data import build_foldseek_pairs as fp
+
+    structures = tmp_path / "antigens"
+    structures.mkdir()
+    antigen = structures / "1abc.cif"
+    antigen.write_text("first antigen")
+    raw = tmp_path / "foldseek_raw.m8"
+    raw.write_text("1abc.cif_A\t1abc.cif_A\t1\n")
+    options = list(fp.FOLDSEEK_ARGS)
+    inputs = fp.search_inputs(structures)
+    binding = dict(schema="foldseek_search_inputs_v1", antigen_structure_sha256=inputs,
+                   search_options=options, raw_output_sha256=fp.sha256(raw), foldseek_version="test")
+    fp.raw_binding_path(raw).write_text(json.dumps(binding))
+    assert fp.verify_reused_raw(raw, inputs, options) == binding
+
+    antigen.write_text("changed antigen, same PDB")
+    with pytest.raises(SystemExit, match="antigen inputs"):
+        fp.verify_reused_raw(raw, fp.search_inputs(structures), options)
+    with pytest.raises(SystemExit, match="search options"):
+        fp.verify_reused_raw(raw, inputs, ["-e", "1"])
+    raw.write_text("different search output")
+    with pytest.raises(SystemExit, match="raw output"):
+        fp.verify_reused_raw(raw, inputs, options)
 
 
 def test_a_short_chain_cannot_link_complexes_by_a_one_sided_tm_score(tmp_path):

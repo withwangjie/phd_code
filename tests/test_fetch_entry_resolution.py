@@ -49,6 +49,8 @@ def _server(bodies, calls=None):
 
 def test_ids_come_from_lines_and_from_assembly_file_names():
     assert fetch.entry_ids(["10bt", "  6VXX ", "10bt_assembly1.cif", "", "junk"]) == ["10BT", "6VXX"]
+    assert fetch.entry_ids(["pdb_000010zo.cif", "pdb_00001ol0.cif", "pdb1abc.ent"]) == [
+        "10ZO", "1OL0", "1ABC"]
 
 
 def test_resolution_is_the_worst_reported_value_or_none():

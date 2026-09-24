@@ -124,6 +124,46 @@ def test_too_few_holdout_components_fails_before_any_training(tmp_path):
         (dataset / "graphs" / "holdout").glob("*.pt"))
 
 
+def test_unreadable_later_source_leaves_training_split_intact(tmp_path, monkeypatch):
+    dataset, audit = _dataset(tmp_path)
+    original_manifest = (dataset / "graph_manifest.json").read_bytes()
+    original_graphs = {p.name for p in (dataset / "graphs" / "train").glob("*.pt")}
+    real_copy = carve.copy_source_structure
+    calls = 0
+
+    def fail_second(source, pdb, destination):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError("unreadable later source")
+        return real_copy(source, pdb, destination)
+
+    monkeypatch.setattr(carve, "copy_source_structure", fail_second)
+    with pytest.raises(OSError, match="unreadable later source"):
+        carve.main(["--dataset-dir", str(dataset), "--audit-dir", str(audit),
+                    "--out-json", str(tmp_path / "holdout.json"), "--min-clusters", "2"])
+    assert (dataset / "graph_manifest.json").read_bytes() == original_manifest
+    assert {p.name for p in (dataset / "graphs" / "train").glob("*.pt")} == original_graphs
+    assert not list((dataset / "graphs" / "holdout").glob("*.pt"))
+
+
+def test_failed_holdout_metadata_write_rolls_back_moved_graphs(tmp_path, monkeypatch):
+    dataset, audit = _dataset(tmp_path)
+    original_manifest = (dataset / "graph_manifest.json").read_bytes()
+    original_graphs = {p.name for p in (dataset / "graphs" / "train").glob("*.pt")}
+
+    def fail_write(*_args):
+        raise OSError("metadata write failed")
+
+    monkeypatch.setattr(carve, "write_outputs", fail_write)
+    with pytest.raises(OSError, match="metadata write failed"):
+        carve.main(["--dataset-dir", str(dataset), "--audit-dir", str(audit),
+                    "--out-json", str(tmp_path / "holdout.json"), "--min-clusters", "2"])
+    assert (dataset / "graph_manifest.json").read_bytes() == original_manifest
+    assert {p.name for p in (dataset / "graphs" / "train").glob("*.pt")} == original_graphs
+    assert not list((dataset / "graphs" / "holdout").glob("*.pt"))
+
+
 def test_the_carve_is_deterministic_and_runs_once(tmp_path):
     first = _carve(*_dataset(tmp_path / "a"), tmp_path / "a.json")
     second = _carve(*_dataset(tmp_path / "b"), tmp_path / "b.json")

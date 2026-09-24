@@ -226,14 +226,19 @@ def symmetric_pdb_scores(raw: Path) -> tuple[dict[tuple[str, str], float], set[s
 
 def resolve_foldseek(value: str) -> str:
     """The Foldseek executable, or a message naming what was found instead."""
+    path = Path(value)
+    if os.name == "nt" and path.is_file() and path.suffix.lower() not in (".exe", ".cmd", ".bat", ".com"):
+        raise SystemExit(f"--foldseek {value} is not a Windows executable")
     located = shutil.which(value)
     if located:
         return located
-    path = Path(value)
     if path.is_dir():
         for candidate in (path / "bin" / "foldseek", path / "foldseek"):
-            if candidate.is_file() and os.access(candidate, os.X_OK):
-                return str(candidate.resolve())
+            variants = ([candidate.with_suffix(ext) for ext in (".exe", ".cmd", ".bat", ".com")]
+                        if os.name == "nt" else [candidate])
+            for executable in variants:
+                if executable.is_file() and os.access(executable, os.X_OK):
+                    return str(executable.resolve())
         raise SystemExit(f"--foldseek {value} is a directory; pass the executable, e.g. {path / 'bin' / 'foldseek'}")
     if not path.exists():
         raise SystemExit(f"--foldseek {value} not found; pass the executable's path or put it on PATH")
@@ -254,6 +259,29 @@ def run_foldseek(foldseek: str, input_dir: Path, work: Path, entries: int, threa
     subprocess.run(command, check=True)
     shutil.rmtree(tmp, ignore_errors=True)
     return raw
+
+
+def search_inputs(input_dir: Path) -> dict[str, str]:
+    """Bind a Foldseek search to the exact antigen structure files it searched."""
+    return {path.name: sha256(path) for path in sorted(input_dir.glob("*.cif"))}
+
+
+def raw_binding_path(raw: Path) -> Path:
+    return raw.with_suffix(".inputs.json")
+
+
+def verify_reused_raw(raw: Path, inputs: dict[str, str], options: Sequence[str]) -> dict:
+    binding_path = raw_binding_path(raw)
+    if not binding_path.is_file():
+        raise SystemExit(f"Cannot reuse {raw}: search input binding is missing ({binding_path}); rerun Foldseek")
+    binding = json.loads(binding_path.read_text(encoding="utf-8"))
+    if (binding.get("schema") != "foldseek_search_inputs_v1"
+            or binding.get("antigen_structure_sha256") != inputs
+            or binding.get("search_options") != list(options)
+            or binding.get("raw_output_sha256") != sha256(raw)):
+        raise SystemExit("Cannot reuse Foldseek output: antigen inputs, search options or raw output changed; "
+                         "rerun Foldseek without --reuse-raw")
+    return binding
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -325,13 +353,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if entries == 0:
         raise SystemExit("No antigen chains to search")
 
+    inputs = search_inputs(input_dir)
+    options = list(args.foldseek_arg or FOLDSEEK_ARGS)
     if args.reuse_raw is not None:
-        # The chains written above are the searched input; only the scoring rule changed.
         raw = args.reuse_raw
+        binding = verify_reused_raw(raw, inputs, options)
         print(f"[build_foldseek_pairs] reusing the Foldseek search {raw} (no new search)", flush=True)
     else:
-        raw = run_foldseek(args.foldseek, input_dir, args.work_dir, entries, args.threads,
-                           args.foldseek_arg or FOLDSEEK_ARGS)
+        raw = run_foldseek(args.foldseek, input_dir, args.work_dir, entries, args.threads, options)
+        version = subprocess.run([args.foldseek, "version"], capture_output=True, text=True, check=False).stdout.strip()
+        binding = dict(schema="foldseek_search_inputs_v1", antigen_structure_sha256=inputs,
+                       search_options=options, raw_output_sha256=sha256(raw), foldseek_version=version or None)
+        raw_binding_path(raw).write_text(json.dumps(binding, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     best, seen = symmetric_pdb_scores(raw)
     unknown = sorted(seen - set(universe))
     if unknown:
@@ -355,13 +388,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         handle.write(f"query\ttarget\t{SCORE_FIELD}\n")
         for (query, target), score in sorted(best.items()):
             handle.write(f"{query}\t{target}\t{score:.4f}\n")
-    version = subprocess.run([args.foldseek, "version"], capture_output=True, text=True, check=False).stdout.strip()
+    version = binding["foldseek_version"]
     manifest = dict(
         schema="foldseek_pairs_v1", pair_table=str(args.out.resolve()), pair_table_sha256=sha256(args.out),
-        raw_output_sha256=sha256(raw), foldseek_version=version or None,
-        foldseek_options=list(args.foldseek_arg or FOLDSEEK_ARGS), score=SCORE_FIELD,
+        raw_output_sha256=sha256(raw), foldseek_version=version,
+        foldseek_options=options, score=SCORE_FIELD,
         score_rule="PDB pair: max over chain pairs of min(qtmscore(q->t), qtmscore(t->q))",
         raw_output=str(Path(raw).resolve()), reused_raw_output=args.reuse_raw is not None,
+        raw_input_binding_sha256=sha256(raw_binding_path(raw)),
         min_chain_length=args.min_chain_length, universe_size=len(universe),
         universe_sha256=sha256(args.universe), searched_pdbs=len(searched), chains_searched=entries,
         self_only=sorted(self_only + missing), allow_missing_hits=bool(args.allow_missing_hits),
