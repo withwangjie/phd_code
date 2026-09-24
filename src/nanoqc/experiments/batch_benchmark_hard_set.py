@@ -48,15 +48,16 @@ from nanoqc.model.model_egnn_pruning import (  # re-exported: historical import 
     ModelLoadInfo, _clean_error_message, _extract_state_dict, _normalize_state_dict_keys,
     _graph_protocol_signature, assert_checkpoint_graph_compatible, load_interface_scorer,
 )
-from nanoqc.solvers.qaoa_interface_sampler import XYMixerQAOASampler
+from nanoqc.solvers.qaoa_interface_sampler import XYMixerQAOASampler, GROUND_ENERGY_TOLERANCE
 from nanoqc.qubo.subgraph_to_qubo import InterfaceQUBOBuilder, ForceFieldConfig, EnergyCalibration
 from nanoqc.quantum.resource_estimation import estimate_qaoa_resources
 
 
 CSV_FILENAME = "snac_hard_qaoa_vs_sa_metrics.csv"
-# Dependency-free helper modules whose code was factored out of the modules
+# Shared helper modules (factored-out helpers plus the formal quantum instance/resource modules) imported by the modules
 # fingerprinted below; they are hashed alongside them in every code_sha256.
-SHARED_HELPER_MODULES = ("repo_io.py", "paired_statistics.py", "residue_tables.py", "safe_graph_load.py")
+SHARED_HELPER_MODULES = ("repo_io.py", "paired_statistics.py", "residue_tables.py", "safe_graph_load.py",
+                         "instance.py", "resource_estimation.py")
 REPORT_FILENAME = "benchmark_summary_report.md"
 FAILED_LOG_FILENAME = "failed_cases.log"
 OPTIMIZATION_WARNINGS_FILENAME = "optimization_warnings.log"
@@ -1040,8 +1041,8 @@ def _ablation_summarize(counts: dict, energies: dict, ground: float, window: flo
     conditional = np.array([counts[s] / mass for s in seen_low]) if mass else np.array([])
     best = min(energies[s] for s in counts)
     return dict(outputs=n, best_energy=best, gap=max(0., best-ground),
-                hit=int(abs(best-ground) <= 1e-6),
-                ground_probability=sum(c for s,c in counts.items() if abs(energies[s]-ground)<=1e-6)/n,
+                hit=int(abs(best-ground) <= GROUND_ENERGY_TOLERANCE),
+                ground_probability=sum(c for s,c in counts.items() if abs(energies[s]-ground)<=GROUND_ENERGY_TOLERANCE)/n,
                 legal_rate=1.0, entropy=float(-sum(probs*np.log(probs))),
                 low_energy_mass=mass/n, low_energy_coverage=len(seen_low)/len(low),
                 low_energy_conditional_entropy=float(-sum(conditional*np.log(conditional))) if mass else None,
@@ -1850,7 +1851,7 @@ def _paired_statistics_main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Formal pre-registered paired cluster statistics")
     parser.add_argument("--results-dir",type=Path,required=True)
     parser.add_argument("--resamples",type=int,default=10000)
-    parser.add_argument("--seed",type=int,default=20260917)
+    parser.add_argument("--seed",type=int,default=DEFAULT_MASTER_SEED)
     parser.add_argument("--cluster-map",type=Path,help="JSON mapping every PDB ID to antigen/sequence-family cluster")
     parser.add_argument("--budget-mode",choices=["outputs","time"],default="outputs")
     parser.add_argument("--primary-pruning", type=str, default="egnn")

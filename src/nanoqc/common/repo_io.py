@@ -43,6 +43,8 @@ MODULE_LAYOUT = {
     "train_egnn_pruning.py": "src/nanoqc/model/train_egnn_pruning.py",
     "subgraph_to_qubo.py": "src/nanoqc/qubo/subgraph_to_qubo.py",
     "qaoa_interface_sampler.py": "src/nanoqc/solvers/qaoa_interface_sampler.py",
+    "instance.py": "src/nanoqc/quantum/instance.py",
+    "resource_estimation.py": "src/nanoqc/quantum/resource_estimation.py",
     "paired_statistics.py": "src/nanoqc/inference/paired_statistics.py",
     "analyze_quantum_scaling.py": "src/nanoqc/inference/analyze_quantum_scaling.py",
     "analyze_structure_recovery.py": "src/nanoqc/inference/analyze_structure_recovery.py",

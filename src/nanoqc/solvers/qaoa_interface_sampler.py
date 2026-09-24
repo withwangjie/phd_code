@@ -101,6 +101,12 @@ class OptimizationCollapseError(RuntimeError):
     """
 
 
+# Absolute energy tolerance defining "at the exact ground energy" everywhere
+# (ground-state enumeration, hit, ground-state probability), shared with the
+# coarse benchmark summaries so both report the same hit semantics.
+GROUND_ENERGY_TOLERANCE = 1e-9
+
+
 def lower_tail_cvar(energies: np.ndarray, probabilities: np.ndarray, alpha: float) -> float:
     """Exact lower-tail CVaR over a *known* probability distribution.
 
@@ -1143,7 +1149,7 @@ class XYMixerQAOASampler:
             "measurement_ledger": measurement_ledger,
         }
 
-    def enumerate_ground_states(self, tolerance: float = 1e-9) -> GroundStateResult:
+    def enumerate_ground_states(self, tolerance: float = GROUND_ENERGY_TOLERANCE) -> GroundStateResult:
         """Exactly enumerate the feasible rotamer assignments.
 
         The current builder emits 3--6 candidates per residue under a 30-bit budget; legacy 2-state registers remain supported for regression tests. The
@@ -1177,7 +1183,7 @@ class XYMixerQAOASampler:
         return self._feasible_energy_cache
 
     def low_energy_states(
-        self, energy_ceiling: float, *, tolerance: float = 1e-9
+        self, energy_ceiling: float, *, tolerance: float = GROUND_ENERGY_TOLERANCE
     ) -> Tuple[BitString, ...]:
         """Enumerate legal states whose energy is at most ``energy_ceiling``."""
 
@@ -1299,14 +1305,14 @@ class XYMixerQAOASampler:
                 {
                     bitstrings[index]
                     for index in np.flatnonzero(
-                        np.isclose(energies, best_energy, atol=1e-9, rtol=0.0)
+                        np.isclose(energies, best_energy, atol=GROUND_ENERGY_TOLERANCE, rtol=0.0)
                     )
                 }
             )
         )
         exact = ground_state or self.enumerate_ground_states()
         success_probability = float(
-            np.mean(np.isclose(energies, exact.energy, atol=1e-9, rtol=0.0))
+            np.mean(np.isclose(energies, exact.energy, atol=GROUND_ENERGY_TOLERANCE, rtol=0.0))
         )
         # Empirical Shannon entropy (nats) of the observed bitstring distribution.
         # `counts` holds only observed (nonzero-count) bitstrings, so no 0*ln(0) term arises.
@@ -1433,7 +1439,7 @@ class XYMixerQAOASampler:
             raise RuntimeError("Simulated annealing produced no states")
         exact = ground_state or self.enumerate_ground_states()
         success_probability = float(
-            np.mean(np.isclose(read_energies, exact.energy, atol=1e-9, rtol=0.0))
+            np.mean(np.isclose(read_energies, exact.energy, atol=GROUND_ENERGY_TOLERANCE, rtol=0.0))
         )
         return AnnealingResult(
             counts=dict(Counter(read_states)),

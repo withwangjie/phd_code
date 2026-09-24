@@ -518,6 +518,17 @@ def test_orchestrated_scripts_cover_every_executed_local_module():
         assert repo_path(name).is_file(), name
 
 
+def test_benchmark_code_fingerprint_covers_quantum_instance_modules():
+    from nanoqc.experiments.batch_benchmark_hard_set import SHARED_HELPER_MODULES
+    assert {"instance.py", "resource_estimation.py"} <= set(SHARED_HELPER_MODULES)
+
+
+def test_orchestrator_never_passes_the_bare_master_seed_to_statistics():
+    source = (REPO / "src/nanoqc/pipeline/run_full_experiment.py").read_text(encoding="utf-8")
+    assert '"--seed",str(self.config["master_seed"])' not in source
+    assert '"--seed", str(self.config["master_seed"])' not in source
+
+
 def test_build_run_manifest_fails_closed_on_missing_script(tmp_path):
     import nanoqc.pipeline.run_full_experiment as full
     from nanoqc.common.repo_io import repo_path

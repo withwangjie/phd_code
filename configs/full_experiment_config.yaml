@@ -479,7 +479,6 @@ final_report:
 # Hardware resource limits; worker counts live in their owning stages.
 # Training uses DDP; ablations use spawned CPU worker processes.
 # Structural target execution remains sequential; platform is explicit.
-# See HARDWARE_REVIEW.md for limitations and protocol amendments.
 # ---------------------------------------------------------------------------
 hardware:
   cpu_threads_per_process: 2
@@ -502,9 +501,9 @@ control:
 #   data_root -> /data/quantum-protein/data (server's existing raw data; not bundled)
 #   run_root  -> /data/quantum-protein/runs (shared, outside this versioned code dir;
 #                survives future code re-deploys)
-#   stages.smoke_check -> false (the formal one-command launch never runs a
-#                smoke/trial sub-run; see run_stage()'s config-disabled-stage
-#                fix in run_full_experiment.py for why this is now safe)
-# Hardware/protocol amendments are documented in HARDWARE_REVIEW.md.
+#   stages.smoke_check -> false was part of that packaged bundle only; this
+#                source configuration keeps stages.smoke_check: true (see the
+#                stages block above), which is the value a run launched from
+#                this file actually freezes into <run_dir>/frozen_config.yaml.
 # This revised configuration must not be mixed into an existing frozen run.
 # ---------------------------------------------------------------------------

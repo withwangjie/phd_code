@@ -184,6 +184,10 @@ ORCHESTRATED_SCRIPTS: List[str] = [
     "model_egnn_pruning.py",
     "subgraph_to_qubo.py",
     "qaoa_interface_sampler.py",
+    # Formal QUBO/Ising instance and QAOA logical-resource accounting,
+    # imported by subgraph_to_qubo / qaoa_interface_sampler / the benchmark.
+    "instance.py",
+    "resource_estimation.py",
     "evaluate_complex_metrics.py",
     "prediction_contract.py",
     "structural_quality.py",
@@ -2143,7 +2147,8 @@ class Orchestrator:
             "--assignments-per-complex", str(cal_cfg.get("assignments_per_complex", 64)),
             "--active-sites", str(cal_cfg.get("active_sites", qc_cfg.get("active_sites", 6))),
             "--radius", str(cal_cfg.get("radius_angstrom", qc_cfg.get("radii", [6.0])[0])),
-            "--seed", str(derive_streams(self.config["master_seed"])["partition"]),
+            "--seed", str(derive_child_seed(
+                derive_streams(self.config["master_seed"])["partition"], "energy_calibration")),
             "--antigen-proximity-scale", str(qc_cfg.get("antigen_proximity_scale_angstrom", 6.0)),
             "--contact-ca-cutoff", str(qc_cfg.get("contact_ca_cutoff_angstrom", 8.0)),
             "--nonbonded-cutoff", str(ff.get("cutoff_angstrom", 8.0)),
@@ -3263,7 +3268,9 @@ class Orchestrator:
                                 self.venv_python,"-m", module_name("batch_benchmark_hard_set.py"),"--paired-statistics",
                                 "--results-dir",str(out),
                                 "--resamples",str(self.config.get("statistics",{}).get("resamples",10000)),
-                                "--seed",str(self.config["master_seed"]),
+                                "--seed",str(derive_child_seed(
+                                    derive_streams(self.config["master_seed"])["inference"],
+                                    "external_vhh_statistics")),
                                 "--cluster-map",str(cluster_path),
                                 "--budget-mode","outputs",
                                 "--primary-pruning",str(
@@ -3571,6 +3578,7 @@ class Orchestrator:
                 ],
             ]
             returncode, log_path = self._run_subprocess("structure_statistics", structure_argv)
+            logs.append(str(log_path)); argvs.append(structure_argv)
             if returncode != 0 or not structure_json.is_file():
                 failures.append(f"structure statistics exited {returncode} (see {log_path})")
             else:
