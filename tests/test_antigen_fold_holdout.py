@@ -239,6 +239,7 @@ def test_smoke_check_reads_this_run_dataset_and_skips_before_queue_freeze():
     # Skipped, not failed, while the dataset does not exist yet.
     assert 'if smoke_manifest.is_file():' in source
     assert "No smoke check could run yet" in source
-    # The pilot's own default is the legacy standalone path that caused the fallback.
-    pilot_default = inspect.getsource(full).count("dataset_clean_500")
-    assert pilot_default == 0
+    # The fallback that caused the failure was the pilot's standalone default.
+    from nanoqc.experiments import run_real_complex_pilot as pilot
+    assert "dataset_clean_500" in inspect.getsource(pilot.main)  # still the standalone default
+    assert "dataset_clean_500" not in source  # but never what the orchestrator relies on
