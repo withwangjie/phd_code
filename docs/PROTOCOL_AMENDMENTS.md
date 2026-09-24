@@ -494,9 +494,12 @@ they were logged later.
   bare ID list. The 495 that did resolve were entries that happen to appear in
   SNAC's summaries. So the subset would again be rejected for a missing field
   rather than for quality.
-- **After:** `fetch_entry_resolution.py` queries RCSB once for the entries'
-  own `rcsb_entry_info.resolution_combined` and writes
-  `pdb<TAB>resolution<TAB>method`. A file named `*entry_resolution.tsv` under
+- **After:** `fetch_entry_resolution.py` asks a finished audit which valid
+  structures it could not date (`--missing-from-audit`), queries RCSB once for
+  those entries' own `rcsb_entry_info.resolution_combined` and writes
+  `pdb<TAB>resolution<TAB>method`. Driving it from the audit rather than from
+  one subset's ID list means the same table also covers the 993 `sabdab_vhh`
+  files whose own records carry no resolution. A file named `*entry_resolution.tsv` under
   the data root (outside pipeline staging) is read by PDB ID exactly as the
   SNAC and SAbDab tables are, with `resolution_source =
   rcsb_entry_resolution`, and is listed with its SHA-256 in the audit report

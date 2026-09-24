@@ -245,14 +245,18 @@ the frozen model.
 External complexes are built with the training-graph definition (graph v1.8,
 biological assembly, 7.5 A SAbDab antigen rule, the same labels and edges):
 
-Structure files that carry no resolution record (RCSB's downloaded assembly
-files hold none) need the entry table the audit reads by PDB ID, fetched once:
+Structure files that carry no resolution record need the entry table the audit
+reads by PDB ID. Ask a finished audit which entries those are, so one table
+covers every subset, and fetch them once:
 
 ```bash
 python -m nanoqc.data.fetch_entry_resolution \
-    --ids data/rcsb_non_redundant_dataset/non_redundant_pdb_ids.txt \
-    --out data/rcsb_non_redundant_dataset/rcsb_entry_resolution.tsv
+    --missing-from-audit runs/<that run>/audit \
+    --out data/entry_resolution.tsv        # --resume continues an interrupted fetch
 ```
+
+Any `*entry_resolution.tsv` under the data root (outside pipeline staging) is
+read, listed in the audit report with its SHA-256, and needs no network again.
 
 With the antigen-fold holdout (the default), the only other input a formal run
 needs beyond the raw data is the frozen Foldseek pair table:
