@@ -125,7 +125,8 @@ def _select(args, s, out: Path, extra: list[str]) -> dict:
     if not ids.is_file():
         raise SystemExit("Run the 'audit' step first (study_pdb_ids.txt missing)")
     run_module("nanoqc.data.select_external_vhh_candidates", [
-        "--sabdab-summary", *map(str, args.sabdab_summary), "--released-after", args.released_after,
+        "--sabdab-summary", *map(str, args.sabdab_summary),
+        *(["--released-after", args.released_after] if args.released_after else []),
         "--structures-dir", str(s["source_dir"]), *(["--download"] if args.download else []),
         "--exclude-pdbs", str(ids), "--min-clusters", str(s["min_clusters"]),
         "--max-resolution", s["max_resolution"], *s["thresholds"], *extra, "--out-dir", str(out)])
@@ -198,7 +199,7 @@ def cmd_pass2(args, config, s) -> int:
         raise SystemExit("The Foldseek pair table differs from the one this run clustered with; "
                          "restore the pass-1 table before pass 2")
     if args.released_after != pass1["released_after"]:
-        raise SystemExit(f"--released-after must stay {pass1['released_after']} (pass 1)")
+        raise SystemExit(f"--released-after must stay {pass1['released_after'] or 'unset'} (pass 1)")
     summaries = sorted(sha256(path) for path in args.sabdab_summary)
     if summaries != sorted(pass1["sabdab_summaries"].values()):
         raise SystemExit("The SAbDab summary differs from pass 1; use the same file(s)")
@@ -246,7 +247,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     for name in ("pass1", "pass2"):
         p = sub.add_parser(name)
         p.add_argument("--sabdab-summary", type=Path, nargs="+", required=True)
-        p.add_argument("--released-after", required=True, help="YYYY-MM-DD, after the training data snapshot")
+        p.add_argument("--released-after", default=None,
+                       help="YYYY-MM-DD temporal holdout on top of the homology holdout; omit when no PDB "
+                            "release postdates the training snapshot")
         p.add_argument("--download", action="store_true")
         if name == "pass1":
             p.add_argument("--training-dataset", type=Path, default=None,
@@ -254,7 +257,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         else:
             p.add_argument("--run-dir", type=Path, required=True, help="The --stop-after queue_freeze run")
     args = parser.parse_args(argv)
-    if args.command in ("pass1", "pass2"):
+    if args.command in ("pass1", "pass2") and args.released_after:
         dt.date.fromisoformat(args.released_after)
     config = load_config(args.config)
     s = settings(config, args.prep_dir)

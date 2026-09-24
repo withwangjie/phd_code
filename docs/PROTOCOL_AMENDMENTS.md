@@ -184,8 +184,14 @@ they were logged later.
   external set existed.
 - **After:** `select_external_vhh_candidates.py` and
   `build_external_vhh_graphs.py` define it.
-  - **Source:** SAbDab entries released after a declared cutoff and absent
-    from the study's audited PDB universe.
+  - **Source:** SAbDab entries absent from the study's audited PDB universe.
+    A release-date cutoff is optional and applies on top: it is available
+    when PDB releases postdate the training snapshot, and omitted otherwise.
+    Independence never rests on the date. It rests on excluding the study's
+    own PDB IDs and on the layered sequence and structure-cluster checks,
+    which the formal audit re-certifies each run. The manifest records
+    `holdout` as `temporal_and_homology` or `homology`, and the manuscript
+    must describe the external set accordingly rather than as a time split.
   - **Complex:** one VHH-antigen complex per entry, matching the SNAC-DB
     per-VHH complexes that supply training and the hard test set [R34]. When
     an entry has several nanobodies, the VHH with the largest passing

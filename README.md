@@ -244,12 +244,12 @@ two passes. Neither pass reads any experimental outcome:
 
 ```bash
 ./scripts/prepare_external_vhh.sh audit      # standalone audit -> study PDB IDs
-./scripts/prepare_external_vhh.sh pass1 --sabdab-summary sabdab_nano_summary_all.tsv \
-    --released-after YYYY-MM-DD --download   # select + build graphs, write foldseek_universe.txt
+./scripts/prepare_external_vhh.sh pass1 --sabdab-summary sabdab_summary_all.tsv \
+    --download                               # select + build graphs, write foldseek_universe.txt
 ./scripts/prepare_external_vhh.sh foldseek --foldseek /path/to/foldseek   # antigen chains only -> pair_tsv
 ./scripts/deploy_launch.sh --stop-after queue_freeze   # training set + cluster map, no training
-./scripts/prepare_external_vhh.sh pass2 --sabdab-summary sabdab_nano_summary_all.tsv \
-    --released-after YYYY-MM-DD --run-dir <that run>   # drop training overlap, rebuild graphs
+./scripts/prepare_external_vhh.sh pass2 --sabdab-summary sabdab_summary_all.tsv \
+    --run-dir <that run>                     # drop training overlap, rebuild graphs
 ./scripts/deploy_launch.sh                              # fresh formal run, pair table unchanged
 ```
 
@@ -259,6 +259,10 @@ detector (ANARCI when installed); annotated antigen chains are always kept.
 It runs an exhaustive all-versus-all search (E <= 10)
 and writes the pair table, a manifest of every chain's role, and an explicit
 self row for a PDB without an antigen chain of at least 20 residues.
+
+`--released-after YYYY-MM-DD` adds a temporal holdout when PDB releases
+postdate the training snapshot; independence itself comes from excluding the
+study's PDB IDs and from the sequence and structure-cluster checks.
 
 Pass 2 refuses to run if the pair table changed after pass 1, because
 external PDBs can link internal clusters. With the table unchanged, the fresh

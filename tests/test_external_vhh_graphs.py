@@ -459,3 +459,30 @@ def test_an_unannotated_fab_in_the_entry_rejects_it(tmp_path, monkeypatch):
     assert as_antigen["unannotated_antibody_chains"] == []
     _, attempts = sel.choose_vhh(source, ["H"], ["A", "B"])
     assert "contains_unannotated_antibody_chain" not in attempts[0]["reasons"]
+
+
+def test_the_release_date_cutoff_is_optional(tmp_path, monkeypatch):
+    """No PDB release postdates a recent training snapshot, so the holdout is homology-only."""
+    import sys
+    import datetime as dt
+    monkeypatch.setitem(sys.modules, "anarci", None)
+    rows = [_sabdab(pdb="9zzz", Hchain="H", date="01/02/99")]
+    entry = sel.metadata_gate("9zzz", rows, released_after=None, excluded=set(), max_resolution=3.0)
+    assert entry["reasons"] == [] and entry["release_date"] == "1999-01-02"
+    dated = sel.metadata_gate("9zzz", rows, released_after=dt.date(2026, 1, 1), excluded=set(), max_resolution=3.0)
+    assert dated["reasons"] == ["released_before_cutoff"]
+    # Study PDBs stay excluded either way: that, not the date, is the leakage gate.
+    assert "in_study_universe" in sel.metadata_gate(
+        "9zzz", rows, released_after=None, excluded={"9zzz"}, max_resolution=3.0)["reasons"]
+
+    structures = tmp_path / "structures"
+    structures.mkdir()
+    (structures / "9zzz.pdb").write_text(_complex_pdb(104.5, 100.0))
+    summary = tmp_path / "sabdab.tsv"
+    keys = list(rows[0])
+    summary.write_text("\t".join(keys) + "\n" + "\t".join(rows[0][k] for k in keys) + "\n")
+    out = tmp_path / "selection"
+    sel.main(["--sabdab-summary", str(summary), "--structures-dir", str(structures), "--out-dir", str(out)])
+    payload = json.loads((out / "candidates.json").read_text())
+    assert payload["released_after"] is None and payload["holdout"] == "homology" and payload["selected"] == 1
+    assert "no release-date cutoff" in (out / "selection_report.md").read_text()

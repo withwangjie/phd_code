@@ -11,8 +11,8 @@ structure instead (step 2), and the entry is rejected as in the training
 audit.
 
 1. Metadata (same rules as the training ``sabdab_vhh`` subset):
-   - released after ``--released-after``, and absent from ``--exclude-pdbs``
-     (the study's audited PDB universe);
+   - absent from ``--exclude-pdbs`` (the study's audited PDB universe), and,
+     when ``--released-after`` is given, released after that date;
    - at least one protein or peptide antigen chain, no scFv;
    - at least one VHH chain and no VH/VL antibody chain in the entry;
    - numeric resolution <= the audit limit.
@@ -88,7 +88,7 @@ def read_sabdab(paths: Iterable[Path]) -> dict[str, list[dict]]:
     return grouped
 
 
-def metadata_gate(pdb: str, rows: list[dict], *, released_after: dt.date, excluded: set[str],
+def metadata_gate(pdb: str, rows: list[dict], *, released_after: Optional[dt.date], excluded: set[str],
                   max_resolution: float) -> dict:
     """Entry-level decision from SAbDab metadata alone."""
     reasons = []
@@ -115,11 +115,12 @@ def metadata_gate(pdb: str, rows: list[dict], *, released_after: dt.date, exclud
         reasons.append("no_polypeptide_antigen")
     try:
         released = min(parse_date(r["date"]) for r in rows)
-        if released <= released_after:
+        if released_after is not None and released <= released_after:
             reasons.append("released_before_cutoff")
     except (KeyError, ValueError):
         released = None
-        reasons.append("unknown_release_date")
+        if released_after is not None:
+            reasons.append("unknown_release_date")
     if pdb in excluded:
         reasons.append("in_study_universe")
     try:
@@ -239,8 +240,11 @@ def independent_groups(rows: list[dict], cluster_map: dict[str, str], **threshol
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--sabdab-summary", type=Path, nargs="+", required=True)
-    parser.add_argument("--released-after", type=dt.date.fromisoformat, required=True,
-                        help="YYYY-MM-DD; must postdate the training data snapshot")
+    parser.add_argument("--released-after", type=dt.date.fromisoformat, default=None,
+                        help="YYYY-MM-DD: keep only entries released after this date, a temporal holdout on "
+                             "top of the homology holdout. Omit when no PDB release postdates the training "
+                             "snapshot; independence then rests on --exclude-pdbs plus the sequence and "
+                             "structure-cluster checks, which is what the formal audit certifies either way.")
     parser.add_argument("--structures-dir", type=Path, required=True)
     parser.add_argument("--download", action="store_true", help="Fetch missing mmCIF files from RCSB")
     parser.add_argument("--exclude-pdbs", type=Path, nargs="*", default=[],
@@ -339,7 +343,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             reason_counts[reason.split(":")[0]] += 1
 
     payload = dict(
-        schema="external_vhh_candidates_v1", released_after=args.released_after.isoformat(),
+        schema="external_vhh_candidates_v1",
+        released_after=(args.released_after.isoformat() if args.released_after else None),
+        holdout=("temporal_and_homology" if args.released_after else "homology"),
         sabdab_summaries={str(p): sha256(p) for p in args.sabdab_summary},
         excluded_pdb_count=len(excluded), training_checked=bool(train), training_graphs=len(train),
         cluster_map_sha256=(sha256(args.cluster_map) if args.cluster_map else None),
@@ -365,7 +371,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     (args.out_dir / "selected_pdbs.txt").write_text("".join(f"{c['pdb_id']}\n" for c in selected), encoding="utf-8")
     lines = [
         "# External VHH candidate selection", "",
-        f"SAbDab entries: {len(candidates)}; released after {args.released_after}; selected: {len(selected)}; "
+        f"SAbDab entries: {len(candidates)}; "
+        + (f"released after {args.released_after}; " if args.released_after else "no release-date cutoff; ")
+        + f"selected: {len(selected)}; "
         f"independent groups: {n_groups} (required {args.min_clusters}: "
         f"{'adequate' if payload['adequate'] else 'NOT adequate'}).", "",
         f"Training overlap checked: {'yes, ' + str(len(train)) + ' training graphs' if train else 'no (pass --training-dataset)'}; "
