@@ -325,3 +325,111 @@ def test_allatom_phi_psi_fail_closed_across_chain_break():
 
 def test_orchestrator_requires_the_current_graph_version():
     assert full.REQUIRED_GRAPH_VERSION == dataset_builder.VERSION
+
+
+# ------------------------------------- biological assembly / antigen chains
+_ASSEMBLY_PDB = """REMARK 350 BIOMOLECULE: 1
+REMARK 350 SOFTWARE DETERMINED QUATERNARY STRUCTURE: MONOMERIC
+REMARK 350 APPLY THE FOLLOWING TO CHAINS: C
+REMARK 350   BIOMT1   1  1.000000  0.000000  0.000000        0.00000
+REMARK 350   BIOMT2   1  0.000000  1.000000  0.000000        0.00000
+REMARK 350   BIOMT3   1  0.000000  0.000000  1.000000        0.00000
+REMARK 350 BIOMOLECULE: 2
+REMARK 350 AUTHOR DETERMINED BIOLOGICAL UNIT: TRIMERIC
+REMARK 350 APPLY THE FOLLOWING TO CHAINS: A, B
+REMARK 350   BIOMT1   1  1.000000  0.000000  0.000000        0.00000
+REMARK 350   BIOMT2   1  0.000000  1.000000  0.000000        0.00000
+REMARK 350   BIOMT3   1  0.000000  0.000000  1.000000        0.00000
+REMARK 350   BIOMT1   2 -1.000000  0.000000  0.000000       10.00000
+REMARK 350   BIOMT2   2  0.000000  1.000000  0.000000        0.00000
+REMARK 350   BIOMT3   2  0.000000  0.000000 -1.000000        0.00000
+ATOM      1  CA  ALA A   1       1.000   2.000   3.000  1.00  0.00           C
+ATOM      2  CA  ALA B   1       4.000   2.000   3.000  1.00  0.00           C
+ATOM      3  CA  ALA C   1       7.000   2.000   3.000  1.00  0.00           C
+END
+"""
+
+
+def test_biological_assembly_prefers_author_unit_and_names_symmetry_copies():
+    import gemmi
+    import nanoqc.data.audit_all_datasets as audit
+    st = audit.biological_assembly_structure(gemmi.read_pdb_string(_ASSEMBLY_PDB))
+    assert dict(st.info)[audit.STRUCTURE_SOURCE_KEY] == "biological_assembly:author_determined:2"
+    positions = {chain.name: tuple(round(v, 3) for v in (chain[0][0].pos.x, chain[0][0].pos.y, chain[0][0].pos.z))
+                 for chain in st[0]}
+    assert positions == {"A": (1.0, 2.0, 3.0), "B": (4.0, 2.0, 3.0),
+                         "A-2": (9.0, 2.0, -3.0), "B-2": (6.0, 2.0, -3.0)}
+    # The same choice survives an mmCIF round trip (generators use subchains there).
+    source = gemmi.read_pdb_string(_ASSEMBLY_PDB)
+    source.setup_entities()
+    from_cif = gemmi.make_structure_from_block(source.make_mmcif_document().sole_block())
+    rebuilt = audit.biological_assembly_structure(from_cif)
+    assert sorted(chain.name for chain in rebuilt[0]) == ["A", "A-2", "B", "B-2"]
+
+
+def test_structures_without_assembly_annotation_fail_closed():
+    import gemmi
+    import pytest
+    import nanoqc.data.audit_all_datasets as audit
+    bare = "\n".join(line for line in _ASSEMBLY_PDB.splitlines() if not line.startswith("REMARK 350"))
+    with pytest.raises(ValueError, match="no biological assembly annotation"):
+        audit.biological_assembly_structure(gemmi.read_pdb_string(bare + "\n"))
+
+
+def test_only_raw_pdb_subsets_are_rebuilt_from_the_assembly(tmp_path):
+    import nanoqc.data.audit_all_datasets as audit
+    path = tmp_path / "entry.pdb"
+    path.write_text(_ASSEMBLY_PDB)
+    for subset, expected in (("train_rcsb", "biological_assembly:author_determined:2"),
+                             ("sabdab_vhh", "biological_assembly:author_determined:2"),
+                             ("snac_db", "as_deposited_file")):
+        st, _ = audit.read_structure(dict(path=str(path), member="", subset=subset, id="entry"))
+        assert dict(st.info)[audit.STRUCTURE_SOURCE_KEY] == expected
+
+
+def _chain(name, group, x0, sequence="QVQLV"):
+    nodes = [dict(aa=aa, pos=(x0 + 3.8 * i, 0.0, 0.0), cb=(x0 + 3.8 * i, 1.5, 0.0))
+             for i, aa in enumerate(sequence)]
+    return dict(name=name, group=group, nodes=nodes)
+
+
+def test_antigen_chains_are_the_ones_contacting_the_paratope():
+    anchor = _chain("H", 0, 0.0)
+    near = _chain("A", 1, 0.0, "KVFGR")
+    near["nodes"] = [dict(n, pos=(n["pos"][0], 0.0, 6.0), cb=(n["cb"][0], 1.5, 6.0)) for n in near["nodes"]]
+    far = _chain("C", 1, 0.0, "MKTAY")
+    far["nodes"] = [dict(n, pos=(n["pos"][0], 0.0, 30.0), cb=(n["cb"][0], 1.5, 30.0)) for n in far["nodes"]]
+    vhh_copy = _chain("H-2", 1, 0.0)
+    vhh_copy["nodes"] = [dict(n, pos=(n["pos"][0], 0.0, 5.0), cb=(n["cb"][0], 1.5, 5.0)) for n in vhh_copy["nodes"]]
+    row = dict(subset="sabdab_vhh", pdb_id="0XXX")
+    kept, meta = dataset_builder.select_contacting_partner_chains(
+        [anchor, near, far, vhh_copy], row, dict(structure_source="x"))
+    assert [c["name"] for c in kept] == ["H", "A"]
+    reasons = {d["chain"]: d["reason"] for d in meta["dropped_chains"]}
+    assert reasons == {"C": "no_paratope_contact_within_7.5A", "H-2": "copy_of_vhh"}
+    assert meta["antigen_contact_basis"] == "whole_vhh_chain_cdr_unmapped"
+    # train_rcsb partners may be homomers of the anchor: identical sequence is kept.
+    kept_rcsb, _ = dataset_builder.select_contacting_partner_chains(
+        [anchor, near, vhh_copy], dict(subset="train_rcsb", pdb_id="0XXX"), dict(structure_source="x"))
+    assert [c["name"] for c in kept_rcsb] == ["H", "A", "H-2"]
+    import pytest
+    with pytest.raises(ValueError, match="no partner chain"):
+        dataset_builder.select_contacting_partner_chains([anchor, far], row, dict(structure_source="x"))
+
+
+def test_all_atom_consumers_rebuild_exactly_the_graph_complex(tmp_path):
+    import gemmi
+    from types import SimpleNamespace
+    import nanoqc.data.audit_all_datasets as audit
+    path = tmp_path / "entry.pdb"
+    path.write_text(_ASSEMBLY_PDB)
+    graph = SimpleNamespace(structure_source="biological_assembly:author_determined:2", chain_ids=["A", "B-2"])
+    out = audit.materialize_graph_complex(path, graph, tmp_path / "complex.cif")
+    assert sorted(chain.name for chain in gemmi.read_structure(str(out))[0]) == ["A", "B-2"]
+    unchanged = SimpleNamespace(structure_source="as_deposited_file", chain_ids=["A", "B", "C"])
+    assert audit.materialize_graph_complex(path, unchanged, tmp_path / "same.cif") == path
+    import pytest
+    with pytest.raises(ValueError, match="differs from graph provenance"):
+        audit.materialize_graph_complex(
+            path, SimpleNamespace(structure_source="biological_assembly:author_determined:1", chain_ids=["A"]),
+            tmp_path / "bad.cif")

@@ -555,6 +555,8 @@ def main(argv=None) -> int:
                 if _ablation_digest(path)!=row["sha256"]: raise ValueError("Test graph hash mismatch")
                 graph=load_graph(path)
                 raw=extract_source(graph.source_id,args.data_root,work/"raw.pdb")
+                from nanoqc.data.audit_all_datasets import materialize_graph_complex
+                raw=materialize_graph_complex(raw,graph,work/"graph_complex.cif")
                 frozen_pool=(
                     set(frozen_target_metadata.get(pdb,{}).get("eligibility_compatible_residues",[]))
                     if args.pdb_allowlist_file and not args.prepare_only else None

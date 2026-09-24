@@ -11,6 +11,10 @@ prediction.
 ## Formal research pipeline
 
 1. **Leakage-controlled data construction**
+   - Complex definition: raw PDB subsets (`sabdab_vhh`, `train_rcsb`) are read as their
+     first author-determined biological assembly (entries without assembly annotation are
+     excluded), and only partner chains with a CA/CB within 7.5 A of the VHH CDR CA/CB are
+     antigen, following SAbDab [R33]; `snac_db` uses SNAC-DB's assembly-curated complexes [R34].
    - Interface labels: cross-partner heavy-atom contact < 5 A, following antibody-antigen/CAPRI-style contact definitions [R3,R4].
    - Graph edges: intra-chain CA radius < 8 A plus fixed cross-partner KNN. An 8 A C-alpha residue-graph cutoff has direct protein-GNN precedent [R22]; the cross-partner KNN degree k=3 remains a study-specific leakage-control choice rather than a literature-optimal constant.
    - EGNN train/validation split: layered connected components. Complexes are
@@ -170,7 +174,7 @@ train/test exclusion, validation-queue eligibility, and cluster-level
 statistics. Missing required cluster metadata fails closed.
 
 The formal pipeline also has an external-validation stage. It requires an
-independently certified graph-v1.7 VHH dataset and runs the frozen EGNN,
+independently certified graph-v1.8 VHH dataset and runs the frozen EGNN,
 calibrated coarse model, and primary solver protocol without refitting.
 FASPR is supported as a mature biological side-chain packing baseline and
 Phenix clashscore as a standard steric-quality diagnostic. These are

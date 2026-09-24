@@ -50,7 +50,12 @@ MIN_INTERFACE_RESIDUES = 15
 # intended, and record the value in each graph's provenance.
 GRAPH_MEMORY_BUDGET_BYTES = 4 * 1024**3
 # 1.7: phi/psi are defined only across real peptide bonds (NaN at chain breaks).
-VERSION = '1.7'
+# 1.8: sabdab_vhh/train_rcsb complexes come from the biological assembly and
+#      keep only antigen chains in contact with the VHH paratope.
+VERSION = '1.8'
+# SAbDab antigen-chain criterion [METHODS_EVIDENCE R33]: any CA/CB within 7.5 A
+# of a CA/CB of the antibody's CDR residues.
+ANTIGEN_CHAIN_CONTACT_ANGSTROM = 7.5
 PROCESS = psutil.Process()
 PEAK_RSS = 0
 MEMORY_LOCK = threading.Lock()
@@ -250,8 +255,10 @@ def build_atoms(st, prefix='', identity_overrides=None):
             if key in seen:raise ValueError(f'ambiguous duplicate residue ID: {chain.name}:{key}')
             seen.add(key)
             ca=atoms['CA'].pos
+            cb=atoms['CB'].pos if 'CB' in atoms else None
             nodes.append(dict(
                 aa=aa,pos=(ca.x,ca.y,ca.z),residue_id=prefix+chain.name+':'+key,name=res.name,
+                cb=(None if cb is None else (cb.x,cb.y,cb.z)),
                 n=(atoms['N'].pos.x,atoms['N'].pos.y,atoms['N'].pos.z),
                 c=(atoms['C'].pos.x,atoms['C'].pos.y,atoms['C'].pos.z),
                 phi=math.nan,psi=math.nan,
@@ -326,10 +333,71 @@ def extract(row, pair=None):
     if sum(c['name']==anchor for c in chains)!=1:raise ValueError('anchor chain absent or ambiguous')
     for c in chains:c['group']=0 if c['name']==anchor else 1
     if {c['group'] for c in chains}!={0,1}:raise ValueError('both interaction partners required')
+    meta=dict(structure_source=str(dict(st.info).get(audit.STRUCTURE_SOURCE_KEY,'as_deposited_file')),
+              antigen_chain_rule='all non-VHH chains of the curated complex file',
+              antigen_contact_basis='not_applicable',dropped_chains=[])
+    if row['subset'] in audit.ASSEMBLY_SUBSETS:
+        chains,meta=select_contacting_partner_chains(chains,row,meta)
+    for c in chains:c['complex_meta']=meta
     return chains
+
+
+def _ca_cb_coordinates(nodes):
+    return np.asarray([xyz for node in nodes for xyz in (node['pos'],node.get('cb')) if xyz is not None],dtype=np.float64)
+
+
+def _paratope_nodes(anchor,row):
+    """VHH CDR1-3 residues when the annotation maps uniquely, else the whole chain."""
+    nodes=anchor['nodes']
+    if row['subset']!='sabdab_vhh':
+        return nodes,'whole_anchor_chain'
+    sequence=''.join(node['aa'] for node in nodes)
+    for rec in audit.PDB_ANNOTATIONS.get(str(row['pdb_id']).upper(),[]):
+        loops=[rec.get(key,'') for key in ('cdr1','cdr2','cdr3')]
+        if rec.get('kind')!='VHH' or not all(loops) or any(sequence.count(loop)!=1 for loop in loops):
+            continue
+        indices=sorted({i for loop in loops for i in range(sequence.index(loop),sequence.index(loop)+len(loop))})
+        return [nodes[i] for i in indices],'vhh_cdr1_cdr2_cdr3'
+    return nodes,'whole_vhh_chain_cdr_unmapped'
+
+
+def select_contacting_partner_chains(chains,row,meta):
+    """Keep only partner chains that contact the anchor's paratope (SAbDab rule).
+
+    A partner chain is antigen when any of its CA/CB atoms lies within
+    ANTIGEN_CHAIN_CONTACT_ANGSTROM of a CA/CB of the paratope residues. For
+    sabdab_vhh, further copies of the VHH itself are never antigen.
+    """
+    anchor=next(c for c in chains if c['group']==0)
+    paratope,basis=_paratope_nodes(anchor,row)
+    tree=cKDTree(_ca_cb_coordinates(paratope))
+    anchor_sequence=''.join(node['aa'] for node in anchor['nodes'])
+    kept=[];dropped=[]
+    for chain in chains:
+        if chain['group']==0:
+            kept.append(chain);continue
+        sequence=''.join(node['aa'] for node in chain['nodes'])
+        if row['subset']=='sabdab_vhh' and sequence==anchor_sequence:
+            dropped.append(dict(chain=chain['name'],reason='copy_of_vhh'));continue
+        distance=float(tree.query(_ca_cb_coordinates(chain['nodes']),k=1)[0].min())
+        if distance<=ANTIGEN_CHAIN_CONTACT_ANGSTROM:
+            kept.append(chain)
+        else:
+            dropped.append(dict(chain=chain['name'],reason=f'no_paratope_contact_within_{ANTIGEN_CHAIN_CONTACT_ANGSTROM:g}A',
+                                min_ca_cb_distance=round(distance,3)))
+    if not any(c['group']==1 for c in kept):
+        raise ValueError(f'no partner chain within {ANTIGEN_CHAIN_CONTACT_ANGSTROM:g} A of the paratope in the biological assembly')
+    meta=dict(meta,antigen_chain_rule=(f'biological-assembly chains with any CA/CB within '
+                                       f'{ANTIGEN_CHAIN_CONTACT_ANGSTROM:g} A of a paratope CA/CB (SAbDab)'),
+              antigen_contact_basis=basis,dropped_chains=dropped)
+    return kept,meta
 
 def make_graph(row, split, pair=None, family_structure_cluster=''):
     chains=extract(row,pair);memory_sample()
+    complex_meta=chains[0].get('complex_meta',dict(
+        structure_source='db55_bound_receptor_ligand_files',
+        antigen_chain_rule='DB5.5 bound receptor/ligand files as paired by the benchmark',
+        antigen_contact_basis='not_applicable',dropped_chains=[]))
     nodes=[];groups=[];chainidx=[];heavy={0:[],1:[]};owners={0:[],1:[]}
     for i,c in enumerate(chains):
         offset=len(nodes);nodes.extend(c['nodes']);groups.extend([c['group']]*len(c['nodes']));chainidx.extend([i]*len(c['nodes']))
@@ -401,6 +469,9 @@ def make_graph(row, split, pair=None, family_structure_cluster=''):
         split=split,source_id=row['id'],node_chain_id=torch.tensor(chainidx,dtype=torch.long),chain_ids=[c['name'] for c in chains],
         chain_groups=[c['group'] for c in chains],residue_ids=[r['residue_id'] for r in nodes],
         chain_sequences=chain_sequences,vhh_sequences=vhh_sequences,antigen_sequences=antigen_sequences,
+        structure_source=complex_meta['structure_source'],antigen_chain_rule=complex_meta['antigen_chain_rule'],
+        antigen_contact_basis=complex_meta['antigen_contact_basis'],
+        dropped_partner_chains=json.dumps(complex_meta['dropped_chains'],sort_keys=True),
         edge_policy='intra_chain_ca_radius_plus_cross_partner_knn',
         intra_chain_ca_cutoff_angstrom=float(INTRA_CHAIN_CA_CUTOFF_ANGSTROM),
         cross_partner_knn_k=cross_partner_knn_k,
