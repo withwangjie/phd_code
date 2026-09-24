@@ -6,9 +6,9 @@ from nanoqc.data import audit_all_datasets as audit
 SNAC_HEADER = "Name,Resolution,PDB_ID,Chain_VH,Chain_VH_old_id,Chain_Ag\n"
 
 
-def test_parse_resolution_reads_the_first_number_or_none():
+def test_parse_resolution_reads_the_worst_number_or_none():
     assert audit.parse_resolution("2.5") == 2.5
-    assert audit.parse_resolution("2.5, 2.7") == 2.5
+    assert audit.parse_resolution("2.5, 2.7") == 2.7
     for missing in ("Resolution is Missing", "NOT", "", None, "0"):
         assert audit.parse_resolution(missing) is None
 
@@ -37,3 +37,32 @@ def test_external_vhh_staging_is_not_a_study_subset(tmp_path):
     (tmp_path / "train_rcsb" / "1abc.pdb").write_text("END\n")
     tasks, _, _ = audit.discover(tmp_path)
     assert [t["subset"] for t in tasks] == ["train_rcsb"]
+
+
+def test_the_worst_resolution_of_a_multi_entry_field_decides(tmp_path):
+    """A field may list one value per entry [R33]; the gate is an upper bound."""
+    curated = tmp_path / "SNAC-DataBase" / "curated_structures"
+    curated.mkdir(parents=True)
+    (curated / "nb_complexes_curation_summary.csv").write_text(
+        SNAC_HEADER + "A,\"2.5, 3.4\",7AAA,H,A,['B']\n")
+    audit.load_annotations(tmp_path)
+    try:
+        assert audit.RESOLUTION_BY_PDB["7AAA"][0] == 3.4  # not 2.5: would pass a 3.0 gate
+    finally:
+        audit.load_annotations(tmp_path / "none")
+
+
+def test_staging_metadata_never_decides_the_gate_and_used_files_are_hashed(tmp_path):
+    (tmp_path / "external_vhh").mkdir()
+    (tmp_path / "external_vhh" / "sabdab_summary_sd_h.tsv").write_text(
+        "pdb\tresolution\n8bbb\t1.5\n")
+    (tmp_path / "sabdab_summary_all.tsv").write_text("pdb\tresolution\n9ccc\t2.0\n")
+    audit.load_annotations(tmp_path)
+    try:
+        assert "8BBB" not in audit.RESOLUTION_BY_PDB  # staging is not study input
+        assert audit.RESOLUTION_BY_PDB["9CCC"] == (2.0, "sabdab_summary")
+        used = audit.RESOLUTION_SOURCE_FILES
+        assert [f["path"] for f in used] == ["sabdab_summary_all.tsv"]
+        assert len(used[0]["sha256"]) == 64
+    finally:
+        audit.load_annotations(tmp_path / "none")

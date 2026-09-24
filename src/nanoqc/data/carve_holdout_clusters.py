@@ -122,7 +122,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     remaining_pool = len(paths) - sum(len(c) for c in holdout_components)
     repinned = [c for c in components if c not in holdout_components
                 and training.pinned_to_training(c, remaining_pool)]
-    if sorted(map(len, repinned)) != sorted(map(len, pinned)):
+    # Compare the components themselves, not their sizes: two distinct
+    # components of equal size must not cancel out and hide a change.
+    def signature(cs):
+        return sorted(tuple(sorted(path.name for path in c)) for c in cs)
+    if signature(repinned) != signature(pinned):
         raise SystemExit(f"Components pinned to training differ before ({sorted(map(len, pinned))}) and after "
                          f"({sorted(map(len, repinned))}) the carve; a component sits at the 1/"
                          f"{training.SPLIT_FOLDS} pin boundary. Record this and amend the pin rule.")

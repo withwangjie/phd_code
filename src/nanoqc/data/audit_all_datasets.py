@@ -22,7 +22,7 @@ import gemmi
 import numpy as np
 from scipy.spatial import cKDTree
 from nanoqc.structure.residue_tables import BACKBONE_ATOMS, SIDECHAIN_HEAVY_ATOMS
-from nanoqc.common.repo_io import REPO_ROOT
+from nanoqc.common.repo_io import REPO_ROOT, sha256_file
 
 BASE = REPO_ROOT  # standalone-run defaults (data/, outputs) are relative to the checkout root
 ANNOTATIONS = {}
@@ -32,6 +32,15 @@ CHAIN_ANNOTATIONS = {}
 # summaries, SAbDab summary tables). SNAC's curated complex files carry no
 # REMARK 2, so the structure file alone reports no resolution for any of them.
 RESOLUTION_BY_PDB = {}
+# Metadata files the resolution fallback read, with their hashes: the gate's
+# outcome depends on them, so a run must be able to name them afterwards.
+RESOLUTION_SOURCE_FILES = []
+# Pipeline staging under the data root, never study input: the external-VHH
+# preparation writes thousands of antigen-only structures (Foldseek input),
+# downloaded candidates and its own copies of summary tables there. They would
+# otherwise enter the audit as 'extra_external_vhh' rows and, worse, decide the
+# resolution gate from a file no study step declares.
+PIPELINE_WORK_DIRS = frozenset({'external_vhh'})
 BACKBONE = set(BACKBONE_ATOMS)
 SIDECHAIN_HEAVY = {name: set(atoms) for name, atoms in SIDECHAIN_HEAVY_ATOMS.items()}
 MAX_RESOLUTION_ANGSTROM = 3.0
@@ -48,12 +57,16 @@ def literal(s, default):
         return default
 
 def parse_resolution(value):
-    """First positive finite number in a metadata field ('2.5', '2.5, 2.7'); None for 'Resolution is Missing', 'NOT'."""
-    match = re.search(r'\d+(?:\.\d+)?', str(value or ''))
-    if not match:
-        return None
-    resolution = float(match.group(0))
-    return resolution if math.isfinite(resolution) and resolution > 0 else None
+    """Worst (largest) positive number in a metadata field; None when it states none.
+
+    A SAbDab row may list one value per deposited entry ('2.5, 2.7') [R33]. The
+    gate is an upper bound, so the worst value is the conservative reading;
+    taking the first would let a field order decide admission. Fields that
+    state no resolution ('Resolution is Missing', 'NOT', 'NA') give None.
+    """
+    values = [float(m) for m in re.findall(r'\d+(?:\.\d+)?', str(value or ''))]
+    values = [v for v in values if math.isfinite(v) and v > 0]
+    return max(values) if values else None
 
 
 def _record_resolution(pdb, value, source):
@@ -63,14 +76,26 @@ def _record_resolution(pdb, value, source):
         RESOLUTION_BY_PDB.setdefault(pdb, (resolution, source))
 
 
+def _staging(root, path):
+    """True for a file under a pipeline working directory (never study input)."""
+    return path.relative_to(root).parts[0] in PIPELINE_WORK_DIRS
+
+
+def _record_source_file(root, path, kind):
+    RESOLUTION_SOURCE_FILES.append(dict(path=str(path.relative_to(root)), kind=kind,
+                                        sha256=sha256_file(path)))
+
+
 def load_annotations(root):
     ANNOTATIONS.clear()
     PDB_ANNOTATIONS.clear()
     CHAIN_ANNOTATIONS.clear()
     RESOLUTION_BY_PDB.clear()
+    RESOLUTION_SOURCE_FILES.clear()
     for path in sorted(root.rglob('*_curation_summary.csv')):
-        if path.parent.name not in ('curated_structures', 'benchmark_dataset'):
+        if path.parent.name not in ('curated_structures', 'benchmark_dataset') or _staging(root, path):
             continue
+        _record_source_file(root, path, 'snac_curation_summary')
         for row in csv.DictReader(path.open(encoding='utf-8-sig', newline='')):
             ANNOTATIONS[(str(path.parent), row['Name'])] = row
             _record_resolution(row.get('PDB_ID'), row.get('Resolution'), 'snac_curation_summary')
@@ -86,10 +111,13 @@ def load_annotations(root):
                 if rec not in PDB_ANNOTATIONS[row['PDB_ID'].upper()]:
                     PDB_ANNOTATIONS[row['PDB_ID'].upper()].append(rec)
     for path in sorted(root.rglob('*sabdab*summary*.tsv')):
+        if _staging(root, path):
+            continue
         with path.open(encoding='utf-8-sig', newline='') as handle:
             reader = csv.DictReader(handle, delimiter='\t')
             if not reader.fieldnames or not {'pdb', 'resolution'} <= set(reader.fieldnames):
                 continue
+            _record_source_file(root, path, 'sabdab_summary')
             for row in reader:
                 _record_resolution(row.get('pdb'), row.get('resolution'), 'sabdab_summary')
     for path in root.rglob('all_input_PDB_files_parsed_file_chains.csv'):
@@ -112,13 +140,6 @@ def pdb_compat(raw, task):
 
 def structural(name):
     return name.lower().endswith(('.pdb', '.cif', '.cif.gz'))
-
-# Pipeline staging under the data root, never a study subset: the external-VHH
-# preparation writes thousands of antigen-only structures (Foldseek input) and
-# downloaded candidates there, which would otherwise enter the audit and the
-# clustering universe as 'extra_external_vhh'.
-PIPELINE_WORK_DIRS = frozenset({'external_vhh'})
-
 
 def discover(root):
     tasks, ignored = [], []
@@ -562,8 +583,13 @@ def report(root, rows, ignored, archives, pairs, elapsed, destination):
     '- 快速模式只计算每个文件首模型。CAPRI 多模型 PDB 仅读至首个 ENDMDL，后续模型既未解析也未做完整性验证；本报告不是全部 decoy 的质量分布。',
     '- SNAC 主表 snac_db = curated_structures/nb_complexes（ZIP 内直接读）；nb_unbound 和 benchmark/nb_complexes 单列。其他 SNAC ZIP 只登记、不解析内部结构；所有松散 .pdb/.cif/.cif.gz 均已纳入。',
     '- CDR-H3 使用 SNAC 的 IMGT Region_Split_VH.cdr3；SAbDab 通过同PDB来源标注与坐标序列匹配转移，不套用未经确认的残基编号。分箱为 <12、12–15、≥16，避免16 aa重复计数。',
+    '- 分辨率：优先取结构文件自带值；文件未记录时按 PDB ID 回落到整理元数据（SNAC curation summary 的 Resolution 列、SAbDab 汇总表的 resolution 列），逐行记录 resolution_source。一个字段列出多个值时取最差（最大）值。流水线工作目录（external_vhh）下的文件不参与，本报告列出实际使用的元数据文件及其哈希。仍然查不到分辨率的条目按 unknown_resolution 排除，阈值不变。',
     '- VHH通过 = SNAC非TCR单VHH来源标注、唯一H链、无L链、H链序列覆盖≥70%且与标注一致，允许合计≤20aa的端部扩展（标签等），更长扩展记未判定；或SAbDab同PDB的ASU0全链域标注仅一个VHH且坐标序列匹配。c_st/c_e不直接当成恒定域。缺乏完整域标注时记candidate；多VHH晶体副本记fail仅表示不符合单链条目要求。未运行ANARCI，本项是本地来源标注核验，不是独立序列分类，未知/候选不得当作合格。','',
     '## 核心子集规模与基础质量','', '| 子集 | 结构文件 | 有效 | 解析/坐标失败 | 有主链缺失文件（占有效） | 缺原子残基/观测残基 | 可评估界面 | 弱界面 | 基础合格/有效 |', '|---|---:|---:|---:|---:|---:|---:|---:|---:|']
+    if RESOLUTION_SOURCE_FILES:
+        lines += ['## 分辨率元数据来源','', '| 文件 | 类型 | SHA-256 |','|---|---|---|']
+        lines += [f'| `{f["path"]}` | {f["kind"]} | `{f["sha256"]}` |' for f in RESOLUTION_SOURCE_FILES]
+        lines += ['']
     order=['train_rcsb','sabdab_vhh','snac_db','test_db55']
     def summary(g):
         rr=groups[g];v=[r for r in rr if r['valid']];m=sum(r['missing_residues']>0 for r in v);nr=sum(r['residues'] for r in v);nm=sum(r['missing_residues'] for r in v); ev=sum(r['interface_status']!='not_applicable' for r in v);w=sum(r['interface_status']=='weak' for r in v);good=sum(r['missing_residues']==0 and r['interface_status']=='pass' for r in v)

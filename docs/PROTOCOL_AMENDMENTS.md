@@ -388,12 +388,23 @@ they were logged later.
   resolution from the SNAC curation summaries (`Resolution`) and, failing
   that, from SAbDab summary tables (`resolution`) under the data root, keyed
   by PDB ID; the value's origin is recorded as `resolution_source`
-  (`structure_file`, `snac_curation_summary`, `sabdab_summary`). An entry
-  with no resolution anywhere (e.g. NMR, "Resolution is Missing") still
-  fails. The threshold and every other quality gate are unchanged.
-- **Also:** `data/external_vhh/` (external-VHH staging: downloaded candidates
-  and the Foldseek antigen-only input structures) is no longer discovered as a
-  study subset; it had entered the audit as 2672 `extra_external_vhh` rows.
+  (`structure_file`, `snac_curation_summary`, `sabdab_summary`). Both carry
+  the deposition's own value [R33,R34], so this reads a published field, not
+  an estimate. A field listing one value per entry ("2.5, 2.7") is read at
+  its **worst** (largest) value, because the gate is an upper bound and a
+  field's order must not decide admission. An entry with no resolution
+  anywhere (e.g. NMR, "Resolution is Missing") still fails. The threshold and
+  every other quality gate are unchanged.
+- **Provenance:** the gate's outcome now depends on metadata files, so the
+  audit report lists every one it used with its SHA-256, and files under
+  pipeline working directories are excluded from the search. Otherwise a
+  table dropped anywhere under the data root could silently change which
+  training structures are admitted, with nothing in the run naming it [R48].
+- **Also:** `data/external_vhh/` (external-VHH staging: downloaded candidates,
+  the Foldseek antigen-only input structures and the preparation's own copies
+  of summary tables) is no longer read as study input, neither as audited
+  structures nor as resolution metadata; it had entered the audit as 2672
+  `extra_external_vhh` rows.
 - **Affected results:** audit, dataset admission (training pool, hard test
   pool), everything downstream.
 - **Results inspected before this amendment:** not applicable (the dataset
