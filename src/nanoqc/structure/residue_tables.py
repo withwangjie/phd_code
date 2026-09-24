@@ -11,6 +11,11 @@ from typing import Dict, Tuple
 
 BACKBONE_ATOMS: Tuple[str, ...] = ("N", "CA", "C", "O")
 
+# Maximum C(i)-N(i+1) distance treated as a real peptide bond (ideal 1.33 A).
+# Consecutive residues in a file are NOT necessarily bonded: unresolved
+# segments leave chain breaks, across which phi/psi are undefined.
+PEPTIDE_BOND_MAX_C_N_ANGSTROM: float = 1.9
+
 SIDECHAIN_HEAVY_ATOMS: Dict[str, Tuple[str, ...]] = {
     "GLY": (), "ALA": ("CB",), "SER": ("CB", "OG"), "CYS": ("CB", "SG"),
     "THR": ("CB", "OG1", "CG2"), "VAL": ("CB", "CG1", "CG2"),

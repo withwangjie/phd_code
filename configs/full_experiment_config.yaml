@@ -170,7 +170,7 @@ queue_freeze:
   graph_build:
     workers: 8  # runtime fallback; auto-resolved from server CPU resources
     # Scientific graph protocol. Changing any value requires a fresh dataset;
-    # graph v1.6 records these values in every .pt and run_summary.json.
+    # graph v1.7 records these values in every .pt and run_summary.json.
     # 5 A cross-partner atom contact is literature-supported for antibody-antigen/CAPRI-style interfaces [METHODS_EVIDENCE R3,R4].
     interface_label_cutoff_angstrom: 5.0
     # 8 A C-alpha residue-graph construction has direct protein-GNN precedent [R22].
@@ -303,6 +303,9 @@ qc_benchmark:
   max_targets: 0  # 0 = every qualifying graph in input_dir, no silent subset
   max_failure_fraction: 0.0  # formal benchmark is fail-closed by default
   pruning: ["egnn", "contact", "distance", "cdr", "random"]
+  # Subgraph radius used to name/record each case. Coarse antigen and fixed-VHH
+  # non-bonded terms use the FULL complex, limited only by
+  # coarse_force_field.cutoff_angstrom, so this value no longer changes energies.
   radii: [6.0]
   # QAOA depth/evaluation budgets are read only from quantum_protocol.
   # Active-site scaling axis for the quantum-vs-classical benchmark. Every
@@ -431,7 +434,7 @@ structure_experiment:
 # ---------------------------------------------------------------------------
 # External validation / mature structural baselines.
 # These are real external dependencies; formal runs fail closed when required
-# inputs are absent. External VHH graphs must have been built with graph v1.6
+# inputs are absent. External VHH graphs must have been built with graph v1.7
 # and independently certified against the training family/structure cluster map.
 # ---------------------------------------------------------------------------
 external_validation:

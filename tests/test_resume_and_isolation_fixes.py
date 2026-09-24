@@ -241,16 +241,19 @@ def _graph_with_antigen_outside_radius():
     extra_x[0, -1] = 1.0
     # Charged antigen residue whose CA is > 6 A from every Active CA (so the
     # 6 A environment radius drops it) but well inside cutoff + side-chain reach.
-    data.x = torch.cat([data.x, extra_x])
-    data.pos = torch.cat([data.pos, torch.tensor([[-4.3, -4.6, 0.0]])])
+    # A charged VHH residue in the same situation for the fixed-VHH term.
+    vhh_x = torch.zeros((1, 21))
+    vhh_x[0, qubo.AA_INDEX["E"]] = 1.0
+    data.x = torch.cat([data.x, extra_x, vhh_x])
+    data.pos = torch.cat([data.pos, torch.tensor([[-4.3, -4.6, 0.0], [-3.0, -5.6, 0.0]])])
     distances = torch.cdist(data.pos, data.pos)
     data.edge_index = ((distances < 8.0) & (distances > 0)).nonzero().t().long()
-    data.node_chain_id = torch.cat([data.node_chain_id, torch.tensor([1])])
-    data.interface_score = torch.cat([data.interface_score, torch.tensor([0.05])])
-    data.residue_ids = [*data.residue_ids, "A:99"]
+    data.node_chain_id = torch.cat([data.node_chain_id, torch.tensor([1, 0])])
+    data.interface_score = torch.cat([data.interface_score, torch.tensor([0.05, 0.04])])
+    data.residue_ids = [*data.residue_ids, "A:99", "H:99"]
     for name in ("is_active", "is_frozen_environment", "selected_vhh_mask", "original_node_index"):
         delattr(data, name)
-    return data, data.num_nodes - 1
+    return data, data.num_nodes - 2
 
 
 def _coarse_builder():
@@ -270,11 +273,20 @@ def test_antigen_environment_uses_full_complex_not_the_environment_radius():
 
     full = _coarse_builder().build(sub)
     truncated_sub = copy.copy(sub)
-    del truncated_sub.antigen_context_pos, truncated_sub.antigen_context_x
+    for name in ("antigen_context_pos", "antigen_context_x", "vhh_context_pos",
+                 "vhh_context_x", "vhh_context_index"):
+        delattr(truncated_sub, name)
     truncated = _coarse_builder().build(truncated_sub)
     assert full.metadata["antigen_environment_scope"] == "full_complex_antigen"
+    assert full.metadata["vhh_environment_scope"] == "full_complex_vhh"
     assert truncated.metadata["antigen_environment_scope"] == "graph_antigen_nodes"
+    assert truncated.metadata["vhh_environment_scope"] == "graph_vhh_nodes"
     assert not np.allclose(full.metadata["raw_antigen_energy"], truncated.metadata["raw_antigen_energy"])
+    far_vhh = data.num_nodes - 1
+    assert far_vhh not in sub.original_node_index.tolist()
+    assert far_vhh in sub.vhh_context_index.tolist()
+    assert not np.allclose(full.metadata["raw_vhh_environment_energy"],
+                           truncated.metadata["raw_vhh_environment_energy"])
 
 
 def test_antigen_neighbour_prefilter_is_exact(monkeypatch):
@@ -282,8 +294,34 @@ def test_antigen_neighbour_prefilter_is_exact(monkeypatch):
     from nanoqc.model.model_egnn_pruning import build_ablation_subgraph
     data, _ = _graph_with_antigen_outside_radius()
     sub = build_ablation_subgraph(data, torch.arange(5), 6.0)
-    filtered = _coarse_builder().build(sub).metadata["raw_antigen_energy"]
+    filtered = _coarse_builder().build(sub).metadata
     monkeypatch.setattr(qubo, "_MAX_PSEUDO_ATOM_OFFSET", 1.0e6)
-    unfiltered = _coarse_builder().build(sub).metadata["raw_antigen_energy"]
+    unfiltered = _coarse_builder().build(sub).metadata
     # Same atom pairs are scored; only float summation order differs.
-    assert np.allclose(filtered, unfiltered, rtol=0.0, atol=1e-12)
+    for key in ("raw_antigen_energy", "raw_vhh_environment_energy"):
+        assert np.allclose(filtered[key], unfiltered[key], rtol=0.0, atol=1e-12)
+
+
+# ------------------------------------------------ chain breaks / graph version
+def test_peptide_bond_detection_distinguishes_chain_breaks():
+    previous = dict(c=(2.0, 1.2, 0.0))
+    assert dataset_builder._peptide_bonded(previous, dict(n=(3.33, 1.2, 0.0)))
+    assert not dataset_builder._peptide_bonded(previous, dict(n=(8.0, 1.2, 0.0)))
+
+
+def test_allatom_phi_psi_fail_closed_across_chain_break():
+    import pytest
+    def residue(x0, n_offset=1.33):
+        return {"name": "SER", "atoms": {
+            "N": np.array([x0, 0.0, 0.0]), "CA": np.array([x0 + 1.46, 0.4, 0.0]),
+            "C": np.array([x0 + 2.0, -0.6, 0.3])}}
+    bonded = {"H:1": residue(0.0), "H:2": residue(3.33), "H:3": residue(6.66)}
+    phi, psi = qubo._backbone_phi_psi(bonded, "H:2")
+    assert np.isfinite([phi, psi]).all()
+    broken = {"H:1": residue(0.0), "H:2": residue(3.33), "H:5": residue(20.0)}
+    with pytest.raises(ValueError, match="chain break"):
+        qubo._backbone_phi_psi(broken, "H:2")
+
+
+def test_orchestrator_requires_the_current_graph_version():
+    assert full.REQUIRED_GRAPH_VERSION == dataset_builder.VERSION

@@ -165,6 +165,10 @@ def rq5_inference_failures(rq5: dict, min_clusters: int) -> list[str]:
 # entrypoint in this repository already fingerprints its own code
 # dependencies (_ablation_main / _recovery_benchmark_main / build_manifest).
 # ---------------------------------------------------------------------------
+# Must equal build_final_pyg_dataset.VERSION (kept literal so the orchestrator
+# does not import torch/PyG at start-up; a test pins the two together).
+REQUIRED_GRAPH_VERSION = "1.7"
+
 ORCHESTRATED_SCRIPTS: List[str] = [
     "run_full_experiment.py",
     "resolve_server_config.py",
@@ -3111,9 +3115,9 @@ class Orchestrator:
                     ext_failures.append(
                         "External independence manifest does not certify zero training-family overlap"
                     )
-                if manifest.get("graph_version")!="1.6":
+                if manifest.get("graph_version")!=REQUIRED_GRAPH_VERSION:
                     ext_failures.append(
-                        f"External VHH graph version must be 1.6, got {manifest.get('graph_version')}"
+                        f"External VHH graph version must be {REQUIRED_GRAPH_VERSION}, got {manifest.get('graph_version')}"
                     )
                 if manifest.get("training_cluster_map_sha256") != current_cluster_sha:
                     ext_failures.append(

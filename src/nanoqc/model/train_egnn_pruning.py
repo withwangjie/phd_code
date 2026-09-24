@@ -95,7 +95,7 @@ def graph_protocol(data: Data) -> Dict[str, Any]:
     )
     missing = [name for name in required if not hasattr(data, name)]
     if missing:
-        raise ValueError(f"Graph lacks protocol metadata {missing}; rebuild with dataset version >=1.6")
+        raise ValueError(f"Graph lacks protocol metadata {missing}; rebuild with dataset version >=1.7")
     protocol = {
         "graph_version": str(data.graph_version),
         "edge_policy": str(data.edge_policy),
@@ -154,7 +154,7 @@ def interface_labels(data: Data) -> Tensor:
     if not hasattr(data, "interface_label"):
         raise ValueError(
             "Graph is missing interface_label; rebuild graphs with "
-            "build_final_pyg_dataset.py version >= 1.6"
+            "build_final_pyg_dataset.py version >= 1.7"
         )
     labels = data.interface_label.detach().cpu().to(torch.float32)
     if labels.shape != (data.num_nodes,):
@@ -244,7 +244,7 @@ def split_paths(paths: Sequence[Path], seed: int) -> Tuple[List[Path], List[Path
         if not family_cluster:
             raise ValueError(
                 f"{path.name} lacks family_structure_cluster; rebuild formal graphs with "
-                "build_final_pyg_dataset.py graph version >=1.6"
+                "build_final_pyg_dataset.py graph version >=1.7"
             )
         anchored = partner_roles_anchored(getattr(data, "subset_source", ""))
         records.append((path, vhh, antigen, cdr3, family_cluster, anchored))

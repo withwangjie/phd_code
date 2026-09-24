@@ -33,10 +33,10 @@ prediction.
      2010 rotamer states [R2] (chi1..chiN) queried from residue phi/psi context.
      Legacy hand-written chi1 priors are debug/compatibility only.
    - Candidate pre-screening uses local environment / antigen-conditioned
-     interaction scoring (coarse model; the antigen term sees every antigen
-     residue of the full complex, limited only by the 8 A atom-pair cutoff,
-     while the environment radius defines only the frozen VHH background
-     [R31,R32]) or Amber14 single-candidate energy
+     interaction scoring (coarse model; the antigen and fixed-VHH terms see
+     every residue of the full complex, limited only by the 8 A atom-pair
+     cutoff [R31,R32]; phi/psi for Dunbrack lookup are defined only across
+     real peptide bonds, so residues at chain breaks are not Active sites) or Amber14 single-candidate energy
      (all-atom validation). Coarse prior/VHH/antigen/pair terms may be linearly
      calibrated to Amber delta-E using training complexes only, with frozen
      coefficients for validation/test.
@@ -170,7 +170,7 @@ train/test exclusion, validation-queue eligibility, and cluster-level
 statistics. Missing required cluster metadata fails closed.
 
 The formal pipeline also has an external-validation stage. It requires an
-independently certified graph-v1.6 VHH dataset and runs the frozen EGNN,
+independently certified graph-v1.7 VHH dataset and runs the frozen EGNN,
 calibrated coarse model, and primary solver protocol without refitting.
 FASPR is supported as a mature biological side-chain packing baseline and
 Phenix clashscore as a standard steric-quality diagnostic. These are

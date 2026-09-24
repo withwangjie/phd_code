@@ -302,18 +302,23 @@ class EGNNInterfaceScorer(nn.Module):
         return result if return_logits else torch.sigmoid(result)
 
 
-def attach_full_antigen_context(subgraph: Data, data: Data) -> Data:
-    """Carry every antigen residue of the FULL complex onto a pruned subgraph.
+def attach_full_complex_context(subgraph: Data, data: Data) -> Data:
+    """Carry every residue of the FULL complex onto a pruned subgraph.
 
-    The environment radius only defines the frozen VHH background. Antigen
-    non-bonded terms must see the whole antigen and be limited solely by the
-    force-field's own atom-pair cutoff (as in Rosetta/SCWRL-style one-body
-    energies), otherwise antigen residues just outside the radius but inside
-    the interaction cutoff would be silently dropped.
+    Coarse non-bonded terms (antigen and fixed VHH background alike) must see
+    the whole complex and be limited solely by the force field's own
+    atom-pair cutoff, as in Rosetta/SCWRL-style one-body energies; otherwise
+    residues just outside the environment radius but inside the interaction
+    range would be silently dropped. The radius therefore no longer limits
+    any energy term.
     """
     antigen = torch.where(data.x[:, -1] == 1)[0]
+    vhh = torch.where(data.x[:, -1] == 0)[0]
     subgraph.antigen_context_pos = data.pos[antigen].clone()
     subgraph.antigen_context_x = data.x[antigen].clone()
+    subgraph.vhh_context_pos = data.pos[vhh].clone()
+    subgraph.vhh_context_x = data.x[vhh].clone()
+    subgraph.vhh_context_index = vhh.clone()
     return subgraph
 
 
@@ -479,7 +484,7 @@ def extract_top_interface_subgraph(
     subgraph.threshold_candidate_count = threshold_count
     subgraph.active_residue_count = int(subgraph.is_active.sum())
     subgraph.frozen_residue_count = int(subgraph.is_frozen_environment.sum())
-    return attach_full_antigen_context(subgraph, data)
+    return attach_full_complex_context(subgraph, data)
 
 
 def _random_radius_graph(num_nodes: int, cutoff: float = 2.5) -> Data:
@@ -601,7 +606,7 @@ def build_ablation_subgraph(data: Any, active: torch.Tensor, radius: float) -> A
     sub.is_frozen_environment = ~sub.is_active
     # PyG does not necessarily slice Python metadata lists.
     sub.residue_ids = [data.residue_ids[i] for i in keep.tolist()]
-    return attach_full_antigen_context(sub, data)
+    return attach_full_complex_context(sub, data)
 
 
 # ---------------------------------------------------------------------------

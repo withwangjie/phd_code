@@ -30,6 +30,7 @@ from torch_geometric.data import Data, Batch
 import nanoqc.data.audit_all_datasets as audit
 from nanoqc.common.repo_io import sha256_file as sha256, REPO_ROOT
 from nanoqc.data.sequence_identity import nw_identity, length_coverage, partner_orientations, partner_roles_anchored
+from nanoqc.structure.residue_tables import PEPTIDE_BOND_MAX_C_N_ANGSTROM
 
 BASE = REPO_ROOT  # standalone-run defaults (data/, outputs) are relative to the checkout root
 AA = 'ACDEFGHIKLMNPQRSTVWY'
@@ -48,7 +49,8 @@ MIN_INTERFACE_RESIDUES = 15
 # load.  Override explicitly in code/config when a different contract is
 # intended, and record the value in each graph's provenance.
 GRAPH_MEMORY_BUDGET_BYTES = 4 * 1024**3
-VERSION = '1.6'
+# 1.7: phi/psi are defined only across real peptide bonds (NaN at chain breaks).
+VERSION = '1.7'
 PROCESS = psutil.Process()
 PEAK_RSS = 0
 MEMORY_LOCK = threading.Lock()
@@ -220,6 +222,11 @@ def _dihedral_degrees(a, b, c, d):
     return float(np.degrees(np.arctan2(y,x)))
 
 
+def _peptide_bonded(previous, following):
+    """True when C(previous)-N(following) is a real peptide bond, not a chain break."""
+    gap=np.asarray(previous['c'],dtype=np.float64)-np.asarray(following['n'],dtype=np.float64)
+    return float(np.linalg.norm(gap))<PEPTIDE_BOND_MAX_C_N_ANGSTROM
+
 def build_atoms(st, prefix='', identity_overrides=None):
     """Full protein residue nodes; recheck every retained heavy-atom residue."""
     if not len(st):raise ValueError('no model')
@@ -253,9 +260,13 @@ def build_atoms(st, prefix='', identity_overrides=None):
                 heavy.append((atom.pos.x,atom.pos.y,atom.pos.z));owners.append(len(nodes)-1)
         for idx,node in enumerate(nodes):
             ca=np.asarray(node['pos'],dtype=np.float64)
-            if idx>0:
+            # phi/psi need a real peptide bond to the neighbour; at a chain
+            # break (unresolved residues) they stay NaN, which later excludes
+            # the residue from Dunbrack site selection instead of looking up a
+            # meaningless backbone bin.
+            if idx>0 and _peptide_bonded(nodes[idx-1],node):
                 node['phi']=_dihedral_degrees(nodes[idx-1]['c'],node['n'],ca,node['c'])
-            if idx+1<len(nodes):
+            if idx+1<len(nodes) and _peptide_bonded(node,nodes[idx+1]):
                 node['psi']=_dihedral_degrees(node['n'],ca,node['c'],nodes[idx+1]['n'])
         if nodes:chains.append(dict(name=prefix+chain.name,original_name=chain.name,nodes=nodes,xyz=np.array(heavy),owners=np.array(owners,dtype=np.int64)))
     if not chains:raise ValueError('no amino acid nodes')

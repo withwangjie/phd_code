@@ -43,7 +43,9 @@ from typing import Any, Dict, Iterable, Mapping, Optional, Sequence, Tuple
 import numpy as np
 import torch
 from torch_geometric.data import Data
-from nanoqc.structure.residue_tables import SIDECHAIN_HEAVY_ATOMS, SYMMETRIC_SWAPS
+from nanoqc.structure.residue_tables import (
+    PEPTIDE_BOND_MAX_C_N_ANGSTROM, SIDECHAIN_HEAVY_ATOMS, SYMMETRIC_SWAPS,
+)
 from nanoqc.quantum.instance import QuantumOptimizationInstance
 from nanoqc.data.safe_graph_load import load_graph
 
@@ -208,6 +210,14 @@ def _backbone_phi_psi(residues: Mapping[str, Mapping[str, Any]], rid: str) -> Tu
     for entry,names in ((prev,("C",)),(current,("N","CA","C")),(nxt,("N",))):
         missing=[name for name in names if name not in entry["atoms"]]
         if missing: raise ValueError(f"Missing backbone atoms {missing} for Dunbrack lookup at {rid}")
+    # Sequence neighbours in the file are not necessarily bonded (unresolved
+    # segments); phi/psi across a chain break are undefined, so fail closed.
+    for left,right,side in ((prev,current,"preceding"),(current,nxt,"following")):
+        gap=float(np.linalg.norm(np.asarray(left["atoms"]["C"],dtype=float)-np.asarray(right["atoms"]["N"],dtype=float)))
+        if gap>=PEPTIDE_BOND_MAX_C_N_ANGSTROM:
+            raise ValueError(
+                f"Dunbrack mode requires peptide-bonded neighbours at {rid}: "
+                f"{side} C-N distance {gap:.2f} A indicates a chain break")
     phi=_torsion_angle_degrees(prev["atoms"]["C"],current["atoms"]["N"],current["atoms"]["CA"],current["atoms"]["C"])
     psi=_torsion_angle_degrees(current["atoms"]["N"],current["atoms"]["CA"],current["atoms"]["C"],nxt["atoms"]["N"])
     return phi,psi
@@ -1446,6 +1456,39 @@ class InterfaceQUBOBuilder:
         ]
         return env_pos, env_sigma, env_epsilon, np.asarray(charges)
 
+    def _full_vhh_environment(
+        self,
+        vhh_pos: np.ndarray,
+        vhh_amino_acids: Sequence[str],
+        vhh_index: np.ndarray,
+        optimized_indices: set,
+        own_index: int,
+        center: np.ndarray,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Fixed VHH background from the full complex, cutoff-limited only.
+
+        Every VHH residue except the site itself contributes a CA bead.
+        Residues whose side chains are being optimized are neutral here (their
+        side-chain charges enter through pair terms); all other VHH residues,
+        including declared-but-unselected ones, keep their coarse net charge,
+        matching ``_rigid_environment``. The CA pre-filter is exact for the
+        same reason as in ``_antigen_environment``.
+        """
+        reach = self.force_field.cutoff_angstrom + _MAX_PSEUDO_ATOM_OFFSET
+        keep = np.flatnonzero(
+            (vhh_index != own_index)
+            & (np.linalg.norm(vhh_pos - center, axis=1) < reach)
+        )
+        env_pos = vhh_pos[keep]
+        env_sigma = np.full(len(keep), 3.50, dtype=np.float64)
+        env_epsilon = np.full(len(keep), 0.06, dtype=np.float64)
+        charges = np.asarray([
+            0.0 if int(vhh_index[i]) in optimized_indices
+            else _NET_CHARGE.get(vhh_amino_acids[int(i)], 0.0)
+            for i in keep
+        ], dtype=np.float64)
+        return env_pos, env_sigma, env_epsilon, charges
+
     def _antigen_environment(
         self,
         antigen_pos: np.ndarray,
@@ -1553,12 +1596,34 @@ class InterfaceQUBOBuilder:
             chain_ids = np.where(np.isclose(x[:, -1], 0.0), 0, 1)
 
         vhh_mask = np.isclose(x[:, -1], 0.0)
-        environments = {
-            int(node_index): self._rigid_environment(
-                pos, amino_acids, frozen_mask, active_mask, vhh_mask, int(node_index)
-            )
-            for node_index in site_nodes
-        }
+        if (hasattr(data, "vhh_context_pos") and hasattr(data, "vhh_context_x")
+                and hasattr(data, "vhh_context_index") and hasattr(data, "original_node_index")):
+            vhh_context_pos = data.vhh_context_pos.detach().cpu().numpy().astype(np.float64)
+            vhh_context_aa = _decode_amino_acids(
+                data.vhh_context_x.detach().cpu().numpy().astype(np.float64))
+            vhh_context_index = data.vhh_context_index.detach().cpu().numpy().astype(np.int64)
+            if (vhh_context_pos.shape != (len(vhh_context_aa), 3)
+                    or vhh_context_index.shape != (len(vhh_context_aa),)
+                    or not np.isfinite(vhh_context_pos).all()):
+                raise ValueError("vhh_context_* must be finite and aligned")
+            subgraph_to_complex = data.original_node_index.detach().cpu().numpy().astype(np.int64)
+            optimized = {int(subgraph_to_complex[int(node)]) for node in site_nodes}
+            environments = {
+                int(node_index): self._full_vhh_environment(
+                    vhh_context_pos, vhh_context_aa, vhh_context_index, optimized,
+                    int(subgraph_to_complex[int(node_index)]), pos[int(node_index)],
+                )
+                for node_index in site_nodes
+            }
+            vhh_scope = "full_complex_vhh"
+        else:
+            environments = {
+                int(node_index): self._rigid_environment(
+                    pos, amino_acids, frozen_mask, active_mask, vhh_mask, int(node_index)
+                )
+                for node_index in site_nodes
+            }
+            vhh_scope = "graph_vhh_nodes"
         if hasattr(data, "antigen_context_pos") and hasattr(data, "antigen_context_x"):
             antigen_pos = data.antigen_context_pos.detach().cpu().numpy().astype(np.float64)
             antigen_amino_acids = _decode_amino_acids(
@@ -1759,10 +1824,10 @@ class InterfaceQUBOBuilder:
             ),
             "candidate_guidance": "pre-screen by rotamer prior + VHH-only fixed-environment energy + antigen interaction energy; antigen counted once",
             "antigen_environment_scope": antigen_scope,
+            "vhh_environment_scope": vhh_scope,
             "antigen_environment_rule": (
                 "every antigen residue of the source complex, limited only by the "
-                "coarse atom-pair non-bonded cutoff; the environment radius applies "
-                "to the frozen VHH background only"
+                "coarse atom-pair non-bonded cutoff"
                 if antigen_scope == "full_complex_antigen"
                 else "antigen nodes present in the supplied graph"),
             "rotamer_model": self.rotamer_mode,
