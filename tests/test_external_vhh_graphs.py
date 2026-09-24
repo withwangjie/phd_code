@@ -8,6 +8,7 @@ import pytest
 
 from nanoqc.data import build_external_vhh_graphs as ext
 from nanoqc.data import select_external_vhh_candidates as sel
+from nanoqc.data import prepare_external_vhh as prep
 
 VHH_TAIL = ("QVQLQESGGGLVQAGGSLRLSCAASGRTFSSYAMGWFRQAPGKEREFVAAISWSGGSTYYADSVKGRFTISRDNAKNTVYLQMNSL"
             "KPEDTAVYYCAAGRYGSSWYPDSYDYWGQGTQVTVSS")
@@ -591,3 +592,19 @@ def test_a_short_chain_cannot_link_complexes_by_a_one_sided_tm_score(tmp_path):
     assert best[("1abc", "3ghi")] == best[("3ghi", "1abc")] == 0.74
     assert best[("1abc", "1abc")] == 1.0
     assert seen == {"1abc", "2def", "3ghi"}
+
+
+def test_preprocessing_default_config_never_reuses_stale_runtime(tmp_path, monkeypatch):
+    repo = tmp_path
+    (repo / "configs").mkdir()
+    (repo / ".runtime").mkdir()
+    (repo / "configs" / "full_experiment_config.yaml").write_text(
+        "marker: current\n", encoding="utf-8"
+    )
+    (repo / ".runtime" / "resolved_runtime_config.yaml").write_text(
+        "marker: stale\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(prep, "REPO_ROOT", repo)
+    loaded = prep.load_config(None)
+    assert loaded["marker"] == "current"
+    assert loaded["_source"] == str((repo / "configs" / "full_experiment_config.yaml").resolve())
