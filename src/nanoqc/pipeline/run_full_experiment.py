@@ -347,10 +347,13 @@ def git_commit_hash(repo_root: Path) -> Optional[str]:
 
 
 def package_versions(names: Sequence[str]) -> Dict[str, Optional[str]]:
-    """Best-effort installed-version report; missing packages record None,
-    never raise -- this is a diagnostic record, not a hard gate, since
-    run_full_experiment.py must not install anything itself."""
+    """Best-effort installed-version report; missing packages record None.
+
+    Imported modules without ``__version__`` fall back to installed
+    distribution metadata; this remains diagnostic and installs nothing.
+    """
     import importlib
+    from importlib import metadata
     versions: Dict[str, Optional[str]] = {}
     for name in names:
         try:
@@ -358,7 +361,14 @@ def package_versions(names: Sequence[str]) -> Dict[str, Optional[str]]:
         except Exception:
             versions[name] = None
             continue
-        versions[name] = getattr(module, "__version__", "unknown")
+        module_version = getattr(module, "__version__", None)
+        if module_version:
+            versions[name] = str(module_version)
+            continue
+        try:
+            versions[name] = metadata.version(name)
+        except metadata.PackageNotFoundError:
+            versions[name] = "unknown"
     return versions
 
 
