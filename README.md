@@ -224,8 +224,11 @@ family-cluster bootstrap confidence intervals.
 A formal run intentionally fails before expensive computation when required
 scientific inputs are unavailable. The preflight verifies the Dunbrack 2010
 library, a frozen family/structure similarity input (cluster map or pair TSV),
-the external VHH graph set, FASPR, Phenix clashscore, and OpenMM GBN2
-parameters when the declared solvent sensitivity is enabled.
+FASPR, Phenix clashscore, and OpenMM GBN2 parameters when the declared solvent
+sensitivity is enabled. When a genuinely external VHH set is configured, its
+graph/raw-structure inputs are also required; under the default antigen-fold
+holdout protocol those run-local inputs are created later by queue_freeze and
+are therefore not required at preflight time.
 
 Family/structure clusters can be reproducibly built from a frozen Foldseek (or
 equivalent) pair table with `build_independence_cluster_map.py`. The script
