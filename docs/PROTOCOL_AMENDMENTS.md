@@ -36,6 +36,7 @@ formal run is required.
 | A11 | Symmetric Foldseek score; oversized components always train | queue_freeze (cluster map, split), egnn_train, external_validation | not applicable (data composition only; no split or result existed) |
 | A12 | Entry resolution from curation metadata; pipeline staging not audited | audit, dataset (admission) | not applicable (audit fields only; no graph or result existed) |
 | A13 | The antigen-fold holdout takes several folds when one is too small | queue_freeze (split), egnn_train, external_validation | not applicable (component counts only; no result existed) |
+| A14 | A downloaded RCSB assembly file is the assembly, not an unannotated ASU | audit, dataset (admission), everything downstream | not applicable (admission counts only; no result existed) |
 
 ## A1. Primary coarse solver endpoint: resource-normalized time-to-solution
 
@@ -445,3 +446,37 @@ they were logged later.
 - **Results inspected before this amendment:** not applicable (component
   counts are data composition; no graph outcome, training run or metric
   existed).
+
+## A14. A downloaded RCSB assembly file is the assembly, not an unannotated ASU
+
+- **Before:** A3 made `sabdab_vhh` and `train_rcsb` complexes read from the
+  biological assembly, failing closed when an entry carries no assembly
+  annotation, so a crystal-packing neighbour is never mistaken for antigen
+  [R33,R34,R35,R36].
+- **Measured:** all 5000 `train_rcsb` entries failed with `no biological
+  assembly annotation (REMARK 350/pdbx_struct_assembly)`; the subset
+  contributed 0 eligible complexes to every run so far. The files are
+  `rcsb_non_redundant_dataset/cif_assemblies/<entry>_assembly1.cif`: RCSB
+  serves a biological assembly as its own file, whose coordinates are already
+  assembled. Such a file carries no `pdbx_struct_assembly`, because that
+  record says how to *build* an assembly from the asymmetric unit. The rule
+  was therefore rejecting files that are already what it asks for.
+- **After:** a file named `<entry>_assembly<N>`, `<entry>-assembly<N>` or
+  `<entry>.pdb<N>` (RCSB's assembly naming, also inside an archive member) is
+  read as the assembly itself in the assembly subsets: no transform is
+  applied, and `structure_source` records
+  `prebuilt_assembly_file:assembly<N>` instead of
+  `biological_assembly:<basis>:<name>`. Every other file keeps failing closed;
+  an asymmetric unit without assembly annotation is still excluded.
+- **Why this is not a loosening:** the requirement is that a complex be the
+  biological assembly, not that a particular record be present. Applying a
+  transform to an already-assembled file would build the assembly twice. The
+  distinction is recorded per graph, so any analysis can separate complexes
+  assembled by this pipeline from complexes served pre-assembled.
+- **Affected results:** audit validity for `train_rcsb`, dataset admission
+  (the training pool), and everything trained or calibrated on it. Cluster
+  counts, the internal validation split and the antigen-fold holdout (A13) are
+  all recomputed from the larger pool, so A13's measured counts describe the
+  pool before this amendment and must be re-read after it.
+- **Results inspected before this amendment:** not applicable (admission
+  counts are data composition; no training run or metric existed).

@@ -1,6 +1,8 @@
 """Entry resolution from curation metadata; pipeline staging is never audited."""
 from __future__ import annotations
 
+import pytest
+
 from nanoqc.data import audit_all_datasets as audit
 
 SNAC_HEADER = "Name,Resolution,PDB_ID,Chain_VH,Chain_VH_old_id,Chain_Ag\n"
@@ -66,3 +68,56 @@ def test_staging_metadata_never_decides_the_gate_and_used_files_are_hashed(tmp_p
         assert len(used[0]["sha256"]) == 64
     finally:
         audit.load_annotations(tmp_path / "none")
+
+
+ATOMS = """loop_
+_atom_site.group_PDB
+_atom_site.id
+_atom_site.type_symbol
+_atom_site.label_atom_id
+_atom_site.label_alt_id
+_atom_site.label_comp_id
+_atom_site.label_asym_id
+_atom_site.label_entity_id
+_atom_site.label_seq_id
+_atom_site.Cartn_x
+_atom_site.Cartn_y
+_atom_site.Cartn_z
+_atom_site.occupancy
+_atom_site.B_iso_or_equiv
+_atom_site.auth_seq_id
+_atom_site.auth_asym_id
+_atom_site.pdbx_PDB_model_num
+ATOM 1 N N . ALA A 1 1 0 0 0 1 10 1 A 1
+ATOM 2 C CA . ALA A 1 1 1 0 0 1 10 1 A 1
+ATOM 3 C C . ALA A 1 1 2 0 0 1 10 1 A 1
+ATOM 4 O O . ALA A 1 1 3 0 0 1 10 1 A 1
+"""
+
+
+def test_a_downloaded_assembly_file_is_the_assembly_and_is_not_rebuilt(tmp_path):
+    """RCSB serves <entry>_assembly<N>: no pdbx_struct_assembly, already assembled."""
+    from nanoqc.data.audit_all_datasets import prebuilt_assembly, read_structure
+
+    assert prebuilt_assembly("10bt_assembly1.cif") == "1"
+    assert prebuilt_assembly("1abc-assembly2.cif.gz") == "2"
+    assert prebuilt_assembly("1abc.pdb1") == "1"
+    for plain in ("1abc.cif", "pdb_000010zo_sabdab.cif", "9DVQ-ASU1-VHH_G-Ag_A.pdb"):
+        assert prebuilt_assembly(plain) is None
+
+    path = tmp_path / "10bt_assembly1.cif"
+    path.write_text("data_10bt\n_entry.id 10bt\n" + ATOMS)
+    task = dict(path=str(path), member="", subset="train_rcsb", id=path.name)
+    structure, _ = read_structure(task)
+    assert dict(structure.info)[audit.STRUCTURE_SOURCE_KEY] == "prebuilt_assembly_file:assembly1"
+    assert len(structure[0]) == 1  # coordinates untouched, no second transform
+
+
+def test_an_asymmetric_unit_without_assembly_annotation_still_fails_closed(tmp_path):
+    from nanoqc.data.audit_all_datasets import read_structure
+
+    path = tmp_path / "10bt.cif"
+    path.write_text("data_10bt\n_entry.id 10bt\n" + ATOMS)
+    task = dict(path=str(path), member="", subset="train_rcsb", id=path.name)
+    with pytest.raises(ValueError, match="no biological assembly annotation"):
+        read_structure(task)

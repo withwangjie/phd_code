@@ -180,6 +180,19 @@ def discover(root):
 # snac_db files are already SNAC-DB assembly-curated complexes.
 ASSEMBLY_SUBSETS = frozenset({'sabdab_vhh', 'train_rcsb'})
 STRUCTURE_SOURCE_KEY = '_nanoqc_structure_source'
+# RCSB serves a biological assembly as its own file, named <entry>_assembly<N>
+# (also -assembly<N>, and .pdb<N> for the legacy format). Such a file already
+# holds the assembled coordinates, so it carries no pdbx_struct_assembly: that
+# record says how to BUILD an assembly from the asymmetric unit. Requiring it
+# would reject a file that is already what the rule asks for, and applying a
+# transform to it would build the assembly twice.
+_PREBUILT_ASSEMBLY = re.compile(r'[-_]assembly(\d+)\.(?:cif|pdb)(?:\.gz)?$|\.pdb(\d+)$', re.IGNORECASE)
+
+
+def prebuilt_assembly(name):
+    """The assembly number when ``name`` is an RCSB assembly file, else None."""
+    match = _PREBUILT_ASSEMBLY.search(pathlib.PurePosixPath(str(name)).name)
+    return (match.group(1) or match.group(2)) if match else None
 
 
 def biological_assembly_structure(st):
@@ -273,10 +286,14 @@ def materialize_graph_complex(source_path, graph, destination):
 
 def read_structure(task):
     st, multi = _read_raw_structure(task)
-    if task.get('subset') in ASSEMBLY_SUBSETS:
-        st = biological_assembly_structure(st)
-    else:
+    assembly = prebuilt_assembly(task['member'] or task['path'])
+    if task.get('subset') not in ASSEMBLY_SUBSETS:
         st.info[STRUCTURE_SOURCE_KEY] = 'as_deposited_file'
+    elif assembly is not None:
+        # Already the assembly: never transform it again.
+        st.info[STRUCTURE_SOURCE_KEY] = f'prebuilt_assembly_file:assembly{assembly}'
+    else:
+        st = biological_assembly_structure(st)
     return st, multi
 
 
