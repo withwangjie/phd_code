@@ -41,6 +41,7 @@ MODULE_LAYOUT = {
     "select_external_vhh_candidates.py": "src/nanoqc/data/select_external_vhh_candidates.py",
     "prepare_external_vhh.py": "src/nanoqc/data/prepare_external_vhh.py",
     "build_foldseek_pairs.py": "src/nanoqc/data/build_foldseek_pairs.py",
+    "convert_sabdab2_summary.py": "src/nanoqc/data/convert_sabdab2_summary.py",
     "sequence_identity.py": "src/nanoqc/data/sequence_identity.py",
     "safe_graph_load.py": "src/nanoqc/data/safe_graph_load.py",
     "model_egnn_pruning.py": "src/nanoqc/model/model_egnn_pruning.py",
