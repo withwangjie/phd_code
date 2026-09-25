@@ -513,7 +513,7 @@ def test_verified_frozen_holdout_can_be_reused_after_partial_queue_failure(tmp_p
     orchestrator=_frozen_holdout_fixture(tmp_path)
     ok,detail=orchestrator._validate_frozen_antigen_holdout()
     assert ok is True
-    assert "verified 1 frozen holdout" in detail
+    assert "verified 1 primary SNAC holdout graph(s)" in detail
     source=inspect.getsource(full.Orchestrator.stage_queue_freeze)
     assert "if reuse_holdout:" in source
     assert "graph rebuild skipped" in source
