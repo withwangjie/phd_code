@@ -323,7 +323,7 @@ def test_methods_evidence_register_covers_formal_design() -> None:
     for token in (
         "E(n)-equivariant",
         "Dunbrack 2010",
-        "heavy-atom distance <=5",
+        "heavy-atom distance <=4.5",
         "QAOA",
         "CVaR",
         "FASPR",
