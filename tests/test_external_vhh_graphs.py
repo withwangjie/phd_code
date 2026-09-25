@@ -20,18 +20,19 @@ THREE = {"A": "ALA", "C": "CYS", "D": "ASP", "E": "GLU", "F": "PHE", "G": "GLY",
 
 
 def _install_fake_anarci(monkeypatch):
-    """Deterministic CDR-resolving ANARCI stub for synthetic formal tests."""
+    """Deterministic ANARCI stub with realistic domain/no-domain semantics."""
     import types
     fake = types.ModuleType("anarci")
 
     def _numbered(sequence):
-        # Synthetic-only: map three unique observed substrings to IMGT CDR
-        # number ranges so the production paratope mapper is genuinely used.
+        # Synthetic-only: two known VHHs are Ig domains; ordinary antigen and
+        # short helper chains return no domain instead of crashing ANARCI.
+        anchors = ("AAGRYGSSWYPDSYDY", "AKDPRWGGCYYGMDY")
+        anchor = next((value for value in anchors if value in sequence), None)
+        if anchor is None:
+            return None
         cdr1 = sequence[18:30]
         cdr2 = sequence[34:44]
-        anchor = "AAGRYGSSWYPDSYDY"
-        if anchor not in sequence:
-            raise ValueError("synthetic VHH lacks expected CDR3")
         numbered = [((27 + i, " "), aa) for i, aa in enumerate(cdr1)]
         numbered += [((56 + i, " "), aa) for i, aa in enumerate(cdr2)]
         numbered += [((111, chr(65 + i)), aa) for i, aa in enumerate(anchor)]
@@ -39,7 +40,11 @@ def _install_fake_anarci(monkeypatch):
 
     def _anarci(seqs, scheme, output):
         assert scheme == "imgt"
-        return [[(_numbered(sequence), 0, 0)] for _name, sequence in seqs], None, None
+        result = []
+        for _name, sequence in seqs:
+            domain = _numbered(sequence)
+            result.append([(domain, 0, 0)] if domain is not None else None)
+        return result, None, None
 
     fake.anarci = _anarci
     monkeypatch.setitem(sys.modules, "anarci", fake)
@@ -50,17 +55,22 @@ def _write_fake_anarci_module(directory):
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "anarci.py").write_text(
         "def _numbered(sequence):\n"
+        "    anchors = ('AAGRYGSSWYPDSYDY', 'AKDPRWGGCYYGMDY')\n"
+        "    anchor = next((value for value in anchors if value in sequence), None)\n"
+        "    if anchor is None:\n"
+        "        return None\n"
         "    cdr1 = sequence[18:30]\n"
         "    cdr2 = sequence[34:44]\n"
-        "    anchor = 'AAGRYGSSWYPDSYDY'\n"
-        "    if anchor not in sequence:\n"
-        "        raise ValueError('synthetic VHH lacks expected CDR3')\n"
         "    out = [((27+i, ' '), aa) for i, aa in enumerate(cdr1)]\n"
         "    out += [((56+i, ' '), aa) for i, aa in enumerate(cdr2)]\n"
         "    out += [((111, chr(65+i)), aa) for i, aa in enumerate(anchor)]\n"
         "    return out\n"
         "def anarci(seqs, scheme='imgt', output=False):\n"
-        "    return [[(_numbered(sequence), 0, 0)] for name, sequence in seqs], None, None\n",
+        "    result = []\n"
+        "    for name, sequence in seqs:\n"
+        "        domain = _numbered(sequence)\n"
+        "        result.append([(domain, 0, 0)] if domain is not None else None)\n"
+        "    return result, None, None\n",
         encoding="utf-8",
     )
 
