@@ -57,6 +57,22 @@ command -v flock >/dev/null || fail "Linux flock is required for atomic launch l
 exec 9>"${REPO_ROOT}/.launch.guard"
 flock -n 9 || fail "A pipeline launch setup is already active in this deployment."
 
+LOCK_FILE="${REPO_ROOT}/.run_full_experiment.lock"
+if [ -f "$LOCK_FILE" ]; then
+    HELD_PID="$(cat "$LOCK_FILE" 2>/dev/null || true)"
+    HELD_CMD=""
+    if [ -n "$HELD_PID" ] && kill -0 "$HELD_PID" 2>/dev/null && [ -r "/proc/${HELD_PID}/cmdline" ]; then
+        HELD_CMD="$(tr '\0' ' ' < "/proc/${HELD_PID}/cmdline" 2>/dev/null || true)"
+    fi
+    if [ -n "$HELD_PID" ] && kill -0 "$HELD_PID" 2>/dev/null &&
+       [[ "$HELD_CMD" == *"nanoqc.pipeline.run_full_experiment"* ]]; then
+        fail "Formal pipeline already appears to be running (PID ${HELD_PID}, lock: ${LOCK_FILE}). Refusing to start a second instance."
+    else
+        log "Stale/unrelated lock file found (PID ${HELD_PID:-unknown}); removing it."
+        rm -f "$LOCK_FILE"
+    fi
+fi
+
 # ---------------------------------------------------------------------------
 # 1. Activate the local virtual environment (POSIX or Windows layout).
 # ---------------------------------------------------------------------------
@@ -211,27 +227,6 @@ if [ "$FRESH_RUN" -eq 1 ]; then
     } > "$RUN_DIR/provenance/environment.txt"
 fi
 
-# ---------------------------------------------------------------------------
-# 2. Fast fail on a second concurrent launch, BEFORE even importing Python --
-#    run_full_experiment.py holds its own filelock for the run_root for the
-#    full duration too; this is a cheap early check so a duplicate launch
-#    does not even pay the interpreter-startup cost.
-# ---------------------------------------------------------------------------
-LOCK_FILE="${REPO_ROOT}/.run_full_experiment.lock"
-if [ -f "$LOCK_FILE" ]; then
-    HELD_PID="$(cat "$LOCK_FILE" 2>/dev/null || true)"
-    HELD_CMD=""
-    if [ -n "$HELD_PID" ] && kill -0 "$HELD_PID" 2>/dev/null && [ -r "/proc/${HELD_PID}/cmdline" ]; then
-        HELD_CMD="$(tr '\0' ' ' < "/proc/${HELD_PID}/cmdline" 2>/dev/null || true)"
-    fi
-    if [ -n "$HELD_PID" ] && kill -0 "$HELD_PID" 2>/dev/null &&
-       [[ "$HELD_CMD" == *"nanoqc.pipeline.run_full_experiment"* ]]; then
-        fail "Formal pipeline already appears to be running (PID ${HELD_PID}, lock: ${LOCK_FILE}). Refusing to start a second instance."
-    else
-        log "Stale/unrelated lock file found (PID ${HELD_PID:-unknown}); removing it."
-        rm -f "$LOCK_FILE"
-    fi
-fi
 
 # ---------------------------------------------------------------------------
 # 3. Formal preflight gate.
