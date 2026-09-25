@@ -50,6 +50,9 @@ server_venv_hint() {
     }' "$SERVER_CONFIG"
 }
 SERVER_VENV_HINT="$(server_venv_hint)"
+if [ -n "${QP_VENV:-}" ]; then
+    SERVER_VENV_HINT=""
+fi
 if [ -n "$SERVER_VENV_HINT" ]; then
     case "$SERVER_VENV_HINT" in
         "~/"*) SERVER_VENV_HINT="${HOME}/${SERVER_VENV_HINT#~/}" ;;
