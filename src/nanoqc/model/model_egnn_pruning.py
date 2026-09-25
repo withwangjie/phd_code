@@ -678,7 +678,8 @@ def _graph_protocol_signature(data: Any) -> Dict[str, Any]:
     required = (
         "graph_version", "edge_policy", "label_policy",
         "intra_chain_ca_cutoff_angstrom", "cross_partner_knn_k",
-        "interface_label_cutoff_angstrom", "min_interface_residues",
+        "interface_label_cutoff_angstrom", "interface_sensitivity_cutoffs_angstrom",
+        "min_interface_residues",
     )
     missing = [name for name in required if not hasattr(data, name)]
     if missing:
@@ -690,6 +691,9 @@ def _graph_protocol_signature(data: Any) -> Dict[str, Any]:
         "intra_chain_ca_cutoff_angstrom": float(data.intra_chain_ca_cutoff_angstrom),
         "cross_partner_knn_k": int(data.cross_partner_knn_k),
         "interface_label_cutoff_angstrom": float(data.interface_label_cutoff_angstrom),
+        "interface_sensitivity_cutoffs_angstrom": [
+            float(v) for v in data.interface_sensitivity_cutoffs_angstrom
+        ],
         "min_interface_residues": int(data.min_interface_residues),
     }
 

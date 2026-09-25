@@ -427,9 +427,10 @@ def chain_data(model):
 def contact_residue_ids(a, b, cutoff=None):
     # Nearest-neighbour queries avoid enumerating every atom-atom pair.
     cutoff = float(INTERFACE_CONTACT_CUTOFF_ANGSTROM if cutoff is None else cutoff)
-    da = b['tree'].query(a['xyz'], distance_upper_bound=cutoff)[0]
-    db = a['tree'].query(b['xyz'], distance_upper_bound=cutoff)[0]
-    return set(map(int,np.unique(a['owners'][da < cutoff]))), set(map(int,np.unique(b['owners'][db < cutoff])))
+    query_bound=np.nextafter(cutoff,np.inf)
+    da = b['tree'].query(a['xyz'], distance_upper_bound=query_bound)[0]
+    db = a['tree'].query(b['xyz'], distance_upper_bound=query_bound)[0]
+    return set(map(int,np.unique(a['owners'][da <= cutoff]))), set(map(int,np.unique(b['owners'][db <= cutoff])))
 
 def contact(a, b):
     left,right=contact_residue_ids(a,b)
@@ -441,7 +442,7 @@ def interfaces(chains, allowed=None):
         for b in chains[i+1:]:
             if allowed is not None and not allowed(a['name'], b['name']):
                 continue
-            if np.any(np.maximum(a['low']-b['high'], b['low']-a['high']) >= INTERFACE_CONTACT_CUTOFF_ANGSTROM):
+            if np.any(np.maximum(a['low']-b['high'], b['low']-a['high']) > INTERFACE_CONTACT_CUTOFF_ANGSTROM):
                 na, nb = 0, 0
             else:
                 na, nb = contact(a, b)

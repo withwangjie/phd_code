@@ -473,8 +473,9 @@ def make_graph(row, split, pair=None, family_structure_cluster='', chains=None):
     def interface_nodes_at(cutoff, partner_trees, atom_arrays, atom_owners):
         counts=[]; interface_nodes=set()
         for g in [0,1]:
-            distances=partner_trees[1-g].query(atom_arrays[g],distance_upper_bound=cutoff)[0]
-            contacted=atom_owners[g][distances<cutoff]
+            query_bound=np.nextafter(cutoff,np.inf)
+            distances=partner_trees[1-g].query(atom_arrays[g],distance_upper_bound=query_bound)[0]
+            contacted=atom_owners[g][distances<=cutoff]
             unique_contacted=np.unique(contacted)
             counts.append(len(unique_contacted))
             interface_nodes.update(int(index) for index in unique_contacted.tolist())

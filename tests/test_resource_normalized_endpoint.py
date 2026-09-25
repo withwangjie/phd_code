@@ -65,7 +65,9 @@ def _scaling_case(pdb: str, sites: int, delta: float) -> dict:
     site_to_variables = {str(s): [3 * s, 3 * s + 1, 3 * s + 2] for s in range(sites)}
     shared = dict(budget_mode="matched_outputs", outputs=1000, configuration_count=3 ** sites,
                   num_bits=3 * sites, qaoa_parameter_count=4, qaoa_xy_gates=6 * sites,
-                  qaoa_zz_gates=sites, qaoa_two_qubit_gates=7 * sites, gap=0.0, hit=1)
+                  qaoa_zz_gates=sites, qaoa_two_qubit_gates=7 * sites,
+                  qaoa_variational_two_qubit_gates=7 * sites,
+                  qaoa_full_circuit_two_qubit_gates=None, gap=0.0, hit=1)
     rows = [dict(shared, solver="qaoa", qaoa_objective="cvar", qaoa_restarts=4,
                  termination_reason="max_evaluations_reached", log10_qts99=4.0 + delta,
                  log10_qts99_execution=2.0 + delta, log10_ground_amplification_exact=1.0 + delta),
