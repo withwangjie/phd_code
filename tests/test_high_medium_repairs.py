@@ -555,7 +555,9 @@ def test_auto_venv_resolution_ignores_existing_non_venv_directory(tmp_path, monk
     good=tmp_path/".venv"
     (good/"bin").mkdir(parents=True)
     (good/"bin"/"activate").write_text("# test\n",encoding="utf-8")
-    (good/"bin"/"python").write_text("#!/bin/sh\n",encoding="utf-8")
+    python_path=good/"bin"/"python"
+    python_path.write_text("#!/bin/sh\n",encoding="utf-8")
+    python_path.chmod(0o755)
     monkeypatch.setenv("QP_VENV",str(bad))
     monkeypatch.setattr(server_resolver,"REPO_ROOT",tmp_path)
     assert server_resolver._resolve_venv({"venv":"auto"}) == str(good.resolve())
