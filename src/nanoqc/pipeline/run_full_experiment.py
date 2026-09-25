@@ -1357,6 +1357,11 @@ class Orchestrator:
             if error:return False,error
             if not summary.get("complete"):
                 return False,"dataset run_summary.json is not complete"
+            holdout_cfg=((self.config.get("queue_freeze",{}) or {}).get("antigen_fold_holdout",{}) or {})
+            if holdout_cfg.get("enabled",False):
+                holdout_ok,holdout_detail=self._validate_frozen_antigen_holdout()
+                if not holdout_ok:
+                    return False,"Frozen antigen-fold holdout failed verification: "+holdout_detail
             # Verify frozen-input hashes before trusting the contents of
             # selected_targets.json (a tampered file must report provenance
             # mismatch, not whatever its forged targets happen to lack).
