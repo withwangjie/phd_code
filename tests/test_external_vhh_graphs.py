@@ -216,8 +216,7 @@ def test_independent_groups_use_the_layered_rule_and_structure_clusters():
 
 
 def test_selection_cli_reports_cluster_adequacy(tmp_path, monkeypatch):
-    import sys
-    monkeypatch.setitem(sys.modules, "anarci", None)
+    _install_fake_anarci(monkeypatch)
     structures = tmp_path / "structures"
     structures.mkdir()
     (structures / "9zzz.pdb").write_text(_complex_pdb(104.5, 100.0, antigen_x0=68.4))
@@ -249,6 +248,7 @@ def test_other_nanobodies_are_never_antigen_and_one_vhh_is_chosen(tmp_path, monk
     source.write_text(_complex_pdb(104.5, 100.0, c_z=-4.5))  # chain C now touches the VHH
     plain = ext.prepare_external_complex(source, "H")
     assert sorted(plain["antigen_chains"]) == ["A-2", "C"]
+    _install_fake_anarci(monkeypatch)
     prepared, attempts = sel.choose_vhh(source, ["C", "H"])
     assert prepared["vhh_chain"] == "H" and prepared["antigen_chains"] == ["A-2"]
     assert {"chain": "C", "reason": "other_antibody_chain"} in prepared["meta"]["dropped_chains"]
@@ -256,13 +256,12 @@ def test_other_nanobodies_are_never_antigen_and_one_vhh_is_chosen(tmp_path, monk
 
 
 def test_cdr3_agreement_is_measured_on_snac_training_annotations(monkeypatch):
-    import sys
-    monkeypatch.setitem(sys.modules, "anarci", None)
+    _install_fake_anarci(monkeypatch)
     train = [dict(subset_source="snac_db", vhh=[VHH_TAIL], cdr_h3="AAGRYGSSWYPDSYDY"),
              dict(subset_source="snac_db", vhh=[VHH_TAIL], cdr_h3="GRYGSSWYPDSYDY"),
              dict(subset_source="train_rcsb", vhh=[VHH_TAIL], cdr_h3="AAGRYGSSWYPDSYDY")]
     assert sel.cdr3_method_agreement(train) == dict(compared=2, agreed=1, fraction=0.5,
-                                                    methods=["imgt_anchor_motif"])
+                                                    methods=["anarci_imgt"])
 
 
 OTHER_VHH = "A" * 20 + ("EVQLVESGGGSVQPGGSLKLSCVASGFTLDDYAIGWFRQAPGKEREGVSCISSSDGSTYYADSVKGRFTISRDNAKNTVYLQMNS"
@@ -452,8 +451,7 @@ def test_cdr3_motif_handles_internal_wgxg_and_tandem_domains():
 
 
 def test_one_representative_per_group_is_built(tmp_path, monkeypatch):
-    import sys
-    monkeypatch.setitem(sys.modules, "anarci", None)
+    _install_fake_anarci(monkeypatch)
     structures = tmp_path / "structures"
     structures.mkdir()
     for pdb in ("9zzz", "9zzw"):  # same VHH and antigen: one layered group
@@ -523,12 +521,16 @@ def test_an_unannotated_fab_in_the_entry_rejects_it(tmp_path, monkeypatch):
     prepared = ext.prepare_external_complex(source, "H", (), ["A"])
     assert [c["chain"] for c in prepared["unannotated_antibody_chains"]] == ["B"]
     assert "B" not in prepared["antigen_chains"]
+    _install_fake_anarci(monkeypatch)
     _, attempts = sel.choose_vhh(source, ["H"], ["A"])
     assert "contains_unannotated_antibody_chain" in attempts[0]["reasons"]
 
     # Annotated as the antigen (anti-idiotype): kept, and the entry is not rejected.
+    import sys
+    monkeypatch.setitem(sys.modules, "anarci", None)
     as_antigen = ext.prepare_external_complex(source, "H", (), ["A", "B"])
     assert as_antigen["unannotated_antibody_chains"] == []
+    _install_fake_anarci(monkeypatch)
     _, attempts = sel.choose_vhh(source, ["H"], ["A", "B"])
     assert "contains_unannotated_antibody_chain" not in attempts[0]["reasons"]
 
@@ -554,6 +556,7 @@ def test_the_release_date_cutoff_is_optional(tmp_path, monkeypatch):
     keys = list(rows[0])
     summary.write_text("\t".join(keys) + "\n" + "\t".join(rows[0][k] for k in keys) + "\n")
     out = tmp_path / "selection"
+    _install_fake_anarci(monkeypatch)
     sel.main(["--sabdab-summary", str(summary), "--structures-dir", str(structures), "--out-dir", str(out)])
     payload = json.loads((out / "candidates.json").read_text())
     assert payload["released_after"] is None and payload["holdout"] == "homology" and payload["selected"] == 1

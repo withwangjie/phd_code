@@ -182,7 +182,8 @@ def choose_vhh(source: Path, vhh_chains: Sequence[str],
     for chain in vhh_chains:
         others = [c for c in vhh_chains if c != chain]
         try:
-            prepared = prepare_external_complex(source, chain, others, annotated_antigen_chains)
+            prepared = prepare_external_complex(
+                source, chain, others, annotated_antigen_chains, require_anarci=True)
         except Exception as exc:
             attempts.append(dict(vhh_chain=chain, reasons=[f"structure_{type(exc).__name__}: {exc}"]))
             continue
@@ -214,7 +215,7 @@ def cdr3_method_agreement(train: list[dict]) -> dict:
             continue  # annotation includes residues unmodelled in the structure
         compared += 1
         try:
-            cdrs = annotate_cdrs(record["vhh"][0])
+            cdrs = annotate_cdrs(record["vhh"][0], require_anarci=True)
         except ValueError:
             continue
         methods.add(cdrs["method"])
@@ -276,6 +277,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--antigen-min-length-coverage", type=float, default=builder.ANTIGEN_MIN_LENGTH_COVERAGE)
     parser.add_argument("--out-dir", type=Path, required=True)
     args = parser.parse_args(argv)
+
+    try:
+        from anarci import anarci as _formal_anarci  # noqa: F401
+    except ImportError as exc:
+        raise SystemExit(
+            "ANARCI is required for formal external-VHH IMGT numbering; "
+            "install the declared formal dependency before candidate selection"
+        ) from exc
 
     excluded = {line.strip().lower()[:4] for path in args.exclude_pdbs
                 for line in path.read_text(encoding="utf-8").splitlines() if line.strip()}
