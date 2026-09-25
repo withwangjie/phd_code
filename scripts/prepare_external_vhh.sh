@@ -25,7 +25,39 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "$REPO_ROOT"
 export PYTHONPATH="${REPO_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}"
-if [ -f "${REPO_ROOT}/.venv/bin/activate" ] && [ -x "${REPO_ROOT}/.venv/bin/python" ]; then
+SERVER_CONFIG_FILE="${QP_SERVER_CONFIG:-${REPO_ROOT}/configs/server_config.yaml}"
+if [[ "$SERVER_CONFIG_FILE" != /* ]]; then
+    SERVER_CONFIG_FILE="${REPO_ROOT}/${SERVER_CONFIG_FILE}"
+fi
+server_venv_hint() {
+    [ -f "$SERVER_CONFIG_FILE" ] || return 0
+    awk -F: '$1 ~ /^[[:space:]]*venv[[:space:]]*$/ {
+        v=substr($0,index($0,":")+1); sub(/#.*/,"",v);
+        gsub(/^[[:space:]]+|[[:space:]]+$/,"",v);
+        gsub(/^"|"$/,"",v); gsub(/^\047|\047$/,"",v);
+        if (v!="" && v!="auto") print v; exit
+    }' "$SERVER_CONFIG_FILE"
+}
+SERVER_VENV_HINT="$(server_venv_hint)"
+if [ -n "$SERVER_VENV_HINT" ]; then
+    case "$SERVER_VENV_HINT" in
+        "~/"*) SERVER_VENV_HINT="${HOME}/${SERVER_VENV_HINT#~/}" ;;
+        /*) ;;
+        *) SERVER_VENV_HINT="${REPO_ROOT}/${SERVER_VENV_HINT}" ;;
+    esac
+fi
+if [ -n "$SERVER_VENV_HINT" ]; then
+    if [ -f "${SERVER_VENV_HINT}/bin/activate" ] && [ -x "${SERVER_VENV_HINT}/bin/python" ]; then
+        # shellcheck disable=SC1091
+        source "${SERVER_VENV_HINT}/bin/activate"
+    elif [ -f "${SERVER_VENV_HINT}/Scripts/activate" ] && [ -f "${SERVER_VENV_HINT}/Scripts/python.exe" ]; then
+        # shellcheck disable=SC1091
+        source "${SERVER_VENV_HINT}/Scripts/activate"
+    else
+        echo "[prepare_external_vhh] ERROR: server_config.yaml declares an unusable venv: ${SERVER_VENV_HINT}" >&2
+        exit 1
+    fi
+elif [ -f "${REPO_ROOT}/.venv/bin/activate" ] && [ -x "${REPO_ROOT}/.venv/bin/python" ]; then
     # shellcheck disable=SC1091
     source "${REPO_ROOT}/.venv/bin/activate"
 elif [ -f "${REPO_ROOT}/.venv/Scripts/activate" ] && [ -f "${REPO_ROOT}/.venv/Scripts/python.exe" ]; then
@@ -40,7 +72,7 @@ else
         # shellcheck disable=SC1091
         source "${SHARED_VENV}/Scripts/activate"
     else
-        echo "[prepare_external_vhh] ERROR: no usable virtual environment found. Set QP_VENV or create ${REPO_ROOT}/.venv." >&2
+        echo "[prepare_external_vhh] ERROR: no usable virtual environment found. Set QP_VENV, configure server_config.yaml:venv, or create ${REPO_ROOT}/.venv." >&2
         exit 1
     fi
 fi
