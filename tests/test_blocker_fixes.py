@@ -73,6 +73,7 @@ def test_cluster_map_accepts_chain_suffixed_foldseek_table(tmp_path):
     assert mapping["1abc"] == mapping["2def"] != mapping["3ghi"]
 
 
-def test_cluster_universe_keeps_only_pdb_ids():
+def test_cluster_universe_uses_the_shared_formal_admission_contract():
     source = inspect.getsource(full.Orchestrator.stage_queue_freeze)
-    assert 're.fullmatch(r"[a-z0-9]{4}",pdb)' in source
+    assert "formal_clustering_pdb_ids" in source
+    assert 'qf_cfg["graph_build"].get("min_interface_residues", 15)' in source

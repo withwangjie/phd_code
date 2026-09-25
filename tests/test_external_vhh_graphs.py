@@ -313,10 +313,18 @@ def test_foldseek_pairs_use_antigen_chains_only(tmp_path, monkeypatch):
         return str(raw / name)
 
     antigen = "MKTAYIAKQRQISFVKSHFSRQ"
-    rows = [dict(pdb_id="1ABC", path=write("1abc.pdb", [("H", VHH_TAIL, 0.0), ("A", antigen, 6.0)]), subset="train_rcsb"),
-            dict(pdb_id="2DEF", path=write("2def.pdb", [("H", VHH_TAIL, 0.0)]), subset="sabdab_vhh"),
-            dict(pdb_id="3GHI", path=write("3ghi_r_b.pdb", [("R", antigen, 0.0)]), subset="test_db55"),
-            dict(pdb_id="3GHI", path=write("3ghi_r_u.pdb", [("U", "G" * 30, 0.0)]), subset="test_db55")]
+    short_antigen = "MKTAYIAKQR"
+    p1 = write("1abc.pdb", [("H", VHH_TAIL, 0.0), ("A", antigen, 6.0)])
+    p2 = write("2def.pdb", [("H", VHH_TAIL, 0.0), ("P", short_antigen, 6.0)])
+    p3 = write("3ghi.pdb", [("H", VHH_TAIL, 0.0), ("R", antigen, 6.0)])
+    from nanoqc.common.repo_io import sha256_file
+    qc = dict(valid=True, missing_residues=0, interface_status="pass",
+              max_contact_residues=20, vhh_status="pass", structure_quality_status="pass")
+    rows = [
+        dict(pdb_id="1ABC", path=p1, subset="snac_db", source_structure_sha256=sha256_file(P(p1)), **qc),
+        dict(pdb_id="2DEF", path=p2, subset="sabdab_vhh", source_structure_sha256=sha256_file(P(p2)), **qc),
+        dict(pdb_id="3GHI", path=p3, subset="snac_db", source_structure_sha256=sha256_file(P(p3)), **qc),
+    ]
     audit_dir = tmp_path / "audit"
     audit_dir.mkdir()
     (audit_dir / "data_audit_details.jsonl").write_text(
@@ -354,7 +362,8 @@ def test_foldseek_pairs_use_antigen_chains_only(tmp_path, monkeypatch):
     assert roles[("1abc", "A")] == ("antigen", "v_domain_motif")
     assert roles[("9zzz", "H")] == ("antibody", "sabdab_chain_id")
     assert roles[("9zzz", "A")] == ("skipped", "shorter_than_20")
-    assert ("3ghi", "U") not in roles  # DB5.5: bound files only
+    assert roles[("3ghi", "H")] == ("antibody", "v_domain_motif")
+    assert roles[("3ghi", "R")] == ("antigen", "v_domain_motif")
 
     env = dict(os.environ, PYTHONPATH=str(P(__file__).resolve().parents[1] / "src"))
     cluster = tmp_path / "clusters.json"
