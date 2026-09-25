@@ -143,6 +143,9 @@ def antigen_structure(pdb: str, sources: Iterable[dict], sabdab_antibody_chains:
                       min_length: int, sabdab_antigen_chains: Iterable[str] = ()) -> tuple[Optional[gemmi.Structure], dict]:
     """One structure holding the PDB's non-antibody chains, and the per-chain record."""
     sabdab = set(sabdab_antibody_chains)
+    internal_sabdab_antibody, internal_sabdab_antigen = audit.sabdab_chain_metadata(pdb)
+    sabdab.update(internal_sabdab_antibody)
+    internal_sabdab_antigen = set(internal_sabdab_antigen)
     model = gemmi.Model("1")
     kept_sequences: dict[str, str] = {}
     chains = []
@@ -153,7 +156,9 @@ def antigen_structure(pdb: str, sources: Iterable[dict], sabdab_antibody_chains:
         except Exception as exc:
             unreadable.append(dict(source=source.get("id") or source["path"], error=f"{type(exc).__name__}: {exc}"))
             continue
-        antigen_annotated = annotated_antigen_chains(source) | set(sabdab_antigen_chains)
+        antigen_annotated = (annotated_antigen_chains(source)
+                             | internal_sabdab_antigen
+                             | set(sabdab_antigen_chains))
         while len(structure) > 1:
             del structure[1]
         structure.setup_entities()

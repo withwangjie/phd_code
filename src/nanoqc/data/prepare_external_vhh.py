@@ -149,16 +149,18 @@ def settings(config: dict, prep_dir: Optional[Path]) -> dict:
 
 
 def study_pdb_ids(audit_jsonl: Path) -> list[str]:
-    """Same rule as queue_freeze's clustering universe: every audited four-character PDB ID."""
+    """Same rule as queue_freeze: source-verified formal VHH PDB IDs only."""
+    from nanoqc.data.audit_all_datasets import formal_clustering_candidate
     ids = set()
     for line in audit_jsonl.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
         try:
-            pdb = str(json.loads(line).get("pdb_id", "")).strip().lower()
+            row = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if PDB_ID.fullmatch(pdb):
+        pdb = str(row.get("pdb_id", "")).strip().lower()
+        if PDB_ID.fullmatch(pdb) and formal_clustering_candidate(row):
             ids.add(pdb)
     return sorted(ids)
 

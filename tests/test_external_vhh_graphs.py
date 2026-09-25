@@ -92,7 +92,7 @@ def test_external_complex_builds_a_verified_v18_graph(tmp_path, monkeypatch):
     assert quality["interface_residues"] >= 15
 
     graph = ext.build_graph(prepared, "9zzz", source)
-    assert graph.graph_version == "1.8" and graph.subset_source == "external_vhh"
+    assert graph.graph_version == "1.9" and graph.subset_source == "external_vhh"
     assert graph.structure_source == "biological_assembly:author_determined:1"
     import torch
     out = tmp_path / "graphs"

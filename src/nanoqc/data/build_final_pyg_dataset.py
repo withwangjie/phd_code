@@ -50,9 +50,14 @@ MIN_INTERFACE_RESIDUES = 15
 # intended, and record the value in each graph's provenance.
 GRAPH_MEMORY_BUDGET_BYTES = 4 * 1024**3
 # 1.7: phi/psi are defined only across real peptide bonds (NaN at chain breaks).
-# 1.8: sabdab_vhh/train_rcsb complexes come from the biological assembly and
-#      keep only antigen chains in contact with the VHH paratope.
-VERSION = '1.8'
+# 1.8: raw assembly sources keep only partner chains in contact with the VHH paratope.
+# 1.9: formal sources are source-verified VHH complexes (SNAC primary, SAbDab
+#      auxiliary), SAbDab carries its own chain/CDR provenance, and cross-source
+#      duplicate PDBs are resolved deterministically before graph construction.
+VERSION = '1.9'
+FORMAL_SOURCE_PRIORITY = ('snac_db', 'sabdab_vhh', 'train_rcsb')
+FORMAL_TRAIN_SOURCES = ('snac_db', 'sabdab_vhh')
+SOURCE_ROLE = {'snac_db': 'primary', 'sabdab_vhh': 'auxiliary', 'train_rcsb': 'audit_only'}
 # SAbDab antigen-chain criterion [METHODS_EVIDENCE R33]: any CA/CB within 7.5 A
 # of a CA/CB of the antibody's CDR residues.
 ANTIGEN_CHAIN_CONTACT_ANGSTROM = 7.5
@@ -141,6 +146,28 @@ def audit_reasons(row):
     elif quality_status not in ('','not_evaluated','pass'):
         reasons.extend(['structure_quality_'+str(reason) for reason in row.get('structure_quality_reasons',[])])
     return reasons
+
+
+def deduplicate_cross_source_pdb(rows):
+    """Resolve duplicate PDBs by source before any quality/outcome is inspected."""
+    rank={source:index for index,source in enumerate(FORMAL_SOURCE_PRIORITY)}
+    sources=collections.defaultdict(set)
+    for row in rows:
+        subset=str(row.get('subset',''))
+        pdb=str(row.get('pdb_id','')).upper()
+        if subset in rank and pdb:
+            sources[pdb].add(subset)
+    winner={pdb:min(found,key=lambda source:rank[source]) for pdb,found in sources.items()}
+    kept=[];dropped=[]
+    for row in rows:
+        subset=str(row.get('subset',''))
+        pdb=str(row.get('pdb_id','')).upper()
+        preferred=winner.get(pdb)
+        if subset in rank and preferred is not None and subset!=preferred:
+            dropped.append((row,preferred))
+        else:
+            kept.append(row)
+    return kept,dropped
 
 def load_inputs(root):
     paths=[root/n for n in ['data_audit_report.md','data_audit_details.csv','data_audit_details.jsonl','data_audit_db55_pairs.json']]
@@ -319,14 +346,12 @@ def extract(row, pair=None):
         for c in b:c['group']=1
         return a+b
     st,_=audit.read_structure(task_of(row));chains=build_atoms(st)
-    if row['subset']=='snac_db':anchor='H'
-    elif row['subset']=='sabdab_vhh':
-        source=audit.CHAIN_ANNOTATIONS.get(row['pdb_id'].upper(),{})
-        names={c['name'] for c in chains}
-        candidates=[d.rsplit('_',1)[0] for d in source.get('Chain_VHH',[]) if d.rsplit('_',1)[0] in names]
-        if len(candidates)!=1:raise ValueError('strict VHH anchor not unique on reread')
-        anchor=candidates[0]
+    if row['subset'] in ('snac_db','sabdab_vhh'):
+        anchor=str(row.get('vhh_chain') or ('H' if row['subset']=='snac_db' else ''))
+        if not anchor:raise ValueError('strict VHH anchor missing from audited provenance')
     else:
+        # Generic complexes remain supported for standalone/debug utilities,
+        # but train_rcsb is audit-only and never reaches formal graph building.
         if not row['pairs']:raise ValueError('missing audited contact pairs')
         strongest=sorted(row['pairs'],key=lambda p:(-(p[2]+p[3]),p[0],p[1]))[0]
         anchor=strongest[0]
@@ -347,15 +372,16 @@ def _ca_cb_coordinates(nodes):
 
 
 def _paratope_nodes(anchor,row):
-    """VHH CDR1-3 residues when the annotation maps uniquely, else the whole chain."""
+    """VHH CDR1-3 residues when the audited source maps them, else whole VHH."""
     nodes=anchor['nodes']
     if row['subset']!='sabdab_vhh':
         return nodes,'whole_anchor_chain'
     sequence=''.join(node['aa'] for node in nodes)
-    for rec in audit.PDB_ANNOTATIONS.get(str(row['pdb_id']).upper(),[]):
-        loops=[rec.get(key,'') for key in ('cdr1','cdr2','cdr3')]
-        if rec.get('kind')!='VHH' or not all(loops) or any(sequence.count(loop)!=1 for loop in loops):
-            continue
+    cdr1=(row.get('cdr1_sequences') or [''])[0]
+    cdr2=(row.get('cdr2_sequences') or [''])[0]
+    cdr3=cdr(row)
+    loops=[cdr1,cdr2,cdr3]
+    if all(loops) and all(sequence.count(loop)==1 for loop in loops):
         indices=sorted({i for loop in loops for i in range(sequence.index(loop),sequence.index(loop)+len(loop))})
         return [nodes[i] for i in indices],'vhh_cdr1_cdr2_cdr3'
     return nodes,'whole_vhh_chain_cdr_unmapped'
@@ -379,6 +405,14 @@ def select_contacting_partner_chains(chains,row,meta):
         sequence=''.join(node['aa'] for node in chain['nodes'])
         if row['subset']=='sabdab_vhh' and sequence==anchor_sequence:
             dropped.append(dict(chain=chain['name'],reason='copy_of_vhh'));continue
+        if row['subset']=='sabdab_vhh':
+            author=audit._author_chain(chain['name'])
+            other_antibody=set(row.get('other_antibody_chains') or [])
+            annotated_antigen=set(row.get('sabdab_antigen_chains') or [])
+            if author in other_antibody:
+                dropped.append(dict(chain=chain['name'],reason='other_antibody_chain'));continue
+            if annotated_antigen and author not in annotated_antigen:
+                dropped.append(dict(chain=chain['name'],reason='not_sabdab_annotated_antigen'));continue
         distance=float(tree.query(_ca_cb_coordinates(chain['nodes']),k=1)[0].min())
         if distance<=ANTIGEN_CHAIN_CONTACT_ANGSTROM:
             kept.append(chain)
@@ -485,8 +519,10 @@ def make_graph(row, split, pair=None, family_structure_cluster='', chains=None):
         homology_antigen_identity_threshold=float(ANTIGEN_IDENTITY_THRESHOLD),
         homology_antigen_min_length_coverage=float(ANTIGEN_MIN_LENGTH_COVERAGE),
         audit_interface_residues=row.get('max_contact_residues',pair['contact_residues'] if pair else 0),
-        audit_vhh_status=row.get('vhh_status','not_applicable'),graph_version=VERSION,
-        graph_memory_budget_bytes=int(GRAPH_MEMORY_BUDGET_BYTES))
+        audit_vhh_status=row.get('vhh_status','not_applicable'),
+        cdr_annotation_method=str(row.get('cdr_annotation_method','')),
+        source_role=SOURCE_ROLE.get(row.get('subset'),'auxiliary_benchmark'),
+        graph_version=VERSION, graph_memory_budget_bytes=int(GRAPH_MEMORY_BUDGET_BYTES))
     gnotes={json.dumps(note,sort_keys=True) for chain in chains for note in chain.get('identity_resolutions',[])}
     graph.residue_identity_resolutions=json.dumps([json.loads(s) for s in sorted(gnotes)])
     graph.num_nodes=n
@@ -647,7 +683,7 @@ def delivery_report(output,manifest,exclusions,failures,summary,complete):
     for reason,count in sorted(collections.Counter(x for r in exclusions for x in r['reasons'].split(';')).items()):lines.append(f'| {reason} | {count} |')
     lines += ['', '## 5. 张量规范与链定义','',
         f'- `pos`: CA坐标float32[N,3]；`x`: float32[N,21]，氨基酸列顺序 `{AA}`，末列为相互作用组0/1。',
-        '- 全部蛋白链和残基保留。通用多链复合物以最强界面链对中的首链为组0、其余蛋白链为组1；VHH为0、其他蛋白链为1；DB5.5受体链集合为0、配体链集合为1。0/1是伙伴组，不冒充多条物理链的唯一编号。',
+        '- Formal训练仅接收来源验证的SNAC/SAbDab VHH：VHH为0、经来源/接触规则保留的抗原为1；train_rcsb仅审计、不进入formal训练。DB5.5受体链集合为0、配体链集合为1。0/1是伙伴组，不冒充多条物理链的唯一编号。',
         '- `chain_ids`、`node_chain_id`、`residue_ids`、`chain_sequences`保留真实链/残基信息；node_chain_id为图内局部链序号，DB5.5用R:/L:前缀防止链ID冲突。',
         f'- `edge_index`: int64[2,2E]；同链边使用CA距离<{INTRA_CHAIN_CA_CUTOFF_ANGSTROM:.2f}Å，跨伙伴边固定采用每节点{CROSS_PARTNER_KNN_K}个最近邻（不设接触距离阈值）。界面标签独立由跨伙伴重原子<{INTERFACE_LABEL_CUTOFF_ANGSTROM:.2f}Å定义，因此跨链边的“存在/不存在”不复用标签阈值。',
         f'- `num_interface_residues`重新计算两个伙伴组之间重原子距离<{INTERFACE_LABEL_CUTOFF_ANGSTROM:.2f}Å的两侧接触残基并集大小；准入下限为{MIN_INTERFACE_RESIDUES}。原审计值保存在audit_interface_residues。',
@@ -769,19 +805,33 @@ def main():
             homology_isolation=dict(vhh_full_chain_identity=VHH_IDENTITY_THRESHOLD,
                 cdr_h3_identity=CDR_H3_IDENTITY_THRESHOLD,antigen_identity=ANTIGEN_IDENTITY_THRESHOLD,
                 antigen_min_length_coverage=ANTIGEN_MIN_LENGTH_COVERAGE),
-            identity_scope='SNAC train/test and EGNN train/validation use layered VHH/CDR-H3/antigen plus frozen family/structure-cluster isolation',
+            identity_scope='SNAC primary + SAbDab auxiliary formal VHH data use layered VHH/CDR-H3/antigen plus frozen family/structure-cluster isolation',
+            data_source_policy=dict(primary='snac_db',auxiliary=['sabdab_vhh'],audit_only=['train_rcsb'],
+                cross_source_priority=list(FORMAL_SOURCE_PRIORITY)),
             graph_protocol=dict(vhh_identity_threshold=VHH_IDENTITY_THRESHOLD,
                 cdr_h3_identity_threshold=CDR_H3_IDENTITY_THRESHOLD,
                 antigen_identity_threshold=ANTIGEN_IDENTITY_THRESHOLD,
                 antigen_min_length_coverage=ANTIGEN_MIN_LENGTH_COVERAGE,interface_label_cutoff_angstrom=INTERFACE_LABEL_CUTOFF_ANGSTROM,intra_chain_ca_cutoff_angstrom=INTRA_CHAIN_CA_CUTOFF_ANGSTROM,cross_partner_knn_k=CROSS_PARTNER_KNN_K,min_interface_residues=MIN_INTERFACE_RESIDUES,graph_version=VERSION),input_sha256=input_hashes,script_sha256=sha256(pathlib.Path(__file__)),admission={})
+        formal_rows,cross_source_dropped=deduplicate_cross_source_pdb(rows)
+        for row,preferred in cross_source_dropped:
+            exclusions.append(exclusion(row,[f'cross_source_duplicate_prefer_{preferred}']))
         lookup={r['path']:r for r in rows if r['subset']=='test_db55'};eligible=[]
-        for source in ['train_rcsb','sabdab_vhh','snac_db']:
-            subset=[r for r in rows if r['subset']==source];good=[]
-            for r in subset:
-                reasons=audit_reasons(r)
-                if reasons:exclusions.append(exclusion(r,reasons))
-                else:good.append(r)
-            summary['admission'][source]=dict(input=len(subset),eligible=len(good));eligible.extend(good)
+        for source in FORMAL_SOURCE_PRIORITY:
+            original=[r for r in rows if r['subset']==source]
+            subset=[r for r in formal_rows if r['subset']==source]
+            good=[]
+            if source not in FORMAL_TRAIN_SOURCES:
+                for row in subset:
+                    exclusions.append(exclusion(row,['formal_source_disabled_unverified_vhh']))
+            else:
+                for row in subset:
+                    reasons=audit_reasons(row)
+                    if reasons:exclusions.append(exclusion(row,reasons))
+                    else:good.append(row)
+                eligible.extend(good)
+            summary['admission'][source]=dict(
+                input=len(original),after_cross_source_dedup=len(subset),eligible=len(good),
+                role=SOURCE_ROLE[source])
         bound=[]
         for p in pairs:
             source=dict(id='DB55_BOUND::'+p['id'],pdb_id=p['id'].upper(),subset='test_db55',max_contact_residues=p.get('contact_residues',0))
@@ -882,7 +932,6 @@ def main():
             reasons=[]
             if r['pdb_id'].upper() in hardids:reasons.append('pdb_overlap_snac_hard')
             seqs={cdr(r)} if cdr(r) else set()
-            if r['subset']=='train_rcsb':seqs.update(x['cdr3'] for x in audit.PDB_ANNOTATIONS.get(r['pdb_id'].upper(),[]) if x['kind']=='VHH' and x['cdr3'])
             if any(cdr_h3_loop_seqsim(s,t)>=CDR_H3_IDENTITY_THRESHOLD for s in seqs for t in hardseqs):reasons.append('cdr3_overlap_snac_hard_threshold')
             if reasons:exclusions.append(exclusion(r,reasons))
             else:train.append(r);known_train_cdr[r['id']]=sorted(seqs)

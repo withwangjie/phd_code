@@ -11,19 +11,21 @@ prediction.
 ## Formal research pipeline
 
 1. **Leakage-controlled data construction**
-   - Complex definition: raw PDB subsets (`sabdab_vhh`, `train_rcsb`) are read as their
-     first author-determined biological assembly (entries without assembly annotation are
-     excluded), and only partner chains with a CA/CB within 7.5 A of the VHH CDR CA/CB are
-     antigen, following SAbDab [R33]; `snac_db` uses SNAC-DB's assembly-curated complexes [R34].
+   - Formal source roles are explicit: `snac_db` is the primary VHH-antigen source,
+     `sabdab_vhh` is auxiliary training data, and generic `train_rcsb` is audit-only
+     because a strongest-contact chain pair does not establish VHH identity.
+     Cross-source duplicate PDBs are resolved before quality/outcome inspection with
+     fixed priority SNAC-DB > SAbDab > RCSB.
+   - Complex definition: `sabdab_vhh` is read as the first author-determined biological
+     assembly (entries without assembly annotation are excluded); SAbDab H/L/antigen
+     metadata defines the VHH entry and only annotated antigen chains within 7.5 A of the
+     VHH paratope are retained. `snac_db` uses SNAC-DB's assembly-curated complexes [R34].
    - Interface labels: cross-partner heavy-atom contact < 5 A, following antibody-antigen/CAPRI-style contact definitions [R3,R4].
    - Graph edges: intra-chain CA radius < 8 A plus fixed cross-partner KNN. An 8 A C-alpha residue-graph cutoff has direct protein-GNN precedent [R22]; the cross-partner KNN degree k=3 remains a study-specific leakage-control choice rather than a literature-optimal constant.
    - EGNN train/validation split: layered connected components. Complexes are
      joined if VHH full-chain identity >=80% [R24], CDR-H3 loop-only identity >=50% [R23], or
      antigen full-chain identity >=30% with >=70% minimum length coverage [R25]; no random 90/10 split.
-     Complexes whose partner roles are not annotation-anchored (e.g. `train_rcsb`, where
-     group 0 is the first chain of the strongest contact pair) are also compared with
-     their partners swapped, so a nanobody stored in the antigen slot is still checked
-     against other nanobodies under the VHH threshold.
+     All formal training graphs have annotation-anchored VHH/antigen roles.
 
 2. **Antigen-conditioned Active-site selection**
    - E(n)-equivariant EGNN [R1] provides residue-level interface probabilities.
@@ -206,7 +208,7 @@ claim it supports is that the frozen pipeline still holds on antigen folds
 training never saw; it is a cluster-level holdout of the same audited
 snapshot, not a separate database. Setting
 `external_validation.external_vhh.graph_dir` and `source_structure_dir`
-scores an independently certified graph-v1.8 VHH dataset instead, with the
+scores an independently certified graph-v1.9 VHH dataset instead, with the
 identical independence audit.
 FASPR is supported as a mature biological side-chain packing baseline and
 Phenix clashscore as a standard steric-quality diagnostic. These are
@@ -245,7 +247,7 @@ the frozen model.
 
 ### Preparing the external VHH set
 
-External complexes are built with the training-graph definition (graph v1.8,
+External complexes are built with the training-graph definition (graph v1.9,
 biological assembly, 7.5 A SAbDab antigen rule, the same labels and edges):
 
 Structure files that carry no resolution record need the entry table the audit

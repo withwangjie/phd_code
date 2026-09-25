@@ -28,6 +28,10 @@ BASE = REPO_ROOT  # standalone-run defaults (data/, outputs) are relative to the
 ANNOTATIONS = {}
 PDB_ANNOTATIONS = collections.defaultdict(list)
 CHAIN_ANNOTATIONS = {}
+# SAbDab metadata is kept independently from SNAC annotations so a formal
+# sabdab_vhh entry never passes merely because the same PDB is also present in
+# SNAC. This is the source-of-truth for SAbDab H/L/antigen chain identities.
+SABDAB_ANNOTATIONS = collections.defaultdict(list)
 # Entry-level resolution by PDB ID from curation metadata (SNAC curation
 # summaries, SAbDab summary tables). SNAC's curated complex files carry no
 # REMARK 2, so the structure file alone reports no resolution for any of them.
@@ -41,6 +45,10 @@ RESOLUTION_SOURCE_FILES = []
 # otherwise enter the audit as 'extra_external_vhh' rows and, worse, decide the
 # resolution gate from a file no study step declares.
 PIPELINE_WORK_DIRS = frozenset({'external_vhh'})
+# Only curated VHH-antigen sources participate in the formal structural
+# similarity universe. Generic RCSB complexes remain auditable but are not
+# formal VHH training data.
+FORMAL_VHH_SUBSETS = frozenset({'snac_db', 'sabdab_vhh'})
 BACKBONE = set(BACKBONE_ATOMS)
 SIDECHAIN_HEAVY = {name: set(atoms) for name, atoms in SIDECHAIN_HEAVY_ATOMS.items()}
 MAX_RESOLUTION_ANGSTROM = 3.0
@@ -90,6 +98,7 @@ def load_annotations(root):
     ANNOTATIONS.clear()
     PDB_ANNOTATIONS.clear()
     CHAIN_ANNOTATIONS.clear()
+    SABDAB_ANNOTATIONS.clear()
     RESOLUTION_BY_PDB.clear()
     RESOLUTION_SOURCE_FILES.clear()
     for path in sorted(root.rglob('*_curation_summary.csv')):
@@ -110,18 +119,34 @@ def load_annotations(root):
                            cdr2=regions.get('cdr2', ''), chain=row.get(old_id, ''), source=row['Name'])
                 if rec not in PDB_ANNOTATIONS[row['PDB_ID'].upper()]:
                     PDB_ANNOTATIONS[row['PDB_ID'].upper()].append(rec)
-    for pattern, kind in (('*sabdab*summary*.tsv', 'sabdab_summary'),
-                          ('*entry_resolution.tsv', 'rcsb_entry_resolution')):
-        for path in sorted(root.rglob(pattern)):
-            if _staging(root, path):
+    # SAbDab is a formal auxiliary VHH source, not only a resolution fallback.
+    # Keep its chain-level metadata so formal ingestion can verify the VHH,
+    # light-chain absence and antigen identity without borrowing SNAC labels.
+    for path in sorted(root.rglob('*sabdab*summary*.tsv')):
+        if _staging(root, path):
+            continue
+        with path.open(encoding='utf-8-sig', newline='') as handle:
+            reader = csv.DictReader(handle, delimiter='\t')
+            fields = set(reader.fieldnames or [])
+            if not {'pdb', 'resolution'} <= fields:
                 continue
-            with path.open(encoding='utf-8-sig', newline='') as handle:
-                reader = csv.DictReader(handle, delimiter='\t')
-                if not reader.fieldnames or not {'pdb', 'resolution'} <= set(reader.fieldnames):
-                    continue
-                _record_source_file(root, path, kind)
-                for row in reader:
-                    _record_resolution(row.get('pdb'), row.get('resolution'), kind)
+            _record_source_file(root, path, 'sabdab_summary')
+            for row in reader:
+                pdb = str(row.get('pdb') or '').strip().upper()
+                _record_resolution(pdb, row.get('resolution'), 'sabdab_summary')
+                if re.fullmatch(r'[0-9A-Z]{4}', pdb) and {'Hchain', 'Lchain', 'antigen_chain'} <= fields:
+                    if row not in SABDAB_ANNOTATIONS[pdb]:
+                        SABDAB_ANNOTATIONS[pdb].append(row)
+    for path in sorted(root.rglob('*entry_resolution.tsv')):
+        if _staging(root, path):
+            continue
+        with path.open(encoding='utf-8-sig', newline='') as handle:
+            reader = csv.DictReader(handle, delimiter='\t')
+            if not reader.fieldnames or not {'pdb', 'resolution'} <= set(reader.fieldnames):
+                continue
+            _record_source_file(root, path, 'rcsb_entry_resolution')
+            for row in reader:
+                _record_resolution(row.get('pdb'), row.get('resolution'), 'rcsb_entry_resolution')
     for path in root.rglob('all_input_PDB_files_parsed_file_chains.csv'):
         with path.open(encoding='utf-8-sig', newline='') as handle:
             for row in csv.DictReader(handle):
@@ -404,8 +429,141 @@ def is_subsequence(short, long):
     it = iter(long)
     return all(c in it for c in short)
 
+def _metadata_present(value):
+    return str(value or '').strip().lower() not in ('', 'na', 'nan', 'none')
+
+
+def _split_chain_ids(value):
+    return {token.strip() for token in re.split(r'[|,]', str(value or ''))
+            if _metadata_present(token)}
+
+
+def _author_chain(name):
+    """Author-chain identifier for a biological-assembly symmetry copy."""
+    return str(name).split('-', 1)[0]
+
+
+def sabdab_chain_metadata(pdbid):
+    """Annotated antibody and antigen author-chain IDs for one SAbDab entry."""
+    rows = SABDAB_ANNOTATIONS.get(str(pdbid).upper(), [])
+    antibody = set()
+    antigen = set()
+    for row in rows:
+        antibody.update(_split_chain_ids(row.get('Hchain')))
+        antibody.update(_split_chain_ids(row.get('Lchain')))
+        antigen.update(_split_chain_ids(row.get('antigen_chain')))
+    return sorted(antibody), sorted(antigen)
+
+
+def _annotate_sabdab_cdrs(sequence):
+    from nanoqc.data.build_external_vhh_graphs import annotate_cdrs
+    return annotate_cdrs(sequence)
+
+
+def _ig_variable_domain(sequence):
+    from nanoqc.data.build_foldseek_pairs import ig_variable_domain
+    return ig_variable_domain(sequence)
+
+
+def sabdab_features(chains, pdbid):
+    """Strict SAbDab VHH identity from SAbDab metadata plus the structure."""
+    result = dict(
+        vhh_status='unknown', vhh_reason='缺少SAbDab链级标注',
+        vhh_chain='', cdr1_sequences=[], cdr2_sequences=[], cdr3_lengths=[],
+        cdr3_sequences=[], cdr_annotation_method='', sabdab_antigen_chains=[],
+        other_antibody_chains=[],
+    )
+    rows = SABDAB_ANNOTATIONS.get(str(pdbid).upper(), [])
+    if not rows:
+        return result, None
+    if any(_metadata_present(row.get('Lchain')) for row in rows):
+        result.update(vhh_status='fail', vhh_reason='SAbDab标注含轻链/VH-VL')
+        return result, None
+    if any(str(row.get('scfv', '')).strip().lower() == 'true' for row in rows):
+        result.update(vhh_status='fail', vhh_reason='SAbDab标注为scFv')
+        return result, None
+    vhh_ids = sorted({chain for row in rows for chain in _split_chain_ids(row.get('Hchain'))})
+    if len(vhh_ids) != 1:
+        result.update(vhh_status='fail',
+                      vhh_reason=f'SAbDab VHH链不唯一（{len(vhh_ids)}条）')
+        return result, None
+    antigen_rows = [row for row in rows if _metadata_present(row.get('antigen_chain'))]
+    antigen_ids = sorted({chain for row in antigen_rows
+                          for chain in _split_chain_ids(row.get('antigen_chain'))})
+    if not antigen_ids:
+        result.update(vhh_status='fail', vhh_reason='SAbDab未标注抗原链')
+        return result, None
+    antigen_types = {token.strip().lower() for row in antigen_rows
+                     for token in str(row.get('antigen_type', '')).split('|') if token.strip()}
+    if not antigen_types.intersection({'protein', 'peptide'}):
+        result.update(vhh_status='fail', vhh_reason='SAbDab无protein/peptide抗原')
+        return result, None
+
+    author_vhh = vhh_ids[0]
+    heavy = [chain for chain in chains if chain['name'] == author_vhh]
+    if not heavy:
+        author_matches = [chain for chain in chains if _author_chain(chain['name']) == author_vhh]
+        if len(author_matches) == 1:
+            heavy = author_matches
+    if len(heavy) != 1:
+        result.update(vhh_status='fail', vhh_reason='SAbDab VHH链在生物学装配中缺失或不唯一')
+        return result, None
+    anchor = heavy[0]
+    observed = anchor['sequence']
+    if len(observed) < 70:
+        result.update(vhh_status='fail', vhh_reason='SAbDab VHH坐标序列过短（<70 aa）')
+        return result, None
+    try:
+        cdrs = _annotate_sabdab_cdrs(observed)
+    except (ValueError, RuntimeError) as exc:
+        result.update(vhh_status='unknown', vhh_reason=f'SAbDab CDR-H3无法确定：{exc}')
+        return result, None
+
+    extra_ig = []
+    antigen_set = set(antigen_ids)
+    for chain in chains:
+        author = _author_chain(chain['name'])
+        if chain['name'] == anchor['name'] or author in antigen_set or chain['sequence'] == observed:
+            continue
+        is_ig, method = _ig_variable_domain(chain['sequence'])
+        if is_ig:
+            extra_ig.append(dict(chain=chain['name'], method=method))
+    if extra_ig:
+        result.update(
+            vhh_status='fail',
+            vhh_reason='SAbDab结构含未标注的额外Ig可变域',
+            other_antibody_chains=[entry['chain'] for entry in extra_ig],
+        )
+        return result, None
+
+    result.update(
+        vhh_status='pass',
+        vhh_reason='SAbDab单VHH链级标注 + 生物学装配核对 + CDR-H3定位',
+        vhh_chain=anchor['name'],
+        cdr1_sequences=([cdrs['cdr1']] if cdrs.get('cdr1') else []),
+        cdr2_sequences=([cdrs['cdr2']] if cdrs.get('cdr2') else []),
+        cdr3_lengths=[len(cdrs['cdr3'])],
+        cdr3_sequences=[cdrs['cdr3']],
+        cdr_annotation_method=cdrs.get('method', ''),
+        sabdab_antigen_chains=antigen_ids,
+    )
+    anchor_name = anchor['name']
+    return result, lambda a, b: (
+        (a == anchor_name and _author_chain(b) in antigen_set)
+        or (b == anchor_name and _author_chain(a) in antigen_set)
+    )
+
+
 def nano_features(task, chains, pdbid):
-    result = dict(vhh_status='unknown', vhh_reason='缺少可验证链标注', cdr3_lengths=[], cdr3_sequences=[])
+    result = dict(
+        vhh_status='unknown', vhh_reason='缺少可验证链标注',
+        vhh_chain='', cdr1_sequences=[], cdr2_sequences=[], cdr3_lengths=[],
+        cdr3_sequences=[], cdr_annotation_method='', sabdab_antigen_chains=[],
+        other_antibody_chains=[],
+    )
+    if task.get('subset') == 'sabdab_vhh':
+        return sabdab_features(chains, pdbid)
+
     name = pathlib.PurePosixPath(task['member'] or task['path']).stem
     parent = str(pathlib.Path(task['path']).parent)
     row = ANNOTATIONS.get((parent, name))
@@ -428,18 +586,23 @@ def nano_features(task, chains, pdbid):
             result.update(vhh_reason='H 链与标注序列不匹配或覆盖不足')
             return result, None
         regions = literal(row.get('Region_Split_VH'), {})
-        cdr = regions.get('cdr3', '')
-        if cdr:
-            result.update(cdr3_lengths=[len(cdr)], cdr3_sequences=[cdr])
-        # c_st/c_e can be short cloning/expression extensions, not Ig constant domains.
-        # Long unclassified extensions need review, rather than a false non-VHH claim.
+        cdr1, cdr2, cdr3 = regions.get('cdr1', ''), regions.get('cdr2', ''), regions.get('cdr3', '')
+        if cdr3:
+            result.update(
+                cdr1_sequences=([cdr1] if cdr1 else []),
+                cdr2_sequences=([cdr2] if cdr2 else []),
+                cdr3_lengths=[len(cdr3)], cdr3_sequences=[cdr3],
+                cdr_annotation_method='snac_imgt_region_split',
+            )
         extensions=len(regions.get('c_st',''))+len(regions.get('c_e',''))
         if extensions>20:
             result.update(vhh_status='unknown', vhh_reason=f'可变域外端部扩展{extensions}aa，需复核是否融合域')
         else:
-            result.update(vhh_status='pass', vhh_reason='SNAC 非TCR单VHH标注 + H链序列核对；端部扩展不超过20aa')
+            result.update(vhh_status='pass', vhh_reason='SNAC 非TCR单VHH标注 + H链序列核对；端部扩展不超过20aa',
+                          vhh_chain=heavy[0]['name'])
         antigen = set(literal(row.get('Chain_Ag'), []))
         return result, lambda a, b: (a == heavy[0]['name'] and b in antigen) or (b == heavy[0]['name'] and a in antigen)
+
     records = PDB_ANNOTATIONS.get(pdbid, [])
     matches = []
     for chain in chains:
@@ -458,8 +621,8 @@ def nano_features(task, chains, pdbid):
     elif len(vhh) > 1:
         result.update(vhh_status='fail', vhh_reason='含多个VHH链副本（非单VHH条目）')
     elif len(vhh) == 1:
-        # Only a metadata-supported candidate: unmatched chains have no independent Ig classifier.
-        result.update(vhh_status='candidate', vhh_reason='一条VHH匹配；其他链未独立排除免疫球蛋白域')
+        result.update(vhh_status='candidate', vhh_reason='一条VHH匹配；其他链未独立排除免疫球蛋白域',
+                      vhh_chain=vhh[0][0])
         source=CHAIN_ANNOTATIONS.get(pdbid)
         if source:
             names={c['name'] for c in chains}
@@ -473,12 +636,23 @@ def nano_features(task, chains, pdbid):
         unique = {next(iter(m[2])) for m in vhh if len(m[2]) == 1}
         if len(unique) == 1 and all(len(m[2]) == 1 for m in vhh):
             cdr = next(iter(unique))
-            result.update(cdr3_lengths=[len(cdr)], cdr3_sequences=[cdr])
+            result.update(cdr3_lengths=[len(cdr)], cdr3_sequences=[cdr],
+                          cdr_annotation_method='snac_transferred_annotation')
         elif len(unique) > 1:
             result['vhh_reason'] += '；多种CDR-H3，文件级长度未判定'
         vhhnames = {m[0] for m in vhh}
         return result, lambda a, b: (a in vhhnames) != (b in vhhnames)
     return result, None
+
+
+def formal_clustering_candidate(row):
+    """True when an audited row belongs to the formal VHH clustering universe."""
+    return (
+        row.get('subset') in FORMAL_VHH_SUBSETS
+        and bool(row.get('valid'))
+        and row.get('vhh_status') == 'pass'
+    )
+
 
 def audit(task):
     out = dict(task, valid=False, error='', residues=0, missing_residues=0, missing_examples=[], chains=0,
@@ -603,7 +777,7 @@ def report(root, rows, ignored, archives, pairs, elapsed, destination):
     '- SNAC 主表 snac_db = curated_structures/nb_complexes（ZIP 内直接读）；nb_unbound 和 benchmark/nb_complexes 单列。其他 SNAC ZIP 只登记、不解析内部结构；所有松散 .pdb/.cif/.cif.gz 均已纳入。',
     '- CDR-H3 使用 SNAC 的 IMGT Region_Split_VH.cdr3；SAbDab 通过同PDB来源标注与坐标序列匹配转移，不套用未经确认的残基编号。分箱为 <12、12–15、≥16，避免16 aa重复计数。',
     '- 分辨率：优先取结构文件自带值；文件未记录时按 PDB ID 回落到整理元数据（SNAC curation summary 的 Resolution 列、SAbDab 汇总表的 resolution 列），逐行记录 resolution_source。一个字段列出多个值时取最差（最大）值。流水线工作目录（external_vhh）下的文件不参与，本报告列出实际使用的元数据文件及其哈希。仍然查不到分辨率的条目按 unknown_resolution 排除，阈值不变。',
-    '- VHH通过 = SNAC非TCR单VHH来源标注、唯一H链、无L链、H链序列覆盖≥70%且与标注一致，允许合计≤20aa的端部扩展（标签等），更长扩展记未判定；或SAbDab同PDB的ASU0全链域标注仅一个VHH且坐标序列匹配。c_st/c_e不直接当成恒定域。缺乏完整域标注时记candidate；多VHH晶体副本记fail仅表示不符合单链条目要求。未运行ANARCI，本项是本地来源标注核验，不是独立序列分类，未知/候选不得当作合格。','',
+    '- VHH通过 = SNAC非TCR单VHH来源标注、唯一H链、无L链、H链序列覆盖≥70%且与标注一致；或SAbDab链级summary明确唯一Hchain、无Lchain/scFv、具有protein/peptide抗原，并在生物学装配中核对VHH链、CDR-H3和额外Ig可变域。SNAC与SAbDab标注独立读取，SAbDab不得借用同PDB的SNAC标签。未知/候选不得当作合格。','',
     '## 核心子集规模与基础质量','', '| 子集 | 结构文件 | 有效 | 解析/坐标失败 | 有主链缺失文件（占有效） | 缺原子残基/观测残基 | 可评估界面 | 弱界面 | 基础合格/有效 |', '|---|---:|---:|---:|---:|---:|---:|---:|---:|']
     if RESOLUTION_SOURCE_FILES:
         lines += ['## 分辨率元数据来源','', '| 文件 | 类型 | SHA-256 |','|---|---|---|']
@@ -677,7 +851,7 @@ def main():
             rows.append(r);handle.write(json.dumps(r,ensure_ascii=False)+'\n')
             if len(rows)%250==0:handle.flush();print(f'{len(rows)}/{len(tasks)} audited, {time.time()-start:.0f}s',flush=True)
     pairs=db55_pairs(tasks)
-    fields=['subset','id','pdb_id','valid','error','chains','residues','missing_residues','interface_status','max_contact_residues','weak_pairs','vhh_status','vhh_reason','cdr3_lengths','models_first_only','legacy_pdb_tail','resolution_angstrom','resolution_source','structure_quality_status','structure_quality_reasons','interface_missing_sidechain_residues','interface_altloc_residues','interface_min_occupancy','interface_mean_bfactor']
+    fields=['subset','id','pdb_id','valid','error','chains','residues','missing_residues','interface_status','max_contact_residues','weak_pairs','vhh_status','vhh_reason','vhh_chain','cdr_annotation_method','cdr3_lengths','sabdab_antigen_chains','other_antibody_chains','models_first_only','legacy_pdb_tail','resolution_angstrom','resolution_source','structure_quality_status','structure_quality_reasons','interface_missing_sidechain_residues','interface_altloc_residues','interface_min_occupancy','interface_mean_bfactor']
     with (args.out/'data_audit_details.csv').open('w',encoding='utf-8-sig',newline='') as handle:
         writer=csv.DictWriter(handle,fieldnames=fields,extrasaction='ignore');writer.writeheader();writer.writerows(rows)
     (args.out/'data_audit_db55_pairs.json').write_text(json.dumps(pairs,ensure_ascii=False,indent=2),encoding='utf-8')

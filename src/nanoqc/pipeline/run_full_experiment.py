@@ -224,7 +224,7 @@ def rq5_inference_failures(rq5: dict, min_clusters: int) -> list[str]:
 # ---------------------------------------------------------------------------
 # Must equal build_final_pyg_dataset.VERSION (kept literal so the orchestrator
 # does not import torch/PyG at start-up; a test pins the two together).
-REQUIRED_GRAPH_VERSION = "1.8"
+REQUIRED_GRAPH_VERSION = "1.9"
 # Must equal qaoa_interface_sampler.MAX_QAOA_DEPTH (literal to avoid importing
 # PennyLane at start-up; a test pins the two together).
 MAX_QAOA_DEPTH = 12
@@ -1990,6 +1990,7 @@ class Orchestrator:
         universe_path=self.run_dir/"audit"/"cluster_universe.txt"
         audit_jsonl=self.run_dir/"audit"/"data_audit_details.jsonl"
         if audit_jsonl.is_file() and not universe_path.is_file():
+            from nanoqc.data.audit_all_datasets import formal_clustering_candidate
             ids=set()
             for line in audit_jsonl.read_text(encoding="utf-8").splitlines():
                 if not line.strip():
@@ -1999,10 +2000,10 @@ class Orchestrator:
                 except json.JSONDecodeError:
                     continue
                 pdb=str(row.get("pdb_id","")).strip().lower()
-                # Only real four-character PDB IDs can be structurally clustered;
-                # audited non-PDB files (e.g. CAPRI models named "T37_...") fall
-                # back to name[:4] in the audit and are never study graphs.
-                if re.fullmatch(r"[a-z0-9]{4}",pdb):
+                # Cluster only source-verified formal VHH candidates. Generic
+                # RCSB, DB5.5 and extra_* rows must not widen the Foldseek
+                # universe or become hidden formal dependencies.
+                if re.fullmatch(r"[a-z0-9]{4}",pdb) and formal_clustering_candidate(row):
                     ids.add(pdb)
             # External VHH structures are part of the SAME frozen structural
             # similarity universe. They must not be appended as untracked

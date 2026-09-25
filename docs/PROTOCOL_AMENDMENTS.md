@@ -14,10 +14,9 @@ the change.
 > be reported as a post-hoc deviation in the manuscript, and the pre-amendment
 > analysis must also be reported.
 
-All amendments below were made on 2026-09-24 on branch
-`claude/blissful-heisenberg-3n2jf3` (base `reorg` @ `e8515ed`). Every one of
-them changes code hashes, so no earlier run directory can be resumed; a fresh
-formal run is required.
+A1-A15 were made on 2026-09-24; A16 was added on 2026-09-25 on branch
+`claude/blissful-heisenberg-3n2jf3`. Every amendment changes code hashes, so
+no earlier run directory can be resumed; a fresh formal run is required.
 
 ## Summary
 
@@ -38,6 +37,7 @@ formal run is required.
 | A13 | The antigen-fold holdout takes several folds when one is too small | queue_freeze (split), egnn_train, external_validation | not applicable (component counts only; no result existed) |
 | A14 | A downloaded RCSB assembly file is the assembly, not an unannotated ASU | audit, dataset (admission), everything downstream | not applicable (admission counts only; no result existed) |
 | A15 | Entry resolution fetched from RCSB for files that carry none | audit, dataset (admission), everything downstream | not applicable (admission counts only; no result existed) |
+| A16 | Formal VHH sources and cross-source PDB precedence | audit, Foldseek universe, dataset admission, EGNN/calibration and everything downstream | to be completed |
 
 ## A1. Primary coarse solver endpoint: resource-normalized time-to-solution
 
@@ -522,3 +522,38 @@ they were logged later.
   after it.
 - **Results inspected before this amendment:** not applicable (admission
   counts are data composition; no training run or metric existed).
+
+
+## A16. Formal VHH sources and cross-source PDB precedence
+
+- **Before:** `build_final_pyg_dataset.py` concatenated `train_rcsb`,
+  `sabdab_vhh` and `snac_db` as equal training candidates. Duplicate PDBs
+  across sources could be represented more than once. The formal SAbDab path
+  could depend on same-PDB SNAC annotations, while generic RCSB complexes had
+  no independent proof that the strongest-contact partner was a VHH.
+- **After:** formal source roles are fixed before any quality or outcome is
+  inspected: SNAC-DB is primary, SAbDab is auxiliary, and generic RCSB is
+  audit-only. Cross-source duplicates use deterministic precedence
+  `SNAC > SAbDab > RCSB`; all rows inside the winning source remain eligible
+  for their source-specific gates. SAbDab formal ingestion now reads its own
+  H/L/antigen metadata, rejects L-chain/scFv/non-polypeptide-antigen entries,
+  verifies an unambiguous VHH in the biological assembly, records the CDR
+  annotation method, rejects unannotated extra Ig variable domains, and binds
+  formal antigen chains to SAbDab metadata plus the 7.5 A paratope-contact
+  rule [R33]. SNAC keeps its curated per-complex annotations [R34].
+  The Foldseek universe now contains only source-verified formal VHH
+  candidates. Graph protocol is bumped to v1.9 so v1.8 graphs cannot resume
+  under the changed admission semantics.
+- **Why RCSB is audit-only:** biological-assembly and resolution checks prove
+  coordinate quality, not nanobody identity. Treating the first chain of the
+  strongest generic protein interface as VHH would change the learning task.
+  RCSB can re-enter formal training only after an independently auditable
+  strict VHH and antigen-role annotation is added in a future amendment.
+- **Why precedence is outcome-free:** source precedence is decided solely from
+  source identity and PDB ID. A lower-priority representation is not used as a
+  fallback when the preferred source later fails a quality gate, so admission
+  cannot be rescued by inspecting downstream quality or model outcomes.
+- **Affected results:** audit metadata, Foldseek clustering universe, formal
+  graph composition, EGNN training/validation, calibration, holdout,
+  QAOA/structure analyses and all downstream reports.
+- **Results inspected before this amendment:** _to be completed by the investigator_.
