@@ -25,18 +25,18 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "$REPO_ROOT"
 export PYTHONPATH="${REPO_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}"
-if [ -f "${REPO_ROOT}/.venv/bin/activate" ]; then
+if [ -f "${REPO_ROOT}/.venv/bin/activate" ] && [ -x "${REPO_ROOT}/.venv/bin/python" ]; then
     # shellcheck disable=SC1091
     source "${REPO_ROOT}/.venv/bin/activate"
-elif [ -f "${REPO_ROOT}/.venv/Scripts/activate" ]; then
+elif [ -f "${REPO_ROOT}/.venv/Scripts/activate" ] && [ -f "${REPO_ROOT}/.venv/Scripts/python.exe" ]; then
     # shellcheck disable=SC1091
     source "${REPO_ROOT}/.venv/Scripts/activate"
 else
     SHARED_VENV="${QP_VENV:-/data/quantum-protein/.venv}"
-    if [ -f "${SHARED_VENV}/bin/activate" ]; then
+    if [ -f "${SHARED_VENV}/bin/activate" ] && [ -x "${SHARED_VENV}/bin/python" ]; then
         # shellcheck disable=SC1091
         source "${SHARED_VENV}/bin/activate"
-    elif [ -f "${SHARED_VENV}/Scripts/activate" ]; then
+    elif [ -f "${SHARED_VENV}/Scripts/activate" ] && [ -f "${SHARED_VENV}/Scripts/python.exe" ]; then
         # shellcheck disable=SC1091
         source "${SHARED_VENV}/Scripts/activate"
     else
