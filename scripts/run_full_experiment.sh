@@ -95,7 +95,18 @@ fi
 # ---------------------------------------------------------------------------
 # 1. Activate the local virtual environment (POSIX or Windows layout).
 # ---------------------------------------------------------------------------
-if [ -n "$SERVER_VENV_HINT" ]; then
+if [ -n "${QP_VENV:-}" ]; then
+    EXPLICIT_VENV="${QP_VENV}"
+    if [ -f "${EXPLICIT_VENV}/bin/activate" ] && [ -x "${EXPLICIT_VENV}/bin/python" ]; then
+        # shellcheck disable=SC1091
+        source "${EXPLICIT_VENV}/bin/activate"
+    elif [ -f "${EXPLICIT_VENV}/Scripts/activate" ] && [ -f "${EXPLICIT_VENV}/Scripts/python.exe" ]; then
+        # shellcheck disable=SC1091
+        source "${EXPLICIT_VENV}/Scripts/activate"
+    else
+        fail "QP_VENV declares an unusable venv: ${EXPLICIT_VENV}"
+    fi
+elif [ -n "$SERVER_VENV_HINT" ]; then
     if [ -f "${SERVER_VENV_HINT}/bin/activate" ] && [ -x "${SERVER_VENV_HINT}/bin/python" ]; then
         # shellcheck disable=SC1091
         source "${SERVER_VENV_HINT}/bin/activate"
@@ -112,7 +123,7 @@ elif [ -f "${REPO_ROOT}/.venv/Scripts/activate" ] && [ -f "${REPO_ROOT}/.venv/Sc
     # shellcheck disable=SC1091
     source "${REPO_ROOT}/.venv/Scripts/activate"
 else
-    SHARED_VENV="${QP_VENV:-/data/quantum-protein/.venv}"
+    SHARED_VENV="/data/quantum-protein/.venv"
     if [ -f "${SHARED_VENV}/bin/activate" ] && [ -x "${SHARED_VENV}/bin/python" ]; then
         # shellcheck disable=SC1091
         source "${SHARED_VENV}/bin/activate"
