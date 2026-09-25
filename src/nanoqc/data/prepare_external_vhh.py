@@ -103,12 +103,25 @@ def preprocessing_external_source(config: dict) -> Optional[Path]:
     env=os.environ.get("QP_EXTERNAL_VHH_SOURCE_DIR")
     if env:
         return Path(env).expanduser().resolve()
-    server_path=REPO_ROOT/"configs"/"server_config.yaml"
+
+    server_setting=os.environ.get("QP_SERVER_CONFIG")
+    if server_setting:
+        server_path=Path(server_setting).expanduser()
+        if not server_path.is_absolute():
+            server_path=REPO_ROOT/server_path
+        server_path=server_path.resolve()
+        if not server_path.is_file():
+            raise SystemExit(f"QP_SERVER_CONFIG does not exist: {server_path}")
+    else:
+        server_path=(REPO_ROOT/"configs"/"server_config.yaml").resolve()
+
     if server_path.is_file():
         server=_load_server_config(server_path)
         value=(server.get("paths") or {}).get("external_vhh_source_dir")
         if value and value!="auto":
-            return Path(str(value)).expanduser().resolve()
+            path=Path(str(value)).expanduser()
+            return (path if path.is_absolute() else REPO_ROOT/path).resolve()
+
     value=((config.get("external_validation",{}) or {}).get("external_vhh",{}) or {}).get(
         "source_structure_dir"
     )
