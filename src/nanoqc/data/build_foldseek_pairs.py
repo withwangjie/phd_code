@@ -137,8 +137,10 @@ def audit_sources(audit_jsonl: Path, *, formal_only: bool = False,
             continue
         if not row.get("valid", True):
             continue
-        sources[pdb].append(dict(path=row["path"], member=row.get("member", ""), subset=row.get("subset", ""),
-                                 id=row.get("id", "")))
+        sources[pdb].append(dict(
+            path=row["path"], member=row.get("member", ""), subset=row.get("subset", ""),
+            id=row.get("id", ""), source_structure_sha256=row.get("source_structure_sha256", ""),
+        ))
     return sources
 
 
@@ -158,6 +160,16 @@ def antigen_structure(pdb: str, sources: Iterable[dict], sabdab_antibody_chains:
     chains = []
     unreadable = []
     for source in sources:
+        if source.get("subset") in audit.FORMAL_VHH_SUBSETS:
+            expected = str(source.get("source_structure_sha256") or "")
+            if not expected:
+                raise ValueError(f"{source.get('id') or source['path']}: audited raw-structure SHA-256 missing")
+            actual = audit.task_source_sha256(dict(source))
+            if actual != expected:
+                raise ValueError(
+                    f"{source.get('id') or source['path']}: raw structure changed since data audit "
+                    f"(expected {expected}, observed {actual})"
+                )
         try:
             structure, _ = audit._read_raw_structure(dict(source))
         except Exception as exc:
@@ -418,6 +430,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     version = binding["foldseek_version"]
     manifest = dict(
         schema="foldseek_pairs_v1", pair_table=str(args.out.resolve()), pair_table_sha256=sha256(args.out),
+        audit_ledger_sha256=sha256(audit_jsonl),
         raw_output_sha256=sha256(raw), foldseek_version=version,
         foldseek_options=options, score=SCORE_FIELD,
         score_rule="PDB pair: max over chain pairs of min(qtmscore(q->t), qtmscore(t->q))",

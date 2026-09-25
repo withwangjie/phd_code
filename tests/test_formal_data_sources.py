@@ -176,3 +176,15 @@ def test_zip_member_hash_binds_member_not_container_path(tmp_path):
         dict(path=str(archive), member="2def.pdb", subset="snac_db", id="b"))
     assert first != second
     assert len(first) == len(second) == 64
+
+
+def test_foldseek_rejects_raw_structure_changed_after_audit(tmp_path):
+    from nanoqc.data.build_foldseek_pairs import antigen_structure
+    raw = tmp_path / "2bbb.pdb"
+    raw.write_text("ORIGINAL\n", encoding="utf-8")
+    task = dict(path=str(raw), member="", subset="sabdab_vhh", id="sabdab/2bbb")
+    expected = audit.task_source_sha256(dict(task))
+    source = dict(task, source_structure_sha256=expected)
+    raw.write_text("CHANGED\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="raw structure changed since data audit"):
+        antigen_structure("2bbb", [source], [], 20)
