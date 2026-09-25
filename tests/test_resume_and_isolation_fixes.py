@@ -454,3 +454,53 @@ def test_quantum_exploration_has_results_manifest_root(tmp_path: Path) -> None:
     assert orchestrator._stage_result_roots("quantum_exploration") == [
         tmp_path / "quantum_exploration"
     ]
+
+
+def _frozen_holdout_fixture(tmp_path: Path) -> Orchestrator:
+    orchestrator=Orchestrator.__new__(Orchestrator)
+    orchestrator.run_dir=tmp_path
+    orchestrator.config={"paths":{"dataset_dir":"dataset"}}
+    dataset=tmp_path/"dataset"
+    graph_dir=dataset/"graphs"/"holdout"
+    source_dir=dataset/"holdout_source_structures"
+    graph_dir.mkdir(parents=True)
+    source_dir.mkdir(parents=True)
+    graph=graph_dir/"case.pt"
+    graph.write_bytes(b"graph-bytes")
+    source=source_dir/"1abc.pdb"
+    source.write_text("END\n",encoding="utf-8")
+    rel="graphs/holdout/case.pt"
+    graph_sha=full.sha256_of(graph)
+    (dataset/"graph_manifest.json").write_text(json.dumps([{
+        "split":"holdout","path":rel,"pdb_id":"1ABC","sha256":graph_sha
+    }]),encoding="utf-8")
+    holdout=tmp_path/"independence"/"antigen_fold_holdout.json"
+    holdout.parent.mkdir(parents=True)
+    holdout.write_text(json.dumps({
+        "schema":"antigen_fold_holdout_v1",
+        "graph_dir":str(graph_dir.resolve()),
+        "source_structure_dir":str(source_dir.resolve()),
+        "targets":[{"pdb_id":"1abc","path":rel,"sha256":graph_sha}],
+        "source_structures":{
+            "1abc":{"path":str(source.resolve()),"sha256":full.sha256_of(source)}
+        },
+    }),encoding="utf-8")
+    return orchestrator
+
+
+def test_verified_frozen_holdout_can_be_reused_after_partial_queue_failure(tmp_path: Path) -> None:
+    orchestrator=_frozen_holdout_fixture(tmp_path)
+    ok,detail=orchestrator._validate_frozen_antigen_holdout()
+    assert ok is True
+    assert "verified 1 frozen holdout" in detail
+    source=inspect.getsource(full.Orchestrator.stage_queue_freeze)
+    assert "if reuse_holdout:" in source
+    assert "graph rebuild skipped" in source
+
+
+def test_tampered_frozen_holdout_is_never_reused(tmp_path: Path) -> None:
+    orchestrator=_frozen_holdout_fixture(tmp_path)
+    (tmp_path/"dataset"/"graphs"/"holdout"/"case.pt").write_bytes(b"tampered")
+    ok,detail=orchestrator._validate_frozen_antigen_holdout()
+    assert ok is False
+    assert "hash mismatch" in detail
