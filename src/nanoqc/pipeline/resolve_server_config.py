@@ -189,8 +189,14 @@ def resolve(scientific: dict[str,Any], server: dict[str,Any]) -> tuple[dict[str,
     hw["openmm_precision"]=str(res.get("openmm_precision","double"))
 
     structural=out.setdefault("external_validation",{}).setdefault("structural_baselines",{})
-    faspr=_resolve_tool(server,"faspr_executable","QP_FASPR",["/opt/FASPR/FASPR"])
-    phenix=_resolve_tool(server,"phenix_clashscore_executable","QP_PHENIX_CLASHSCORE",["phenix.clashscore","/opt/phenix/phenix.clashscore"])
+    faspr=_resolve_tool(
+        server,"faspr_executable","QP_FASPR",
+        ["FASPR","/opt/FASPR/FASPR"],
+    )
+    phenix=_resolve_tool(
+        server,"phenix_clashscore_executable","QP_PHENIX_CLASHSCORE",
+        ["phenix.clashscore","/opt/phenix/phenix.clashscore"],
+    )
     if faspr:
         structural["faspr_executable"]=faspr
     if phenix:
