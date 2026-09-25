@@ -79,6 +79,17 @@ def test_final_report_reads_formal_statistics_payload(tmp_path: Path) -> None:
     assert loaded==payload
 
 
+def test_final_report_keeps_matched_time_outside_confirmatory_gatekeeping() -> None:
+    outputs_note=report._paired_inference_multiplicity_note("outputs")
+    time_note=report._paired_inference_multiplicity_note("time")
+    assert "serial gatekeeping" in outputs_note
+    assert "matched-output" in outputs_note
+    assert "secondary" in outputs_note
+    assert "descriptive controls" in time_note
+    assert "outside the confirmatory serial-gatekeeping family" in time_note
+    assert "gatekeeping-adjusted confirmatory evidence" in time_note
+
+
 def test_statistics_fails_closed_when_qc_dir_missing(tmp_path: Path) -> None:
     class Harness:
         run_dir=tmp_path

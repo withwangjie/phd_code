@@ -586,5 +586,11 @@ def test_deploy_exports_the_virtual_environment_it_actually_selected() -> None:
 
 def test_preprocessing_qp_venv_precedence_matches_formal_launcher() -> None:
     source=(REPO/"scripts"/"prepare_external_vhh.sh").read_text(encoding="utf-8")
-    assert 'if [ -n "${QP_VENV:-}" ]; then' in source
-    assert 'SERVER_VENV_HINT=""' in source
+    qp_venv=source.index('if [ -n "${QP_VENV:-}" ]; then')
+    server_hint=source.index('elif [ -n "$SERVER_VENV_HINT" ]; then')
+    repo_venv=source.index('elif [ -f "${REPO_ROOT}/.venv/bin/activate"')
+    assert 'SERVER_CONFIG_FILE="${QP_SERVER_CONFIG:-${REPO_ROOT}/configs/server_config.yaml}"' in source
+    assert 'SERVER_VENV_HINT="$(server_venv_hint)"' in source
+    assert 'activate_venv "${QP_VENV}" "QP_VENV"' in source
+    assert 'activate_venv "$SERVER_VENV_HINT" "server_config.yaml"' in source
+    assert qp_venv < server_hint < repo_venv

@@ -85,6 +85,26 @@ def _formal_statistics_payload(ctx: "ReportContext", mode: str) -> Optional[Dict
     return payload if isinstance(payload,dict) else None
 
 
+def _paired_inference_multiplicity_note(mode: str) -> str:
+    """Return protocol-faithful multiplicity language for a budget mode."""
+    if mode=="outputs":
+        return (
+            "Multiplicity: serial gatekeeping. The quantum-intrinsic primary family "
+            "(primary-size exact ground-state amplification and its scaling slope) is "
+            "Holm-adjusted alone; matched-output QAOA-vs-classical effects are secondary "
+            "and can be interpreted inferentially only after both primary hypotheses are "
+            "rejected. The all-effects Holm column is descriptive."
+        )
+    if mode=="time":
+        return (
+            "Matched-time analyses are descriptive controls for classical emulation cost "
+            "and are outside the confirmatory serial-gatekeeping family. Their raw p values "
+            "and all-effects Holm values are descriptive and must not be interpreted as "
+            "gatekeeping-adjusted confirmatory evidence."
+        )
+    raise ValueError(f"Unsupported paired-statistics budget mode: {mode}")
+
+
 def _primary_active_sites(ctx: "ReportContext") -> int:
     return int(((ctx.frozen_config.get("statistics",{}) or {}).get("primary_active_sites",6)))
 
@@ -679,17 +699,14 @@ def section_search_performance(ctx: ReportContext) -> List[str]:
         else:
             lines.append("| — | — | — | 0 | n/a | n/a | n/a | n/a | n/a |")
         lines.append("")
-        lines.append(
-            "Multiplicity: serial gatekeeping. The primary family (primary QC contrast and primary "
-            "scaling slope) is Holm-adjusted alone; secondary effects are confirmatory only after both "
-            "primary hypotheses are rejected. The all-effects Holm column is descriptive.")
+        lines.append(_paired_inference_multiplicity_note(mode))
         lines.append("")
         lines.append(f"Paired-case counts: `{json.dumps(payload.get('paired_cases',{}),sort_keys=True)}`.")
         lines.append(f"Exclusions: `{json.dumps(payload.get('exclusions',{}),sort_keys=True)}`.")
         if mode=="time":
             lines.append(
-                "Time-mode inference is reported separately from matched-output inference and uses "
-                "only the explicitly recorded time-budget controls passing the frozen overrun rule.")
+                "Matched-time results use only explicitly recorded time-budget controls passing "
+                "the frozen overrun rule; they are reported separately from matched-output inference.")
         lines.append("")
     return lines
 
