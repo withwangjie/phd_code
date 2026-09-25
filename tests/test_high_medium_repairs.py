@@ -549,7 +549,7 @@ def test_pair_table_coverage_is_required_before_frozen_clustering() -> None:
     assert "foldseek --run-dir" in source
 
 
-def test_auto_venv_resolution_ignores_existing_non_venv_directory(tmp_path, monkeypatch) -> None:
+def test_explicit_qp_venv_fails_closed_when_invalid(tmp_path, monkeypatch) -> None:
     bad=tmp_path/"not_a_venv"
     bad.mkdir()
     good=tmp_path/".venv"
@@ -559,5 +559,19 @@ def test_auto_venv_resolution_ignores_existing_non_venv_directory(tmp_path, monk
     python_path.write_text("#!/bin/sh\n",encoding="utf-8")
     python_path.chmod(0o755)
     monkeypatch.setenv("QP_VENV",str(bad))
+    monkeypatch.setattr(server_resolver,"REPO_ROOT",tmp_path)
+    import pytest
+    with pytest.raises(SystemExit,match="QP_VENV is invalid"):
+        server_resolver._resolve_venv({"venv":"auto"})
+
+
+def test_auto_venv_resolution_uses_repo_venv_when_env_absent(tmp_path, monkeypatch) -> None:
+    good=tmp_path/".venv"
+    (good/"bin").mkdir(parents=True)
+    (good/"bin"/"activate").write_text("# test\n",encoding="utf-8")
+    python_path=good/"bin"/"python"
+    python_path.write_text("#!/bin/sh\n",encoding="utf-8")
+    python_path.chmod(0o755)
+    monkeypatch.delenv("QP_VENV",raising=False)
     monkeypatch.setattr(server_resolver,"REPO_ROOT",tmp_path)
     assert server_resolver._resolve_venv({"venv":"auto"}) == str(good.resolve())
