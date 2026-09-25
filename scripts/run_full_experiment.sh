@@ -133,6 +133,49 @@ else
     FRESH_RUN=1
 fi
 
+if [ "$FRESH_RUN" -eq 0 ]; then
+    QP_RESUME_RUN_DIR="$RUN_DIR" QP_RESOLVED_CONFIG="$RESOLVED_CONFIG" python - <<'PY'
+from __future__ import annotations
+import json
+import os
+from pathlib import Path
+import yaml
+
+from nanoqc.pipeline.run_full_experiment import build_run_manifest
+from nanoqc.common.seed_streams import verify_stream_map
+
+run_dir=Path(os.environ["QP_RESUME_RUN_DIR"]).resolve()
+config_path=Path(os.environ["QP_RESOLVED_CONFIG"]).resolve()
+manifest_path=run_dir/"run_manifest.json"
+if not manifest_path.is_file():
+    raise SystemExit(f"Resume target has no run_manifest.json: {run_dir}")
+previous=json.loads(manifest_path.read_text(encoding="utf-8"))
+config=yaml.safe_load(config_path.read_text(encoding="utf-8"))
+repo_root=Path(config["paths"]["repo_root"]).resolve()
+current=build_run_manifest(config,repo_root)
+fields=(
+    "code_sha256",
+    "methods_evidence_sha256",
+    "results_contract_sha256",
+    "protocol_amendments_sha256",
+    "config",
+)
+changed=[field for field in fields if previous.get(field)!=current.get(field)]
+if changed:
+    raise SystemExit(
+        "Refusing resume before preflight: current code/evidence/config differs "
+        f"from the original run ({', '.join(changed)}). Start a fresh run directory."
+    )
+seed_map=run_dir/"seed_streams.json"
+if seed_map.is_file() and not verify_stream_map(seed_map):
+    raise SystemExit(
+        "Refusing resume before preflight: seed_streams.json no longer matches "
+        "the current deterministic seed derivation."
+    )
+print(f"[run_full_experiment] Resume provenance verified before preflight: {run_dir}")
+PY
+fi
+
 mkdir -p "$RUN_DIR/logs" "$RUN_DIR/provenance"
 if [ "$FRESH_RUN" -eq 1 ]; then
     cp "$SCIENTIFIC_CONFIG" "$RUN_DIR/provenance/scientific_config.source.yaml"
