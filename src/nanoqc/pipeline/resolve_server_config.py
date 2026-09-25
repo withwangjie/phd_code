@@ -69,6 +69,12 @@ def _resolve_venv(server: dict[str,Any]) -> str:
             and windows_python.is_file()
         )
 
+    env=os.environ.get("QP_VENV")
+    if env:
+        p=Path(str(env)).expanduser().resolve()
+        if not valid(p):
+            raise SystemExit(f"QP_VENV is invalid: {p}")
+        return str(p)
     raw=server.get("venv","auto")
     if raw!="auto":
         p=Path(str(raw)).expanduser().resolve()
@@ -76,7 +82,6 @@ def _resolve_venv(server: dict[str,Any]) -> str:
             raise SystemExit(f"Configured venv is invalid: {p}")
         return str(p)
     candidates=[
-        os.environ.get("QP_VENV"),
         REPO_ROOT/".venv",
         "/data/quantum-protein/.venv",
     ]
