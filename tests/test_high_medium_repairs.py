@@ -575,3 +575,10 @@ def test_auto_venv_resolution_uses_repo_venv_when_env_absent(tmp_path, monkeypat
     monkeypatch.delenv("QP_VENV",raising=False)
     monkeypatch.setattr(server_resolver,"REPO_ROOT",tmp_path)
     assert server_resolver._resolve_venv({"venv":"auto"}) == str(good.resolve())
+
+
+def test_deploy_exports_the_virtual_environment_it_actually_selected() -> None:
+    source=(REPO/"scripts"/"deploy_launch.sh").read_text(encoding="utf-8")
+    assert 'ACTIVE_VENV=' in source
+    assert 'export QP_VENV="${ACTIVE_VENV}"' in source
+    assert 'export QP_VENV="$SHARED_VENV"' not in source
