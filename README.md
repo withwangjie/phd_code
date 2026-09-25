@@ -336,7 +336,8 @@ the validation queue never chooses its solvent model after inspecting results.
 ```text
 configs/   full_experiment_config.yaml (frozen scientific protocol), server_config.yaml (infrastructure only)
 docs/      METHODS_EVIDENCE.md (design-to-literature register), RESULTS_CONTRACT.md (required outputs),
-           PROTOCOL_AMENDMENTS.md (dated post-freeze protocol changes)
+           PROTOCOL_AMENDMENTS.md (dated post-freeze protocol changes),
+           PIPELINE_WALKTHROUGH.md (stage-by-stage walkthrough of what each stage does and why)
 scripts/   deploy_launch.sh, run_full_experiment.sh, formal_preflight.sh, check_status.sh, repair_openmm_cuda.sh,
            prepare_external_vhh.sh
 src/nanoqc/
