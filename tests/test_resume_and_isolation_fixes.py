@@ -18,6 +18,8 @@ import nanoqc.qubo.subgraph_to_qubo as qubo
 from nanoqc.data.sequence_identity import partner_orientations, partner_roles_anchored
 from nanoqc.pipeline.run_full_experiment import Orchestrator, StageResult
 
+REPO = Path(__file__).resolve().parents[1]
+
 
 # ---------------------------------------------------------------- resume logic
 def _orchestrator(tmp_path: Path) -> Orchestrator:
