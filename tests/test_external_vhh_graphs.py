@@ -680,3 +680,22 @@ def test_preprocessing_external_source_matches_server_config(tmp_path, monkeypat
     monkeypatch.delenv("QP_EXTERNAL_VHH_SOURCE_DIR",raising=False)
     config={"external_validation":{"external_vhh":{"source_structure_dir":""}}}
     assert prep.preprocessing_external_source(config) == external.resolve()
+
+
+def test_preprocessing_data_root_honors_qp_server_config(tmp_path, monkeypatch):
+    custom=tmp_path/"custom_server.yaml"
+    custom_data=tmp_path/"custom_data"
+    custom.write_text("paths:\n  data_root: "+str(custom_data)+"\n",encoding="utf-8")
+    monkeypatch.setattr(prep,"REPO_ROOT",tmp_path)
+    monkeypatch.setenv("QP_SERVER_CONFIG",str(custom))
+    monkeypatch.delenv("QP_DATA_ROOT",raising=False)
+    resolved=prep.preprocessing_data_root({"paths":{"data_root":str(tmp_path/"fallback")}},None)
+    assert resolved == custom_data.resolve()
+
+
+def test_preprocessing_data_root_rejects_missing_explicit_server_config(tmp_path, monkeypatch):
+    monkeypatch.setattr(prep,"REPO_ROOT",tmp_path)
+    missing=tmp_path/"missing_server.yaml"
+    monkeypatch.setenv("QP_SERVER_CONFIG",str(missing))
+    with pytest.raises(SystemExit,match="QP_SERVER_CONFIG does not exist"):
+        prep.preprocessing_data_root({"paths":{"data_root":str(tmp_path/"fallback")}},None)
