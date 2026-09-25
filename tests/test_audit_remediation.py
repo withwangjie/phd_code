@@ -223,6 +223,7 @@ def _minimal_scientific_config() -> Dict[str, Any]:
                 "intra_chain_ca_cutoff_angstrom": 8.0,
                 "cross_partner_knn_k": 3,
                 "min_interface_residues": 15,
+                "include_db55_auxiliary": False,
             },
             "validation_queue": {"sites": 6},
         },

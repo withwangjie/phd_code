@@ -147,6 +147,8 @@ def main(argv:Optional[Sequence[str]]=None)->int:
         qaoa_xy_gates=int(q.get("qaoa_xy_gates",0) or 0)
         qaoa_zz_gates=int(q.get("qaoa_zz_gates",0) or 0)
         qaoa_two_qubit_gates=int(q.get("qaoa_two_qubit_gates",0) or 0)
+        qaoa_variational_two_qubit_gates=int(q.get("qaoa_variational_two_qubit_gates",0) or 0)
+        qaoa_full_circuit_two_qubit_gates=q.get("qaoa_full_circuit_two_qubit_gates")
         if config_count<=0 or num_bits<=0:
             failures.append(f"{path.name}: invalid complexity metadata");continue
         try:
@@ -157,10 +159,14 @@ def main(argv:Optional[Sequence[str]]=None)->int:
             failures.append(f"{path.name}: missing quantum metrics (re-run the benchmark with resource accounting)");continue
         if not all(math.isfinite(v) for v in qts_values):
             failures.append(f"{path.name}: nonfinite quantum metrics");continue
-        if qaoa_parameter_count<=0 or qaoa_xy_gates<=0 or qaoa_two_qubit_gates<=0:
-            failures.append(f"{path.name}: missing/invalid QAOA logical-resource metadata");continue
-        if qaoa_two_qubit_gates != qaoa_xy_gates + qaoa_zz_gates:
-            failures.append(f"{path.name}: inconsistent QAOA two-qubit gate accounting");continue
+        if qaoa_parameter_count<=0 or qaoa_xy_gates<=0 or qaoa_variational_two_qubit_gates<=0:
+            failures.append(f"{path.name}: missing/invalid QAOA variational-layer resource metadata");continue
+        if qaoa_variational_two_qubit_gates != qaoa_xy_gates + qaoa_zz_gates:
+            failures.append(f"{path.name}: inconsistent QAOA variational two-qubit gate accounting");continue
+        if qaoa_two_qubit_gates != qaoa_variational_two_qubit_gates:
+            failures.append(f"{path.name}: legacy two-qubit alias disagrees with variational count");continue
+        if qaoa_full_circuit_two_qubit_gates is not None:
+            failures.append(f"{path.name}: full-circuit 2q count must remain unclaimed until StatePrep decomposition is frozen");continue
         if config_count != 3 ** int(cfg["active_sites"]):
             failures.append(f"{path.name}: feasible configuration count is not 3^active_sites");continue
         try:
@@ -176,6 +182,7 @@ def main(argv:Optional[Sequence[str]]=None)->int:
             qaoa_xy_gates=qaoa_xy_gates,
             qaoa_zz_gates=qaoa_zz_gates,
             qaoa_two_qubit_gates=qaoa_two_qubit_gates,
+            qaoa_variational_two_qubit_gates=qaoa_variational_two_qubit_gates,
             qaoa_log10_amplification_exact=float(q["log10_ground_amplification_exact"]),
             delta_log10_qts99_execution=float(q["log10_qts99_execution"])-float(b["log10_qts99_execution"]),
             qaoa_log10_qts99=float(q["log10_qts99"]),baseline_log10_qts99=float(b["log10_qts99"]),
@@ -212,6 +219,8 @@ def main(argv:Optional[Sequence[str]]=None)->int:
                 qaoa_xy_gates=float(np.mean([r["qaoa_xy_gates"] for r in group])),
                 qaoa_zz_gates=float(np.mean([r["qaoa_zz_gates"] for r in group])),
                 qaoa_two_qubit_gates=float(np.mean([r["qaoa_two_qubit_gates"] for r in group])),
+                qaoa_variational_two_qubit_gates=float(np.mean(
+                    [r["qaoa_variational_two_qubit_gates"] for r in group])),
                 qaoa_log10_amplification_exact=float(np.mean([r["qaoa_log10_amplification_exact"] for r in group])),
                 delta_log10_qts99_execution=float(np.mean([r["delta_log10_qts99_execution"] for r in group])),
                 delta_log10_qts99=float(np.mean([r["delta_log10_qts99"] for r in group])),
@@ -227,7 +236,7 @@ def main(argv:Optional[Sequence[str]]=None)->int:
             slope_num_bits=_slope([x["num_bits"] for x in points],[x[RESPONSE] for x in points]),
             slope_num_qubits=_slope([x["num_qubits"] for x in points],[x[RESPONSE] for x in points]),
             slope_two_qubit_gates=_slope(
-                [x["qaoa_two_qubit_gates"] for x in points],[x[RESPONSE] for x in points]),
+                [x["qaoa_variational_two_qubit_gates"] for x in points],[x[RESPONSE] for x in points]),
             slope_active_sites=_slope([x["active_sites"] for x in points],[x[RESPONSE] for x in points]),
             descriptive_slopes={name:_slope([x["log10_configuration_count"] for x in points],[x[name] for x in points])
                                 for name in DESCRIPTIVE_RESPONSES},
@@ -280,6 +289,8 @@ def main(argv:Optional[Sequence[str]]=None)->int:
             mean_qaoa_xy_gates=float(np.mean([r["qaoa_xy_gates"] for r in rows])),
             mean_qaoa_zz_gates=float(np.mean([r["qaoa_zz_gates"] for r in rows])),
             mean_qaoa_two_qubit_gates=float(np.mean([r["qaoa_two_qubit_gates"] for r in rows])),
+            mean_qaoa_variational_two_qubit_gates=float(np.mean(
+                [r["qaoa_variational_two_qubit_gates"] for r in rows])),
             mean_qaoa_log10_amplification_exact=float(np.mean([r["qaoa_log10_amplification_exact"] for r in rows])),
             mean_delta_log10_qts99_execution=float(np.mean([r["delta_log10_qts99_execution"] for r in rows])),
             mean_delta_log10_qts99=float(np.mean([r["delta_log10_qts99"] for r in rows])),
@@ -292,11 +303,12 @@ def main(argv:Optional[Sequence[str]]=None)->int:
         simulator_scope="classical exact-subspace finite-shot QAOA; not hardware quantum speedup",
         primary_predictor="log10_configuration_count",
         descriptive_resource_axes=[
-            "num_qubits","qaoa_two_qubit_gates","qaoa_xy_gates","qaoa_zz_gates",
+            "num_qubits","qaoa_variational_two_qubit_gates","qaoa_xy_gates","qaoa_zz_gates",
         ],
         resource_accounting=(
-            "logical pre-transpilation gates for the implemented penalty-free cost "
-            "Hamiltonian plus local XY mixer; W-state StatePrep decomposition excluded"
+            "logical pre-transpilation variational-layer gates (penalty-free cost + local XY mixer); "
+            "W-state StatePrep decomposition is not frozen, therefore no full-circuit two-qubit "
+            "gate count is claimed"
         ),
         primary_response="qaoa_log10_amplification_exact",
         descriptive_responses=[f"qaoa_minus_{args.baseline}_log10_qts99",
@@ -320,8 +332,9 @@ def main(argv:Optional[Sequence[str]]=None)->int:
         f"Primary pruning: {args.primary_pruning}; baseline: {args.baseline}; p={args.primary_depth}; "
         f"outputs={args.primary_outputs}; objective={args.primary_objective}; restarts={args.primary_restarts}.",
         f"Primary predictor: log10(feasible configuration count). Active-site levels: {sizes}.",
-        "Descriptive quantum-resource axes: logical qubits and pre-transpilation two-qubit "
-        "gates (ZZ cost + XY mixer); W-state StatePrep decomposition is excluded.",
+        "Descriptive quantum-resource axes: logical qubits and pre-transpilation variational-layer "
+        "two-qubit gates (ZZ cost + XY mixer). W-state StatePrep decomposition is unspecified, "
+        "so these are not full-circuit gate counts.",
         "Response: QAOA's exact log10 ground-state amplification over uniform feasible sampling (quantum-intrinsic; simulator-level). Positive slope means relative concentration on the ground state grows with problem size. QAOA-minus-classical queries-to-solution (with and without training shots) and best-of-N gap/hit are descriptive.",
         "",
         f"Primary-size ({args.primary_active_sites} sites) mean log10 amplification: {amplification['mean_log10_amplification']}; "
@@ -336,7 +349,7 @@ def main(argv:Optional[Sequence[str]]=None)->int:
     for row in size_summary:
         lines.append(
             f"| {row['active_sites']} | {row['n_rows']} | {row['n_pdb']} | "
-            f"{row['mean_num_qubits']:.6g} | {row['mean_qaoa_two_qubit_gates']:.6g} | "
+            f"{row['mean_num_qubits']:.6g} | {row['mean_qaoa_variational_two_qubit_gates']:.6g} | "
             f"{row['mean_qaoa_xy_gates']:.6g} | {row['mean_qaoa_zz_gates']:.6g} | "
             f"{row['mean_log10_configuration_count']:.6g} | "
             f"{row['mean_qaoa_log10_amplification_exact']:.6g} | {row['mean_delta_log10_qts99_execution']:.6g} | "

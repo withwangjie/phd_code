@@ -26,8 +26,14 @@ class QAOAResourceEstimate:
     rz_gates_total: int
     zz_gates_total: int
     xy_gates_total: int
+    # Backward-compatible alias for the implemented variational-layer 2q count.
+    # It is NOT a full-circuit count because qml.StatePrep has no frozen
+    # decomposition in this protocol.
     two_qubit_gates_total: int
+    variational_two_qubit_gates_total: int
     feasible_configuration_count: int
+    state_preparation_two_qubit_gates: Optional[int] = None
+    full_circuit_two_qubit_gates: Optional[int] = None
     eval_shots: Optional[int] = None
     max_evals: Optional[int] = None
     output_shots: Optional[int] = None
@@ -35,7 +41,9 @@ class QAOAResourceEstimate:
     max_optimization_shots: Optional[int] = None
     max_measurement_shots: Optional[int] = None
     accounting_scope: str = (
-        "logical pre-transpilation QAOA gates; local W-state StatePrep decomposition excluded"
+        "logical pre-transpilation variational-layer gates only (cost + XY mixer); "
+        "local W-state StatePrep decomposition is unspecified and excluded, so no "
+        "full-circuit two-qubit count is claimed"
     )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -101,7 +109,10 @@ def estimate_qaoa_resources(
         zz_gates_total=int(p)*pair,
         xy_gates_total=int(p)*mixer,
         two_qubit_gates_total=int(p)*(pair+mixer),
+        variational_two_qubit_gates_total=int(p)*(pair+mixer),
         feasible_configuration_count=instance.feasible_configuration_count,
+        state_preparation_two_qubit_gates=None,
+        full_circuit_two_qubit_gates=None,
         eval_shots=eval_shots_i,
         max_evals=max_evals_i,
         output_shots=output_shots_i,

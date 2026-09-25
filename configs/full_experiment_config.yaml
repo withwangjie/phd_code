@@ -202,6 +202,10 @@ queue_freeze:
     # k=3 remains a study-specific leakage-control choice; no claim of literature-optimality.
     cross_partner_knn_k: 3
     min_interface_residues: 15
+    # DB5.5 is a general PPI auxiliary benchmark, not part of the formal
+    # VHH-QAOA train/test evidence. Disabled by default; if explicitly enabled,
+    # its historical exact-248 contract remains fail-closed.
+    include_db55_auxiliary: false
     # build_final_pyg_dataset.py --no-cap ignores target_hard's 300..500
     # range check entirely; this value is recorded for provenance only and
     # has no selection effect when no_cap is true.

@@ -1259,7 +1259,13 @@ def _ablation_run_case(data: Any, scorer: Any, config: dict, args: Any, artifact
                         qaoa_rz_gates=resources.rz_gates_total,
                         qaoa_zz_gates=resources.zz_gates_total,
                         qaoa_xy_gates=resources.xy_gates_total,
+                        # Legacy alias retained for schema compatibility; the
+                        # explicit field below is the scientifically correct name.
                         qaoa_two_qubit_gates=resources.two_qubit_gates_total,
+                        qaoa_variational_two_qubit_gates=resources.variational_two_qubit_gates_total,
+                        qaoa_state_preparation_two_qubit_gates=resources.state_preparation_two_qubit_gates,
+                        qaoa_full_circuit_two_qubit_gates=resources.full_circuit_two_qubit_gates,
+                        qaoa_gate_accounting_scope=resources.accounting_scope,
                         qaoa_max_measurement_shots=resources.max_measurement_shots,
                         qaoa_total_measurement_shots=opt.total_opt_shots+outputs,
                         solver_seconds=elapsed,

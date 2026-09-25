@@ -2275,6 +2275,8 @@ class Orchestrator:
             )
         if cluster_map_path is not None and cluster_map_path.is_file():
             graph_argv += ["--cluster-map", str(cluster_map_path)]
+        if qf_cfg["graph_build"].get("include_db55_auxiliary", False):
+            graph_argv.append("--include-db55-auxiliary")
         if qf_cfg["graph_build"].get("no_cap", True):
             graph_argv += ["--no-cap", "--partition-seed", str(streams["partition"])]
         else:

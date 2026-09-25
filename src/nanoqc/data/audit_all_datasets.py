@@ -424,9 +424,9 @@ def chain_data(model):
             ))
     return chains, missing, total, details
 
-def contact_residue_ids(a, b):
+def contact_residue_ids(a, b, cutoff=None):
     # Nearest-neighbour queries avoid enumerating every atom-atom pair.
-    cutoff = float(INTERFACE_CONTACT_CUTOFF_ANGSTROM)
+    cutoff = float(INTERFACE_CONTACT_CUTOFF_ANGSTROM if cutoff is None else cutoff)
     da = b['tree'].query(a['xyz'], distance_upper_bound=cutoff)[0]
     db = a['tree'].query(b['xyz'], distance_upper_bound=cutoff)[0]
     return set(map(int,np.unique(a['owners'][da < cutoff]))), set(map(int,np.unique(b['owners'][db < cutoff])))
@@ -826,7 +826,11 @@ def db55_pairs(tasks):
                 ac = dict(xyz=np.concatenate([c['xyz'] for c in a]), owners=np.concatenate([c['owners']+sum(len(x['sequence']) for x in a[:i]) for i,c in enumerate(a)]))
                 bc = dict(xyz=np.concatenate([c['xyz'] for c in b]), owners=np.concatenate([c['owners']+sum(len(x['sequence']) for x in b[:i]) for i,c in enumerate(b)]))
                 ac['tree'], bc['tree'] = cKDTree(ac['xyz']), cKDTree(bc['xyz'])
-                nr,nl=contact(ac,bc)
+                # DB5.5/CAPRI auxiliary semantics remain the benchmark's
+                # conventional 5 A atom-contact definition, independent of
+                # the VHH primary 4.5 A interface label.
+                left_ids,right_ids=contact_residue_ids(ac,bc,cutoff=5.0)
+                nr,nl=len(left_ids),len(right_ids)
                 out.update(valid=True,error='', receptor_contacts=nr,ligand_contacts=nl,contact_residues=nr+nl,interface_status='weak' if nr+nl<15 else 'pass')
             except Exception as exc:
                 out['error']=str(exc)
@@ -842,7 +846,7 @@ def report(root, rows, ignored, archives, pairs, elapsed, destination):
     lines=['# 全数据集结构快速审计报告','',f'生成时间：{time.strftime("%Y-%m-%d %H:%M:%S")}。',f'数据目录：`{root}`。Gemmi {gemmi.__version__}；NumPy {np.__version__}。','', '## 统计口径与范围','',
     '- 有效文件：格式可解析，首模型含至少一个具有正占有率、有限坐标的氨基酸重原子残基；不等于完整结构或独立样本。忽略 `._` AppleDouble 资源文件。',
     '- 主链缺失：已观测氨基酸残基缺少 N、CA、C、O 任一原子；同名原子选最高占有率构象。完全未建模的残基不在分母内，本次不根据 SEQRES 补计。非蛋白链、水和游离配体不参与。',
-    '- 界面：严格距离 <5.0 Å；统计两侧接触残基数之和，不是原子对数或残基对数。多链结构默认取最强链对；有VHH标注时仅比较VHH–其他/已标注抗原链。各链对计数保存在 JSONL。最强链对仍 <15 才标记疑似弱界面；该启发式不能证明晶体伪接触。',
+    f'- VHH主界面：跨伙伴重原子严格距离 <{INTERFACE_CONTACT_CUTOFF_ANGSTROM:.1f} Å；统计两侧接触残基数之和。多链结构默认取最强链对；有VHH标注时仅比较VHH–已标注抗原链。DB5.5辅助配对继续使用CAPRI式5.0 Å接触定义。',
     '- 合格率是严格基础筛查率：有效、观测残基主链无缺失、可评估界面且接触≥15；分母为有效文件。纳米专区的“VHH严格通过率”另列，不混同基础物理合格率。',
     '- DB5.5 的单独 receptor/ligand 文件只做格式与主链检查；界面按 `_r_b`+`_l_b` 结合态坐标配对统计，不对未结合态强行叠合。',
     '- 快速模式只计算每个文件首模型。CAPRI 多模型 PDB 仅读至首个 ENDMDL，后续模型既未解析也未做完整性验证；本报告不是全部 decoy 的质量分布。',

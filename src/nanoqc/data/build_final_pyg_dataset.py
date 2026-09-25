@@ -729,9 +729,10 @@ def delivery_report(output,manifest,exclusions,failures,summary,complete):
         lines.append(f'| {sp} / {src} | {sum(0<x<12 for x in lengths)} | {sum(12<=x<16 for x in lengths)} | {sum(x>=16 for x in lengths)} | {sum(x==0 for x in lengths)} |')
     lines += ['', '## 4. 清洗、切分与去冗余','', '| 来源 | 审计候选 | 同时通过硬过滤 |','|---|---:|---:|']
     for src,counts in summary.get('admission',{}).items():lines.append(f'| {src} | {counts["input"]} | {counts["eligible"]} |')
-    lines += ['',f'- DB5.5目标：248个主链完整且界面通过的bound受体–配体对；实际交付 {sum(r["split"]=="test_db55" for r in manifest)}。',
-        '- `test_db55` 当前仅为备用图集，不进入本流水线的训练或正式评估；其准入仅检查可解析性、已观测主链完整性和结合态界面，不代表通过完整结构质量门控。',
-        '- 训练候选按审计清单中的全部DB5.5配对PDB ID保守排除，即使对应备用图构建失败也不放回训练池；PDB ID排除不构成序列同源独立性证明。',
+    db55_enabled=bool(summary.get('include_db55_auxiliary',False))
+    lines += ['',f'- DB5.5辅助benchmark：'+('启用；严格要求248个合格bound受体–配体对。' if db55_enabled else '关闭；不构图、不作为主流水线依赖。')+f' 实际交付 {sum(r["split"]=="test_db55" for r in manifest)}。',
+        '- `test_db55` 仅为可选通用PPI辅助图集，不进入VHH-QAOA训练或正式主评价；启用时保持原有exact-248 fail-closed合同。',
+        '- 仅在DB5.5辅助benchmark启用时，其全部配对PDB ID才从训练候选保守排除；关闭时DB5.5不会改变VHH主数据组成。',
         f'- SNAC长CDR-H3：{summary.get("long_eligible",0)}条非DB5.5重叠候选，{summary.get("unique_long_cdr",0)}条唯一序列，{CDR_H3_IDENTITY_THRESHOLD*100:.0f}%代表簇 {summary.get("clusters",0)} 个；固定随机种子 {SEED} 选取目标400个，实际 {sum(r["split"]=="test_snac_hard" for r in manifest)}。',
         '- SNAC候选首先按CDR-H3做代表簇选择；最终图级隔离进一步统一检查VHH全链、CDR-H3和抗原序列。',
         f'- 分层阈值：VHH全链<{VHH_IDENTITY_THRESHOLD:.2f}、CDR-H3 loop<{CDR_H3_IDENTITY_THRESHOLD:.2f}、抗原全链<{ANTIGEN_IDENTITY_THRESHOLD:.2f}（抗原最小长度覆盖{ANTIGEN_MIN_LENGTH_COVERAGE:.2f}）。任一阈值触发即判为同源并隔离。',
@@ -779,7 +780,7 @@ def main():
     global ANTIGEN_IDENTITY_THRESHOLD, ANTIGEN_MIN_LENGTH_COVERAGE
     global INTERFACE_LABEL_CUTOFF_ANGSTROM, INTERFACE_SENSITIVITY_CUTOFFS_ANGSTROM, INTRA_CHAIN_CA_CUTOFF_ANGSTROM
     global CROSS_PARTNER_KNN_K, MIN_INTERFACE_RESIDUES
-    parser=argparse.ArgumentParser();parser.add_argument('--out',type=pathlib.Path,default=BASE/'dataset_clean_500');parser.add_argument('--workers',type=int,default=2);parser.add_argument('--target-hard',type=int,default=500);parser.add_argument('--no-cap',action='store_true',help='Process every qualifying, deduplicated, isolated CDR-H3 cluster instead of capping at --target-hard.');parser.add_argument('--partition-seed',type=int,default=None,help='Override the module SEED for cluster shuffle order (e.g. an independently-derived partition stream); defaults to SEED when omitted.');parser.add_argument('--audit-dir',type=pathlib.Path,default=BASE);parser.add_argument('--data-root',type=pathlib.Path,default=BASE/'data');parser.add_argument('--vhh-identity-threshold',type=float,default=VHH_IDENTITY_THRESHOLD);parser.add_argument('--cdr-h3-identity-threshold',type=float,default=CDR_H3_IDENTITY_THRESHOLD);parser.add_argument('--antigen-identity-threshold',type=float,default=ANTIGEN_IDENTITY_THRESHOLD);parser.add_argument('--antigen-min-length-coverage',type=float,default=ANTIGEN_MIN_LENGTH_COVERAGE);parser.add_argument('--interface-label-cutoff',type=float,default=INTERFACE_LABEL_CUTOFF_ANGSTROM);parser.add_argument('--interface-sensitivity-cutoffs',type=float,nargs='+',default=list(INTERFACE_SENSITIVITY_CUTOFFS_ANGSTROM));parser.add_argument('--intra-chain-ca-cutoff',type=float,default=INTRA_CHAIN_CA_CUTOFF_ANGSTROM);parser.add_argument('--cross-partner-knn-k',type=int,default=CROSS_PARTNER_KNN_K);parser.add_argument('--min-interface-residues',type=int,default=MIN_INTERFACE_RESIDUES);parser.add_argument('--cluster-map',type=pathlib.Path,default=None,help='PDB->family/structure cluster JSON. Formal runs require it; standalone/debug runs may omit it only if they accept non-formal output.');parser.add_argument('--resume',action='store_true');args=parser.parse_args();RESUME=args.resume
+    parser=argparse.ArgumentParser();parser.add_argument('--out',type=pathlib.Path,default=BASE/'dataset_clean_500');parser.add_argument('--workers',type=int,default=2);parser.add_argument('--target-hard',type=int,default=500);parser.add_argument('--no-cap',action='store_true',help='Process every qualifying, deduplicated, isolated CDR-H3 cluster instead of capping at --target-hard.');parser.add_argument('--partition-seed',type=int,default=None,help='Override the module SEED for cluster shuffle order (e.g. an independently-derived partition stream); defaults to SEED when omitted.');parser.add_argument('--audit-dir',type=pathlib.Path,default=BASE);parser.add_argument('--data-root',type=pathlib.Path,default=BASE/'data');parser.add_argument('--vhh-identity-threshold',type=float,default=VHH_IDENTITY_THRESHOLD);parser.add_argument('--cdr-h3-identity-threshold',type=float,default=CDR_H3_IDENTITY_THRESHOLD);parser.add_argument('--antigen-identity-threshold',type=float,default=ANTIGEN_IDENTITY_THRESHOLD);parser.add_argument('--antigen-min-length-coverage',type=float,default=ANTIGEN_MIN_LENGTH_COVERAGE);parser.add_argument('--interface-label-cutoff',type=float,default=INTERFACE_LABEL_CUTOFF_ANGSTROM);parser.add_argument('--interface-sensitivity-cutoffs',type=float,nargs='+',default=list(INTERFACE_SENSITIVITY_CUTOFFS_ANGSTROM));parser.add_argument('--intra-chain-ca-cutoff',type=float,default=INTRA_CHAIN_CA_CUTOFF_ANGSTROM);parser.add_argument('--cross-partner-knn-k',type=int,default=CROSS_PARTNER_KNN_K);parser.add_argument('--min-interface-residues',type=int,default=MIN_INTERFACE_RESIDUES);parser.add_argument('--cluster-map',type=pathlib.Path,default=None,help='PDB->family/structure cluster JSON. Formal runs require it; standalone/debug runs may omit it only if they accept non-formal output.');parser.add_argument('--include-db55-auxiliary',action='store_true',help='Build the optional DB5.5 auxiliary graph set; when enabled the exact 248-pair contract remains mandatory.');parser.add_argument('--resume',action='store_true');args=parser.parse_args();RESUME=args.resume
     if any(not 0.0 < value <= 1.0 for value in (
         args.vhh_identity_threshold,args.cdr_h3_identity_threshold,
         args.antigen_identity_threshold,args.antigen_min_length_coverage)):
@@ -829,6 +830,7 @@ def main():
     # Written to run_summary.json up front (see below), so a build that failed
     # part-way can still be resumed instead of always looking "different".
     resume_identity=dict(no_cap=bool(args.no_cap),target_hard=(None if args.no_cap else args.target_hard),
+        include_db55_auxiliary=bool(args.include_db55_auxiliary),
         graph_protocol=expected_protocol,family_cluster_map_sha256=cluster_map_sha256,
         partition_seed=(args.partition_seed if args.partition_seed is not None else SEED))
     if RESUME:
@@ -869,6 +871,7 @@ def main():
             PEAK_RSS=max(PEAK_RSS,previous.get('sampled_peak_rss_bytes',0))
         partition_seed=args.partition_seed if args.partition_seed is not None else SEED
         summary.update(seed=partition_seed,no_cap=args.no_cap,target_hard=(None if args.no_cap else args.target_hard),
+            include_db55_auxiliary=bool(args.include_db55_auxiliary),
             homology_isolation=dict(vhh_full_chain_identity=VHH_IDENTITY_THRESHOLD,
                 cdr_h3_identity=CDR_H3_IDENTITY_THRESHOLD,antigen_identity=ANTIGEN_IDENTITY_THRESHOLD,
                 antigen_min_length_coverage=ANTIGEN_MIN_LENGTH_COVERAGE),
@@ -900,18 +903,21 @@ def main():
                 input=len(original),after_cross_source_dedup=len(subset),eligible=len(good),
                 role=SOURCE_ROLE[source])
         bound=[]
-        for p in pairs:
-            source=dict(id='DB55_BOUND::'+p['id'],pdb_id=p['id'].upper(),subset='test_db55',max_contact_residues=p.get('contact_residues',0))
-            if not p['valid'] or p.get('interface_status')!='pass' or any(not lookup[p[k]]['valid'] or lookup[p[k]]['missing_residues'] for k in ['receptor','ligand']):
-                exclusions.append(exclusion(source,['db55_bound_quality']));continue
-            q=dict(p,receptor_row=lookup[p['receptor']],ligand_row=lookup[p['ligand']]);bound.append((source,q))
-        if len(bound)!=248:raise ValueError(f'Expected 248 eligible DB5.5 pairs, found {len(bound)}')
-        print('Building 248 DB5.5 bound graphs',flush=True)
-        for row,p in bound:
-            record,error=save_graph(row,'test_db55',output,pair=p)
-            if record:manifest.append(record)
-            if error:failures.append(error)
-        dbids=db55_reserved_pdb_ids(pairs)
+        dbids=set()
+        if args.include_db55_auxiliary:
+            for p in pairs:
+                source=dict(id='DB55_BOUND::'+p['id'],pdb_id=p['id'].upper(),subset='test_db55',max_contact_residues=p.get('contact_residues',0))
+                if not p['valid'] or p.get('interface_status')!='pass' or any(not lookup[p[k]]['valid'] or lookup[p[k]]['missing_residues'] for k in ['receptor','ligand']):
+                    exclusions.append(exclusion(source,['db55_bound_quality']));continue
+                q=dict(p,receptor_row=lookup[p['receptor']],ligand_row=lookup[p['ligand']]);bound.append((source,q))
+            if len(bound)!=248:
+                raise ValueError(f'Expected 248 eligible DB5.5 pairs when auxiliary benchmark is enabled, found {len(bound)}')
+            print('Building optional 248-pair DB5.5 auxiliary graph set',flush=True)
+            for row,p in bound:
+                record,error=save_graph(row,'test_db55',output,pair=p)
+                if record:manifest.append(record)
+                if error:failures.append(error)
+            dbids=db55_reserved_pdb_ids(pairs)
         pool=[]
         for r in eligible:
             if r['pdb_id'].upper() in dbids:exclusions.append(exclusion(r,['pdb_overlap_db55']))
@@ -1073,12 +1079,18 @@ def main():
         maxtrain=max((cdr_h3_loop_seqsim(s,t) for r in train_records for s in known_train_cdr[r['source_id']] for t in hardseqs),default=0)
         _require(maxtrain<CDR_H3_IDENTITY_THRESHOLD, 'validation failed: maxtrain<CDR_H3_IDENTITY_THRESHOLD')
         _require(len(list((output/'graphs').rglob('*.pt')))==len(manifest), "validation failed: len(list((output/'graphs').rglob('*.pt')))==len(manifest)")
-        _require(sum(r['split']=='test_db55' for r in manifest)==248, "validation failed: sum(r['split']=='test_db55' for r in manifest)==248")
+        expected_db55_count=248 if args.include_db55_auxiliary else 0
+        _require(sum(r['split']=='test_db55' for r in manifest)==expected_db55_count,
+                 f'validation failed: expected {expected_db55_count} DB5.5 auxiliary graphs')
         for split in ['train','test_db55','test_snac_hard']:
             sample_rows=[r for r in manifest if r['split']==split][:2]
+            if not sample_rows:
+                continue
             sample=[torch.load(output/r['path'],weights_only=False,map_location='cpu') for r in sample_rows]
             batched=Batch.from_data_list(sample);_require(batched.num_nodes==sum(g.num_nodes for g in sample),f'PyG batch read-back failed for split {split}')
-        summary.update(validation=dict(all_graphs_read_back=True,db55_count_248=True,pdb_split_overlap=0,
+        summary.update(validation=dict(all_graphs_read_back=True,
+            db55_auxiliary_enabled=bool(args.include_db55_auxiliary),
+            db55_expected_count=expected_db55_count,pdb_split_overlap=0,
             hard_max_pair_cdr_h3_loop_identity=maxhard,known_train_hard_max_cdr_h3_loop_identity=maxtrain,
             hard_layered_pair_max=hard_pair_max,train_hard_layered_cross_max=cross_max,
             layered_train_hard_isolation=True,

@@ -67,7 +67,11 @@ def test_qaoa_resource_estimate_matches_implemented_xy_ansatz() -> None:
     assert resources.mixer_pairs_per_layer==2
     assert resources.zz_gates_total==2
     assert resources.xy_gates_total==4
-    assert resources.two_qubit_gates_total==6
+    assert resources.two_qubit_gates_total==6  # legacy alias
+    assert resources.variational_two_qubit_gates_total==6
+    assert resources.state_preparation_two_qubit_gates is None
+    assert resources.full_circuit_two_qubit_gates is None
+    assert "variational-layer" in resources.accounting_scope
     assert resources.feasible_configuration_count==4
     assert resources.max_optimization_shots==45000
     assert resources.max_measurement_shots==46000
@@ -108,8 +112,9 @@ def test_quantum_protocol_is_single_source_of_truth() -> None:
 
 def test_scaling_reports_quantum_resource_axes_without_new_primary_tests() -> None:
     source=(REPO/"src/nanoqc/inference/analyze_quantum_scaling.py").read_text(encoding="utf-8")
-    assert '"num_qubits","qaoa_two_qubit_gates","qaoa_xy_gates","qaoa_zz_gates"' in source
-    assert "mean_qaoa_two_qubit_gates" in source
+    assert '"num_qubits","qaoa_variational_two_qubit_gates","qaoa_xy_gates","qaoa_zz_gates"' in source
+    assert "mean_qaoa_variational_two_qubit_gates" in source
+    assert "no full-circuit two-qubit" in source
     assert 'primary_predictor="log10_configuration_count"' in source
     assert "descriptive_resource_axes" in source
 
