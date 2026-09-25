@@ -224,7 +224,7 @@ def rq5_inference_failures(rq5: dict, min_clusters: int) -> list[str]:
 # ---------------------------------------------------------------------------
 # Must equal build_final_pyg_dataset.VERSION (kept literal so the orchestrator
 # does not import torch/PyG at start-up; a test pins the two together).
-REQUIRED_GRAPH_VERSION = "1.9"
+REQUIRED_GRAPH_VERSION = "1.10"
 # Must equal qaoa_interface_sampler.MAX_QAOA_DEPTH (literal to avoid importing
 # PennyLane at start-up; a test pins the two together).
 MAX_QAOA_DEPTH = 12

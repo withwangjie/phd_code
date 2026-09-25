@@ -10,6 +10,7 @@ import collections
 import concurrent.futures
 import csv
 import gzip
+import hashlib
 import json
 import math
 import pathlib
@@ -155,6 +156,24 @@ def load_annotations(root):
                 if row['Bioassembly']=='0' and pid in PDB_ANNOTATIONS:
                     CHAIN_ANNOTATIONS[pid]={k:literal(row.get(k),[]) for k in ('Chain_VH','Chain_VL','Chain_VHH')}
 
+def task_source_sha256(task):
+    """SHA-256 of the exact raw structure file or ZIP member audited."""
+    cached = str(task.get('_source_structure_sha256') or '')
+    if cached:
+        return cached
+    if task.get('member'):
+        if not hasattr(ZIP_LOCAL, 'archives'):
+            ZIP_LOCAL.archives = {}
+        if task['path'] not in ZIP_LOCAL.archives:
+            ZIP_LOCAL.archives[task['path']] = zipfile.ZipFile(task['path'])
+        raw = ZIP_LOCAL.archives[task['path']].read(task['member'])
+        digest = hashlib.sha256(raw).hexdigest()
+    else:
+        digest = sha256_file(pathlib.Path(task['path']))
+    task['_source_structure_sha256'] = digest
+    return digest
+
+
 def pdb_compat(raw, task):
     try:
         return gemmi.read_pdb_string(raw)
@@ -285,7 +304,7 @@ def materialize_graph_complex(source_path, graph, destination):
     """
     recorded = str(getattr(graph, 'structure_source', '') or '')
     if not recorded:
-        raise ValueError('graph lacks structure_source provenance; rebuild graphs (v1.8)')
+        raise ValueError('graph lacks structure_source provenance; rebuild graphs (v1.10)')
     st = gemmi.read_structure(str(source_path))
     if not len(st):
         raise ValueError('source structure has no coordinate model')
@@ -335,6 +354,7 @@ def _read_raw_structure(task):
         if task['path'] not in ZIP_LOCAL.archives:
             ZIP_LOCAL.archives[task['path']] = zipfile.ZipFile(task['path'])
         raw = ZIP_LOCAL.archives[task['path']].read(task['member'])  # validates CRC
+        task['_source_structure_sha256'] = hashlib.sha256(raw).hexdigest()
     else:
         # Do not load gigabyte-sized CAPRI ensembles into memory.
         chunks, has_models = [], False
@@ -705,12 +725,15 @@ def audit(task):
     out = dict(task, valid=False, error='', residues=0, missing_residues=0, missing_examples=[], chains=0,
         interface_status='not_applicable', max_contact_residues=None, weak_pairs=0, pairs=[],
         models_first_only=False, vhh_status='not_applicable', cdr3_lengths=[],
+        source_structure_sha256='',
         resolution_angstrom=None, resolution_source=None, structure_quality_status='not_evaluated',
         structure_quality_reasons=[], interface_missing_sidechain_residues=0,
         interface_altloc_residues=0, interface_min_occupancy=None,
         interface_mean_bfactor=None)
     try:
         st, multi = read_structure(task)
+        if task.get('subset') in FORMAL_VHH_SUBSETS or task.get('subset') == 'test_db55':
+            out['source_structure_sha256'] = task_source_sha256(task)
         if not len(st):
             raise ValueError('no coordinate model')
         chains, missing, total, details = chain_data(st[0])
@@ -898,12 +921,17 @@ def main():
             rows.append(r);handle.write(json.dumps(r,ensure_ascii=False)+'\n')
             if len(rows)%250==0:handle.flush();print(f'{len(rows)}/{len(tasks)} audited, {time.time()-start:.0f}s',flush=True)
     pairs=db55_pairs(tasks)
-    fields=['subset','id','pdb_id','valid','error','chains','residues','missing_residues','interface_status','max_contact_residues','weak_pairs','vhh_status','vhh_reason','vhh_chain','cdr_annotation_method','cdr3_lengths','sabdab_antigen_chains','other_antibody_chains','models_first_only','legacy_pdb_tail','resolution_angstrom','resolution_source','structure_quality_status','structure_quality_reasons','interface_missing_sidechain_residues','interface_altloc_residues','interface_min_occupancy','interface_mean_bfactor']
+    fields=['subset','id','pdb_id','valid','error','chains','residues','missing_residues','interface_status','max_contact_residues','weak_pairs','vhh_status','vhh_reason','vhh_chain','cdr_annotation_method','cdr3_lengths','sabdab_antigen_chains','other_antibody_chains','source_structure_sha256','models_first_only','legacy_pdb_tail','resolution_angstrom','resolution_source','structure_quality_status','structure_quality_reasons','interface_missing_sidechain_residues','interface_altloc_residues','interface_min_occupancy','interface_mean_bfactor']
     with (args.out/'data_audit_details.csv').open('w',encoding='utf-8-sig',newline='') as handle:
         writer=csv.DictWriter(handle,fieldnames=fields,extrasaction='ignore');writer.writeheader();writer.writerows(rows)
     (args.out/'data_audit_db55_pairs.json').write_text(json.dumps(pairs,ensure_ascii=False,indent=2),encoding='utf-8')
     (args.out/'data_audit_inventory.json').write_text(json.dumps(dict(
         ignored=ignored,archives=archives,tasks=len(tasks),partial_run=bool(args.limit),
+        source_hash_contract=dict(
+            algorithm='sha256',
+            bound_subsets=sorted(FORMAL_VHH_SUBSETS | {'test_db55'}),
+            hashed_valid_rows=sum(bool(r.get('source_structure_sha256')) for r in rows),
+        ),
         structure_quality_protocol=dict(max_resolution_angstrom=MAX_RESOLUTION_ANGSTROM,
             min_interface_occupancy=MIN_INTERFACE_OCCUPANCY,
             allow_interface_altloc=ALLOW_INTERFACE_ALTLOC,

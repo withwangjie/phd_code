@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 import nanoqc.data.audit_all_datasets as audit
 import nanoqc.data.build_final_pyg_dataset as builder
 import nanoqc.data.prepare_external_vhh as prep
@@ -111,7 +113,7 @@ def test_study_foldseek_universe_contains_only_verified_formal_vhh(tmp_path):
 
 
 def test_graph_protocol_version_changes_with_data_admission_semantics():
-    assert builder.VERSION == "1.9"
+    assert builder.VERSION == "1.10"
 
 
 def test_cluster_universe_cannot_be_bridged_by_qc_failures_or_lower_priority_sources():
@@ -147,3 +149,30 @@ def test_foldseek_formal_sources_drop_qc_failures(tmp_path):
     sources = audit_sources(ledger, formal_only=True, min_interface_residues=15)
     assert [row["id"] for row in sources["2bbb"]] == ["good"]
     assert sources["3ccc"] == []
+
+
+def test_raw_structure_change_after_audit_fails_closed(tmp_path):
+    raw = tmp_path / "1abc.pdb"
+    raw.write_text("ORIGINAL\n", encoding="utf-8")
+    task = dict(path=str(raw), member="", subset="snac_db", id="snac/1abc")
+    expected = audit.task_source_sha256(dict(task))
+    row = dict(task, pdb_id="1ABC", source_structure_sha256=expected)
+    assert builder.verify_audited_source(row) == expected
+
+    raw.write_text("CHANGED\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="raw structure changed since data audit"):
+        builder.verify_audited_source(row)
+
+
+def test_zip_member_hash_binds_member_not_container_path(tmp_path):
+    import zipfile
+    archive = tmp_path / "nb_complexes.zip"
+    with zipfile.ZipFile(archive, "w") as handle:
+        handle.writestr("1abc.pdb", "MEMBER-A\n")
+        handle.writestr("2def.pdb", "MEMBER-B\n")
+    first = audit.task_source_sha256(
+        dict(path=str(archive), member="1abc.pdb", subset="snac_db", id="a"))
+    second = audit.task_source_sha256(
+        dict(path=str(archive), member="2def.pdb", subset="snac_db", id="b"))
+    assert first != second
+    assert len(first) == len(second) == 64

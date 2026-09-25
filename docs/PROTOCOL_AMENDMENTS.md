@@ -544,8 +544,10 @@ they were logged later.
   The Foldseek universe now contains only source-verified, row-level
   QC-eligible formal VHH candidates from the same preferred source used by
   graph admission; rejected structures cannot bridge single-linkage antigen
-  components. Graph protocol is bumped to v1.9 so v1.8 graphs cannot resume
-  under the changed admission semantics.
+  components. Graph protocol v1.10 additionally binds each graph-consumed raw
+  structure to the SHA-256 recorded by data audit and rechecks the bytes before
+  construction, so audit/build cannot silently span different structure
+  snapshots. Earlier v1.8/v1.9 graphs cannot resume under these semantics.
 - **Why RCSB is audit-only:** biological-assembly and resolution checks prove
   coordinate quality, not nanobody identity. Treating the first chain of the
   strongest generic protein interface as VHH would change the learning task.

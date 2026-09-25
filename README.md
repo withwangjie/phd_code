@@ -208,7 +208,7 @@ claim it supports is that the frozen pipeline still holds on antigen folds
 training never saw; it is a cluster-level holdout of the same audited
 snapshot, not a separate database. Setting
 `external_validation.external_vhh.graph_dir` and `source_structure_dir`
-scores an independently certified graph-v1.9 VHH dataset instead, with the
+scores an independently certified graph-v1.10 VHH dataset instead, with the
 identical independence audit.
 FASPR is supported as a mature biological side-chain packing baseline and
 Phenix clashscore as a standard steric-quality diagnostic. These are
@@ -247,7 +247,7 @@ the frozen model.
 
 ### Preparing the external VHH set
 
-External complexes are built with the training-graph definition (graph v1.9,
+External complexes are built with the training-graph definition (graph v1.10,
 biological assembly, 7.5 A SAbDab antigen rule, the same labels and edges):
 
 Structure files that carry no resolution record need the entry table the audit

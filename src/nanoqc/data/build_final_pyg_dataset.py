@@ -52,9 +52,10 @@ GRAPH_MEMORY_BUDGET_BYTES = 4 * 1024**3
 # 1.7: phi/psi are defined only across real peptide bonds (NaN at chain breaks).
 # 1.8: raw assembly sources keep only partner chains in contact with the VHH paratope.
 # 1.9: formal sources are source-verified VHH complexes (SNAC primary, SAbDab
-#      auxiliary), SAbDab carries its own chain/CDR provenance, and cross-source
-#      duplicate PDBs are resolved deterministically before graph construction.
-VERSION = '1.9'
+#      auxiliary), with deterministic cross-source PDB precedence.
+# 1.10: every graph-consumed raw structure is SHA-256-bound at audit time and
+#       reverified immediately before graph construction.
+VERSION = '1.10'
 FORMAL_SOURCE_PRIORITY = audit.FORMAL_SOURCE_PRIORITY
 FORMAL_TRAIN_SOURCES = tuple(source for source in FORMAL_SOURCE_PRIORITY
                              if source in audit.FORMAL_VHH_SUBSETS)
@@ -311,6 +312,21 @@ def build_atoms(st, prefix='', identity_overrides=None):
 def task_of(row):
     return {k:row[k] for k in ['path','member','subset','id']}
 
+
+def verify_audited_source(row):
+    """Fail closed if raw structure bytes changed after the data audit."""
+    expected = str(row.get('source_structure_sha256') or '')
+    if not expected:
+        raise ValueError(f'audited source SHA-256 missing for {row.get("id", row.get("pdb_id", ""))}')
+    actual = audit.task_source_sha256(task_of(row))
+    if actual != expected:
+        raise ValueError(
+            f'raw structure changed since data audit for {row.get("id", row.get("pdb_id", ""))}: '
+            f'expected {expected}, observed {actual}'
+        )
+    return actual
+
+
 def bound_identity_overrides(st,row):
     """Resolve ambiguous labels only from the explicitly paired DB5.5 apo file.
 
@@ -521,6 +537,7 @@ def make_graph(row, split, pair=None, family_structure_cluster='', chains=None):
         homology_antigen_min_length_coverage=float(ANTIGEN_MIN_LENGTH_COVERAGE),
         audit_interface_residues=row.get('max_contact_residues',pair['contact_residues'] if pair else 0),
         audit_vhh_status=row.get('vhh_status','not_applicable'),
+        source_structure_sha256=str(row.get('source_structure_sha256','')),
         cdr_annotation_method=str(row.get('cdr_annotation_method','')),
         source_role=SOURCE_ROLE.get(row.get('subset'),'auxiliary_benchmark'),
         graph_version=VERSION, graph_memory_budget_bytes=int(GRAPH_MEMORY_BUDGET_BYTES))
@@ -574,10 +591,18 @@ def validate_graph(g):
     _require(g.num_interface_residues>=min_interface and len(g.cdr3_seq)==g.cdr3_len, 'validation failed: g.num_interface_residues>=min_interface and len(g.cdr3_seq)==g.cdr3_len')
     if getattr(g,'split','') in ('train','test_snac_hard'):
         _require(str(getattr(g,'family_structure_cluster','')), 'formal VHH graph lacks family/structure cluster ID')
+        raw_sha=str(getattr(g,'source_structure_sha256',''))
+        _require(bool(re.fullmatch(r'[0-9a-f]{64}',raw_sha)),
+                 'formal VHH graph lacks audited raw-structure SHA-256')
     _require(g.validate(raise_on_error=True), 'validation failed: g.validate(raise_on_error=True)')
 
 def save_graph(row, split, output, pair=None, cluster_id='', family_structure_cluster=''):
     try:
+        if pair is None:
+            verify_audited_source(row)
+        else:
+            verify_audited_source(pair['receptor_row'])
+            verify_audited_source(pair['ligand_row'])
         name=f'{row["subset"]}__{row["pdb_id"].upper()}__{hashlib.sha256(row["id"].encode()).hexdigest()[:16]}.pt'
         path=output/'graphs'/split/name
         existing=path.exists()
@@ -600,6 +625,7 @@ def save_graph(row, split, output, pair=None, cluster_id='', family_structure_cl
             directed_edges=g.num_edges,undirected_edges=g.num_edges//2,density=g.num_edges/(g.num_nodes*(g.num_nodes-1)),bytes=path.stat().st_size,
             cdr3_seq=g.cdr3_seq,cdr3_len=g.cdr3_len,num_interface_residues=g.num_interface_residues,
             cluster_id=cluster_id,family_structure_cluster=getattr(g,'family_structure_cluster',''),
+            source_structure_sha256=getattr(g,'source_structure_sha256',''),
             sha256=sha256(path),identity_resolution_notes=getattr(g,'residue_identity_resolutions','[]'))
         return record,None
     except Exception as exc:
@@ -1027,7 +1053,7 @@ def main():
         failures.append(dict(split='pipeline',source_id='',pdb_id='',reason=type(exc).__name__,detail=str(exc)));traceback.print_exc()
     finally:
         summary.update(elapsed_seconds=previous_elapsed+time.time()-start,complete=complete,graphs=len(manifest),sampled_peak_rss_bytes=PEAK_RSS)
-        fields=['split','path','source_id','pdb_id','subset_source','nodes','directed_edges','undirected_edges','density','bytes','cdr3_seq','cdr3_len','num_interface_residues','cluster_id','sha256','identity_resolution_notes']
+        fields=['split','path','source_id','pdb_id','subset_source','nodes','directed_edges','undirected_edges','density','bytes','cdr3_seq','cdr3_len','num_interface_residues','cluster_id','source_structure_sha256','sha256','identity_resolution_notes']
         write_csv(output/'graph_manifest.csv',manifest,fields)
         (output/'graph_manifest.json').write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding='utf-8')
         write_csv(output/'excluded_samples.csv',exclusions,['source_id','pdb_id','subset_source','reasons'])

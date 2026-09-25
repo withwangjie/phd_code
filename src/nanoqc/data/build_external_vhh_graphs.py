@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build graph-v1.9 external VHH graphs from raw PDB/mmCIF files.
+"""Build graph-v1.10 external VHH graphs from raw PDB/mmCIF files.
 
 External complexes get the training-graph definition of one VHH-antigen
 complex: the first author-determined biological assembly, one annotated VHH
@@ -241,7 +241,7 @@ def prepare_external_complex(structure_path: Path, vhh_chain: str,
 
 
 def build_graph(prepared: dict, pdb_id: str, structure_path: Path):
-    """Graph-v1.9 Data object for a prepared complex that passed quality gates."""
+    """Graph-v1.10 Data object for a prepared complex that passed quality gates."""
     if prepared["quality"]["structure_quality_status"] != "pass":
         raise ValueError(f"structure quality failed: {prepared['quality']['structure_quality_reasons']}")
     row = dict(pdb_id=pdb_id.upper(), subset=SUBSET, id=f"{SUBSET}/{pdb_id.lower()}",
