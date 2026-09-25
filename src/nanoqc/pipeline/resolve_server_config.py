@@ -58,10 +58,15 @@ def _find_existing(candidates: list[str|Path], *, executable: bool=False) -> str
 
 def _resolve_venv(server: dict[str,Any]) -> str:
     def valid(path: Path) -> bool:
+        posix_python=path/"bin/python"
+        windows_python=path/"Scripts/python.exe"
         return (
-            (path/"bin/activate").is_file() and (path/"bin/python").is_file()
+            (path/"bin/activate").is_file()
+            and posix_python.is_file()
+            and os.access(posix_python,os.X_OK)
         ) or (
-            (path/"Scripts/activate").is_file() and (path/"Scripts/python.exe").is_file()
+            (path/"Scripts/activate").is_file()
+            and windows_python.is_file()
         )
 
     raw=server.get("venv","auto")
