@@ -55,8 +55,9 @@ GRAPH_MEMORY_BUDGET_BYTES = 4 * 1024**3
 #      auxiliary), SAbDab carries its own chain/CDR provenance, and cross-source
 #      duplicate PDBs are resolved deterministically before graph construction.
 VERSION = '1.9'
-FORMAL_SOURCE_PRIORITY = ('snac_db', 'sabdab_vhh', 'train_rcsb')
-FORMAL_TRAIN_SOURCES = ('snac_db', 'sabdab_vhh')
+FORMAL_SOURCE_PRIORITY = audit.FORMAL_SOURCE_PRIORITY
+FORMAL_TRAIN_SOURCES = tuple(source for source in FORMAL_SOURCE_PRIORITY
+                             if source in audit.FORMAL_VHH_SUBSETS)
 SOURCE_ROLE = {'snac_db': 'primary', 'sabdab_vhh': 'auxiliary', 'train_rcsb': 'audit_only'}
 # SAbDab antigen-chain criterion [METHODS_EVIDENCE R33]: any CA/CB within 7.5 A
 # of a CA/CB of the antibody's CDR residues.

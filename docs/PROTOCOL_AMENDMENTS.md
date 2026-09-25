@@ -541,8 +541,10 @@ they were logged later.
   annotation method, rejects unannotated extra Ig variable domains, and binds
   formal antigen chains to SAbDab metadata plus the 7.5 A paratope-contact
   rule [R33]. SNAC keeps its curated per-complex annotations [R34].
-  The Foldseek universe now contains only source-verified formal VHH
-  candidates. Graph protocol is bumped to v1.9 so v1.8 graphs cannot resume
+  The Foldseek universe now contains only source-verified, row-level
+  QC-eligible formal VHH candidates from the same preferred source used by
+  graph admission; rejected structures cannot bridge single-linkage antigen
+  components. Graph protocol is bumped to v1.9 so v1.8 graphs cannot resume
   under the changed admission semantics.
 - **Why RCSB is audit-only:** biological-assembly and resolution checks prove
   coordinate quality, not nanobody identity. Treating the first chain of the

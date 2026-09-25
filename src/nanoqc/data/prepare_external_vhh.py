@@ -148,21 +148,18 @@ def settings(config: dict, prep_dir: Optional[Path]) -> dict:
     )
 
 
-def study_pdb_ids(audit_jsonl: Path) -> list[str]:
-    """Same rule as queue_freeze: source-verified formal VHH PDB IDs only."""
-    from nanoqc.data.audit_all_datasets import formal_clustering_candidate
-    ids = set()
+def study_pdb_ids(audit_jsonl: Path, min_interface_residues: int = 15) -> list[str]:
+    """Same source precedence/QC universe as queue_freeze."""
+    from nanoqc.data.audit_all_datasets import formal_clustering_pdb_ids
+    rows = []
     for line in audit_jsonl.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
         try:
-            row = json.loads(line)
+            rows.append(json.loads(line))
         except json.JSONDecodeError:
             continue
-        pdb = str(row.get("pdb_id", "")).strip().lower()
-        if PDB_ID.fullmatch(pdb) and formal_clustering_candidate(row):
-            ids.add(pdb)
-    return sorted(ids)
+    return formal_clustering_pdb_ids(rows, min_interface_residues)
 
 
 def run_module(module: str, argv: list[str]) -> None:
@@ -188,7 +185,9 @@ def cmd_audit(args, config, s) -> int:
         if audit_cfg.get(key, False):
             argv.append(flag)
     run_module("nanoqc.data.audit_all_datasets", argv)
-    ids = study_pdb_ids(s["prep"] / "audit" / "data_audit_details.jsonl")
+    min_interface = int(((config.get("queue_freeze", {}) or {}).get("graph_build", {}) or {})
+                        .get("min_interface_residues", 15))
+    ids = study_pdb_ids(s["prep"] / "audit" / "data_audit_details.jsonl", min_interface)
     (s["prep"] / "study_pdb_ids.txt").write_text("".join(f"{i}\n" for i in ids), encoding="utf-8")
     print(f"[prepare_external_vhh] {len(ids)} study PDB IDs -> {s['prep'] / 'study_pdb_ids.txt'}")
     return 0
@@ -274,9 +273,12 @@ def cmd_foldseek(args, config, s) -> int:
               "study PDBs alone (antigen-fold holdout). Pass --run-dir <run> to bind the table to a run's "
               "own universe instead.")
     data_root = preprocessing_data_root(config,args.data_root)
+    min_interface = int(((config.get("queue_freeze", {}) or {}).get("graph_build", {}) or {})
+                        .get("min_interface_residues", 15))
     argv = ["--universe", str(universe), "--audit-dir", str(audit_dir), "--data-root", str(data_root),
             "--out", str(s["pair_tsv"]),
-            "--work-dir", str(s["prep"] / "foldseek"), "--foldseek", args.foldseek, "--threads", str(args.threads)]
+            "--work-dir", str(s["prep"] / "foldseek"), "--foldseek", args.foldseek, "--threads", str(args.threads),
+            "--min-interface-residues", str(min_interface)]
     if candidates.is_file():
         argv += ["--external-candidates", str(candidates), "--external-structures", str(s["source_dir"])]
     argv += ["--allow-missing-hits"] * bool(args.allow_missing_hits) + ["--force"] * bool(args.force)

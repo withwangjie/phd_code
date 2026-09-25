@@ -115,7 +115,8 @@ def annotated_antigen_chains(source: dict) -> set[str]:
     return set(audit.literal(row.get("Chain_Ag"), [])) if row else set()
 
 
-def audit_sources(audit_jsonl: Path) -> dict[str, list[dict]]:
+def audit_sources(audit_jsonl: Path, *, formal_only: bool = False,
+                  min_interface_residues: int = 15) -> dict[str, list[dict]]:
     """Readable audited structure files per four-character PDB ID (DB5.5: bound files only).
 
     IDs whose every file failed the audit's parse map to an empty list.
@@ -132,6 +133,8 @@ def audit_sources(audit_jsonl: Path) -> dict[str, list[dict]]:
         if row.get("subset") == "test_db55" and "_b." not in name:
             continue
         sources.setdefault(pdb, [])
+        if formal_only and not audit.formal_row_eligible(row, min_interface_residues):
+            continue
         if not row.get("valid", True):
             continue
         sources[pdb].append(dict(path=row["path"], member=row.get("member", ""), subset=row.get("subset", ""),
@@ -142,8 +145,12 @@ def audit_sources(audit_jsonl: Path) -> dict[str, list[dict]]:
 def antigen_structure(pdb: str, sources: Iterable[dict], sabdab_antibody_chains: Iterable[str],
                       min_length: int, sabdab_antigen_chains: Iterable[str] = ()) -> tuple[Optional[gemmi.Structure], dict]:
     """One structure holding the PDB's non-antibody chains, and the per-chain record."""
+    sources = list(sources)
     sabdab = set(sabdab_antibody_chains)
-    internal_sabdab_antibody, internal_sabdab_antigen = audit.sabdab_chain_metadata(pdb)
+    uses_internal_sabdab = any(source.get("subset") == "sabdab_vhh" for source in sources)
+    internal_sabdab_antibody, internal_sabdab_antigen = (
+        audit.sabdab_chain_metadata(pdb) if uses_internal_sabdab else ([], [])
+    )
     sabdab.update(internal_sabdab_antibody)
     internal_sabdab_antigen = set(internal_sabdab_antigen)
     model = gemmi.Model("1")
@@ -170,7 +177,7 @@ def antigen_structure(pdb: str, sources: Iterable[dict], sabdab_antibody_chains:
             record = dict(source=source.get("id") or source["path"], chain=chain.name, length=len(sequence))
             if chain.name in antigen_annotated:
                 record.update(role="antigen", method="antigen_annotation")
-            elif annotated_antibody(pdb, sequence):
+            elif source.get("subset") == "snac_db" and annotated_antibody(pdb, sequence):
                 record.update(role="antibody", method="annotation")
             elif chain.name in sabdab:
                 record.update(role="antibody", method="sabdab_chain_id")
@@ -304,6 +311,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--foldseek-arg", action="append", default=None,
                         help=f"Replaces the default search options {' '.join(FOLDSEEK_ARGS)} (repeatable)")
     parser.add_argument("--min-chain-length", type=int, default=MIN_CHAIN_LENGTH)
+    parser.add_argument("--min-interface-residues", type=int, default=15,
+                        help="Must match queue_freeze.graph_build.min_interface_residues")
     parser.add_argument("--allow-missing-hits", action="store_true")
     parser.add_argument("--force", action="store_true", help="Overwrite an existing pair table")
     parser.add_argument("--reuse-raw", type=Path, default=None,
@@ -319,7 +328,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     universe = sorted({line.strip().lower() for line in args.universe.read_text(encoding="utf-8").splitlines()
                        if line.strip()})
     audit.load_annotations(args.data_root.resolve())
-    sources = audit_sources(args.audit_dir / "data_audit_details.jsonl")
+    audit_jsonl = args.audit_dir / "data_audit_details.jsonl"
+    ledger_rows = [json.loads(line) for line in audit_jsonl.read_text(encoding="utf-8").splitlines()
+                   if line.strip()]
+    preferred_source = audit.formal_source_by_pdb(ledger_rows)
+    sources = audit_sources(
+        audit_jsonl, formal_only=True, min_interface_residues=args.min_interface_residues)
     external: dict[str, dict] = {}
     if args.external_candidates is not None:
         payload = json.loads(args.external_candidates.read_text(encoding="utf-8"))
@@ -337,6 +351,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         pdb_sources = list(sources.get(pdb, []))
         antibody_chains: list[str] = []
         antigen_chains: list[str] = []
+        if pdb not in external:
+            preferred = preferred_source.get(pdb.upper())
+            if preferred not in audit.FORMAL_VHH_SUBSETS:
+                raise SystemExit(f"Universe PDB {pdb} has no preferred formal VHH source")
+            pdb_sources = [source for source in pdb_sources if source.get("subset") == preferred]
+            if not pdb_sources:
+                raise SystemExit(
+                    f"Universe PDB {pdb} has no QC-eligible structure from preferred source {preferred}")
         if pdb in external:
             path = source_structure_for_pdb(args.external_structures, pdb)
             pdb_sources = [dict(path=str(path), member="", subset="external_vhh", id=str(path))]
@@ -401,7 +423,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         score_rule="PDB pair: max over chain pairs of min(qtmscore(q->t), qtmscore(t->q))",
         raw_output=str(Path(raw).resolve()), reused_raw_output=args.reuse_raw is not None,
         raw_input_binding_sha256=sha256(raw_binding_path(raw)),
-        min_chain_length=args.min_chain_length, universe_size=len(universe),
+        min_chain_length=args.min_chain_length,
+        min_interface_residues=args.min_interface_residues,
+        universe_size=len(universe),
         universe_sha256=sha256(args.universe), searched_pdbs=len(searched), chains_searched=entries,
         self_only=sorted(self_only + missing), allow_missing_hits=bool(args.allow_missing_hits),
         external_candidates_sha256=(sha256(args.external_candidates) if args.external_candidates else None),

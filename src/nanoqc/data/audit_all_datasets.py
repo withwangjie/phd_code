@@ -48,6 +48,7 @@ PIPELINE_WORK_DIRS = frozenset({'external_vhh'})
 # Only curated VHH-antigen sources participate in the formal structural
 # similarity universe. Generic RCSB complexes remain auditable but are not
 # formal VHH training data.
+FORMAL_SOURCE_PRIORITY = ('snac_db', 'sabdab_vhh', 'train_rcsb')
 FORMAL_VHH_SUBSETS = frozenset({'snac_db', 'sabdab_vhh'})
 BACKBONE = set(BACKBONE_ATOMS)
 SIDECHAIN_HEAVY = {name: set(atoms) for name, atoms in SIDECHAIN_HEAVY_ATOMS.items()}
@@ -645,13 +646,59 @@ def nano_features(task, chains, pdbid):
     return result, None
 
 
-def formal_clustering_candidate(row):
-    """True when an audited row belongs to the formal VHH clustering universe."""
-    return (
-        row.get('subset') in FORMAL_VHH_SUBSETS
-        and bool(row.get('valid'))
-        and row.get('vhh_status') == 'pass'
-    )
+def formal_source_by_pdb(rows):
+    """Highest-priority source represented for each PDB, before QC/outcomes."""
+    rank = {source: index for index, source in enumerate(FORMAL_SOURCE_PRIORITY)}
+    represented = collections.defaultdict(set)
+    for row in rows:
+        pdb = str(row.get('pdb_id') or '').strip().upper()
+        subset = str(row.get('subset') or '')
+        if pdb and subset in rank:
+            represented[pdb].add(subset)
+    return {
+        pdb: min(sources, key=lambda source: rank[source])
+        for pdb, sources in represented.items()
+    }
+
+
+def formal_row_eligible(row, min_interface_residues=15):
+    """The row-level QC gate used before formal graph construction/clustering."""
+    if row.get('subset') not in FORMAL_VHH_SUBSETS:
+        return False
+    if row.get('valid') is not True:
+        return False
+    if int(row.get('missing_residues') or 0) > 0:
+        return False
+    if row.get('interface_status') != 'pass':
+        return False
+    maximum = row.get('max_contact_residues')
+    if maximum is None or int(maximum) < int(min_interface_residues):
+        return False
+    if row.get('vhh_status') != 'pass':
+        return False
+    if row.get('structure_quality_status') != 'pass':
+        return False
+    return True
+
+
+def formal_clustering_pdb_ids(rows, min_interface_residues=15):
+    """PDB universe matching source precedence and formal row-level admission.
+
+    Lower-priority representations never rescue a preferred source that fails
+    QC. Excluded structures therefore cannot bridge otherwise independent
+    Foldseek components.
+    """
+    preferred = formal_source_by_pdb(rows)
+    out = set()
+    for pdb, source in preferred.items():
+        if source not in FORMAL_VHH_SUBSETS:
+            continue
+        if any(str(row.get('pdb_id') or '').strip().upper() == pdb
+               and row.get('subset') == source
+               and formal_row_eligible(row, min_interface_residues)
+               for row in rows):
+            out.add(pdb.lower())
+    return sorted(out)
 
 
 def audit(task):
@@ -775,7 +822,7 @@ def report(root, rows, ignored, archives, pairs, elapsed, destination):
     '- DB5.5 的单独 receptor/ligand 文件只做格式与主链检查；界面按 `_r_b`+`_l_b` 结合态坐标配对统计，不对未结合态强行叠合。',
     '- 快速模式只计算每个文件首模型。CAPRI 多模型 PDB 仅读至首个 ENDMDL，后续模型既未解析也未做完整性验证；本报告不是全部 decoy 的质量分布。',
     '- SNAC 主表 snac_db = curated_structures/nb_complexes（ZIP 内直接读）；nb_unbound 和 benchmark/nb_complexes 单列。其他 SNAC ZIP 只登记、不解析内部结构；所有松散 .pdb/.cif/.cif.gz 均已纳入。',
-    '- CDR-H3 使用 SNAC 的 IMGT Region_Split_VH.cdr3；SAbDab 通过同PDB来源标注与坐标序列匹配转移，不套用未经确认的残基编号。分箱为 <12、12–15、≥16，避免16 aa重复计数。',
+    '- CDR-H3：SNAC 使用自身 IMGT Region_Split_VH.cdr3；SAbDab 使用自身 Hchain 元数据定位VHH后进行 IMGT/保守锚点 CDR-H3 定位，并逐条记录 cdr_annotation_method。分箱为 <12、12–15、≥16，避免16 aa重复计数。',
     '- 分辨率：优先取结构文件自带值；文件未记录时按 PDB ID 回落到整理元数据（SNAC curation summary 的 Resolution 列、SAbDab 汇总表的 resolution 列），逐行记录 resolution_source。一个字段列出多个值时取最差（最大）值。流水线工作目录（external_vhh）下的文件不参与，本报告列出实际使用的元数据文件及其哈希。仍然查不到分辨率的条目按 unknown_resolution 排除，阈值不变。',
     '- VHH通过 = SNAC非TCR单VHH来源标注、唯一H链、无L链、H链序列覆盖≥70%且与标注一致；或SAbDab链级summary明确唯一Hchain、无Lchain/scFv、具有protein/peptide抗原，并在生物学装配中核对VHH链、CDR-H3和额外Ig可变域。SNAC与SAbDab标注独立读取，SAbDab不得借用同PDB的SNAC标签。未知/候选不得当作合格。','',
     '## 核心子集规模与基础质量','', '| 子集 | 结构文件 | 有效 | 解析/坐标失败 | 有主链缺失文件（占有效） | 缺原子残基/观测残基 | 可评估界面 | 弱界面 | 基础合格/有效 |', '|---|---:|---:|---:|---:|---:|---:|---:|---:|']

@@ -186,7 +186,7 @@ queue_freeze:
   graph_build:
     workers: 8  # runtime fallback; auto-resolved from server CPU resources
     # Scientific graph protocol. Changing any value requires a fresh dataset;
-    # graph v1.8 records these values in every .pt and run_summary.json.
+    # graph v1.9 records these values in every .pt and run_summary.json.
     # 5 A cross-partner atom contact is literature-supported for antibody-antigen/CAPRI-style interfaces [METHODS_EVIDENCE R3,R4].
     interface_label_cutoff_angstrom: 5.0
     # 8 A C-alpha residue-graph construction has direct protein-GNN precedent [R22].

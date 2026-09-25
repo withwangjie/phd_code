@@ -1992,21 +1992,22 @@ class Orchestrator:
         universe_path=self.run_dir/"audit"/"cluster_universe.txt"
         audit_jsonl=self.run_dir/"audit"/"data_audit_details.jsonl"
         if audit_jsonl.is_file() and not universe_path.is_file():
-            from nanoqc.data.audit_all_datasets import formal_clustering_candidate
-            ids=set()
+            from nanoqc.data.audit_all_datasets import formal_clustering_pdb_ids
+            audit_rows=[]
             for line in audit_jsonl.read_text(encoding="utf-8").splitlines():
                 if not line.strip():
                     continue
                 try:
-                    row=json.loads(line)
+                    audit_rows.append(json.loads(line))
                 except json.JSONDecodeError:
                     continue
-                pdb=str(row.get("pdb_id","")).strip().lower()
-                # Cluster only source-verified formal VHH candidates. Generic
-                # RCSB, DB5.5 and extra_* rows must not widen the Foldseek
-                # universe or become hidden formal dependencies.
-                if re.fullmatch(r"[a-z0-9]{4}",pdb) and formal_clustering_candidate(row):
-                    ids.add(pdb)
+            # Match the graph-builder's source precedence and row-level QC
+            # before clustering: excluded structures must not bridge otherwise
+            # independent antigen-fold components.
+            ids=set(formal_clustering_pdb_ids(
+                audit_rows,
+                qf_cfg["graph_build"].get("min_interface_residues", 15),
+            ))
             # External VHH structures are part of the SAME frozen structural
             # similarity universe. They must not be appended as untracked
             # singleton clusters only at external-validation time.

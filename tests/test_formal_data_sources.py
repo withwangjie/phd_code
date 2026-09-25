@@ -95,13 +95,16 @@ def test_generic_rcsb_is_audit_only_not_formal_training():
 
 def test_study_foldseek_universe_contains_only_verified_formal_vhh(tmp_path):
     ledger = tmp_path / "data_audit_details.jsonl"
+    pass_fields = dict(valid=True, missing_residues=0, interface_status="pass",
+                       max_contact_residues=20, vhh_status="pass",
+                       structure_quality_status="pass")
     rows = [
-        dict(subset="snac_db", pdb_id="1ABC", valid=True, vhh_status="pass"),
-        dict(subset="sabdab_vhh", pdb_id="2DEF", valid=True, vhh_status="pass"),
-        dict(subset="train_rcsb", pdb_id="3GHI", valid=True, vhh_status="not_applicable"),
-        dict(subset="test_db55", pdb_id="4JKL", valid=True, vhh_status="not_applicable"),
-        dict(subset="sabdab_vhh", pdb_id="5MNO", valid=True, vhh_status="fail"),
-        dict(subset="extra_misc", pdb_id="6PQR", valid=True, vhh_status="not_applicable"),
+        dict(subset="snac_db", pdb_id="1ABC", **pass_fields),
+        dict(subset="sabdab_vhh", pdb_id="2DEF", **pass_fields),
+        dict(subset="train_rcsb", pdb_id="3GHI", **pass_fields),
+        dict(subset="test_db55", pdb_id="4JKL", **pass_fields),
+        dict(subset="sabdab_vhh", pdb_id="5MNO", **{**pass_fields, "vhh_status": "fail"}),
+        dict(subset="extra_misc", pdb_id="6PQR", **pass_fields),
     ]
     ledger.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
     assert prep.study_pdb_ids(ledger) == ["1abc", "2def"]
@@ -109,3 +112,38 @@ def test_study_foldseek_universe_contains_only_verified_formal_vhh(tmp_path):
 
 def test_graph_protocol_version_changes_with_data_admission_semantics():
     assert builder.VERSION == "1.9"
+
+
+def test_cluster_universe_cannot_be_bridged_by_qc_failures_or_lower_priority_sources():
+    good = dict(valid=True, missing_residues=0, interface_status="pass",
+                max_contact_residues=20, vhh_status="pass",
+                structure_quality_status="pass")
+    rows = [
+        # SNAC wins by source precedence but fails QC; the passing SAbDab copy
+        # must not rescue the PDB into the clustering universe.
+        dict(subset="snac_db", pdb_id="1AAA", **{**good, "structure_quality_status": "fail"}),
+        dict(subset="sabdab_vhh", pdb_id="1AAA", **good),
+        dict(subset="sabdab_vhh", pdb_id="2BBB", **good),
+        dict(subset="snac_db", pdb_id="3CCC", **{**good, "missing_residues": 1}),
+        dict(subset="snac_db", pdb_id="4DDD", **{**good, "max_contact_residues": 10}),
+        dict(subset="snac_db", pdb_id="5EEE", **{**good, "interface_status": "weak"}),
+    ]
+    assert audit.formal_source_by_pdb(rows)["1AAA"] == "snac_db"
+    assert audit.formal_clustering_pdb_ids(rows, 15) == ["2bbb"]
+
+
+def test_foldseek_formal_sources_drop_qc_failures(tmp_path):
+    ledger = tmp_path / "data_audit_details.jsonl"
+    base = dict(path="/tmp/x.pdb", member="", valid=True, missing_residues=0,
+                interface_status="pass", max_contact_residues=20, vhh_status="pass",
+                structure_quality_status="pass")
+    rows = [
+        dict(base, id="good", subset="sabdab_vhh", pdb_id="2BBB"),
+        dict(base, id="bad", subset="snac_db", pdb_id="3CCC",
+             structure_quality_status="fail"),
+    ]
+    ledger.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+    from nanoqc.data.build_foldseek_pairs import audit_sources
+    sources = audit_sources(ledger, formal_only=True, min_interface_residues=15)
+    assert [row["id"] for row in sources["2bbb"]] == ["good"]
+    assert sources["3ccc"] == []
