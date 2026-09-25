@@ -10,12 +10,43 @@ cd "$REPO_ROOT"
 export PYTHONPATH="${REPO_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}"
 CONFIG_FILE="${QP_RESOLVED_CONFIG:-${REPO_ROOT}/configs/full_experiment_config.yaml}"
 SERVER_REPORT="${QP_SERVER_REPORT:-}"
+SERVER_CONFIG_FILE="${QP_SERVER_CONFIG:-${REPO_ROOT}/configs/server_config.yaml}"
+if [[ "$SERVER_CONFIG_FILE" != /* ]]; then
+    SERVER_CONFIG_FILE="${REPO_ROOT}/${SERVER_CONFIG_FILE}"
+fi
+server_venv_hint() {
+    [ -f "$SERVER_CONFIG_FILE" ] || return 0
+    awk -F: '$1 ~ /^[[:space:]]*venv[[:space:]]*$/ {
+        v=substr($0,index($0,":")+1); sub(/#.*/,"",v);
+        gsub(/^[[:space:]]+|[[:space:]]+$/,"",v);
+        gsub(/^"|"$/,"",v); gsub(/^\047|\047$/,"",v);
+        if (v!="" && v!="auto") print v; exit
+    }' "$SERVER_CONFIG_FILE"
+}
+SERVER_VENV_HINT="$(server_venv_hint)"
+if [ -n "$SERVER_VENV_HINT" ]; then
+    case "$SERVER_VENV_HINT" in
+        "~/"*) SERVER_VENV_HINT="${HOME}/${SERVER_VENV_HINT#~/}" ;;
+        /*) ;;
+        *) SERVER_VENV_HINT="${REPO_ROOT}/${SERVER_VENV_HINT}" ;;
+    esac
+fi
 [ -f "$CONFIG_FILE" ] || { echo "[formal_preflight] ERROR: config not found: $CONFIG_FILE" >&2; exit 1; }
 
 log() { echo "[formal_preflight] $*"; }
 fail() { echo "[formal_preflight] ERROR: $*" >&2; exit 1; }
 
-if [ -f "$REPO_ROOT/.venv/bin/activate" ] && [ -x "$REPO_ROOT/.venv/bin/python" ]; then
+if [ -n "$SERVER_VENV_HINT" ]; then
+    if [ -f "${SERVER_VENV_HINT}/bin/activate" ] && [ -x "${SERVER_VENV_HINT}/bin/python" ]; then
+        # shellcheck disable=SC1091
+        source "${SERVER_VENV_HINT}/bin/activate"
+    elif [ -f "${SERVER_VENV_HINT}/Scripts/activate" ] && [ -f "${SERVER_VENV_HINT}/Scripts/python.exe" ]; then
+        # shellcheck disable=SC1091
+        source "${SERVER_VENV_HINT}/Scripts/activate"
+    else
+        fail "server_config.yaml declares an unusable venv: ${SERVER_VENV_HINT}"
+    fi
+elif [ -f "$REPO_ROOT/.venv/bin/activate" ] && [ -x "$REPO_ROOT/.venv/bin/python" ]; then
     # shellcheck disable=SC1091
     source "$REPO_ROOT/.venv/bin/activate"
 elif [ -f "$REPO_ROOT/.venv/Scripts/activate" ] && [ -f "$REPO_ROOT/.venv/Scripts/python.exe" ]; then
@@ -30,7 +61,7 @@ else
         # shellcheck disable=SC1091
         source "${SHARED_VENV}/Scripts/activate"
     else
-        fail "No usable virtual environment found. Set QP_VENV or provide $REPO_ROOT/.venv."
+        fail "No usable virtual environment found. Set QP_VENV, configure server_config.yaml:venv, or provide $REPO_ROOT/.venv."
     fi
 fi
 
@@ -43,7 +74,7 @@ if [ -z "${QP_RESOLVED_CONFIG:-}" ]; then
     SERVER_REPORT="${REPO_ROOT}/.runtime/server_resolution.json"
     python -m nanoqc.pipeline.resolve_server_config \
         --scientific-config "${REPO_ROOT}/configs/full_experiment_config.yaml" \
-        --server-config "${QP_SERVER_CONFIG:-${REPO_ROOT}/configs/server_config.yaml}" \
+        --server-config "$SERVER_CONFIG_FILE" \
         --out-config "$CONFIG_FILE" \
         --out-report "$SERVER_REPORT"
 fi
