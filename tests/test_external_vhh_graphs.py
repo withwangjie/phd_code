@@ -667,3 +667,16 @@ def test_preprocessing_data_root_explicit_cli_wins(tmp_path, monkeypatch):
         {"paths":{"data_root":str(tmp_path/"fallback")}},
         explicit,
     ) == explicit.resolve()
+
+
+def test_preprocessing_external_source_matches_server_config(tmp_path, monkeypatch):
+    (tmp_path/"configs").mkdir()
+    external=tmp_path/"external_structures"
+    (tmp_path/"configs"/"server_config.yaml").write_text(
+        "paths:\n  external_vhh_source_dir: "+str(external)+"\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(prep,"REPO_ROOT",tmp_path)
+    monkeypatch.delenv("QP_EXTERNAL_VHH_SOURCE_DIR",raising=False)
+    config={"external_validation":{"external_vhh":{"source_structure_dir":""}}}
+    assert prep.preprocessing_external_source(config) == external.resolve()
