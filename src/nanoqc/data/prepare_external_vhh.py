@@ -85,13 +85,33 @@ def preprocessing_data_root(config: dict, explicit: Optional[Path]) -> Path:
     return repo_path(os.environ.get("QP_DATA_ROOT") or config["paths"]["data_root"]).resolve()
 
 
+def preprocessing_external_source(config: dict) -> Optional[Path]:
+    """Resolve the external raw-structure directory with formal-server precedence."""
+    env=os.environ.get("QP_EXTERNAL_VHH_SOURCE_DIR")
+    if env:
+        return Path(env).expanduser().resolve()
+    server_path=REPO_ROOT/"configs"/"server_config.yaml"
+    if server_path.is_file():
+        server=_load_server_config(server_path)
+        value=(server.get("paths") or {}).get("external_vhh_source_dir")
+        if value and value!="auto":
+            return Path(str(value)).expanduser().resolve()
+    value=((config.get("external_validation",{}) or {}).get("external_vhh",{}) or {}).get(
+        "source_structure_dir"
+    )
+    if value:
+        return repo_path(str(value)).resolve()
+    return None
+
+
 def settings(config: dict, prep_dir: Optional[Path]) -> dict:
     external = config["external_validation"]["external_vhh"]
     homology = config["queue_freeze"]["homology_isolation"]
+    source_dir=preprocessing_external_source(config)
     return dict(
         prep=(prep_dir or REPO_ROOT / "data" / "external_vhh" / "prep"),
         graph_dir=repo_path(external["graph_dir"]),
-        source_dir=repo_path(os.environ.get("QP_EXTERNAL_VHH_SOURCE_DIR") or external["source_structure_dir"]),
+        source_dir=(source_dir if source_dir is not None else REPO_ROOT),
         min_clusters=int(external.get("min_clusters", 10)),
         pair_tsv=repo_path(config["queue_freeze"]["independence_clustering"]["pair_tsv"]),
         thresholds=["--vhh-threshold", str(homology.get("vhh_full_chain_identity", 0.80)),
@@ -322,9 +342,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     config = load_config(args.config)
     external_cfg=((config.get("external_validation",{}) or {}).get("external_vhh",{}) or {})
     if args.command in ("pass1","pass2"):
-        if not external_cfg.get("graph_dir") or not (
-            os.environ.get("QP_EXTERNAL_VHH_SOURCE_DIR") or external_cfg.get("source_structure_dir")
-        ):
+        if not external_cfg.get("graph_dir") or preprocessing_external_source(config) is None:
             raise SystemExit(
                 f"{args.command} is only valid for a genuinely external VHH set: "
                 "configure both external_validation.external_vhh.graph_dir and "
