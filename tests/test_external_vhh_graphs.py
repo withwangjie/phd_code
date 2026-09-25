@@ -637,3 +637,33 @@ def test_external_only_preprocessing_refuses_holdout_mode(tmp_path, monkeypatch)
     monkeypatch.delenv("QP_EXTERNAL_VHH_SOURCE_DIR",raising=False)
     with pytest.raises(SystemExit,match="only valid for a genuinely external VHH set"):
         prep.main(["--config",str(config),"pass1","--sabdab-summary",str(tmp_path/"dummy.tsv")])
+
+
+def test_preprocessing_data_root_matches_current_server_config(tmp_path, monkeypatch):
+    (tmp_path/"configs").mkdir()
+    server_data=tmp_path/"server_data"
+    (tmp_path/"configs"/"server_config.yaml").write_text(
+        "paths:\n  data_root: "+str(server_data)+"\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(prep,"REPO_ROOT",tmp_path)
+    monkeypatch.delenv("QP_DATA_ROOT",raising=False)
+    resolved=prep.preprocessing_data_root(
+        {"paths":{"data_root":str(tmp_path/"wrong_fallback")}},
+        None,
+    )
+    assert resolved == server_data.resolve()
+
+
+def test_preprocessing_data_root_explicit_cli_wins(tmp_path, monkeypatch):
+    (tmp_path/"configs").mkdir()
+    (tmp_path/"configs"/"server_config.yaml").write_text(
+        "paths:\n  data_root: "+str(tmp_path/"server_data")+"\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(prep,"REPO_ROOT",tmp_path)
+    explicit=tmp_path/"explicit_data"
+    assert prep.preprocessing_data_root(
+        {"paths":{"data_root":str(tmp_path/"fallback")}},
+        explicit,
+    ) == explicit.resolve()
