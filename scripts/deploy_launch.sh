@@ -36,10 +36,13 @@ fail() { echo "[deploy_launch] ERROR: $*" >&2; exit 1; }
 # that is very likely missing this project's dependencies.
 # ---------------------------------------------------------------------------
 SHARED_VENV="${QP_VENV:-/data/quantum-protein/.venv}"
+PREFER_SHARED=0
+[ -n "${QP_VENV:-}" ] && PREFER_SHARED=1
 VENV_FROM_CLI=0
 if [ "${1:-}" = "--venv" ]; then
     [ "$#" -ge 2 ] || fail "--venv requires a path"
     SHARED_VENV="$2"
+    PREFER_SHARED=1
     VENV_FROM_CLI=1
     shift 2
 fi
@@ -62,6 +65,7 @@ if [ "$VENV_FROM_CLI" -eq 0 ] && [ -z "${QP_VENV:-}" ]; then
                 /*) SHARED_VENV="$SERVER_VENV_HINT" ;;
                 *) SHARED_VENV="${REPO_ROOT}/${SERVER_VENV_HINT}" ;;
             esac
+            PREFER_SHARED=1
         fi
     fi
 fi
@@ -76,7 +80,23 @@ if [ -L "${REPO_ROOT}/.venv" ] && ! venv_usable "${REPO_ROOT}/.venv"; then
     rm -f "${REPO_ROOT}/.venv"
 fi
 
-if venv_usable "${REPO_ROOT}/.venv"; then
+if [ "$PREFER_SHARED" -eq 1 ]; then
+    venv_usable "${SHARED_VENV}" || fail "Selected virtual environment is unusable: ${SHARED_VENV}"
+    ACTIVE_VENV="$(readlink -f "${SHARED_VENV}" 2>/dev/null || printf '%s' "${SHARED_VENV}")"
+    if [ -L "${REPO_ROOT}/.venv" ]; then
+        CURRENT_LINK="$(readlink -f "${REPO_ROOT}/.venv" 2>/dev/null || true)"
+        if [ "$CURRENT_LINK" != "$ACTIVE_VENV" ]; then
+            rm -f "${REPO_ROOT}/.venv"
+            ln -s "$ACTIVE_VENV" "${REPO_ROOT}/.venv"
+            log "Updated repository environment link -> ${ACTIVE_VENV}"
+        fi
+    elif [ ! -e "${REPO_ROOT}/.venv" ]; then
+        ln -s "$ACTIVE_VENV" "${REPO_ROOT}/.venv"
+        log "Linked repository environment -> ${ACTIVE_VENV}"
+    else
+        log "Explicit environment selected: ${ACTIVE_VENV}; existing real ${REPO_ROOT}/.venv left untouched."
+    fi
+elif venv_usable "${REPO_ROOT}/.venv"; then
     ACTIVE_VENV="$(readlink -f "${REPO_ROOT}/.venv" 2>/dev/null || printf '%s' "${REPO_ROOT}/.venv")"
     log "Environment available: ${REPO_ROOT}/.venv -> ${ACTIVE_VENV}"
 elif [ -e "${REPO_ROOT}/.venv" ]; then
@@ -84,7 +104,7 @@ elif [ -e "${REPO_ROOT}/.venv" ]; then
 elif venv_usable "${SHARED_VENV}"; then
     ln -s "${SHARED_VENV}" "${REPO_ROOT}/.venv"
     ACTIVE_VENV="$(readlink -f "${REPO_ROOT}/.venv" 2>/dev/null || printf '%s' "${SHARED_VENV}")"
-    log "Linked this deployment to the existing shared environment: ${ACTIVE_VENV}"
+    log "Linked this deployment to the default shared environment: ${ACTIVE_VENV}"
 else
     fail "No virtual environment found at ${SHARED_VENV}. Set QP_VENV, use --venv /path/to/existing/.venv, or create/restore that environment first."
 fi
