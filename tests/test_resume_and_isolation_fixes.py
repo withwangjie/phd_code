@@ -504,3 +504,18 @@ def test_tampered_frozen_holdout_is_never_reused(tmp_path: Path) -> None:
     ok,detail=orchestrator._validate_frozen_antigen_holdout()
     assert ok is False
     assert "hash mismatch" in detail
+
+
+def test_launcher_checks_active_pipeline_before_shared_runtime_write() -> None:
+    script=(REPO/"scripts"/"run_full_experiment.sh").read_text(encoding="utf-8")
+    runtime_write=script.index('RUNTIME_DIR="${REPO_ROOT}/.runtime"')
+    assert script.index('flock -n 9') < runtime_write
+    assert script.index('LOCK_FILE="${REPO_ROOT}/.run_full_experiment.lock"') < runtime_write
+    assert script.index('nanoqc.pipeline.run_full_experiment') < runtime_write
+
+
+def test_resume_provenance_is_checked_before_preflight() -> None:
+    script=(REPO/"scripts"/"run_full_experiment.sh").read_text(encoding="utf-8")
+    assert script.index("Resume provenance verified before preflight") < script.index(
+        'PREFLIGHT_SCRIPT="${SCRIPT_DIR}/formal_preflight.sh"'
+    )
