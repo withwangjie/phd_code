@@ -21,20 +21,29 @@ THREE = {"A": "ALA", "C": "CYS", "D": "ASP", "E": "GLU", "F": "PHE", "G": "GLY",
 
 def _install_fake_anarci(monkeypatch):
     """Deterministic IMGT-like numbering stub for formal builder unit tests."""
+    import re
     import types
     fake = types.ModuleType("anarci")
 
+    def _numbered_loops(sequence):
+        # The synthetic antigen overlaps the N-terminal fixture residues.
+        # Assign those residues to CDR1/CDR2 so the fixture exercises the
+        # formal CDR-restricted paratope path rather than the whole-chain
+        # fallback. CDR3 is still located from the conserved VHH anchors.
+        cdr1 = sequence[:12]
+        cdr2 = sequence[12:22]
+        match = re.search(r"Y[YFHW]C(.{3,40})WG.G", sequence)
+        if match is None:
+            raise ValueError("synthetic VHH lacks CDR3 anchors")
+        cdr3 = match.group(1)
+        numbered = [((27 + i, " "), aa) for i, aa in enumerate(cdr1)]
+        numbered += [((56 + i, " "), aa) for i, aa in enumerate(cdr2)]
+        numbered += [((111, chr(65 + i)), aa) for i, aa in enumerate(cdr3)]
+        return numbered
+
     def _anarci(seqs, scheme, output):
         assert scheme == "imgt"
-        numbered_domains = []
-        for _name, sequence in seqs:
-            # Synthetic fixtures prepend 20 residues to the canonical VHH_TAIL.
-            # The formal builder only needs a deterministic variable-domain
-            # numbering contract here; real formal runs require real ANARCI.
-            domain_sequence = sequence[-len(VHH_TAIL):]
-            numbered = [((n, " "), aa) for n, aa in enumerate(domain_sequence, start=1)]
-            numbered_domains.append([(numbered, 0, 0)])
-        return numbered_domains, None, None
+        return [[(_numbered_loops(sequence), 0, 0)] for _name, sequence in seqs], None, None
 
     fake.anarci = _anarci
     monkeypatch.setitem(sys.modules, "anarci", fake)
@@ -44,14 +53,20 @@ def _write_fake_anarci_module(directory):
     """Create an importable ANARCI stub for subprocess-only unit tests."""
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "anarci.py").write_text(
-        "DOMAIN_LEN = 123\n"
+        "import re\n"
+        "def _numbered(sequence):\n"
+        "    cdr1 = sequence[:12]\n"
+        "    cdr2 = sequence[12:22]\n"
+        "    m = re.search(r'Y[YFHW]C(.{3,40})WG.G', sequence)\n"
+        "    if m is None:\n"
+        "        raise ValueError('synthetic VHH lacks CDR3 anchors')\n"
+        "    cdr3 = m.group(1)\n"
+        "    out = [((27+i, ' '), aa) for i, aa in enumerate(cdr1)]\n"
+        "    out += [((56+i, ' '), aa) for i, aa in enumerate(cdr2)]\n"
+        "    out += [((111, chr(65+i)), aa) for i, aa in enumerate(cdr3)]\n"
+        "    return out\n"
         "def anarci(seqs, scheme='imgt', output=False):\n"
-        "    domains = []\n"
-        "    for name, sequence in seqs:\n"
-        "        seq = sequence[-DOMAIN_LEN:]\n"
-        "        numbered = [((i, ' '), aa) for i, aa in enumerate(seq, start=1)]\n"
-        "        domains.append([(numbered, 0, 0)])\n"
-        "    return domains, None, None\n",
+        "    return [[(_numbered(sequence), 0, 0)] for name, sequence in seqs], None, None\n",
         encoding="utf-8",
     )
 
