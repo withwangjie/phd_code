@@ -215,7 +215,10 @@ def test_with_no_arguments_it_finds_the_latest_audit_and_the_data_root(tmp_path,
         (d / "data_audit_details.jsonl").write_text(
             json.dumps(dict(subset="train_rcsb", pdb_id=pdb, valid=True, resolution_angstrom=None)) + "\n")
     newest = tmp_path / "runs" / "run_new" / "audit" / "data_audit_details.jsonl"
-    newest.touch()
+    older = tmp_path / "runs" / "run_old" / "audit" / "data_audit_details.jsonl"
+    # File-system timestamp resolution varies; make the ordering explicit.
+    os.utime(older, (1_600_000_000, 1_600_000_000))
+    os.utime(newest, (1_600_000_010, 1_600_000_010))
     assert fetch.latest_audit_dir() == newest.parent
     assert fetch.data_root() == tmp_path / "data"
 
