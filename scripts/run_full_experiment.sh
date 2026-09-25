@@ -172,10 +172,15 @@ exec 9>"${REPO_ROOT}/.launch.guard"
 flock -n 9 || fail "A pipeline launch or process already owns this deployment."
 if [ -f "$LOCK_FILE" ]; then
     HELD_PID="$(cat "$LOCK_FILE" 2>/dev/null || true)"
-    if [ -n "$HELD_PID" ] && kill -0 "$HELD_PID" 2>/dev/null; then
-        fail "run_full_experiment.sh already appears to be running (PID ${HELD_PID}, lock: ${LOCK_FILE}). Refusing to start a second instance. If that process is gone, remove the lock file manually."
+    HELD_CMD=""
+    if [ -n "$HELD_PID" ] && kill -0 "$HELD_PID" 2>/dev/null && [ -r "/proc/${HELD_PID}/cmdline" ]; then
+        HELD_CMD="$(tr '\0' ' ' < "/proc/${HELD_PID}/cmdline" 2>/dev/null || true)"
+    fi
+    if [ -n "$HELD_PID" ] && kill -0 "$HELD_PID" 2>/dev/null &&
+       [[ "$HELD_CMD" == *"nanoqc.pipeline.run_full_experiment"* ]]; then
+        fail "Formal pipeline already appears to be running (PID ${HELD_PID}, lock: ${LOCK_FILE}). Refusing to start a second instance."
     else
-        log "Stale lock file found (PID ${HELD_PID:-unknown} not running); removing it."
+        log "Stale/unrelated lock file found (PID ${HELD_PID:-unknown}); removing it."
         rm -f "$LOCK_FILE"
     fi
 fi
