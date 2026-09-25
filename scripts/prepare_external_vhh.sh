@@ -39,36 +39,34 @@ server_venv_hint() {
     }' "$SERVER_CONFIG_FILE"
 }
 SERVER_VENV_HINT="$(server_venv_hint)"
-if [ -n "${QP_VENV:-}" ]; then
-    EXPLICIT_VENV="${QP_VENV}"
-    if [ -f "${EXPLICIT_VENV}/bin/activate" ] && [ -x "${EXPLICIT_VENV}/bin/python" ]; then
-        # shellcheck disable=SC1091
-        source "${EXPLICIT_VENV}/bin/activate"
-    elif [ -f "${EXPLICIT_VENV}/Scripts/activate" ] && [ -f "${EXPLICIT_VENV}/Scripts/python.exe" ]; then
-        # shellcheck disable=SC1091
-        source "${EXPLICIT_VENV}/Scripts/activate"
-    else
-        echo "[prepare_external_vhh] ERROR: QP_VENV declares an unusable venv: ${EXPLICIT_VENV}" >&2
-        exit 1
+
+activate_venv() {
+    local candidate="$1"
+    local label="$2"
+    if [ -f "${candidate}/bin/activate" ] && [ -x "${candidate}/bin/python" ]; then
+        # shellcheck disable=SC1090
+        source "${candidate}/bin/activate"
+        return 0
     fi
+    if [ -f "${candidate}/Scripts/activate" ] && [ -f "${candidate}/Scripts/python.exe" ]; then
+        # shellcheck disable=SC1090
+        source "${candidate}/Scripts/activate"
+        return 0
+    fi
+    echo "[prepare_external_vhh] ERROR: ${label} declares an unusable venv: ${candidate}" >&2
+    return 1
+}
+
+if [ -n "${QP_VENV:-}" ]; then
+    # Explicit environment always wins and must not be overridden later.
+    activate_venv "${QP_VENV}" "QP_VENV" || exit 1
 elif [ -n "$SERVER_VENV_HINT" ]; then
     case "$SERVER_VENV_HINT" in
         "~/"*) SERVER_VENV_HINT="${HOME}/${SERVER_VENV_HINT#~/}" ;;
         /*) ;;
         *) SERVER_VENV_HINT="${REPO_ROOT}/${SERVER_VENV_HINT}" ;;
     esac
-fi
-if [ -n "$SERVER_VENV_HINT" ]; then
-    if [ -f "${SERVER_VENV_HINT}/bin/activate" ] && [ -x "${SERVER_VENV_HINT}/bin/python" ]; then
-        # shellcheck disable=SC1091
-        source "${SERVER_VENV_HINT}/bin/activate"
-    elif [ -f "${SERVER_VENV_HINT}/Scripts/activate" ] && [ -f "${SERVER_VENV_HINT}/Scripts/python.exe" ]; then
-        # shellcheck disable=SC1091
-        source "${SERVER_VENV_HINT}/Scripts/activate"
-    else
-        echo "[prepare_external_vhh] ERROR: server_config.yaml declares an unusable venv: ${SERVER_VENV_HINT}" >&2
-        exit 1
-    fi
+    activate_venv "$SERVER_VENV_HINT" "server_config.yaml" || exit 1
 elif [ -f "${REPO_ROOT}/.venv/bin/activate" ] && [ -x "${REPO_ROOT}/.venv/bin/python" ]; then
     # shellcheck disable=SC1091
     source "${REPO_ROOT}/.venv/bin/activate"
@@ -77,15 +75,9 @@ elif [ -f "${REPO_ROOT}/.venv/Scripts/activate" ] && [ -f "${REPO_ROOT}/.venv/Sc
     source "${REPO_ROOT}/.venv/Scripts/activate"
 else
     SHARED_VENV="/data/quantum-protein/.venv"
-    if [ -f "${SHARED_VENV}/bin/activate" ] && [ -x "${SHARED_VENV}/bin/python" ]; then
-        # shellcheck disable=SC1091
-        source "${SHARED_VENV}/bin/activate"
-    elif [ -f "${SHARED_VENV}/Scripts/activate" ] && [ -f "${SHARED_VENV}/Scripts/python.exe" ]; then
-        # shellcheck disable=SC1091
-        source "${SHARED_VENV}/Scripts/activate"
-    else
+    activate_venv "$SHARED_VENV" "default shared environment" || {
         echo "[prepare_external_vhh] ERROR: no usable virtual environment found. Set QP_VENV, configure server_config.yaml:venv, or create ${REPO_ROOT}/.venv." >&2
         exit 1
-    fi
+    }
 fi
 exec python -m nanoqc.data.prepare_external_vhh "$@"
