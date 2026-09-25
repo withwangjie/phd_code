@@ -65,40 +65,6 @@ for ARG in "$@"; do
     esac
 done
 
-activate_venv() {
-    local candidate="$1"
-    local label="$2"
-    if [ -f "${candidate}/bin/activate" ] && [ -x "${candidate}/bin/python" ]; then
-        # shellcheck disable=SC1090
-        source "${candidate}/bin/activate"
-        return 0
-    fi
-    if [ -f "${candidate}/Scripts/activate" ] && [ -f "${candidate}/Scripts/python.exe" ]; then
-        # shellcheck disable=SC1090
-        source "${candidate}/Scripts/activate"
-        return 0
-    fi
-    fail "${label} is not a usable virtual environment: ${candidate}"
-}
-
-# Match resolve_server_config.py exactly: QP_VENV > server config > repo .venv
-# > default shared environment.
-if [ -n "${QP_VENV:-}" ]; then
-    activate_venv "${QP_VENV}" "QP_VENV"
-elif [ -n "$SERVER_VENV_HINT" ]; then
-    activate_venv "$SERVER_VENV_HINT" "server_config.yaml:venv"
-elif [ -f "${REPO_ROOT}/.venv/bin/activate" ] && [ -x "${REPO_ROOT}/.venv/bin/python" ]; then
-    # shellcheck disable=SC1091
-    source "${REPO_ROOT}/.venv/bin/activate"
-elif [ -f "${REPO_ROOT}/.venv/Scripts/activate" ] && [ -f "${REPO_ROOT}/.venv/Scripts/python.exe" ]; then
-    # shellcheck disable=SC1091
-    source "${REPO_ROOT}/.venv/Scripts/activate"
-else
-    activate_venv "/data/quantum-protein/.venv" "default shared environment"
-fi
-log "Activated virtual environment: $(command -v python)"
-python --version
-
 # Serialize launch setup BEFORE writing shared .runtime files. The background
 # orchestrator later holds its own run-root FileLock for the full experiment;
 # this guard protects only the launcher/preflight handoff from concurrent
