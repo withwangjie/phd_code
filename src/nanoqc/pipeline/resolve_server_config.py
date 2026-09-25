@@ -58,7 +58,11 @@ def _find_existing(candidates: list[str|Path], *, executable: bool=False) -> str
 
 def _resolve_venv(server: dict[str,Any]) -> str:
     def valid(path: Path) -> bool:
-        return (path/"bin/activate").is_file() or (path/"Scripts/activate").is_file()
+        return (
+            (path/"bin/activate").is_file() and (path/"bin/python").is_file()
+        ) or (
+            (path/"Scripts/activate").is_file() and (path/"Scripts/python.exe").is_file()
+        )
 
     raw=server.get("venv","auto")
     if raw!="auto":
