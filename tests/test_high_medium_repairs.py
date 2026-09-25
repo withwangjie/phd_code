@@ -547,3 +547,14 @@ def test_pair_table_coverage_is_required_before_frozen_clustering() -> None:
     assert "not demonstrated as searched" in source
     # The failure has to name the run whose universe the table must match.
     assert "foldseek --run-dir" in source
+
+
+def test_auto_venv_resolution_ignores_existing_non_venv_directory(tmp_path, monkeypatch) -> None:
+    bad=tmp_path/"not_a_venv"
+    bad.mkdir()
+    good=tmp_path/".venv"
+    (good/"bin").mkdir(parents=True)
+    (good/"bin"/"activate").write_text("# test\n",encoding="utf-8")
+    monkeypatch.setenv("QP_VENV",str(bad))
+    monkeypatch.setattr(server_resolver,"REPO_ROOT",tmp_path)
+    assert server_resolver._resolve_venv({"venv":"auto"}) == str(good.resolve())
