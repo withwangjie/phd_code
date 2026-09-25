@@ -73,12 +73,25 @@ def repo_path(value: str) -> Path:
 def preprocessing_data_root(config: dict, explicit: Optional[Path]) -> Path:
     """Resolve the same server data root used by formal deployment.
 
-    Explicit CLI input wins, then QP_DATA_ROOT/server_config auto-resolution,
-    then the scientific config fallback only when no server config exists.
+    Explicit CLI input wins. Otherwise the exact QP_SERVER_CONFIG selected by
+    the formal shell launchers is honored (relative paths are repository-root
+    relative), including QP_DATA_ROOT/server-config auto resolution. Only when
+    no server config exists do we fall back to the scientific config path.
     """
     if explicit is not None:
         return explicit.expanduser().resolve()
-    server_path=REPO_ROOT/"configs"/"server_config.yaml"
+
+    server_setting=os.environ.get("QP_SERVER_CONFIG")
+    if server_setting:
+        server_path=Path(server_setting).expanduser()
+        if not server_path.is_absolute():
+            server_path=REPO_ROOT/server_path
+        server_path=server_path.resolve()
+        if not server_path.is_file():
+            raise SystemExit(f"QP_SERVER_CONFIG does not exist: {server_path}")
+    else:
+        server_path=(REPO_ROOT/"configs"/"server_config.yaml").resolve()
+
     if server_path.is_file():
         server=_load_server_config(server_path)
         return Path(_resolve_data_root(server)).resolve()
