@@ -49,6 +49,14 @@ for ARG in "$@"; do
     esac
 done
 
+# Serialize launch setup BEFORE writing shared .runtime files. The background
+# orchestrator later holds its own run-root FileLock for the full experiment;
+# this guard protects only the launcher/preflight handoff from concurrent
+# shells racing on resolved_runtime_config.yaml and server_resolution.json.
+command -v flock >/dev/null || fail "Linux flock is required for atomic launch locking."
+exec 9>"${REPO_ROOT}/.launch.guard"
+flock -n 9 || fail "A pipeline launch setup is already active in this deployment."
+
 # ---------------------------------------------------------------------------
 # 1. Activate the local virtual environment (POSIX or Windows layout).
 # ---------------------------------------------------------------------------
@@ -210,9 +218,6 @@ fi
 #    does not even pay the interpreter-startup cost.
 # ---------------------------------------------------------------------------
 LOCK_FILE="${REPO_ROOT}/.run_full_experiment.lock"
-command -v flock >/dev/null || fail "Linux flock is required for atomic launch locking."
-exec 9>"${REPO_ROOT}/.launch.guard"
-flock -n 9 || fail "A pipeline launch or process already owns this deployment."
 if [ -f "$LOCK_FILE" ]; then
     HELD_PID="$(cat "$LOCK_FILE" 2>/dev/null || true)"
     HELD_CMD=""
