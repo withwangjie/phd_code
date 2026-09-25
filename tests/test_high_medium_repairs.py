@@ -582,3 +582,9 @@ def test_deploy_exports_the_virtual_environment_it_actually_selected() -> None:
     assert 'ACTIVE_VENV=' in source
     assert 'export QP_VENV="${ACTIVE_VENV}"' in source
     assert 'export QP_VENV="$SHARED_VENV"' not in source
+
+
+def test_preprocessing_qp_venv_precedence_matches_formal_launcher() -> None:
+    source=(REPO/"scripts"/"prepare_external_vhh.sh").read_text(encoding="utf-8")
+    assert 'if [ -n "${QP_VENV:-}" ]; then' in source
+    assert 'SERVER_VENV_HINT=""' in source
