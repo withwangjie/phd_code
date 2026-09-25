@@ -589,3 +589,15 @@ they were logged later.
   (when it scores the run-local holdout), cluster adequacy counts and final
   reporting of that holdout.
 - **Results inspected before this amendment:** _to be completed by the investigator_.
+
+
+## A18. Literature-audited interface definition, formal IMGT numbering and strict fixed backbone
+
+- **Primary interface:** the formal VHH-antigen interface is now cross-partner heavy-atom distance **<=4.5 A** [METHODS_EVIDENCE R49]. Graph v1.11 also stores node-aligned 3.5 A and 5.0 A labels as preregistered strict/permissive sensitivity definitions. They do not alter cross-partner KNN edges or the primary EGNN target.
+- **Audit/build consistency:** audit receives the same 4.5 A cutoff, records it in `data_audit_inventory.json`, and graph construction rejects an audit made with a different primary cutoff. The standalone external-preparation audit now forwards this setting as well.
+- **Formal CDR definition:** formal SAbDab and genuine external-VHH candidate selection/building require ANARCI with IMGT numbering and fail closed if the dependency is absent. The motif CDR-H3 locator remains only for non-formal debug/legacy paths. SNAC retains its curated source IMGT region annotation.
+- **Fixed backbone:** formal structural runs require `loop_relax_iterations: 0`; orchestration validates this before execution and now also defaults every formal stage invocation to zero. Primary all-atom relaxation therefore cannot move N/CA/C/O coordinates.
+- **DB5.5:** remains optional (`include_db55_auxiliary: false` by default); when explicitly enabled, the original exact-248 fail-closed contract is preserved.
+- **Quantum resource wording:** current two-qubit resource counts are explicitly variational-layer counts (cost ZZ + local XY mixer). Full-circuit counts remain null until a concrete W-state StatePrep decomposition is frozen; no total-gate claim is made by substituting the variational count.
+- **Affected results:** graph labels/protocol hashes, EGNN training, Active-site selection, formal external VHH preparation, structure endpoints and all downstream reports. Old graph v1.10 artifacts are intentionally incompatible.
+- **Results inspected before this amendment:** no formal validation/test result was used to select these protocol changes; they implement the literature and protocol audit performed before formal rerun.

@@ -3331,7 +3331,7 @@ class Orchestrator:
                 "--cdr-h3-identity-threshold", str(qf_cfg["homology_isolation"].get("cdr_h3_identity", 0.50)),
                 "--antigen-identity-threshold", str(qf_cfg["homology_isolation"].get("antigen_identity", 0.30)),
                 "--antigen-min-length-coverage", str(qf_cfg["homology_isolation"].get("antigen_min_length_coverage", 0.70)),
-                "--loop-relax-iterations", str(cfg.get("loop_relax_iterations", 100)),
+                "--loop-relax-iterations", str(cfg.get("loop_relax_iterations", 0)),
                 "--eval-shots", str(qprimary.get("eval_shots",500)),
                 "--seeds", *[str(s) for s in cfg.get("seeds", [42, 43, 44])],
                 # (requirement #2) --master-seed lets run_real_complex_pilot.py
@@ -3604,7 +3604,7 @@ class Orchestrator:
                     "--max-evals",str(qprimary.get("max_evals",90)),
                     "--sa-passes",str(cfg.get("sa_passes",100)),
                     "--relax-iterations",str(cfg.get("relax_iterations",200)),
-                    "--loop-relax-iterations",str(cfg.get("loop_relax_iterations",100)),
+                    "--loop-relax-iterations",str(cfg.get("loop_relax_iterations",0)),
                     "--seeds",*[str(v) for v in cfg.get("seeds",[42,43,44,45,46])],
                     "--optimize-seeds",*[str(v) for v in optimize_seeds],
                     "--measurement-seeds",*[str(v) for v in measurement_seeds],

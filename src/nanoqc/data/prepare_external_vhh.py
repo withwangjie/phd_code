@@ -177,6 +177,7 @@ def cmd_audit(args, config, s) -> int:
     data_root = preprocessing_data_root(config,args.data_root)
     argv = ["--data", str(data_root), "--workers", str(audit_cfg.get("workers", 4)),
             "--limit", str(audit_cfg.get("limit", 0)), "--out", str(s["prep"] / "audit"),
+            "--interface-contact-cutoff", str(audit_cfg.get("interface_contact_cutoff_angstrom", 4.5)),
             "--max-resolution", s["max_resolution"],
             "--min-interface-occupancy", str(audit_cfg.get("min_interface_occupancy", 0.90))]
     for key, flag in (("allow_interface_altloc", "--allow-interface-altloc"),

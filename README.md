@@ -20,7 +20,7 @@ prediction.
      assembly (entries without assembly annotation are excluded); SAbDab H/L/antigen
      metadata defines the VHH entry and only annotated antigen chains within 7.5 A of the
      VHH paratope are retained. `snac_db` uses SNAC-DB's assembly-curated complexes [R34].
-   - Interface labels: cross-partner heavy-atom contact < 5 A, following antibody-antigen/CAPRI-style contact definitions [R3,R4].
+   - Interface labels: primary cross-partner heavy-atom contact <= 4.5 A [R49]. Node-aligned 3.5 A and 5.0 A labels are frozen in graph v1.11 for strict/permissive sensitivity analyses; graph edges remain threshold-independent KNN.
    - Graph edges: intra-chain CA radius < 8 A plus fixed cross-partner KNN. An 8 A C-alpha residue-graph cutoff has direct protein-GNN precedent [R22]; the cross-partner KNN degree k=3 remains a study-specific leakage-control choice rather than a literature-optimal constant.
    - EGNN train/validation split: layered connected components. Complexes are
      joined if VHH full-chain identity >=80% [R24], CDR-H3 loop-only identity >=50% [R23], or
@@ -113,8 +113,9 @@ prediction.
   from development-only replicates.
 - Coarse antigen interaction scores are not binding free energies; contact
   number is a geometry baseline, not an affinity estimator.
-- All-atom experiments remain native-backbone-conditioned, but formal recovery
-  perturbs and reconstructs every defined Active side-chain chi. The coarse
+- All-atom primary experiments are strict fixed-backbone: N/CA/C/O coordinates
+  never move (`loop_relax_iterations: 0`). Formal recovery perturbs and
+  reconstructs every defined Active side-chain chi. The coarse
   energy surrogate remains chi1-oriented and is calibrated against Amber14 on
   training complexes only.
 - Smoke checks and legacy explicit `chi1_angles` overrides are engineering or
@@ -209,7 +210,7 @@ claim it supports is that the frozen pipeline still holds on antigen folds
 training never saw; it is a cluster-level holdout of the same audited
 snapshot, not a separate database. Setting
 `external_validation.external_vhh.graph_dir` and `source_structure_dir`
-scores an independently certified graph-v1.10 VHH dataset instead, with the
+scores an independently certified graph-v1.11 VHH dataset instead, with the
 identical independence audit.
 FASPR is supported as a mature biological side-chain packing baseline and
 Phenix clashscore as a standard steric-quality diagnostic. These are
@@ -248,7 +249,7 @@ the frozen model.
 
 ### Preparing the external VHH set
 
-External complexes are built with the training-graph definition (graph v1.10,
+External complexes are built with the training-graph definition (graph v1.11,
 biological assembly, 7.5 A SAbDab antigen rule, the same labels and edges):
 
 Structure files that carry no resolution record need the entry table the audit
@@ -317,10 +318,10 @@ homology group. Selection also requires a protein or peptide antigen, resolution
 homology rule and reports whether `min_clusters` independent groups exist.
 CDR-H3 follows IMGT (105-117), like the training SNAC `Region_Split_VH.cdr3`;
 with `--training-dataset` the report states how often the external CDR-H3
-rule reproduces the training annotation. CDRs use ANARCI IMGT numbering when
-ANARCI is installed. Otherwise CDR-H3 is
-located between the IMGT 104 cysteine and 118 tryptophan motifs, and the
-paratope falls back to the whole VHH chain. Every formal run re-certifies
+rule reproduces the training annotation. Formal SAbDab/external candidates
+require ANARCI IMGT numbering and fail closed when ANARCI is unavailable.
+The motif locator is retained only for non-formal debug/legacy paths and
+cannot define a formal external graph. Every formal run re-certifies
 independence against its own frozen training set and cluster map.
 
 The primary all-atom protocol uses vacuum/NoCutoff Amber14 packing energy.
