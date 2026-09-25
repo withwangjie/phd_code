@@ -77,16 +77,20 @@ if [ -L "${REPO_ROOT}/.venv" ] && ! venv_usable "${REPO_ROOT}/.venv"; then
 fi
 
 if venv_usable "${REPO_ROOT}/.venv"; then
-    log "Environment available: ${REPO_ROOT}/.venv -> $(readlink -f "${REPO_ROOT}/.venv" 2>/dev/null || printf '%s' "${REPO_ROOT}/.venv")"
+    ACTIVE_VENV="$(readlink -f "${REPO_ROOT}/.venv" 2>/dev/null || printf '%s' "${REPO_ROOT}/.venv")"
+    log "Environment available: ${REPO_ROOT}/.venv -> ${ACTIVE_VENV}"
 elif [ -e "${REPO_ROOT}/.venv" ]; then
     fail "${REPO_ROOT}/.venv exists but is not a usable virtual environment; move/remove it or set QP_VENV."
 elif venv_usable "${SHARED_VENV}"; then
     ln -s "${SHARED_VENV}" "${REPO_ROOT}/.venv"
-    log "Linked this deployment to the existing shared environment: ${SHARED_VENV}"
+    ACTIVE_VENV="$(readlink -f "${REPO_ROOT}/.venv" 2>/dev/null || printf '%s' "${SHARED_VENV}")"
+    log "Linked this deployment to the existing shared environment: ${ACTIVE_VENV}"
 else
     fail "No virtual environment found at ${SHARED_VENV}. Set QP_VENV, use --venv /path/to/existing/.venv, or create/restore that environment first."
 fi
 
-export QP_VENV="$SHARED_VENV"
+# Export the environment that was actually selected. QP_VENV has highest
+# precedence in the resolver and downstream shell entrypoints.
+export QP_VENV="${ACTIVE_VENV}"
 log "Handing off to run_full_experiment.sh (formal pipeline uses the stage toggles frozen in configs/full_experiment_config.yaml; current source config includes smoke_check before data_audit)."
 exec bash "${SCRIPT_DIR}/run_full_experiment.sh" "$@"
