@@ -20,35 +20,47 @@ THREE = {"A": "ALA", "C": "CYS", "D": "ASP", "E": "GLU", "F": "PHE", "G": "GLY",
 
 
 def _install_fake_anarci(monkeypatch):
-    """Deterministic sequential IMGT numbering stub for formal builder tests."""
+    """Deterministic CDR-resolving ANARCI stub for synthetic formal tests."""
     import types
     fake = types.ModuleType("anarci")
 
+    def _numbered(sequence):
+        # Synthetic-only: map three unique observed substrings to IMGT CDR
+        # number ranges so the production paratope mapper is genuinely used.
+        cdr1 = sequence[18:30]
+        cdr2 = sequence[34:44]
+        anchor = "AAGRYGSSWYPDSYDY"
+        if anchor not in sequence:
+            raise ValueError("synthetic VHH lacks expected CDR3")
+        numbered = [((27 + i, " "), aa) for i, aa in enumerate(cdr1)]
+        numbered += [((56 + i, " "), aa) for i, aa in enumerate(cdr2)]
+        numbered += [((111, chr(65 + i)), aa) for i, aa in enumerate(anchor)]
+        return numbered
+
     def _anarci(seqs, scheme, output):
         assert scheme == "imgt"
-        domains = []
-        for _name, sequence in seqs:
-            domain_sequence = sequence[-len(VHH_TAIL):]
-            numbered = [((i, " "), aa) for i, aa in enumerate(domain_sequence, start=1)]
-            domains.append([(numbered, 0, 0)])
-        return domains, None, None
+        return [[(_numbered(sequence), 0, 0)] for _name, sequence in seqs], None, None
 
     fake.anarci = _anarci
     monkeypatch.setitem(sys.modules, "anarci", fake)
 
 
 def _write_fake_anarci_module(directory):
-    """Create an importable sequential IMGT stub for subprocess unit tests."""
+    """Create an importable ANARCI stub for subprocess-only synthetic tests."""
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "anarci.py").write_text(
-        f"DOMAIN_LEN = {len(VHH_TAIL)}\n"
+        "def _numbered(sequence):\n"
+        "    cdr1 = sequence[18:30]\n"
+        "    cdr2 = sequence[34:44]\n"
+        "    anchor = 'AAGRYGSSWYPDSYDY'\n"
+        "    if anchor not in sequence:\n"
+        "        raise ValueError('synthetic VHH lacks expected CDR3')\n"
+        "    out = [((27+i, ' '), aa) for i, aa in enumerate(cdr1)]\n"
+        "    out += [((56+i, ' '), aa) for i, aa in enumerate(cdr2)]\n"
+        "    out += [((111, chr(65+i)), aa) for i, aa in enumerate(anchor)]\n"
+        "    return out\n"
         "def anarci(seqs, scheme='imgt', output=False):\n"
-        "    domains = []\n"
-        "    for name, sequence in seqs:\n"
-        "        seq = sequence[-DOMAIN_LEN:]\n"
-        "        numbered = [((i, ' '), aa) for i, aa in enumerate(seq, start=1)]\n"
-        "        domains.append([(numbered, 0, 0)])\n"
-        "    return domains, None, None\n",
+        "    return [[(_numbered(sequence), 0, 0)] for name, sequence in seqs], None, None\n",
         encoding="utf-8",
     )
 
@@ -208,7 +220,7 @@ def test_selection_cli_reports_cluster_adequacy(tmp_path, monkeypatch):
     monkeypatch.setitem(sys.modules, "anarci", None)
     structures = tmp_path / "structures"
     structures.mkdir()
-    (structures / "9zzz.pdb").write_text(_complex_pdb(104.5, 100.0, antigen_x0=174.8))
+    (structures / "9zzz.pdb").write_text(_complex_pdb(104.5, 100.0, antigen_x0=68.4))
     summary = tmp_path / "sabdab.tsv"
     rows = [_sabdab(pdb="9zzz", Hchain="H"), _sabdab(pdb="9yyy", Hchain="H", date="01/02/20")]
     keys = list(rows[0])
@@ -274,7 +286,7 @@ def test_two_pass_preparation_keeps_the_universe_and_pair_table_fixed(tmp_path, 
     monkeypatch.delenv("QP_EXTERNAL_VHH_SOURCE_DIR", raising=False)
     structures = tmp_path / "structures"
     structures.mkdir()
-    (structures / "9zzz.pdb").write_text(_complex_pdb(104.5, 100.0, antigen_x0=174.8))
+    (structures / "9zzz.pdb").write_text(_complex_pdb(104.5, 100.0, antigen_x0=68.4))
     pairs = tmp_path / "pairs.tsv"
     pairs.write_text("query\ttarget\tqtmscore\n1abc\t1abc\t1.0\n9zzz\t9zzz\t1.0\n")
     config = dict(paths=dict(data_root=str(tmp_path / "data"), dataset_dir="dataset"),
@@ -445,7 +457,7 @@ def test_one_representative_per_group_is_built(tmp_path, monkeypatch):
     structures = tmp_path / "structures"
     structures.mkdir()
     for pdb in ("9zzz", "9zzw"):  # same VHH and antigen: one layered group
-        (structures / f"{pdb}.pdb").write_text(_complex_pdb(104.5, 100.0, antigen_x0=174.8))
+        (structures / f"{pdb}.pdb").write_text(_complex_pdb(104.5, 100.0, antigen_x0=68.4))
     summary = tmp_path / "sabdab.tsv"
     rows = [_sabdab(pdb="9zzz", Hchain="H"), _sabdab(pdb="9zzw", Hchain="H")]
     keys = list(rows[0])
