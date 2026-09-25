@@ -46,7 +46,7 @@ def _find_existing(candidates: list[str|Path], *, executable: bool=False) -> str
         if not raw:
             continue
         s=str(raw)
-        if "/" not in s:
+        if not Path(s).is_absolute() and "/" not in s and "\\" not in s:
             found=shutil.which(s)
             if found:
                 return found

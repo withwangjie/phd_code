@@ -26,6 +26,7 @@ gemmi          # evaluate_complex_metrics.py expects gemmi==0.7.5
 openmm
 pdbfixer       # conda-forge is the usual source for openmm/pdbfixer
 parasail
+anarci==2026.2.13.2  # Unofficial PyPI packaging of ANARCI v1; also install HMMER's hmmscan
 
 # Test runner used by formal_preflight.sh
 pytest

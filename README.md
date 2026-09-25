@@ -269,6 +269,11 @@ read, listed in the audit report with its SHA-256, and needs no network again.
 With the antigen-fold holdout (the default), the only other input a formal run
 needs beyond the raw data is the frozen Foldseek pair table:
 
+ANARCI also needs HMMER's `hmmscan` executable on `PATH`. The Python package
+alone is insufficient; `env_check` checks both before the data audit. Install
+HMMER on the Linux server (for example, `conda install -c bioconda hmmer=3.3.2`)
+and verify `hmmscan -h` there.
+
 ```bash
 ./scripts/prepare_external_vhh.sh audit                     # study PDB IDs from a standalone audit
 ./scripts/prepare_external_vhh.sh foldseek --foldseek /path/to/foldseek --threads 32

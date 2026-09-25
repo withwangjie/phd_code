@@ -1827,6 +1827,12 @@ class Orchestrator:
         missing_resources: list[str] = []
         checks: dict[str, Any] = {}
 
+        if "anarci" in required:
+            hmmscan = shutil.which("hmmscan")
+            checks["anarci_hmmscan"] = hmmscan
+            if not hmmscan:
+                missing_resources.append("hmmscan (HMMER; required by ANARCI)")
+
         # Every orchestrated source file is part of the frozen executable protocol.
         for name in ORCHESTRATED_SCRIPTS:
             path=repo_path(name, self.repo_root)
