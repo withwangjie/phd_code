@@ -41,7 +41,8 @@ VHH_IDENTITY_THRESHOLD = 0.80
 CDR_H3_IDENTITY_THRESHOLD = 0.50
 ANTIGEN_IDENTITY_THRESHOLD = 0.30
 ANTIGEN_MIN_LENGTH_COVERAGE = 0.70
-INTERFACE_LABEL_CUTOFF_ANGSTROM = 5.0
+INTERFACE_LABEL_CUTOFF_ANGSTROM = 4.5
+INTERFACE_SENSITIVITY_CUTOFFS_ANGSTROM = (3.5, 5.0)
 INTRA_CHAIN_CA_CUTOFF_ANGSTROM = 8.0
 CROSS_PARTNER_KNN_K = 3
 MIN_INTERFACE_RESIDUES = 15
@@ -56,7 +57,9 @@ GRAPH_MEMORY_BUDGET_BYTES = 4 * 1024**3
 #      auxiliary), with deterministic cross-source PDB precedence.
 # 1.10: every graph-consumed raw structure is SHA-256-bound at audit time and
 #       reverified immediately before graph construction.
-VERSION = '1.10'
+# 1.11: primary interface labels/admission use 4.5 A heavy-atom contacts;
+#       3.5/5.0 A sensitivity labels are materialized without changing edges.
+VERSION = '1.11'
 FORMAL_SOURCE_PRIORITY = audit.FORMAL_SOURCE_PRIORITY
 FORMAL_TRAIN_SOURCES = tuple(source for source in FORMAL_SOURCE_PRIORITY
                              if source in audit.FORMAL_VHH_SUBSETS)
@@ -173,7 +176,7 @@ def deduplicate_cross_source_pdb(rows):
     return kept,dropped
 
 def load_inputs(root):
-    paths=[root/n for n in ['data_audit_report.md','data_audit_details.csv','data_audit_details.jsonl','data_audit_db55_pairs.json']]
+    paths=[root/n for n in ['data_audit_report.md','data_audit_details.csv','data_audit_details.jsonl','data_audit_db55_pairs.json','data_audit_inventory.json']]
     report=paths[0].read_text(encoding='utf-8')
     if '核心子集' not in report:raise ValueError('Unexpected audit report')
     table={r['id']:r for r in csv.DictReader(paths[1].open(encoding='utf-8-sig',newline=''))}
@@ -184,6 +187,13 @@ def load_inputs(root):
             if str(r[key]) != q[key]:raise ValueError(f'CSV/JSONL audit mismatch: {r["id"]} {key}')
     if len(table)!=len(rows):raise ValueError('Audit row count mismatch')
     pairs=json.loads(paths[3].read_text(encoding='utf-8'))
+    inventory=json.loads(paths[4].read_text(encoding='utf-8'))
+    audit_cutoff=float((inventory.get('structure_quality_protocol') or {}).get(
+        'interface_contact_cutoff_angstrom',float('nan')))
+    if not math.isclose(audit_cutoff,INTERFACE_LABEL_CUTOFF_ANGSTROM,rel_tol=0.0,abs_tol=1e-12):
+        raise ValueError(
+            f'Audit/graph primary interface cutoff mismatch: audit={audit_cutoff}, '
+            f'graph={INTERFACE_LABEL_CUTOFF_ANGSTROM}')
     return rows,pairs,{p.name:sha256(p) for p in paths}
 
 def cluster_long(rows):
@@ -460,19 +470,29 @@ def make_graph(row, split, pair=None, family_structure_cluster='', chains=None):
     if n>200000:raise MemoryError(f'node safety cap exceeded: {n}')
     arrays={g:np.concatenate(heavy[g]) for g in [0,1]};rid={g:np.concatenate(owners[g]) for g in [0,1]}
     trees={g:cKDTree(arrays[g]) for g in [0,1]}
-    counts=[]
-    interface_nodes=set()
-    for g in [0,1]:
-        distances=trees[1-g].query(arrays[g],distance_upper_bound=INTERFACE_LABEL_CUTOFF_ANGSTROM)[0]
-        contacted=rid[g][distances<INTERFACE_LABEL_CUTOFF_ANGSTROM]
-        unique_contacted=np.unique(contacted)
-        counts.append(len(unique_contacted))
-        interface_nodes.update(int(index) for index in unique_contacted.tolist())
-    interface=sum(counts)
+    def interface_nodes_at(cutoff):
+        counts=[]; interface_nodes=set()
+        for g in [0,1]:
+            distances=trees[1-g].query(arrays[g],distance_upper_bound=cutoff)[0]
+            contacted=rid[g][distances<cutoff]
+            unique_contacted=np.unique(contacted)
+            counts.append(len(unique_contacted))
+            interface_nodes.update(int(index) for index in unique_contacted.tolist())
+        return sum(counts),interface_nodes
+
+    interface,interface_nodes=interface_nodes_at(INTERFACE_LABEL_CUTOFF_ANGSTROM)
     if interface<MIN_INTERFACE_RESIDUES:raise ValueError(f'weak actual partner interface: {interface}')
     heavy_atom_interface_label=np.zeros(n,dtype=np.float32)
     if interface_nodes:
         heavy_atom_interface_label[np.fromiter(sorted(interface_nodes),dtype=np.int64)]=1.0
+    sensitivity_labels=[]
+    for cutoff in INTERFACE_SENSITIVITY_CUTOFFS_ANGSTROM:
+        _,nodes_at_cutoff=interface_nodes_at(cutoff)
+        labels=np.zeros(n,dtype=np.float32)
+        if nodes_at_cutoff:
+            labels[np.fromiter(sorted(nodes_at_cutoff),dtype=np.int64)]=1.0
+        sensitivity_labels.append(labels)
+    interface_label_sensitivity=np.stack(sensitivity_labels,axis=1)
     del arrays,rid,trees,heavy,owners
     # Leakage control: target labels are defined from cross-partner heavy-atom
     # contacts (configured heavy-atom cutoff), so cross-partner edge EXISTENCE must not be defined by a
@@ -518,6 +538,8 @@ def make_graph(row, split, pair=None, family_structure_cluster='', chains=None):
     backbone_psi=np.asarray([r['psi'] for r in nodes],dtype=np.float32)
     graph=Data(pos=torch.from_numpy(pos),x=torch.from_numpy(x),edge_index=torch.from_numpy(edge),
         interface_label=torch.from_numpy(heavy_atom_interface_label),
+        interface_label_sensitivity=torch.from_numpy(interface_label_sensitivity),
+        interface_sensitivity_cutoffs_angstrom=list(INTERFACE_SENSITIVITY_CUTOFFS_ANGSTROM),
         backbone_phi=torch.from_numpy(backbone_phi),backbone_psi=torch.from_numpy(backbone_psi),
         pdb_id=row['pdb_id'].upper(),subset_source=row['subset'],cdr3_seq=seq,cdr3_len=len(seq),num_interface_residues=interface,
         split=split,source_id=row['id'],node_chain_id=torch.tensor(chainidx,dtype=torch.long),chain_ids=[c['name'] for c in chains],
@@ -562,6 +584,15 @@ def validate_graph(g):
     _require(isinstance(g,Data) and g.pos.shape==(n,3) and g.pos.dtype==torch.float32, 'validation failed: isinstance(g,Data) and g.pos.shape==(n,3) and g.pos.dtype==torch.float32')
     _require(g.x.shape==(n,21) and g.x.dtype==torch.float32 and e.dtype==torch.long and e.shape[0]==2, 'validation failed: g.x.shape==(n,21) and g.x.dtype==torch.float32 and e.dtype==torch.long and e.shape[0]==2')
     _require(g.backbone_phi.shape==(n,) and g.backbone_psi.shape==(n,), 'validation failed: g.backbone_phi.shape==(n,) and g.backbone_psi.shape==(n,)')
+    sensitivity=getattr(g,'interface_label_sensitivity',None)
+    sensitivity_cutoffs=[float(v) for v in getattr(g,'interface_sensitivity_cutoffs_angstrom',[])]
+    _require(isinstance(sensitivity,torch.Tensor) and sensitivity.shape==(n,len(sensitivity_cutoffs)),
+             'formal graph lacks node-aligned interface sensitivity labels')
+    _require(sensitivity_cutoffs==list(INTERFACE_SENSITIVITY_CUTOFFS_ANGSTROM),
+             'interface sensitivity cutoffs do not match graph protocol')
+    _require(torch.all(sensitivity[:,0] <= g.interface_label)
+             and torch.all(g.interface_label <= sensitivity[:,-1]),
+             'interface labels are not monotone across 3.5/4.5/5.0 A cutoffs')
     _require(torch.all(torch.isfinite(g.backbone_phi)|torch.isnan(g.backbone_phi)), 'validation failed: torch.all(torch.isfinite(g.backbone_phi)|torch.isnan(g.backbone_phi))')
     _require(torch.all(torch.isfinite(g.backbone_psi)|torch.isnan(g.backbone_psi)), 'validation failed: torch.all(torch.isfinite(g.backbone_psi)|torch.isnan(g.backbone_psi))')
     _require(torch.isfinite(g.pos).all() and torch.isfinite(g.x).all(), 'validation failed: torch.isfinite(g.pos).all() and torch.isfinite(g.x).all()')
@@ -746,15 +777,21 @@ def delivery_report(output,manifest,exclusions,failures,summary,complete):
 def main():
     global RESUME, PEAK_RSS, VHH_IDENTITY_THRESHOLD, CDR_H3_IDENTITY_THRESHOLD
     global ANTIGEN_IDENTITY_THRESHOLD, ANTIGEN_MIN_LENGTH_COVERAGE
-    global INTERFACE_LABEL_CUTOFF_ANGSTROM, INTRA_CHAIN_CA_CUTOFF_ANGSTROM
+    global INTERFACE_LABEL_CUTOFF_ANGSTROM, INTERFACE_SENSITIVITY_CUTOFFS_ANGSTROM, INTRA_CHAIN_CA_CUTOFF_ANGSTROM
     global CROSS_PARTNER_KNN_K, MIN_INTERFACE_RESIDUES
-    parser=argparse.ArgumentParser();parser.add_argument('--out',type=pathlib.Path,default=BASE/'dataset_clean_500');parser.add_argument('--workers',type=int,default=2);parser.add_argument('--target-hard',type=int,default=500);parser.add_argument('--no-cap',action='store_true',help='Process every qualifying, deduplicated, isolated CDR-H3 cluster instead of capping at --target-hard.');parser.add_argument('--partition-seed',type=int,default=None,help='Override the module SEED for cluster shuffle order (e.g. an independently-derived partition stream); defaults to SEED when omitted.');parser.add_argument('--audit-dir',type=pathlib.Path,default=BASE);parser.add_argument('--data-root',type=pathlib.Path,default=BASE/'data');parser.add_argument('--vhh-identity-threshold',type=float,default=VHH_IDENTITY_THRESHOLD);parser.add_argument('--cdr-h3-identity-threshold',type=float,default=CDR_H3_IDENTITY_THRESHOLD);parser.add_argument('--antigen-identity-threshold',type=float,default=ANTIGEN_IDENTITY_THRESHOLD);parser.add_argument('--antigen-min-length-coverage',type=float,default=ANTIGEN_MIN_LENGTH_COVERAGE);parser.add_argument('--interface-label-cutoff',type=float,default=INTERFACE_LABEL_CUTOFF_ANGSTROM);parser.add_argument('--intra-chain-ca-cutoff',type=float,default=INTRA_CHAIN_CA_CUTOFF_ANGSTROM);parser.add_argument('--cross-partner-knn-k',type=int,default=CROSS_PARTNER_KNN_K);parser.add_argument('--min-interface-residues',type=int,default=MIN_INTERFACE_RESIDUES);parser.add_argument('--cluster-map',type=pathlib.Path,default=None,help='PDB->family/structure cluster JSON. Formal runs require it; standalone/debug runs may omit it only if they accept non-formal output.');parser.add_argument('--resume',action='store_true');args=parser.parse_args();RESUME=args.resume
+    parser=argparse.ArgumentParser();parser.add_argument('--out',type=pathlib.Path,default=BASE/'dataset_clean_500');parser.add_argument('--workers',type=int,default=2);parser.add_argument('--target-hard',type=int,default=500);parser.add_argument('--no-cap',action='store_true',help='Process every qualifying, deduplicated, isolated CDR-H3 cluster instead of capping at --target-hard.');parser.add_argument('--partition-seed',type=int,default=None,help='Override the module SEED for cluster shuffle order (e.g. an independently-derived partition stream); defaults to SEED when omitted.');parser.add_argument('--audit-dir',type=pathlib.Path,default=BASE);parser.add_argument('--data-root',type=pathlib.Path,default=BASE/'data');parser.add_argument('--vhh-identity-threshold',type=float,default=VHH_IDENTITY_THRESHOLD);parser.add_argument('--cdr-h3-identity-threshold',type=float,default=CDR_H3_IDENTITY_THRESHOLD);parser.add_argument('--antigen-identity-threshold',type=float,default=ANTIGEN_IDENTITY_THRESHOLD);parser.add_argument('--antigen-min-length-coverage',type=float,default=ANTIGEN_MIN_LENGTH_COVERAGE);parser.add_argument('--interface-label-cutoff',type=float,default=INTERFACE_LABEL_CUTOFF_ANGSTROM);parser.add_argument('--interface-sensitivity-cutoffs',type=float,nargs='+',default=list(INTERFACE_SENSITIVITY_CUTOFFS_ANGSTROM));parser.add_argument('--intra-chain-ca-cutoff',type=float,default=INTRA_CHAIN_CA_CUTOFF_ANGSTROM);parser.add_argument('--cross-partner-knn-k',type=int,default=CROSS_PARTNER_KNN_K);parser.add_argument('--min-interface-residues',type=int,default=MIN_INTERFACE_RESIDUES);parser.add_argument('--cluster-map',type=pathlib.Path,default=None,help='PDB->family/structure cluster JSON. Formal runs require it; standalone/debug runs may omit it only if they accept non-formal output.');parser.add_argument('--resume',action='store_true');args=parser.parse_args();RESUME=args.resume
     if any(not 0.0 < value <= 1.0 for value in (
         args.vhh_identity_threshold,args.cdr_h3_identity_threshold,
         args.antigen_identity_threshold,args.antigen_min_length_coverage)):
         parser.error('homology thresholds/coverage must lie in (0,1]')
 
     if not (math.isfinite(args.interface_label_cutoff) and args.interface_label_cutoff > 0): parser.error('--interface-label-cutoff must be positive finite')
+    if (not args.interface_sensitivity_cutoffs
+            or any((not math.isfinite(v)) or v<=0 for v in args.interface_sensitivity_cutoffs)
+            or list(args.interface_sensitivity_cutoffs)!=sorted(set(args.interface_sensitivity_cutoffs))):
+        parser.error('--interface-sensitivity-cutoffs must be unique positive finite values in ascending order')
+    if not (min(args.interface_sensitivity_cutoffs) < args.interface_label_cutoff < max(args.interface_sensitivity_cutoffs)):
+        parser.error('primary --interface-label-cutoff must lie inside the sensitivity cutoff range')
     if not (math.isfinite(args.intra_chain_ca_cutoff) and args.intra_chain_ca_cutoff > 0): parser.error('--intra-chain-ca-cutoff must be positive finite')
     if args.cross_partner_knn_k < 1: parser.error('--cross-partner-knn-k must be >=1')
     if args.min_interface_residues < 1: parser.error('--min-interface-residues must be >=1')
@@ -763,6 +800,7 @@ def main():
     ANTIGEN_IDENTITY_THRESHOLD=float(args.antigen_identity_threshold)
     ANTIGEN_MIN_LENGTH_COVERAGE=float(args.antigen_min_length_coverage)
     INTERFACE_LABEL_CUTOFF_ANGSTROM=float(args.interface_label_cutoff)
+    INTERFACE_SENSITIVITY_CUTOFFS_ANGSTROM=tuple(float(v) for v in args.interface_sensitivity_cutoffs)
     INTRA_CHAIN_CA_CUTOFF_ANGSTROM=float(args.intra_chain_ca_cutoff)
     CROSS_PARTNER_KNN_K=int(args.cross_partner_knn_k)
     MIN_INTERFACE_RESIDUES=int(args.min_interface_residues)
@@ -783,6 +821,7 @@ def main():
         antigen_identity_threshold=ANTIGEN_IDENTITY_THRESHOLD,
         antigen_min_length_coverage=ANTIGEN_MIN_LENGTH_COVERAGE,
         interface_label_cutoff_angstrom=INTERFACE_LABEL_CUTOFF_ANGSTROM,
+        interface_sensitivity_cutoffs_angstrom=list(INTERFACE_SENSITIVITY_CUTOFFS_ANGSTROM),
         intra_chain_ca_cutoff_angstrom=INTRA_CHAIN_CA_CUTOFF_ANGSTROM,
         cross_partner_knn_k=CROSS_PARTNER_KNN_K,
         min_interface_residues=MIN_INTERFACE_RESIDUES,graph_version=VERSION)
@@ -839,7 +878,7 @@ def main():
             graph_protocol=dict(vhh_identity_threshold=VHH_IDENTITY_THRESHOLD,
                 cdr_h3_identity_threshold=CDR_H3_IDENTITY_THRESHOLD,
                 antigen_identity_threshold=ANTIGEN_IDENTITY_THRESHOLD,
-                antigen_min_length_coverage=ANTIGEN_MIN_LENGTH_COVERAGE,interface_label_cutoff_angstrom=INTERFACE_LABEL_CUTOFF_ANGSTROM,intra_chain_ca_cutoff_angstrom=INTRA_CHAIN_CA_CUTOFF_ANGSTROM,cross_partner_knn_k=CROSS_PARTNER_KNN_K,min_interface_residues=MIN_INTERFACE_RESIDUES,graph_version=VERSION),input_sha256=input_hashes,script_sha256=sha256(pathlib.Path(__file__)),admission={})
+                antigen_min_length_coverage=ANTIGEN_MIN_LENGTH_COVERAGE,interface_label_cutoff_angstrom=INTERFACE_LABEL_CUTOFF_ANGSTROM,interface_sensitivity_cutoffs_angstrom=list(INTERFACE_SENSITIVITY_CUTOFFS_ANGSTROM),intra_chain_ca_cutoff_angstrom=INTRA_CHAIN_CA_CUTOFF_ANGSTROM,cross_partner_knn_k=CROSS_PARTNER_KNN_K,min_interface_residues=MIN_INTERFACE_RESIDUES,graph_version=VERSION),input_sha256=input_hashes,script_sha256=sha256(pathlib.Path(__file__)),admission={})
         formal_rows,cross_source_dropped=deduplicate_cross_source_pdb(rows)
         for row,preferred in cross_source_dropped:
             exclusions.append(exclusion(row,[f'cross_source_duplicate_prefer_{preferred}']))

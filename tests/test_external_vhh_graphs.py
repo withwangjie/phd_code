@@ -73,6 +73,11 @@ def test_optional_anarci_numbering_is_used_when_installed(monkeypatch):
     assert cdrs["cdr3"] == VHH_TAIL[104:117] and cdrs["cdr1"] == VHH_TAIL[26:38]
 
 
+def test_formal_anarci_numbering_fails_closed_when_dependency_is_missing(monkeypatch):
+    monkeypatch.setitem(sys.modules, "anarci", None)
+    with pytest.raises(RuntimeError, match="ANARCI is required"):
+        ext.annotate_cdrs(VHH_TAIL, require_anarci=True)
+
 def test_external_complex_builds_a_verified_v18_graph(tmp_path, monkeypatch):
     import sys
     monkeypatch.setitem(sys.modules, "anarci", None)  # force the motif fallback
@@ -92,7 +97,7 @@ def test_external_complex_builds_a_verified_v18_graph(tmp_path, monkeypatch):
     assert quality["interface_residues"] >= 15
 
     graph = ext.build_graph(prepared, "9zzz", source)
-    assert graph.graph_version == "1.10" and graph.subset_source == "external_vhh"
+    assert graph.graph_version == "1.11" and graph.subset_source == "external_vhh"
     assert graph.structure_source == "biological_assembly:author_determined:1"
     import torch
     out = tmp_path / "graphs"

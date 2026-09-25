@@ -53,6 +53,7 @@ FORMAL_SOURCE_PRIORITY = ('snac_db', 'sabdab_vhh', 'train_rcsb')
 FORMAL_VHH_SUBSETS = frozenset({'snac_db', 'sabdab_vhh'})
 BACKBONE = set(BACKBONE_ATOMS)
 SIDECHAIN_HEAVY = {name: set(atoms) for name, atoms in SIDECHAIN_HEAVY_ATOMS.items()}
+INTERFACE_CONTACT_CUTOFF_ANGSTROM = 4.5
 MAX_RESOLUTION_ANGSTROM = 3.0
 MIN_INTERFACE_OCCUPANCY = 0.90
 ALLOW_INTERFACE_ALTLOC = False
@@ -425,9 +426,10 @@ def chain_data(model):
 
 def contact_residue_ids(a, b):
     # Nearest-neighbour queries avoid enumerating every atom-atom pair.
-    da = b['tree'].query(a['xyz'], distance_upper_bound=5.0)[0]
-    db = a['tree'].query(b['xyz'], distance_upper_bound=5.0)[0]
-    return set(map(int,np.unique(a['owners'][da < 5.0]))), set(map(int,np.unique(b['owners'][db < 5.0])))
+    cutoff = float(INTERFACE_CONTACT_CUTOFF_ANGSTROM)
+    da = b['tree'].query(a['xyz'], distance_upper_bound=cutoff)[0]
+    db = a['tree'].query(b['xyz'], distance_upper_bound=cutoff)[0]
+    return set(map(int,np.unique(a['owners'][da < cutoff]))), set(map(int,np.unique(b['owners'][db < cutoff])))
 
 def contact(a, b):
     left,right=contact_residue_ids(a,b)
@@ -439,7 +441,7 @@ def interfaces(chains, allowed=None):
         for b in chains[i+1:]:
             if allowed is not None and not allowed(a['name'], b['name']):
                 continue
-            if np.any(np.maximum(a['low']-b['high'], b['low']-a['high']) >= 5):
+            if np.any(np.maximum(a['low']-b['high'], b['low']-a['high']) >= INTERFACE_CONTACT_CUTOFF_ANGSTROM):
                 na, nb = 0, 0
             else:
                 na, nb = contact(a, b)
@@ -478,7 +480,7 @@ def sabdab_chain_metadata(pdbid):
 
 def _annotate_sabdab_cdrs(sequence):
     from nanoqc.data.build_external_vhh_graphs import annotate_cdrs
-    return annotate_cdrs(sequence)
+    return annotate_cdrs(sequence, require_anarci=True)
 
 
 def _ig_variable_domain(sequence):
@@ -890,11 +892,13 @@ def report(root, rows, ignored, archives, pairs, elapsed, destination):
     destination.write_text('\n'.join(lines)+'\n',encoding='utf-8')
 
 def main():
-    global MAX_RESOLUTION_ANGSTROM, MIN_INTERFACE_OCCUPANCY
+    global INTERFACE_CONTACT_CUTOFF_ANGSTROM, MAX_RESOLUTION_ANGSTROM, MIN_INTERFACE_OCCUPANCY
     global ALLOW_INTERFACE_ALTLOC, REQUIRE_RESOLUTION, REQUIRE_COMPLETE_INTERFACE_SIDECHAINS
-    parser=argparse.ArgumentParser();parser.add_argument('--data',type=pathlib.Path,default=BASE/'data');parser.add_argument('--workers',type=int,default=4);parser.add_argument('--limit',type=int,default=0);parser.add_argument('--out',type=pathlib.Path,default=BASE);parser.add_argument('--max-resolution',type=float,default=MAX_RESOLUTION_ANGSTROM);parser.add_argument('--min-interface-occupancy',type=float,default=MIN_INTERFACE_OCCUPANCY);parser.add_argument('--allow-interface-altloc',action='store_true');parser.add_argument('--allow-unknown-resolution',action='store_true');parser.add_argument('--allow-incomplete-interface-sidechains',action='store_true');parser.add_argument('--reuse-non-nano',action='store_true',help='Explicitly reuse valid non-nano geometry from this output directory; assumes unchanged files and geometry rules. Nano annotations and failed entries are recomputed.');args=parser.parse_args()
+    parser=argparse.ArgumentParser();parser.add_argument('--data',type=pathlib.Path,default=BASE/'data');parser.add_argument('--workers',type=int,default=4);parser.add_argument('--limit',type=int,default=0);parser.add_argument('--out',type=pathlib.Path,default=BASE);parser.add_argument('--interface-contact-cutoff',type=float,default=INTERFACE_CONTACT_CUTOFF_ANGSTROM);parser.add_argument('--max-resolution',type=float,default=MAX_RESOLUTION_ANGSTROM);parser.add_argument('--min-interface-occupancy',type=float,default=MIN_INTERFACE_OCCUPANCY);parser.add_argument('--allow-interface-altloc',action='store_true');parser.add_argument('--allow-unknown-resolution',action='store_true');parser.add_argument('--allow-incomplete-interface-sidechains',action='store_true');parser.add_argument('--reuse-non-nano',action='store_true',help='Explicitly reuse valid non-nano geometry from this output directory; assumes unchanged files and geometry rules. Nano annotations and failed entries are recomputed.');args=parser.parse_args()
+    if not math.isfinite(args.interface_contact_cutoff) or args.interface_contact_cutoff<=0: parser.error('--interface-contact-cutoff must be positive finite')
     if not math.isfinite(args.max_resolution) or args.max_resolution<=0: parser.error('--max-resolution must be positive finite')
     if not 0 < args.min_interface_occupancy <= 1: parser.error('--min-interface-occupancy must be in (0,1]')
+    INTERFACE_CONTACT_CUTOFF_ANGSTROM=float(args.interface_contact_cutoff)
     MAX_RESOLUTION_ANGSTROM=float(args.max_resolution)
     MIN_INTERFACE_OCCUPANCY=float(args.min_interface_occupancy)
     ALLOW_INTERFACE_ALTLOC=bool(args.allow_interface_altloc)
@@ -932,7 +936,8 @@ def main():
             bound_subsets=sorted(FORMAL_VHH_SUBSETS | {'test_db55'}),
             hashed_valid_rows=sum(bool(r.get('source_structure_sha256')) for r in rows),
         ),
-        structure_quality_protocol=dict(max_resolution_angstrom=MAX_RESOLUTION_ANGSTROM,
+        structure_quality_protocol=dict(interface_contact_cutoff_angstrom=INTERFACE_CONTACT_CUTOFF_ANGSTROM,
+            max_resolution_angstrom=MAX_RESOLUTION_ANGSTROM,
             min_interface_occupancy=MIN_INTERFACE_OCCUPANCY,
             allow_interface_altloc=ALLOW_INTERFACE_ALTLOC,
             require_resolution=REQUIRE_RESOLUTION,

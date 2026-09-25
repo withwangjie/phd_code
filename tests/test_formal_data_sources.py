@@ -113,7 +113,7 @@ def test_study_foldseek_universe_contains_only_verified_formal_vhh(tmp_path):
 
 
 def test_graph_protocol_version_changes_with_data_admission_semantics():
-    assert builder.VERSION == "1.10"
+    assert builder.VERSION == "1.11"
 
 
 def test_cluster_universe_cannot_be_bridged_by_qc_failures_or_lower_priority_sources():

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build graph-v1.10 external VHH graphs from raw PDB/mmCIF files.
+"""Build graph-v1.11 external VHH graphs from raw PDB/mmCIF files.
 
 External complexes get the training-graph definition of one VHH-antigen
 complex: the first author-determined biological assembly, one annotated VHH
@@ -7,18 +7,18 @@ chain as partner 0, antigen = assembly chains with a CA/CB within 7.5 A of
 the VHH paratope (SAbDab rule [METHODS_EVIDENCE R33]). Copies of that VHH and
 every other annotated antibody chain of the entry are never antigen, as in the
 SNAC-DB per-VHH complexes that supply the training and hard test sets. The
-graph also keeps 5 A heavy-atom interface labels, 8 A intra-chain CA edges and
+graph uses 4.5 A primary heavy-atom interface labels (plus frozen 3.5/5.0 A
+sensitivity labels), 8 A intra-chain CA edges and
 fixed cross-partner KNN. Labelling, edges and validation are the unchanged
 ``build_final_pyg_dataset.make_graph`` code; the audit's structure-quality
 gates (resolution, interface side-chain completeness, altloc, occupancy) are
 applied to the VHH-antigen interface.
 
-CDRs use IMGT numbering from ANARCI when it is installed (CDR1 27-38, CDR2
-56-65, CDR3 105-117). Without ANARCI only CDR-H3 is located, between the
-conserved FR3 cysteine motif and the FR4 W-G-x-G motif (the IMGT 104/118
-anchors), and the paratope falls back to the whole VHH chain, as for
-training complexes whose CDRs cannot be mapped. The method is recorded per
-graph.
+Formal CDRs use IMGT numbering from ANARCI (CDR1 27-38, CDR2 56-65,
+CDR3 105-117) and fail closed when ANARCI is unavailable. The conserved
+FR3/FR4 motif locator remains only as a non-formal debug/legacy fallback;
+it can never define a formal SAbDab/external graph. The method is recorded
+per graph.
 
 Candidates come from ``select_external_vhh_candidates.py``; only those it
 marks ``selected`` are built. Independence from the training set is not
@@ -88,10 +88,12 @@ def _anarci_cdrs(sequence: str) -> Optional[dict]:
     return dict(loops, method="anarci_imgt")
 
 
-def annotate_cdrs(sequence: str) -> dict:
-    """IMGT CDRs of a VHH sequence; ``cdr1``/``cdr2`` are empty without ANARCI."""
+def annotate_cdrs(sequence: str, *, require_anarci: bool = False) -> dict:
+    """IMGT CDRs; formal callers set require_anarci=True and fail closed."""
     annotated = _anarci_cdrs(sequence)
     if annotated is None:
+        if require_anarci:
+            raise RuntimeError("ANARCI is required for formal IMGT CDR numbering")
         annotated = dict(cdr1="", cdr2="", cdr3=cdr3_by_motif(sequence), method="imgt_anchor_motif")
     if sequence.count(annotated["cdr3"]) != 1:
         raise ValueError("CDR-H3 does not map uniquely onto the VHH chain")
@@ -207,7 +209,8 @@ def unannotated_antibody_chains(chains: list, known: Sequence[str], annotated_an
 
 def prepare_external_complex(structure_path: Path, vhh_chain: str,
                              other_antibody_chains: Sequence[str] = (),
-                             annotated_antigen_chains: Sequence[str] = ()) -> dict:
+                             annotated_antigen_chains: Sequence[str] = (),
+                             *, require_anarci: bool = False) -> dict:
     """Assembly, partner chains, CDRs and quality for one external complex."""
     st = gemmi.read_structure(str(structure_path))
     if not len(st):
@@ -224,7 +227,7 @@ def prepare_external_complex(structure_path: Path, vhh_chain: str,
     for chain in chains:
         chain["group"] = 0 if chain["name"] == vhh_chain else 1
     vhh_sequence = "".join(node["aa"] for node in anchors[0]["nodes"])
-    cdrs = annotate_cdrs(vhh_sequence)
+    cdrs = annotate_cdrs(vhh_sequence, require_anarci=require_anarci)
     extra_antibody = unannotated_antibody_chains(
         chains, [vhh_chain, *other_antibody_chains], annotated_antigen_chains)
     meta = dict(structure_source=str(dict(st.info)[audit.STRUCTURE_SOURCE_KEY]))
@@ -241,7 +244,7 @@ def prepare_external_complex(structure_path: Path, vhh_chain: str,
 
 
 def build_graph(prepared: dict, pdb_id: str, structure_path: Path):
-    """Graph-v1.10 Data object for a prepared complex that passed quality gates."""
+    """Graph-v1.11 Data object for a prepared complex that passed quality gates."""
     if prepared["quality"]["structure_quality_status"] != "pass":
         raise ValueError(f"structure quality failed: {prepared['quality']['structure_quality_reasons']}")
     row = dict(pdb_id=pdb_id.upper(), subset=SUBSET, id=f"{SUBSET}/{pdb_id.lower()}",
@@ -295,7 +298,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             if row.get("source_structure_sha256") and sha256(source) != row["source_structure_sha256"]:
                 raise ValueError("raw structure changed since candidate selection")
             prepared = prepare_external_complex(source, row["vhh_chain"], row.get("other_antibody_chains", []),
-                                                row.get("sabdab_antigen_chains", []))
+                                                row.get("sabdab_antigen_chains", []), require_anarci=True)
             graph = build_graph(prepared, pdb, source)
             path = args.out_dir / f"{SUBSET}__{pdb.upper()}.pt"
             torch.save(graph, path)

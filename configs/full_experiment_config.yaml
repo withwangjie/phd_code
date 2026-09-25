@@ -79,6 +79,7 @@ env_check:
     - openmm
     - pdbfixer
     - parasail
+    - anarci  # formal SAbDab/external VHH IMGT numbering is fail-closed
     - psutil
     - tqdm
     - yaml  # PyYAML, required by run_full_experiment.py itself
@@ -109,6 +110,10 @@ data_audit:
   workers: 16  # runtime fallback; auto-resolved from server CPU resources before formal launch
   limit: 0  # 0 = no limit; audits every discovered structure
   # High-confidence structure benchmark gates.
+  # Primary direct-contact definition. Krawczyk et al. 2014 use 4.5 A
+  # heavy-atom antibody-antigen contacts; 3.5/5.0 A are predeclared
+  # sensitivity cutoffs rather than alternative primary outcomes.
+  interface_contact_cutoff_angstrom: 4.5
   max_resolution_angstrom: 3.0
   min_interface_occupancy: 0.90
   allow_interface_altloc: false
@@ -186,9 +191,12 @@ queue_freeze:
   graph_build:
     workers: 8  # runtime fallback; auto-resolved from server CPU resources
     # Scientific graph protocol. Changing any value requires a fresh dataset;
-    # graph v1.10 records these values in every .pt and run_summary.json.
-    # 5 A cross-partner atom contact is literature-supported for antibody-antigen/CAPRI-style interfaces [METHODS_EVIDENCE R3,R4].
-    interface_label_cutoff_angstrom: 5.0
+    # graph v1.11 records these values in every .pt and run_summary.json.
+    # Primary = 4.5 A heavy-atom antibody-antigen direct contact [R49].
+    # 3.5/5.0 A are stored as sensitivity labels only; EGNN primary training
+    # consumes interface_label at 4.5 A.
+    interface_label_cutoff_angstrom: 4.5
+    interface_sensitivity_cutoffs_angstrom: [3.5, 5.0]
     # 8 A C-alpha residue-graph construction has direct protein-GNN precedent [R22].
     intra_chain_ca_cutoff_angstrom: 8.0
     # k=3 remains a study-specific leakage-control choice; no claim of literature-optimality.
@@ -462,7 +470,9 @@ structure_experiment:
     sigma_offsets: [-1.0, 0.0, 1.0]
   # Formal all-atom search uses complete Dunbrack chi1..chiN states and
   # multi-chi perturbation/recovery; 3-6 states/site -> <=30 variables.
-  loop_relax_iterations: 100
+  # Primary inference is STRICT fixed-backbone. The optional CDR-backbone
+  # relaxation path is development-only and must remain disabled here.
+  loop_relax_iterations: 0
   robust_qaoa: true
   # QAOA depth, budgets, objective, restarts, shots and parameter scaling are
   # inherited verbatim from quantum_protocol.primary.
@@ -475,7 +485,7 @@ structure_experiment:
 # ---------------------------------------------------------------------------
 # External validation / mature structural baselines.
 # These are real external dependencies; formal runs fail closed when required
-# inputs are absent. External VHH graphs must have been built with graph v1.8
+# inputs are absent. External VHH graphs must have been built with graph v1.11
 # and independently certified against the training family/structure cluster map.
 # ---------------------------------------------------------------------------
 external_validation:

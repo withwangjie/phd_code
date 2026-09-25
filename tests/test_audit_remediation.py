@@ -218,7 +218,8 @@ def _minimal_scientific_config() -> Dict[str, Any]:
                 "antigen_min_length_coverage": 0.70,
             },
             "graph_build": {
-                "interface_label_cutoff_angstrom": 5.0,
+                "interface_label_cutoff_angstrom": 4.5,
+                "interface_sensitivity_cutoffs_angstrom": [3.5, 5.0],
                 "intra_chain_ca_cutoff_angstrom": 8.0,
                 "cross_partner_knn_k": 3,
                 "min_interface_residues": 15,
@@ -318,7 +319,8 @@ def test_checkpoint_graph_protocol_gate_rejects_semantic_mismatch() -> None:
         "label_policy": "cross_partner_heavy_atom_cutoff",
         "intra_chain_ca_cutoff_angstrom": 8.0,
         "cross_partner_knn_k": 3,
-        "interface_label_cutoff_angstrom": 5.0,
+        "interface_label_cutoff_angstrom": 4.5,
+                "interface_sensitivity_cutoffs_angstrom": [3.5, 5.0],
         "min_interface_residues": 15,
     }
     homology = {

@@ -224,7 +224,7 @@ def rq5_inference_failures(rq5: dict, min_clusters: int) -> list[str]:
 # ---------------------------------------------------------------------------
 # Must equal build_final_pyg_dataset.VERSION (kept literal so the orchestrator
 # does not import torch/PyG at start-up; a test pins the two together).
-REQUIRED_GRAPH_VERSION = "1.10"
+REQUIRED_GRAPH_VERSION = "1.11"
 # Must equal qaoa_interface_sampler.MAX_QAOA_DEPTH (literal to avoid importing
 # PennyLane at start-up; a test pins the two together).
 MAX_QAOA_DEPTH = 12
@@ -525,7 +525,7 @@ def _validate_scientific_config(config: Dict[str, Any]) -> None:
         raise ValueError(f"homology_isolation values must lie in (0,1]: {required_homology}")
 
     positive_graph = {
-        "interface_label_cutoff_angstrom": float(graph.get("interface_label_cutoff_angstrom", 5.0)),
+        "interface_label_cutoff_angstrom": float(graph.get("interface_label_cutoff_angstrom", 4.5)),
         "intra_chain_ca_cutoff_angstrom": float(graph.get("intra_chain_ca_cutoff_angstrom", 8.0)),
     }
     if any((not math.isfinite(v)) or v <= 0 for v in positive_graph.values()):
@@ -534,6 +534,20 @@ def _validate_scientific_config(config: Dict[str, Any]) -> None:
         raise ValueError("graph_build.cross_partner_knn_k must be >=1")
     if int(graph.get("min_interface_residues", 15)) < 1:
         raise ValueError("graph_build.min_interface_residues must be >=1")
+    primary_interface=float(graph.get("interface_label_cutoff_angstrom",4.5))
+    sensitivity_interfaces=[float(v) for v in graph.get(
+        "interface_sensitivity_cutoffs_angstrom",[3.5,5.0])]
+    if not math.isclose(primary_interface,4.5,rel_tol=0.0,abs_tol=1e-12):
+        raise ValueError("Formal primary interface_label_cutoff_angstrom must remain 4.5 A")
+    if sensitivity_interfaces != [3.5,5.0]:
+        raise ValueError("Formal interface sensitivity cutoffs must remain [3.5, 5.0] A")
+    audit_interface=float((config.get("data_audit",{}) or {}).get(
+        "interface_contact_cutoff_angstrom",4.5))
+    if not math.isclose(audit_interface,primary_interface,rel_tol=0.0,abs_tol=1e-12):
+        raise ValueError("data_audit and graph_build primary interface cutoffs must match")
+    if int(structure.get("loop_relax_iterations",0) or 0) != 0:
+        raise ValueError(
+            "Formal structure_experiment is strict fixed-backbone: loop_relax_iterations must be 0")
 
     if not 0.0 <= float(qc.get("antigen_guidance_weight", 0.25)) <= 1.0:
         raise ValueError("qc_benchmark.antigen_guidance_weight must be in [0,1]")
@@ -2004,6 +2018,7 @@ class Orchestrator:
             "--workers", str(cfg.get("workers", 4)),
             "--limit", str(cfg.get("limit", 0)),
             "--out", str(self.run_dir / "audit"),
+            "--interface-contact-cutoff", str(cfg.get("interface_contact_cutoff_angstrom", 4.5)),
             "--max-resolution", str(cfg.get("max_resolution_angstrom", 3.0)),
             "--min-interface-occupancy", str(cfg.get("min_interface_occupancy", 0.90)),
         ]
@@ -2046,7 +2061,11 @@ class Orchestrator:
             "--cdr-h3-identity-threshold", str(qf_cfg["homology_isolation"].get("cdr_h3_identity", 0.50)),
             "--antigen-identity-threshold", str(qf_cfg["homology_isolation"].get("antigen_identity", 0.30)),
             "--antigen-min-length-coverage", str(qf_cfg["homology_isolation"].get("antigen_min_length_coverage", 0.70)),
-            "--interface-label-cutoff", str(qf_cfg["graph_build"].get("interface_label_cutoff_angstrom", 5.0)),
+            "--interface-label-cutoff", str(qf_cfg["graph_build"].get("interface_label_cutoff_angstrom", 4.5)),
+            "--interface-sensitivity-cutoffs", *[
+                str(v) for v in qf_cfg["graph_build"].get(
+                    "interface_sensitivity_cutoffs_angstrom", [3.5, 5.0])
+            ],
             "--intra-chain-ca-cutoff", str(qf_cfg["graph_build"].get("intra_chain_ca_cutoff_angstrom", 8.0)),
             "--cross-partner-knn-k", str(qf_cfg["graph_build"].get("cross_partner_knn_k", 3)),
             "--min-interface-residues", str(qf_cfg["graph_build"].get("min_interface_residues", 15)),

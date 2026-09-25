@@ -35,7 +35,7 @@ def verified_graph_identity(graph: object, path: Path, *, require_cdr: bool = Fa
             or not isinstance(chain_index,torch.Tensor) or chain_index.ndim!=1
             or len(chain_index)!=len(x) or not isinstance(chains,list)
             or not isinstance(groups,list) or len(chains)!=len(groups) or not chains):
-        raise ValueError(f"{path}: graph lacks the required residue/chain identity fields (rebuild with graph v1.10)")
+        raise ValueError(f"{path}: graph lacks the required residue/chain identity fields (rebuild with graph v1.11)")
     if not torch.isfinite(x).all() or not torch.all((x[:,:20]==0)|(x[:,:20]==1)):
         raise ValueError(f"{path}: invalid amino-acid one-hot node features")
     if not torch.all(x[:,:20].sum(dim=1)==1):
