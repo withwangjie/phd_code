@@ -235,6 +235,8 @@ ORCHESTRATED_SCRIPTS: List[str] = [
     "seed_streams.py",
     "audit_all_datasets.py",
     "build_final_pyg_dataset.py",
+    "build_external_vhh_graphs.py",
+    "build_foldseek_pairs.py",
     "build_independence_cluster_map.py",
     "train_egnn_pruning.py",
     "egnn_seed_sensitivity.py",
