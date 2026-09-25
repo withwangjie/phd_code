@@ -19,6 +19,43 @@ THREE = {"A": "ALA", "C": "CYS", "D": "ASP", "E": "GLU", "F": "PHE", "G": "GLY",
          "T": "THR", "V": "VAL", "W": "TRP", "Y": "TYR"}
 
 
+def _install_fake_anarci(monkeypatch):
+    """Deterministic IMGT-like numbering stub for formal builder unit tests."""
+    import types
+    fake = types.ModuleType("anarci")
+
+    def _anarci(seqs, scheme, output):
+        assert scheme == "imgt"
+        numbered_domains = []
+        for _name, sequence in seqs:
+            # Synthetic fixtures prepend 20 residues to the canonical VHH_TAIL.
+            # The formal builder only needs a deterministic variable-domain
+            # numbering contract here; real formal runs require real ANARCI.
+            domain_sequence = sequence[-len(VHH_TAIL):]
+            numbered = [((n, " "), aa) for n, aa in enumerate(domain_sequence, start=1)]
+            numbered_domains.append([(numbered, 0, 0)])
+        return numbered_domains, None, None
+
+    fake.anarci = _anarci
+    monkeypatch.setitem(sys.modules, "anarci", fake)
+
+
+def _write_fake_anarci_module(directory):
+    """Create an importable ANARCI stub for subprocess-only unit tests."""
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "anarci.py").write_text(
+        "DOMAIN_LEN = 123\n"
+        "def anarci(seqs, scheme='imgt', output=False):\n"
+        "    domains = []\n"
+        "    for name, sequence in seqs:\n"
+        "        seq = sequence[-DOMAIN_LEN:]\n"
+        "        numbered = [((i, ' '), aa) for i, aa in enumerate(seq, start=1)]\n"
+        "        domains.append([(numbered, 0, 0)])\n"
+        "    return domains, None, None\n",
+        encoding="utf-8",
+    )
+
+
 def _atoms(chain, sequence, x0, z, serial):
     lines = []
     for i, aa in enumerate(sequence):
@@ -189,6 +226,7 @@ def test_selection_cli_reports_cluster_adequacy(tmp_path, monkeypatch):
     assert chosen["9yyy"]["reasons"] == ["released_before_cutoff"]
 
     graphs = tmp_path / "graphs"
+    _install_fake_anarci(monkeypatch)
     assert ext.main(["--candidates", str(out / "candidates.json"), "--structures-dir", str(structures),
                      "--out-dir", str(graphs)]) == 0
     manifest = json.loads((graphs / "external_graph_manifest.json").read_text())
@@ -223,6 +261,7 @@ OTHER_VHH = "A" * 20 + ("EVQLVESGGGSVQPGGSLKLSCVASGFTLDDYAIGWFRQAPGKEREGVSCISSSD
 
 
 def test_two_pass_preparation_keeps_the_universe_and_pair_table_fixed(tmp_path, monkeypatch):
+    import os
     import sys
     import torch
     import yaml
@@ -231,7 +270,10 @@ def test_two_pass_preparation_keeps_the_universe_and_pair_table_fixed(tmp_path, 
     from nanoqc.data import prepare_external_vhh as prep
 
     monkeypatch.setitem(sys.modules, "anarci", None)
-    monkeypatch.setenv("PYTHONPATH", str(P(__file__).resolve().parents[1] / "src"))
+    fake_modules = tmp_path / "fake_modules"
+    _write_fake_anarci_module(fake_modules)
+    src_path = P(__file__).resolve().parents[1] / "src"
+    monkeypatch.setenv("PYTHONPATH", str(fake_modules) + os.pathsep + str(src_path))
     monkeypatch.delenv("QP_EXTERNAL_VHH_SOURCE_DIR", raising=False)
     structures = tmp_path / "structures"
     structures.mkdir()
@@ -418,6 +460,7 @@ def test_one_representative_per_group_is_built(tmp_path, monkeypatch):
     assert payload["selected"] == 2 and payload["independent_groups"] == 1
     assert [c["pdb_id"] for c in payload["candidates"] if c["representative"]] == ["9zzw"]  # tie: PDB order
     graphs = tmp_path / "graphs"
+    _install_fake_anarci(monkeypatch)
     ext.main(["--candidates", str(out / "candidates.json"), "--structures-dir", str(structures),
               "--out-dir", str(graphs), "--representatives-only"])
     assert [p.name for p in graphs.glob("*.pt")] == ["external_vhh__9ZZW.pt"]
