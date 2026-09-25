@@ -255,7 +255,14 @@ def cmd_foldseek(args, config, s) -> int:
     if args.reuse_raw:
         argv += ["--reuse-raw", str(s["prep"] / "foldseek" / "foldseek_raw.m8")]
     run_module("nanoqc.data.build_foldseek_pairs", argv)
-    print(f"Next: ./scripts/deploy_launch.sh --stop-after queue_freeze (pair table {s['pair_tsv']}).")
+    if args.run_dir is not None:
+        print(
+            "Next: resume the SAME run so its frozen audit universe remains authoritative: "
+            f"./scripts/deploy_launch.sh --resume {args.run_dir.resolve()} "
+            "--force-restage queue_freeze"
+        )
+    else:
+        print(f"Next: ./scripts/deploy_launch.sh --stop-after queue_freeze (pair table {s['pair_tsv']}).")
     return 0
 
 
