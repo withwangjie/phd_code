@@ -48,6 +48,7 @@ from typing import Optional, Sequence
 import yaml
 
 from nanoqc.common.repo_io import REPO_ROOT, sha256_file as sha256
+from nanoqc.pipeline.resolve_server_config import _load as _load_server_config, _resolve_data_root
 
 PDB_ID = re.compile(r"[a-z0-9]{4}")
 
@@ -67,6 +68,21 @@ def load_config(path: Optional[Path]) -> dict:
 def repo_path(value: str) -> Path:
     path = Path(str(value)).expanduser()
     return path if path.is_absolute() else REPO_ROOT / path
+
+
+def preprocessing_data_root(config: dict, explicit: Optional[Path]) -> Path:
+    """Resolve the same server data root used by formal deployment.
+
+    Explicit CLI input wins, then QP_DATA_ROOT/server_config auto-resolution,
+    then the scientific config fallback only when no server config exists.
+    """
+    if explicit is not None:
+        return explicit.expanduser().resolve()
+    server_path=REPO_ROOT/"configs"/"server_config.yaml"
+    if server_path.is_file():
+        server=_load_server_config(server_path)
+        return Path(_resolve_data_root(server)).resolve()
+    return repo_path(os.environ.get("QP_DATA_ROOT") or config["paths"]["data_root"]).resolve()
 
 
 def settings(config: dict, prep_dir: Optional[Path]) -> dict:
@@ -113,7 +129,7 @@ def write_json(path: Path, payload: dict) -> None:
 
 def cmd_audit(args, config, s) -> int:
     audit_cfg = config.get("data_audit", {}) or {}
-    data_root = args.data_root or repo_path(os.environ.get("QP_DATA_ROOT") or config["paths"]["data_root"])
+    data_root = preprocessing_data_root(config,args.data_root)
     argv = ["--data", str(data_root), "--workers", str(audit_cfg.get("workers", 4)),
             "--limit", str(audit_cfg.get("limit", 0)), "--out", str(s["prep"] / "audit"),
             "--max-resolution", s["max_resolution"],
@@ -209,7 +225,7 @@ def cmd_foldseek(args, config, s) -> int:
         print(f"[prepare_external_vhh] no external candidates; clustering the {len(universe.read_text().split())} "
               "study PDBs alone (antigen-fold holdout). Pass --run-dir <run> to bind the table to a run's "
               "own universe instead.")
-    data_root = args.data_root or repo_path(os.environ.get("QP_DATA_ROOT") or config["paths"]["data_root"])
+    data_root = preprocessing_data_root(config,args.data_root)
     argv = ["--universe", str(universe), "--audit-dir", str(audit_dir), "--data-root", str(data_root),
             "--out", str(s["pair_tsv"]),
             "--work-dir", str(s["prep"] / "foldseek"), "--foldseek", args.foldseek, "--threads", str(args.threads)]
