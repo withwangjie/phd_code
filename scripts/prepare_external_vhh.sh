@@ -39,6 +39,11 @@ server_venv_hint() {
     }' "$SERVER_CONFIG_FILE"
 }
 SERVER_VENV_HINT="$(server_venv_hint)"
+# Keep precedence identical to resolve_server_config.py and the formal launcher:
+# an explicit QP_VENV always overrides server_config.yaml.
+if [ -n "${QP_VENV:-}" ]; then
+    SERVER_VENV_HINT=""
+fi
 if [ -n "$SERVER_VENV_HINT" ]; then
     case "$SERVER_VENV_HINT" in
         "~/"*) SERVER_VENV_HINT="${HOME}/${SERVER_VENV_HINT#~/}" ;;
