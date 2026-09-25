@@ -2179,25 +2179,47 @@ class Orchestrator:
         else:
             graph_argv += ["--target-hard", str(qf_cfg["graph_build"].get("target_hard_if_capped", 500)),
                             "--partition-seed", str(streams["partition"])]
-        if (dataset_dir / "run_summary.json").is_file():
-            graph_argv.append("--resume")
-        returncode, graph_log = self._run_subprocess("queue_freeze_graph_build", graph_argv)
+        holdout_cfg = qf_cfg.get("antigen_fold_holdout", {}) or {}
+        holdout_json = self.run_dir / "independence" / "antigen_fold_holdout.json"
+        reuse_holdout=False
+        if holdout_cfg.get("enabled", False) and holdout_json.is_file():
+            reuse_holdout,holdout_detail=self._validate_frozen_antigen_holdout()
+            if not reuse_holdout:
+                return StageResult(
+                    "queue_freeze","failed",started,utc_timestamp(),1,
+                    "Existing antigen-fold holdout is inconsistent and cannot be safely rebuilt in-place: "
+                    +holdout_detail+". Start a fresh run directory.",
+                )
+
         graph_expected = [dataset_dir / name for name in
                            ("graph_manifest.csv", "graph_manifest.json",
                             "run_summary.json", "graph_dataset_delivery_report.md")]
-        graph_ok, graph_detail = self._artifacts_present(graph_expected)
-        if returncode != 0 or not graph_ok:
-            return StageResult("queue_freeze", "failed", started, utc_timestamp(), returncode,
-                                f"build_final_pyg_dataset.py exited {returncode}; {graph_detail} (see {graph_log})",
-                                graph_argv, str(graph_log), graph_ok)
+        if reuse_holdout:
+            graph_ok,graph_detail=self._artifacts_present(graph_expected)
+            graph_log=self.log_dir/"queue_freeze_graph_build.log"
+            returncode=0
+            if not graph_ok:
+                return StageResult(
+                    "queue_freeze","failed",started,utc_timestamp(),1,
+                    "Frozen holdout is valid but its parent graph-build artifacts are incomplete: "
+                    +graph_detail+". Start a fresh run directory.",
+                )
+            graph_detail="Reused verified frozen antigen-fold holdout; graph rebuild skipped."
+        else:
+            if (dataset_dir / "run_summary.json").is_file():
+                graph_argv.append("--resume")
+            returncode, graph_log = self._run_subprocess("queue_freeze_graph_build", graph_argv)
+            graph_ok, graph_detail = self._artifacts_present(graph_expected)
+            if returncode != 0 or not graph_ok:
+                return StageResult("queue_freeze", "failed", started, utc_timestamp(), returncode,
+                                    f"build_final_pyg_dataset.py exited {returncode}; {graph_detail} (see {graph_log})",
+                                    graph_argv, str(graph_log), graph_ok)
 
         # 3a2. Antigen-fold holdout (PROTOCOL_AMENDMENTS.md A10). Carved BEFORE
         # the validation queue is frozen and before any training, so the queue
         # is selected from the data the pipeline will actually train on, and
         # held-out complexes can never reach training or calibration.
-        holdout_cfg = qf_cfg.get("antigen_fold_holdout", {}) or {}
-        holdout_json = self.run_dir / "independence" / "antigen_fold_holdout.json"
-        if holdout_cfg.get("enabled", False):
+        if holdout_cfg.get("enabled", False) and not reuse_holdout:
             holdout_argv = [
                 self.venv_python, "-m", module_name("carve_holdout_clusters.py"),
                 "--dataset-dir", str(dataset_dir),
