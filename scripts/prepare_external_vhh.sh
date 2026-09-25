@@ -39,12 +39,19 @@ server_venv_hint() {
     }' "$SERVER_CONFIG_FILE"
 }
 SERVER_VENV_HINT="$(server_venv_hint)"
-# Keep precedence identical to resolve_server_config.py and the formal launcher:
-# an explicit QP_VENV always overrides server_config.yaml.
 if [ -n "${QP_VENV:-}" ]; then
-    SERVER_VENV_HINT=""
-fi
-if [ -n "$SERVER_VENV_HINT" ]; then
+    EXPLICIT_VENV="${QP_VENV}"
+    if [ -f "${EXPLICIT_VENV}/bin/activate" ] && [ -x "${EXPLICIT_VENV}/bin/python" ]; then
+        # shellcheck disable=SC1091
+        source "${EXPLICIT_VENV}/bin/activate"
+    elif [ -f "${EXPLICIT_VENV}/Scripts/activate" ] && [ -f "${EXPLICIT_VENV}/Scripts/python.exe" ]; then
+        # shellcheck disable=SC1091
+        source "${EXPLICIT_VENV}/Scripts/activate"
+    else
+        echo "[prepare_external_vhh] ERROR: QP_VENV declares an unusable venv: ${EXPLICIT_VENV}" >&2
+        exit 1
+    fi
+elif [ -n "$SERVER_VENV_HINT" ]; then
     case "$SERVER_VENV_HINT" in
         "~/"*) SERVER_VENV_HINT="${HOME}/${SERVER_VENV_HINT#~/}" ;;
         /*) ;;
@@ -69,7 +76,7 @@ elif [ -f "${REPO_ROOT}/.venv/Scripts/activate" ] && [ -f "${REPO_ROOT}/.venv/Sc
     # shellcheck disable=SC1091
     source "${REPO_ROOT}/.venv/Scripts/activate"
 else
-    SHARED_VENV="${QP_VENV:-/data/quantum-protein/.venv}"
+    SHARED_VENV="/data/quantum-protein/.venv"
     if [ -f "${SHARED_VENV}/bin/activate" ] && [ -x "${SHARED_VENV}/bin/python" ]; then
         # shellcheck disable=SC1091
         source "${SHARED_VENV}/bin/activate"
