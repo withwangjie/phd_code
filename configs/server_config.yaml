@@ -1,4 +1,4 @@
-# Server/runtime configuration.
+# Server/runtime configuration for /data/phd_code (2 Tesla T4 GPUs).
 # Scientific protocol choices stay in full_experiment_config.yaml. DDP rank
 # count is selected from available GPUs and can change the trained EGNN model:
 # rank-specific seeds and DistributedSampler partitions depend on it. The
@@ -6,23 +6,19 @@
 
 version: 1
 
-# "auto" searches QP_VENV, an existing repo .venv, then common deployment paths.
-# An absolute path may be supplied on a new server.
-venv: "auto"
+venv: "/data/phd_code/.venv"
 
 paths:
-  # "auto" first honors QP_DATA_ROOT / QP_RUN_ROOT. For data_root it then
-  # searches common local/server locations; run_root defaults beside data_root.
-  data_root: "auto"
-  run_root: "auto"
+  data_root: "/data/phd_code/data"
+  run_root: "/data/phd_code/runs"
   # Set QP_EXTERNAL_VHH_SOURCE_DIR or an absolute directory here for the
   # trusted raw PDB/mmCIF files that accompany external VHH graphs.
   external_vhh_source_dir: "auto"
 
 tools:
-  # "auto" honors QP_FASPR / QP_PHENIX_CLASHSCORE and then searches PATH/common paths.
-  faspr_executable: "auto"
-  phenix_clashscore_executable: "auto"
+  # FASPR must live beside its dun2010bbdep.bin rotamer library.
+  faspr_executable: "/data/FASPR/FASPR"
+  phenix_clashscore_executable: "/opt/phenix-2.2.1-6174/phenix_bin/phenix.clashscore"
 
 resources:
   mode: "auto"
@@ -33,22 +29,22 @@ resources:
   # The resolver chooses the largest available GPU rank count <= max_ddp_gpus
   # that exactly divides target_global_batch_size.
   target_global_batch_size: 4
-  max_ddp_gpus: 4
+  max_ddp_gpus: 2
 
   # CPU concurrency policy. Auto worker counts never exceed max_workers and
   # reserve at least cpu_reserve_cores for the OS/orchestrator.
-  cpu_reserve_cores: 2
+  cpu_reserve_cores: 8
   max_workers: 16
   cpu_threads_per_process: 2
-  max_egnn_loader_workers: 8
+  max_egnn_loader_workers: 4
   openmm_cpu_threads: 8
 
   # OpenMM uses CUDA automatically when available. Device 0 is used because
   # structural targets are intentionally sequential in the formal protocol.
-  openmm_platform: "auto"
+  openmm_platform: "CUDA"
   openmm_device: "0"
   openmm_precision: "double"
 
   # Preflight operational resource gates (not scientific parameters).
   min_free_disk_gb: 50
-  min_available_ram_gb: 16
+  min_available_ram_gb: 32
