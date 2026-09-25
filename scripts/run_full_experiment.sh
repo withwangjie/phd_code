@@ -41,6 +41,22 @@ if [[ "$SERVER_CONFIG" != /* ]]; then
 fi
 [ -f "$SCIENTIFIC_CONFIG" ] || fail "Scientific config file not found: ${REPO_ROOT}/${SCIENTIFIC_CONFIG}"
 [ -f "$SERVER_CONFIG" ] || fail "Server config file not found: ${SERVER_CONFIG}"
+server_venv_hint() {
+    awk -F: '$1 ~ /^[[:space:]]*venv[[:space:]]*$/ {
+        v=substr($0,index($0,":")+1); sub(/#.*/,"",v);
+        gsub(/^[[:space:]]+|[[:space:]]+$/,"",v);
+        gsub(/^"|"$/,"",v); gsub(/^\047|\047$/,"",v);
+        if (v!="" && v!="auto") print v; exit
+    }' "$SERVER_CONFIG"
+}
+SERVER_VENV_HINT="$(server_venv_hint)"
+if [ -n "$SERVER_VENV_HINT" ]; then
+    case "$SERVER_VENV_HINT" in
+        "~/"*) SERVER_VENV_HINT="${HOME}/${SERVER_VENV_HINT#~/}" ;;
+        /*) ;;
+        *) SERVER_VENV_HINT="${REPO_ROOT}/${SERVER_VENV_HINT}" ;;
+    esac
+fi
 for ARG in "$@"; do
     case "$ARG" in
         --config|--config=*|--run-dir|--run-dir=*)
@@ -76,7 +92,17 @@ fi
 # ---------------------------------------------------------------------------
 # 1. Activate the local virtual environment (POSIX or Windows layout).
 # ---------------------------------------------------------------------------
-if [ -f "${REPO_ROOT}/.venv/bin/activate" ] && [ -x "${REPO_ROOT}/.venv/bin/python" ]; then
+if [ -n "$SERVER_VENV_HINT" ]; then
+    if [ -f "${SERVER_VENV_HINT}/bin/activate" ] && [ -x "${SERVER_VENV_HINT}/bin/python" ]; then
+        # shellcheck disable=SC1091
+        source "${SERVER_VENV_HINT}/bin/activate"
+    elif [ -f "${SERVER_VENV_HINT}/Scripts/activate" ] && [ -f "${SERVER_VENV_HINT}/Scripts/python.exe" ]; then
+        # shellcheck disable=SC1091
+        source "${SERVER_VENV_HINT}/Scripts/activate"
+    else
+        fail "server_config.yaml declares an unusable venv: ${SERVER_VENV_HINT}"
+    fi
+elif [ -f "${REPO_ROOT}/.venv/bin/activate" ] && [ -x "${REPO_ROOT}/.venv/bin/python" ]; then
     # shellcheck disable=SC1091
     source "${REPO_ROOT}/.venv/bin/activate"
 elif [ -f "${REPO_ROOT}/.venv/Scripts/activate" ] && [ -f "${REPO_ROOT}/.venv/Scripts/python.exe" ]; then
@@ -91,7 +117,7 @@ else
         # shellcheck disable=SC1091
         source "${SHARED_VENV}/Scripts/activate"
     else
-        fail "No usable virtual environment found. Set QP_VENV or provide ${REPO_ROOT}/.venv."
+        fail "No usable virtual environment found. Set QP_VENV, configure server_config.yaml:venv, or provide ${REPO_ROOT}/.venv."
     fi
 fi
 log "Activated virtual environment: $(command -v python)"
