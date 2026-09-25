@@ -38,6 +38,7 @@ no earlier run directory can be resumed; a fresh formal run is required.
 | A14 | A downloaded RCSB assembly file is the assembly, not an unannotated ASU | audit, dataset (admission), everything downstream | not applicable (admission counts only; no result existed) |
 | A15 | Entry resolution fetched from RCSB for files that carry none | audit, dataset (admission), everything downstream | not applicable (admission counts only; no result existed) |
 | A16 | Formal VHH sources and cross-source PDB precedence | audit, Foldseek universe, dataset admission, EGNN/calibration and everything downstream | to be completed |
+| A17 | SNAC-only primary antigen-fold targets; SAbDab quarantine; exact source_id binding | queue_freeze, external_validation, final_report | to be completed |
 
 ## A1. Primary coarse solver endpoint: resource-normalized time-to-solution
 
@@ -560,4 +561,31 @@ they were logged later.
 - **Affected results:** audit metadata, Foldseek clustering universe, formal
   graph composition, EGNN training/validation, calibration, holdout,
   QAOA/structure analyses and all downstream reports.
+- **Results inspected before this amendment:** _to be completed by the investigator_.
+
+
+## A17. Primary-source antigen-fold holdout and exact source binding
+
+- **Before:** antigen-fold components were carved jointly from SNAC and SAbDab
+  and every graph in a selected component became a scored holdout target.
+  Holdout raw structures were selected by PDB ID only, so a PDB represented by
+  more than one source (or more than one curated complex) could bind a graph to
+  the wrong raw file.
+- **After:** layered components are still built jointly from SNAC primary and
+  SAbDab auxiliary graphs, preserving the same leakage barriers. A component is
+  eligible for the antigen-fold holdout only when it contains a SNAC primary
+  graph. The whole selected component is removed from training; exactly one
+  deterministic SNAC graph per PDB is scored, while SAbDab component members
+  and duplicate same-PDB SNAC graphs are moved to
+  `graphs/holdout_quarantine` and never scored. Every scored target resolves
+  its raw structure by exact audit `source_id` and audit-time SHA-256, not by
+  PDB ID alone. The holdout manifest schema is v2.
+- **Why:** SAbDab is an auxiliary source in the frozen data design and should
+  prevent leakage without becoming a co-primary evaluation population.
+  One-target-per-PDB avoids pseudo-replication and matches the downstream raw
+  source contract. Exact source binding closes the ambiguity created by
+  cross-source or per-PDB duplicate representations.
+- **Affected results:** antigen-fold holdout composition, external_validation
+  (when it scores the run-local holdout), cluster adequacy counts and final
+  reporting of that holdout.
 - **Results inspected before this amendment:** _to be completed by the investigator_.

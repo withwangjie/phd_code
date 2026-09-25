@@ -473,18 +473,37 @@ def _frozen_holdout_fixture(tmp_path: Path) -> Orchestrator:
     source.write_text("END\n",encoding="utf-8")
     rel="graphs/holdout/case.pt"
     graph_sha=full.sha256_of(graph)
+    raw_sha="a"*64
+    source_id="snac_db/1abc.pdb"
     (dataset/"graph_manifest.json").write_text(json.dumps([{
-        "split":"holdout","path":rel,"pdb_id":"1ABC","sha256":graph_sha
+        "split":"holdout","path":rel,"pdb_id":"1ABC","sha256":graph_sha,
+        "subset_source":"snac_db","source_id":source_id,
+        "source_structure_sha256":raw_sha
     }]),encoding="utf-8")
+    audit_dir=tmp_path/"audit";audit_dir.mkdir()
+    (audit_dir/"data_audit_details.jsonl").write_text(json.dumps({
+        "id":source_id,"subset":"snac_db","pdb_id":"1ABC",
+        "source_structure_sha256":raw_sha
+    })+"\n",encoding="utf-8")
     holdout=tmp_path/"independence"/"antigen_fold_holdout.json"
     holdout.parent.mkdir(parents=True)
     holdout.write_text(json.dumps({
-        "schema":"antigen_fold_holdout_v1",
+        "schema":"antigen_fold_holdout_v2",
+        "primary_source":"snac_db","auxiliary_source":"sabdab_vhh",
         "graph_dir":str(graph_dir.resolve()),
+        "quarantine_dir":str((dataset/"graphs"/"holdout_quarantine").resolve()),
         "source_structure_dir":str(source_dir.resolve()),
-        "targets":[{"pdb_id":"1abc","path":rel,"sha256":graph_sha}],
+        "targets":[{
+            "pdb_id":"1abc","path":rel,"sha256":graph_sha,
+            "subset_source":"snac_db","source_id":source_id,
+            "source_structure_sha256":raw_sha
+        }],
+        "quarantined":[],
         "source_structures":{
-            "1abc":{"path":str(source.resolve()),"sha256":full.sha256_of(source)}
+            "1abc":{
+                "path":str(source.resolve()),"sha256":full.sha256_of(source),
+                "source_id":source_id,"audited_source_sha256":raw_sha
+            }
         },
     }),encoding="utf-8")
     return orchestrator

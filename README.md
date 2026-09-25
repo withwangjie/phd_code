@@ -26,6 +26,7 @@ prediction.
      joined if VHH full-chain identity >=80% [R24], CDR-H3 loop-only identity >=50% [R23], or
      antigen full-chain identity >=30% with >=70% minimum length coverage [R25]; no random 90/10 split.
      All formal training graphs have annotation-anchored VHH/antigen roles.
+   - Antigen-fold holdout: layered components are built jointly from SNAC and SAbDab so auxiliary homologues cannot remain in training. Scored targets are SNAC-only (one deterministic graph per PDB); SAbDab and duplicate same-PDB members of selected components are quarantined outside both training and evaluation. Holdout raw structures are bound by exact audit source_id + SHA-256.
 
 2. **Antigen-conditioned Active-site selection**
    - E(n)-equivariant EGNN [R1] provides residue-level interface probabilities.

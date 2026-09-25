@@ -842,7 +842,7 @@ class Orchestrator:
         return dataset/"graphs"/"holdout", dataset/"holdout_source_structures", True
 
     def _validate_frozen_antigen_holdout(self) -> tuple[bool, str]:
-        """Verify an already-carved holdout before reusing it during queue recovery."""
+        """Verify an already-carved primary-SNAC holdout before queue recovery."""
         holdout_json=self.run_dir/"independence"/"antigen_fold_holdout.json"
         if not holdout_json.is_file():
             return False,"holdout manifest is absent"
@@ -850,70 +850,143 @@ class Orchestrator:
             payload=json.loads(holdout_json.read_text(encoding="utf-8"))
         except (OSError,json.JSONDecodeError) as exc:
             return False,f"unreadable holdout manifest: {type(exc).__name__}: {exc}"
-        if not isinstance(payload,dict) or payload.get("schema")!="antigen_fold_holdout_v1":
+        if not isinstance(payload,dict) or payload.get("schema")!="antigen_fold_holdout_v2":
             return False,"invalid antigen-fold holdout schema"
+        if payload.get("primary_source")!="snac_db" or payload.get("auxiliary_source")!="sabdab_vhh":
+            return False,"holdout source-role contract is invalid"
 
         dataset=self.dataset_dir().resolve()
         expected_graph_dir=(dataset/"graphs"/"holdout").resolve()
+        expected_quarantine_dir=(dataset/"graphs"/"holdout_quarantine").resolve()
         expected_source_dir=(dataset/"holdout_source_structures").resolve()
         try:
             graph_dir=Path(str(payload["graph_dir"])).resolve()
+            quarantine_dir=Path(str(payload["quarantine_dir"])).resolve()
             source_dir=Path(str(payload["source_structure_dir"])).resolve()
         except (KeyError,TypeError,ValueError) as exc:
             return False,f"holdout manifest lacks resolved directories: {exc}"
-        if graph_dir!=expected_graph_dir or source_dir!=expected_source_dir:
+        if (graph_dir!=expected_graph_dir or quarantine_dir!=expected_quarantine_dir
+                or source_dir!=expected_source_dir):
             return False,"holdout manifest directories do not match this run's dataset"
         if not graph_dir.is_dir() or not source_dir.is_dir():
             return False,"holdout graph/source directory is missing"
 
         manifest_path=dataset/"graph_manifest.json"
-        if not manifest_path.is_file():
-            return False,"dataset graph_manifest.json is missing"
+        audit_jsonl=self.run_dir/"audit"/"data_audit_details.jsonl"
+        if not manifest_path.is_file() or not audit_jsonl.is_file():
+            return False,"dataset graph manifest or audit ledger is missing"
         try:
             manifest=json.loads(manifest_path.read_text(encoding="utf-8"))
+            audit_rows=[json.loads(line) for line in audit_jsonl.read_text(encoding="utf-8").splitlines()
+                        if line.strip()]
         except (OSError,json.JSONDecodeError) as exc:
-            return False,f"unreadable graph manifest: {type(exc).__name__}: {exc}"
+            return False,f"unreadable holdout provenance input: {type(exc).__name__}: {exc}"
         if not isinstance(manifest,list):
             return False,"graph_manifest.json must be a list"
-        by_path={str(row.get("path","")).replace("\\","/"):row for row in manifest if isinstance(row,dict)}
+        by_path={str(row.get("path","")).replace("\\","/"):row
+                 for row in manifest if isinstance(row,dict)}
+        audit_by_id={}
+        for row in audit_rows:
+            source_id=str((row or {}).get("id",""))
+            if not source_id:
+                continue
+            if source_id in audit_by_id:
+                return False,f"duplicate audit source_id in frozen ledger: {source_id}"
+            audit_by_id[source_id]=row
+
         targets=payload.get("targets")
+        quarantined=payload.get("quarantined",[])
         if not isinstance(targets,list) or not targets:
             return False,"holdout manifest has no targets"
+        if not isinstance(quarantined,list):
+            return False,"holdout quarantine manifest is malformed"
+
         target_paths=set()
+        target_pdbs=set()
+        target_by_pdb={}
         for row in targets:
             if not isinstance(row,dict):
                 return False,"malformed holdout target record"
             rel=str(row.get("path","")).replace("\\","/")
             expected_sha=str(row.get("sha256",""))
-            if not rel.startswith("graphs/holdout/") or not expected_sha:
-                return False,f"invalid holdout target binding: {row!r}"
+            pdb=str(row.get("pdb_id","")).lower()
+            source_id=str(row.get("source_id",""))
+            raw_sha=str(row.get("source_structure_sha256",""))
+            if (not rel.startswith("graphs/holdout/") or not expected_sha
+                    or row.get("subset_source")!="snac_db" or not source_id
+                    or len(raw_sha)!=64 or len(pdb)!=4):
+                return False,f"invalid primary holdout target binding: {row!r}"
+            if pdb in target_pdbs:
+                return False,f"primary holdout has duplicate PDB target: {pdb}"
             path=(dataset/rel).resolve()
             if not path.is_relative_to(dataset) or not path.is_file():
                 return False,f"holdout graph missing/outside dataset: {rel}"
             manifest_row=by_path.get(rel)
-            if not manifest_row or manifest_row.get("split")!="holdout":
-                return False,f"graph manifest does not bind holdout graph: {rel}"
+            if (not manifest_row or manifest_row.get("split")!="holdout"
+                    or manifest_row.get("subset_source")!="snac_db"
+                    or str(manifest_row.get("source_id",""))!=source_id
+                    or str(manifest_row.get("source_structure_sha256",""))!=raw_sha):
+                return False,f"graph manifest does not bind primary holdout graph: {rel}"
             actual_sha=sha256_of(path)
             if actual_sha!=expected_sha or str(manifest_row.get("sha256",""))!=actual_sha:
                 return False,f"holdout graph hash mismatch: {rel}"
-            target_paths.add(rel)
+            audit_row=audit_by_id.get(source_id)
+            if (not audit_row
+                    or str(audit_row.get("pdb_id","")).lower()!=pdb
+                    or audit_row.get("subset")!="snac_db"
+                    or str(audit_row.get("source_structure_sha256",""))!=raw_sha):
+                return False,f"holdout target is not bound to its exact audited SNAC source: {source_id}"
+            target_paths.add(rel);target_pdbs.add(pdb);target_by_pdb[pdb]=row
+
+        quarantine_paths=set()
+        for row in quarantined:
+            if not isinstance(row,dict):
+                return False,"malformed holdout quarantine record"
+            rel=str(row.get("path","")).replace("\\","/")
+            expected_sha=str(row.get("sha256",""))
+            if not rel.startswith("graphs/holdout_quarantine/") or not expected_sha:
+                return False,f"invalid holdout quarantine binding: {row!r}"
+            path=(dataset/rel).resolve()
+            if not path.is_relative_to(dataset) or not path.is_file():
+                return False,f"quarantined graph missing/outside dataset: {rel}"
+            manifest_row=by_path.get(rel)
+            if not manifest_row or manifest_row.get("split")!="holdout_quarantine":
+                return False,f"graph manifest does not bind quarantined graph: {rel}"
+            actual_sha=sha256_of(path)
+            if actual_sha!=expected_sha or str(manifest_row.get("sha256",""))!=actual_sha:
+                return False,f"quarantined graph hash mismatch: {rel}"
+            quarantine_paths.add(rel)
+        if quarantine_paths and not quarantine_dir.is_dir():
+            return False,"holdout quarantine directory is missing"
+
         manifest_holdout={path for path,row in by_path.items() if row.get("split")=="holdout"}
+        manifest_quarantine={path for path,row in by_path.items() if row.get("split")=="holdout_quarantine"}
         if manifest_holdout!=target_paths:
-            return False,"graph manifest holdout rows differ from frozen holdout target set"
+            return False,"graph manifest holdout rows differ from frozen primary target set"
+        if manifest_quarantine!=quarantine_paths:
+            return False,"graph manifest quarantine rows differ from frozen quarantine set"
+        if target_paths & quarantine_paths:
+            return False,"holdout target/quarantine path overlap"
 
         sources=payload.get("source_structures")
-        if not isinstance(sources,dict) or not sources:
-            return False,"holdout manifest has no source-structure bindings"
+        if not isinstance(sources,dict) or set(sources)!=target_pdbs:
+            return False,"holdout source-structure bindings differ from primary PDB targets"
         for pdb,binding in sources.items():
             if not isinstance(binding,dict):
                 return False,f"malformed source binding for {pdb}"
             path=Path(str(binding.get("path",""))).resolve()
             expected_sha=str(binding.get("sha256",""))
-            if not path.is_relative_to(source_dir) or not path.is_file() or not expected_sha:
-                return False,f"invalid holdout source structure for {pdb}"
+            source_id=str(binding.get("source_id",""))
+            audited_sha=str(binding.get("audited_source_sha256",""))
+            target=target_by_pdb[pdb]
+            if (not path.is_relative_to(source_dir) or not path.is_file() or not expected_sha
+                    or source_id!=target["source_id"]
+                    or audited_sha!=target["source_structure_sha256"]):
+                return False,f"invalid exact holdout source structure for {pdb}"
             if sha256_of(path)!=expected_sha:
                 return False,f"holdout source-structure hash mismatch for {pdb}"
-        return True,f"verified {len(targets)} frozen holdout graph(s)"
+        return True,(f"verified {len(targets)} primary SNAC holdout graph(s) and "
+                     f"{len(quarantined)} quarantined component member(s)")
 
     def frozen_cluster_map_path(self) -> Path:
         """Run-local family/structure cluster map used by every downstream stage."""

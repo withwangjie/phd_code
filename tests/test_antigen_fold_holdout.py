@@ -20,13 +20,14 @@ def _sequence(rng: random.Random, length: int = 120) -> str:
     return "".join(rng.choice(RESIDUES) for _ in range(length))
 
 
-def _graph(path: Path, vhh: str, antigen: str, cdr3: str, cluster: str, pdb: str) -> Path:
+def _graph(path: Path, vhh: str, antigen: str, cdr3: str, cluster: str, pdb: str,
+           subset: str = "snac_db") -> Path:
     graph = Data(x=torch.zeros(1, 3))
     graph.vhh_sequences = [vhh]
     graph.antigen_sequences = [antigen]
     graph.cdr3_seq = cdr3
     graph.family_structure_cluster = cluster
-    graph.subset_source = "snac_db"
+    graph.subset_source = subset
     torch.save(graph, path)
     return path
 
@@ -42,13 +43,20 @@ def _dataset(tmp_path: Path, count: int = 40) -> tuple[Path, Path]:
     manifest, audit_rows = [], []
     for index in range(count):
         pdb = f"{index + 10:02d}ab"
-        path = _graph(train / f"snac_db__{pdb.upper()}.pt", _sequence(rng), _sequence(rng, 200),
-                      _sequence(rng, 14), f"cluster_{index:06d}", pdb)
-        manifest.append(dict(split="train", path=f"graphs/train/{path.name}", pdb_id=pdb.upper(),
-                             sha256=sha256_file(path), family_structure_cluster=f"cluster_{index:06d}"))
         source = raw / f"{pdb}.pdb"
         source.write_text(f"REMARK {pdb}\nEND\n")
-        audit_rows.append(dict(pdb_id=pdb.upper(), path=str(source), member="", valid=True))
+        source_id = f"snac_db/{pdb}.pdb"
+        source_sha = sha256_file(source)
+        path = _graph(train / f"snac_db__{pdb.upper()}.pt", _sequence(rng), _sequence(rng, 200),
+                      _sequence(rng, 14), f"cluster_{index:06d}", pdb)
+        manifest.append(dict(
+            split="train", path=f"graphs/train/{path.name}", pdb_id=pdb.upper(),
+            subset_source="snac_db", source_id=source_id,
+            source_structure_sha256=source_sha, sha256=sha256_file(path),
+            family_structure_cluster=f"cluster_{index:06d}"))
+        audit_rows.append(dict(
+            id=source_id, subset="snac_db", pdb_id=pdb.upper(), path=str(source),
+            member="", valid=True, source_structure_sha256=source_sha))
     (dataset / "graph_manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True))
     audit = tmp_path / "audit"
     audit.mkdir()
@@ -101,13 +109,20 @@ def test_the_holdout_never_splits_a_homologous_component(tmp_path):
     _graph(twin, shared.vhh_sequences[0], _sequence(random.Random(5), 200),
            _sequence(random.Random(6), 14), "cluster_999999", "99zz")
     manifest = json.loads((dataset / "graph_manifest.json").read_text())
-    manifest.append(dict(split="train", path=f"graphs/train/{twin.name}", pdb_id="99ZZ",
-                         sha256=sha256_file(twin), family_structure_cluster="cluster_999999"))
+    source = tmp_path / "raw" / "99zz.pdb"
+    source.write_text("REMARK 99zz\nEND\n")
+    source_id = "snac_db/99zz.pdb"
+    source_sha = sha256_file(source)
+    manifest.append(dict(
+        split="train", path=f"graphs/train/{twin.name}", pdb_id="99ZZ",
+        subset_source="snac_db", source_id=source_id,
+        source_structure_sha256=source_sha, sha256=sha256_file(twin),
+        family_structure_cluster="cluster_999999"))
     (dataset / "graph_manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True))
-    (tmp_path / "raw" / "99zz.pdb").write_text("REMARK 99zz\nEND\n")
     details = audit / "data_audit_details.jsonl"
-    details.write_text(details.read_text() + json.dumps(
-        dict(pdb_id="99ZZ", path=str(tmp_path / "raw" / "99zz.pdb"), member="", valid=True)) + "\n")
+    details.write_text(details.read_text() + json.dumps(dict(
+        id=source_id, subset="snac_db", pdb_id="99ZZ", path=str(source),
+        member="", valid=True, source_structure_sha256=source_sha)) + "\n")
 
     _carve(dataset, audit, tmp_path / "holdout.json")
     held = {path.name for path in (dataset / "graphs" / "holdout").glob("*.pt")}
@@ -131,12 +146,12 @@ def test_unreadable_later_source_leaves_training_split_intact(tmp_path, monkeypa
     real_copy = carve.copy_source_structure
     calls = 0
 
-    def fail_second(source, pdb, destination):
+    def fail_second(source, pdb, destination, expected_sha256):
         nonlocal calls
         calls += 1
         if calls == 2:
             raise OSError("unreadable later source")
-        return real_copy(source, pdb, destination)
+        return real_copy(source, pdb, destination, expected_sha256)
 
     monkeypatch.setattr(carve, "copy_source_structure", fail_second)
     with pytest.raises(OSError, match="unreadable later source"):
@@ -375,3 +390,91 @@ def test_the_holdout_cannot_swallow_every_non_validation_fold(tmp_path):
     with pytest.raises(SystemExit) as raised:  # argparse error: message goes to stderr
         _carve(dataset, audit, tmp_path / "holdout.json", fold="1,2,3,4", min_clusters=1)
     assert raised.value.code == 2
+
+
+def test_sabdab_in_selected_primary_component_is_quarantined_not_scored(tmp_path):
+    dataset, audit = _dataset(tmp_path)
+    train_dir = dataset / "graphs" / "train"
+    primary = sorted(train_dir.glob("*.pt"))[0]
+    primary_graph = torch.load(primary, map_location="cpu", weights_only=False)
+
+    # Choose a deterministic auxiliary filename whose two-member component is
+    # not the reserved internal-validation fold.
+    aux_path = None
+    for suffix in range(100):
+        candidate = train_dir / f"sabdab_vhh__AUX{suffix:02d}.pt"
+        if training.component_fold([primary, candidate]) != training.VALIDATION_FOLD:
+            aux_path = candidate
+            break
+    assert aux_path is not None
+    aux_pdb = "9aux"
+    _graph(aux_path, primary_graph.vhh_sequences[0], _sequence(random.Random(101), 200),
+           _sequence(random.Random(102), 14), "cluster_aux", aux_pdb, subset="sabdab_vhh")
+
+    source = tmp_path / "raw" / f"{aux_pdb}.pdb"
+    source.write_text("REMARK auxiliary\nEND\n")
+    source_id = f"sabdab_vhh/{aux_pdb}.pdb"
+    source_sha = sha256_file(source)
+    manifest_path = dataset / "graph_manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest.append(dict(
+        split="train", path=f"graphs/train/{aux_path.name}", pdb_id=aux_pdb.upper(),
+        subset_source="sabdab_vhh", source_id=source_id,
+        source_structure_sha256=source_sha, sha256=sha256_file(aux_path),
+        family_structure_cluster="cluster_aux"))
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True))
+    details = audit / "data_audit_details.jsonl"
+    details.write_text(details.read_text() + json.dumps(dict(
+        id=source_id, subset="sabdab_vhh", pdb_id=aux_pdb.upper(), path=str(source),
+        member="", valid=True, source_structure_sha256=source_sha)) + "\n")
+
+    component = next(c for c in training.layered_components(sorted(train_dir.glob("*.pt")))
+                     if aux_path in c)
+    fold = training.component_fold(component)
+    assert fold != training.VALIDATION_FOLD
+    payload = _carve(dataset, audit, tmp_path / "holdout_aux.json",
+                     fold=fold, min_clusters=1)
+
+    held = {p.name for p in (dataset / "graphs" / "holdout").glob("*.pt")}
+    quarantined = {p.name for p in (dataset / "graphs" / "holdout_quarantine").glob("*.pt")}
+    assert primary.name in held
+    assert aux_path.name in quarantined
+    assert aux_path.name not in held
+    assert all(t["subset_source"] == "snac_db" for t in payload["targets"])
+    assert any(q["subset_source"] == "sabdab_vhh"
+               and q["reason"] == "auxiliary_sabdab_component_member"
+               for q in payload["quarantined"])
+    assert aux_path.name not in {p.name for p in train_dir.glob("*.pt")}
+
+
+def test_holdout_uses_exact_source_id_not_first_row_for_same_pdb(tmp_path):
+    dataset, audit = _dataset(tmp_path)
+    train_dir = dataset / "graphs" / "train"
+    paths = sorted(train_dir.glob("*.pt"))
+    primary = next(path for path in paths
+                   if training.component_fold([path]) != training.VALIDATION_FOLD)
+    manifest = json.loads((dataset / "graph_manifest.json").read_text())
+    row = next(r for r in manifest if r["path"] == f"graphs/train/{primary.name}")
+    pdb = row["pdb_id"].lower()
+
+    # Prepend a lower-priority same-PDB source whose bytes differ. A PDB-only
+    # lookup would pick this wrong structure; exact source_id binding must not.
+    bogus = tmp_path / "raw" / f"{pdb}_bogus.pdb"
+    bogus.write_text("BOGUS\nEND\n")
+    bogus_row = dict(
+        id=f"sabdab_vhh/bogus_{pdb}.pdb", subset="sabdab_vhh",
+        pdb_id=pdb.upper(), path=str(bogus), member="", valid=True,
+        source_structure_sha256=sha256_file(bogus),
+    )
+    details = audit / "data_audit_details.jsonl"
+    details.write_text(json.dumps(bogus_row) + "\n" + details.read_text())
+
+    fold = training.component_fold([primary])
+    payload = _carve(dataset, audit, tmp_path / "holdout_exact.json",
+                     fold=fold, min_clusters=1)
+    target = next(t for t in payload["targets"] if t["pdb_id"] == pdb)
+    assert target["source_id"] == row["source_id"]
+    binding = payload["source_structures"][pdb]
+    assert binding["source_id"] == row["source_id"]
+    copied = Path(binding["path"])
+    assert copied.read_text() != bogus.read_text()
