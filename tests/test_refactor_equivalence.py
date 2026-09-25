@@ -15,7 +15,7 @@ import itertools
 import math
 import random
 from pathlib import Path
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Sequence, Tuple
 
 import numpy as np
 import pytest
