@@ -304,6 +304,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.command in ("pass1", "pass2") and args.released_after:
         dt.date.fromisoformat(args.released_after)
     config = load_config(args.config)
+    external_cfg=((config.get("external_validation",{}) or {}).get("external_vhh",{}) or {})
+    if args.command in ("pass1","pass2"):
+        if not external_cfg.get("graph_dir") or not (
+            os.environ.get("QP_EXTERNAL_VHH_SOURCE_DIR") or external_cfg.get("source_structure_dir")
+        ):
+            raise SystemExit(
+                f"{args.command} is only valid for a genuinely external VHH set: "
+                "configure both external_validation.external_vhh.graph_dir and "
+                "source_structure_dir (or QP_EXTERNAL_VHH_SOURCE_DIR). "
+                "For the default antigen-fold holdout use only audit + foldseek."
+            )
     s = settings(config, args.prep_dir)
     s["prep"].mkdir(parents=True, exist_ok=True)
     return dict(audit=cmd_audit, pass1=cmd_pass1, foldseek=cmd_foldseek,
