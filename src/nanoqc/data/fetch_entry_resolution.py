@@ -65,13 +65,15 @@ def data_root() -> Path:
 
 
 def latest_audit_dir(runs_dir: Optional[Path] = None) -> Optional[Path]:
-    """The newest run directory's audit, when it holds a finished audit."""
+    """The audit whose details file was most recently updated."""
     runs = runs_dir if runs_dir is not None else REPO_ROOT / "runs"
     if not runs.is_dir():
         return None
     candidates = [d / "audit" for d in runs.iterdir() if d.is_dir()]
     candidates = [a for a in candidates if (a / "data_audit_details.jsonl").is_file()]
-    return max(candidates, key=lambda a: a.stat().st_mtime) if candidates else None
+    return max(candidates, key=lambda a: (
+        (a / "data_audit_details.jsonl").stat().st_mtime_ns, str(a)
+    )) if candidates else None
 
 
 def entry_ids(values: Iterable[str]) -> list[str]:
