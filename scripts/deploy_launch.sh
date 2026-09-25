@@ -36,10 +36,34 @@ fail() { echo "[deploy_launch] ERROR: $*" >&2; exit 1; }
 # that is very likely missing this project's dependencies.
 # ---------------------------------------------------------------------------
 SHARED_VENV="${QP_VENV:-/data/quantum-protein/.venv}"
+VENV_FROM_CLI=0
 if [ "${1:-}" = "--venv" ]; then
     [ "$#" -ge 2 ] || fail "--venv requires a path"
     SHARED_VENV="$2"
+    VENV_FROM_CLI=1
     shift 2
+fi
+
+if [ "$VENV_FROM_CLI" -eq 0 ] && [ -z "${QP_VENV:-}" ]; then
+    SERVER_CONFIG_FILE="${QP_SERVER_CONFIG:-${REPO_ROOT}/configs/server_config.yaml}"
+    if [[ "$SERVER_CONFIG_FILE" != /* ]]; then
+        SERVER_CONFIG_FILE="${REPO_ROOT}/${SERVER_CONFIG_FILE}"
+    fi
+    if [ -f "$SERVER_CONFIG_FILE" ]; then
+        SERVER_VENV_HINT="$(awk -F: '$1 ~ /^[[:space:]]*venv[[:space:]]*$/ {
+            v=substr($0,index($0,":")+1); sub(/#.*/,"",v);
+            gsub(/^[[:space:]]+|[[:space:]]+$/,"",v);
+            gsub(/^"|"$/,"",v); gsub(/^\047|\047$/,"",v);
+            if (v!="" && v!="auto") print v; exit
+        }' "$SERVER_CONFIG_FILE")"
+        if [ -n "$SERVER_VENV_HINT" ]; then
+            case "$SERVER_VENV_HINT" in
+                "~/"*) SHARED_VENV="${HOME}/${SERVER_VENV_HINT#~/}" ;;
+                /*) SHARED_VENV="$SERVER_VENV_HINT" ;;
+                *) SHARED_VENV="${REPO_ROOT}/${SERVER_VENV_HINT}" ;;
+            esac
+        fi
+    fi
 fi
 
 venv_usable() {
@@ -63,5 +87,6 @@ else
     fail "No virtual environment found at ${SHARED_VENV}. Set QP_VENV, use --venv /path/to/existing/.venv, or create/restore that environment first."
 fi
 
+export QP_VENV="$SHARED_VENV"
 log "Handing off to run_full_experiment.sh (formal pipeline uses the stage toggles frozen in configs/full_experiment_config.yaml; current source config includes smoke_check before data_audit)."
 exec bash "${SCRIPT_DIR}/run_full_experiment.sh" "$@"
