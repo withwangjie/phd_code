@@ -43,7 +43,8 @@ if [ "${1:-}" = "--venv" ]; then
 fi
 
 venv_usable() {
-    [ -f "$1/bin/activate" ] || [ -f "$1/Scripts/activate" ]
+    { [ -f "$1/bin/activate" ] && [ -x "$1/bin/python" ]; } ||
+    { [ -f "$1/Scripts/activate" ] && [ -f "$1/Scripts/python.exe" ]; }
 }
 
 if [ -L "${REPO_ROOT}/.venv" ] && ! venv_usable "${REPO_ROOT}/.venv"; then
