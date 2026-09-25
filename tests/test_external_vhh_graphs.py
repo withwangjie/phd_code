@@ -219,7 +219,7 @@ def test_selection_cli_reports_cluster_adequacy(tmp_path, monkeypatch):
     _install_fake_anarci(monkeypatch)
     structures = tmp_path / "structures"
     structures.mkdir()
-    (structures / "9zzz.pdb").write_text(_complex_pdb(104.5, 100.0, antigen_x0=68.4))
+    (structures / "9zzz.pdb").write_text(_complex_pdb(104.5, 100.0))
     summary = tmp_path / "sabdab.tsv"
     rows = [_sabdab(pdb="9zzz", Hchain="H"), _sabdab(pdb="9yyy", Hchain="H", date="01/02/20")]
     keys = list(rows[0])
@@ -285,7 +285,7 @@ def test_two_pass_preparation_keeps_the_universe_and_pair_table_fixed(tmp_path, 
     monkeypatch.delenv("QP_EXTERNAL_VHH_SOURCE_DIR", raising=False)
     structures = tmp_path / "structures"
     structures.mkdir()
-    (structures / "9zzz.pdb").write_text(_complex_pdb(104.5, 100.0, antigen_x0=68.4))
+    (structures / "9zzz.pdb").write_text(_complex_pdb(104.5, 100.0))
     pairs = tmp_path / "pairs.tsv"
     pairs.write_text("query\ttarget\tqtmscore\n1abc\t1abc\t1.0\n9zzz\t9zzz\t1.0\n")
     config = dict(paths=dict(data_root=str(tmp_path / "data"), dataset_dir="dataset"),
@@ -455,7 +455,7 @@ def test_one_representative_per_group_is_built(tmp_path, monkeypatch):
     structures = tmp_path / "structures"
     structures.mkdir()
     for pdb in ("9zzz", "9zzw"):  # same VHH and antigen: one layered group
-        (structures / f"{pdb}.pdb").write_text(_complex_pdb(104.5, 100.0, antigen_x0=68.4))
+        (structures / f"{pdb}.pdb").write_text(_complex_pdb(104.5, 100.0))
     summary = tmp_path / "sabdab.tsv"
     rows = [_sabdab(pdb="9zzz", Hchain="H"), _sabdab(pdb="9zzw", Hchain="H")]
     keys = list(rows[0])
