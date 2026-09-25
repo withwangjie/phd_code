@@ -839,6 +839,80 @@ class Orchestrator:
         dataset=self.dataset_dir()
         return dataset/"graphs"/"holdout", dataset/"holdout_source_structures", True
 
+    def _validate_frozen_antigen_holdout(self) -> tuple[bool, str]:
+        """Verify an already-carved holdout before reusing it during queue recovery."""
+        holdout_json=self.run_dir/"independence"/"antigen_fold_holdout.json"
+        if not holdout_json.is_file():
+            return False,"holdout manifest is absent"
+        try:
+            payload=json.loads(holdout_json.read_text(encoding="utf-8"))
+        except (OSError,json.JSONDecodeError) as exc:
+            return False,f"unreadable holdout manifest: {type(exc).__name__}: {exc}"
+        if not isinstance(payload,dict) or payload.get("schema")!="antigen_fold_holdout_v1":
+            return False,"invalid antigen-fold holdout schema"
+
+        dataset=self.dataset_dir().resolve()
+        expected_graph_dir=(dataset/"graphs"/"holdout").resolve()
+        expected_source_dir=(dataset/"holdout_source_structures").resolve()
+        try:
+            graph_dir=Path(str(payload["graph_dir"])).resolve()
+            source_dir=Path(str(payload["source_structure_dir"])).resolve()
+        except (KeyError,TypeError,ValueError) as exc:
+            return False,f"holdout manifest lacks resolved directories: {exc}"
+        if graph_dir!=expected_graph_dir or source_dir!=expected_source_dir:
+            return False,"holdout manifest directories do not match this run's dataset"
+        if not graph_dir.is_dir() or not source_dir.is_dir():
+            return False,"holdout graph/source directory is missing"
+
+        manifest_path=dataset/"graph_manifest.json"
+        if not manifest_path.is_file():
+            return False,"dataset graph_manifest.json is missing"
+        try:
+            manifest=json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError,json.JSONDecodeError) as exc:
+            return False,f"unreadable graph manifest: {type(exc).__name__}: {exc}"
+        if not isinstance(manifest,list):
+            return False,"graph_manifest.json must be a list"
+        by_path={str(row.get("path","")).replace("\\","/"):row for row in manifest if isinstance(row,dict)}
+        targets=payload.get("targets")
+        if not isinstance(targets,list) or not targets:
+            return False,"holdout manifest has no targets"
+        target_paths=set()
+        for row in targets:
+            if not isinstance(row,dict):
+                return False,"malformed holdout target record"
+            rel=str(row.get("path","")).replace("\\","/")
+            expected_sha=str(row.get("sha256",""))
+            if not rel.startswith("graphs/holdout/") or not expected_sha:
+                return False,f"invalid holdout target binding: {row!r}"
+            path=(dataset/rel).resolve()
+            if not path.is_relative_to(dataset) or not path.is_file():
+                return False,f"holdout graph missing/outside dataset: {rel}"
+            manifest_row=by_path.get(rel)
+            if not manifest_row or manifest_row.get("split")!="holdout":
+                return False,f"graph manifest does not bind holdout graph: {rel}"
+            actual_sha=sha256_of(path)
+            if actual_sha!=expected_sha or str(manifest_row.get("sha256",""))!=actual_sha:
+                return False,f"holdout graph hash mismatch: {rel}"
+            target_paths.add(rel)
+        manifest_holdout={path for path,row in by_path.items() if row.get("split")=="holdout"}
+        if manifest_holdout!=target_paths:
+            return False,"graph manifest holdout rows differ from frozen holdout target set"
+
+        sources=payload.get("source_structures")
+        if not isinstance(sources,dict) or not sources:
+            return False,"holdout manifest has no source-structure bindings"
+        for pdb,binding in sources.items():
+            if not isinstance(binding,dict):
+                return False,f"malformed source binding for {pdb}"
+            path=Path(str(binding.get("path",""))).resolve()
+            expected_sha=str(binding.get("sha256",""))
+            if not path.is_relative_to(source_dir) or not path.is_file() or not expected_sha:
+                return False,f"invalid holdout source structure for {pdb}"
+            if sha256_of(path)!=expected_sha:
+                return False,f"holdout source-structure hash mismatch for {pdb}"
+        return True,f"verified {len(targets)} frozen holdout graph(s)"
+
     def frozen_cluster_map_path(self) -> Path:
         """Run-local family/structure cluster map used by every downstream stage."""
         return self.run_dir/"independence"/"pdb_family_clusters.json"
