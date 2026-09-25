@@ -57,18 +57,30 @@ def _find_existing(candidates: list[str|Path], *, executable: bool=False) -> str
     return None
 
 def _resolve_venv(server: dict[str,Any]) -> str:
+    def valid(path: Path) -> bool:
+        return (path/"bin/activate").is_file() or (path/"Scripts/activate").is_file()
+
     raw=server.get("venv","auto")
     if raw!="auto":
         p=Path(str(raw)).expanduser().resolve()
-        if not ((p/"bin/activate").is_file() or (p/"Scripts/activate").is_file()):
+        if not valid(p):
             raise SystemExit(f"Configured venv is invalid: {p}")
         return str(p)
-    env=os.environ.get("QP_VENV")
-    candidates=[env, REPO_ROOT/".venv", "/data/quantum-protein/.venv"]
-    found=_find_existing([p for p in candidates if p])
-    if not found:
-        raise SystemExit("Unable to resolve virtual environment. Set QP_VENV or server_config.yaml:venv.")
-    return found
+    candidates=[
+        os.environ.get("QP_VENV"),
+        REPO_ROOT/".venv",
+        "/data/quantum-protein/.venv",
+    ]
+    for raw_candidate in candidates:
+        if not raw_candidate:
+            continue
+        candidate=Path(str(raw_candidate)).expanduser().resolve()
+        if valid(candidate):
+            return str(candidate)
+    raise SystemExit(
+        "Unable to resolve a usable virtual environment. "
+        "Set QP_VENV or server_config.yaml:venv."
+    )
 
 def _resolve_data_root(server: dict[str,Any]) -> str:
     raw=(server.get("paths") or {}).get("data_root","auto")
