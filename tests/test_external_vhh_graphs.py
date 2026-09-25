@@ -608,3 +608,32 @@ def test_preprocessing_default_config_never_reuses_stale_runtime(tmp_path, monke
     loaded = prep.load_config(None)
     assert loaded["marker"] == "current"
     assert loaded["_source"] == str((repo / "configs" / "full_experiment_config.yaml").resolve())
+
+
+def test_external_only_preprocessing_refuses_holdout_mode(tmp_path, monkeypatch):
+    config=tmp_path/"config.yaml"
+    config.write_text(
+        "\n".join([
+            "paths:",
+            "  data_root: /tmp/data",
+            "queue_freeze:",
+            "  homology_isolation:",
+            "    vhh_full_chain_identity: 0.8",
+            "    cdr_h3_identity: 0.5",
+            "    antigen_identity: 0.3",
+            "    antigen_min_length_coverage: 0.7",
+            "  independence_clustering:",
+            "    pair_tsv: data/independence/foldseek_pairs.tsv",
+            "external_validation:",
+            "  external_vhh:",
+            "    graph_dir: ''",
+            "    source_structure_dir: ''",
+            "    min_clusters: 10",
+            "data_audit:",
+            "  max_resolution_angstrom: 3.0",
+        ])+"\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("QP_EXTERNAL_VHH_SOURCE_DIR",raising=False)
+    with pytest.raises(SystemExit,match="only valid for a genuinely external VHH set"):
+        prep.main(["--config",str(config),"pass1","--sabdab-summary",str(tmp_path/"dummy.tsv")])
