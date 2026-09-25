@@ -470,24 +470,25 @@ def make_graph(row, split, pair=None, family_structure_cluster='', chains=None):
     if n>200000:raise MemoryError(f'node safety cap exceeded: {n}')
     arrays={g:np.concatenate(heavy[g]) for g in [0,1]};rid={g:np.concatenate(owners[g]) for g in [0,1]}
     trees={g:cKDTree(arrays[g]) for g in [0,1]}
-    def interface_nodes_at(cutoff):
+    def interface_nodes_at(cutoff, partner_trees, atom_arrays, atom_owners):
         counts=[]; interface_nodes=set()
         for g in [0,1]:
-            distances=trees[1-g].query(arrays[g],distance_upper_bound=cutoff)[0]
-            contacted=rid[g][distances<cutoff]
+            distances=partner_trees[1-g].query(atom_arrays[g],distance_upper_bound=cutoff)[0]
+            contacted=atom_owners[g][distances<cutoff]
             unique_contacted=np.unique(contacted)
             counts.append(len(unique_contacted))
             interface_nodes.update(int(index) for index in unique_contacted.tolist())
         return sum(counts),interface_nodes
 
-    interface,interface_nodes=interface_nodes_at(INTERFACE_LABEL_CUTOFF_ANGSTROM)
+    interface,interface_nodes=interface_nodes_at(
+        INTERFACE_LABEL_CUTOFF_ANGSTROM,trees,arrays,rid)
     if interface<MIN_INTERFACE_RESIDUES:raise ValueError(f'weak actual partner interface: {interface}')
     heavy_atom_interface_label=np.zeros(n,dtype=np.float32)
     if interface_nodes:
         heavy_atom_interface_label[np.fromiter(sorted(interface_nodes),dtype=np.int64)]=1.0
     sensitivity_labels=[]
     for cutoff in INTERFACE_SENSITIVITY_CUTOFFS_ANGSTROM:
-        _,nodes_at_cutoff=interface_nodes_at(cutoff)
+        _,nodes_at_cutoff=interface_nodes_at(cutoff,trees,arrays,rid)
         labels=np.zeros(n,dtype=np.float32)
         if nodes_at_cutoff:
             labels[np.fromiter(sorted(nodes_at_cutoff),dtype=np.int64)]=1.0
