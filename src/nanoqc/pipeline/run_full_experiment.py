@@ -1969,9 +1969,13 @@ class Orchestrator:
                 faspr=Path(structural.get("faspr_executable",""))
                 phenix=Path(structural.get("phenix_clashscore_executable",""))
                 checks["faspr_executable"]=faspr.is_file()
+                rotamer_binary=faspr.parent/"dun2010bbdep.bin"
+                checks["faspr_rotamer_binary"]=rotamer_binary.is_file()
                 checks["phenix_clashscore_executable"]=phenix.is_file()
                 if not faspr.is_file():
                     missing_resources.append(str(faspr))
+                if not rotamer_binary.is_file():
+                    missing_resources.append(str(rotamer_binary))
                 if not phenix.is_file():
                     missing_resources.append(str(phenix))
 
@@ -4056,6 +4060,8 @@ class Orchestrator:
             phenix=Path(structural.get("phenix_clashscore_executable",""))
             if not faspr.is_file():
                 failures.append(f"Required FASPR executable missing: {faspr}")
+            if not (faspr.parent/"dun2010bbdep.bin").is_file():
+                failures.append(f"Required FASPR rotamer library missing: {faspr.parent/'dun2010bbdep.bin'}")
             if not phenix.is_file():
                 failures.append(f"Required Phenix clashscore executable missing: {phenix}")
             if faspr.is_file() and phenix.is_file():

@@ -134,6 +134,8 @@ def main() -> int:
     args=parser.parse_args()
     if not args.faspr.is_file():
         parser.error(f"FASPR executable not found: {args.faspr}")
+    if not (args.faspr.parent/"dun2010bbdep.bin").is_file():
+        parser.error(f"FASPR rotamer library not found beside executable: {args.faspr.parent/'dun2010bbdep.bin'}")
     if args.phenix_clashscore is not None and not args.phenix_clashscore.is_file():
         parser.error(f"Phenix clashscore executable not found: {args.phenix_clashscore}")
     if args.timeout_seconds<=0:
