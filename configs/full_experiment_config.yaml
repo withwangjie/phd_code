@@ -273,7 +273,10 @@ egnn_train:
   learning_rate: 1.0e-3
   weight_decay: 1.0e-5
   gradient_clip: 5.0
-  amp: true
+  # Formal training uses CUDA FP32 for numerical stability.  The EGNN
+  # geometry path contains squared Cartesian distances and previously
+  # produced a non-finite first-batch loss under FP16 AMP on Tesla T4.
+  amp: false
   pin_memory: true
   # Uses queue_freeze.homology_isolation exactly; no independent threshold.
   # Development-only seed sensitivity (Bouthillier et al., MLSys 2021): this
