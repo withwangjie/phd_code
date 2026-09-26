@@ -747,6 +747,9 @@ class QUBOResult:
                 "state_policy": self.metadata.get("state_policy"),
                 "rotamer_library_path": self.metadata.get("rotamer_library_path"),
                 "rotamer_library_sha256": self.metadata.get("rotamer_library_sha256"),
+                "rotamer_source": self.metadata.get("rotamer_source"),
+                "pyrosetta_version": self.metadata.get("pyrosetta_version"),
+                "pyrosetta_init_options": self.metadata.get("pyrosetta_init_options"),
                 "lambda_value": self.lambda_value,
                 "lambda_lower_bound": self.lambda_lower_bound,
                 "ising_energy_equivalence_max_error": self.metadata.get(
@@ -857,6 +860,90 @@ def _load_dunbrack_bins(library_path: Path, requested_bins: set[tuple[str,int,in
         normalized[key]=[RotamerTemplate(r.chi1_degrees,r.prior_probability/total,r.chi_degrees,r.chi_sigmas,r.source) for r in rows]
     return normalized
 
+
+class PyRosettaRotamerProvider:
+    """Read backbone-dependent dun10 samples from Rosetta's installed database.
+
+    PyRosetta is imported lazily so legacy analyses remain usable without its
+    separately licensed distribution.  The formal mode never falls back to a
+    text library when the requested Rosetta API or database is unavailable.
+    """
+
+    source = "pyrosetta_dun10"
+    init_options = "-mute all -dun10"
+
+    def __init__(self) -> None:
+        try:
+            import pyrosetta
+        except ImportError as exc:
+            raise RuntimeError("PyRosetta dun10 mode requires an installed PyRosetta distribution") from exc
+        if not pyrosetta.rosetta.basic.was_init_called():
+            pyrosetta.init(self.init_options)
+        elif not pyrosetta.rosetta.basic.options.get_boolean_option("dun10"):
+            raise RuntimeError("PyRosetta was initialized without the dun10 rotamer library")
+        self.pyrosetta = pyrosetta
+        self.rosetta = pyrosetta.rosetta
+        self.version = pyrosetta.version()
+
+    def load_bins(self, requested_bins: set[tuple[str, int, int]]) -> Dict[tuple[str, int, int], list[RotamerTemplate]]:
+        rosetta = self.rosetta
+        factory = rosetta.core.pack.dunbrack.RotamerLibrary.get_instance()
+        found = {}
+        for residue, phi, psi in sorted(requested_bins):
+            one_letter = next((aa for aa, three in _THREE_LETTER.items() if three == residue), None)
+            if one_letter is None:
+                raise ValueError(f"Unsupported Rosetta rotamer residue: {residue}")
+            library = factory.get_library_by_aa(rosetta.core.chemical.aa_from_oneletter_code(one_letter))
+            if library is None or not hasattr(library, "get_all_rotamer_samples"):
+                raise RuntimeError(f"PyRosetta dun10 samples unavailable for {residue}")
+            backbone = rosetta.utility.fixedsizearray1_double_5_t()
+            backbone[1], backbone[2] = float(phi), float(psi)
+            samples = library.get_all_rotamer_samples(backbone)
+            rows = []
+            for sample in samples:
+                n_chi = int(sample.nchi())
+                probability = float(sample.probability())
+                if n_chi < 1 or n_chi > 4 or not math.isfinite(probability) or probability < 0:
+                    raise ValueError(f"Invalid PyRosetta dun10 sample for {residue} {phi} {psi}")
+                means, sigmas = sample.chi_mean(), sample.chi_sd()
+                chis = tuple(float(means[i]) for i in range(1, n_chi + 1))
+                deviations = tuple(float(sigmas[i]) for i in range(1, n_chi + 1))
+                if not all(math.isfinite(v) for v in (*chis, *deviations)) or any(v < 0 for v in deviations):
+                    raise ValueError(f"Nonfinite PyRosetta dun10 chi for {residue} {phi} {psi}")
+                rows.append(RotamerTemplate(chis[0], probability, chis, deviations, self.source))
+            total = sum(row.prior_probability for row in rows)
+            if total <= 0:
+                raise ValueError(f"PyRosetta dun10 has no nonzero samples for {residue} {phi} {psi}")
+            found[(residue, phi, psi)] = [
+                RotamerTemplate(row.chi1_degrees, row.prior_probability / total,
+                                row.chi_degrees, row.chi_sigmas, row.source)
+                for row in rows
+            ]
+        return found
+
+
+def _load_rotamer_bins(mode: str, library_path: Optional[Path],
+                       requested: set[tuple[str, int, int]]) -> Dict[tuple[str, int, int], list[RotamerTemplate]]:
+    if mode == "pyrosetta_dun10":
+        return PyRosettaRotamerProvider().load_bins(requested)
+    if mode == "dunbrack2010":
+        if library_path is None:
+            raise ValueError("Dunbrack text mode requires rotamer_library_path")
+        return _load_dunbrack_bins(library_path, requested)
+    raise ValueError(f"No backbone-dependent rotamer provider for {mode}")
+
+
+def rotamer_source_metadata(mode: str, library_path: Optional[Path]) -> dict:
+    if mode == "pyrosetta_dun10":
+        provider = PyRosettaRotamerProvider()
+        return {"rotamer_source": provider.source,
+                "pyrosetta_version": provider.version,
+                "pyrosetta_init_options": provider.init_options,
+                "rotamer_library_path": None, "rotamer_library_sha256": None}
+    return {"rotamer_source": mode,
+            "rotamer_library_path": None if library_path is None else str(library_path),
+            "rotamer_library_sha256": _sha256_path(library_path)}
+
 def _dunbrack_templates_for_site(library_bins, amino_acid: str, phi: float, psi: float, *, probability_floor: float, sigma_offsets: Sequence[float]) -> Tuple[RotamerTemplate, ...]:
     """Expand Dunbrack rotamers using their reported chi1 sigma."""
     key=(_THREE_LETTER[amino_acid],_nearest_dunbrack_bin(phi),_nearest_dunbrack_bin(psi))
@@ -872,7 +959,7 @@ def _dunbrack_templates_for_site(library_bins, amino_acid: str, phi: float, psi:
                 chis[0]=angle
             else:
                 chis=[angle]
-            expanded.append(RotamerTemplate(angle,weight,tuple(chis),row.chi_sigmas,"dunbrack2010"))
+            expanded.append(RotamerTemplate(angle,weight,tuple(chis),row.chi_sigmas,row.source))
     if not expanded: raise ValueError(f"No Dunbrack candidates survived probability floor for {key}")
     expanded.sort(key=lambda r:(-r.prior_probability,r.chi1_degrees))
     total=sum(r.prior_probability for r in expanded)
@@ -1161,8 +1248,8 @@ class InterfaceQUBOBuilder:
         self.penalty_margin = penalty_margin
         self.force_field = force_field or ForceFieldConfig()
         self.rotamer_mode = str(rotamer_mode)
-        if self.rotamer_mode not in ("legacy", "dunbrack2010"):
-            raise ValueError("rotamer_mode must be legacy or dunbrack2010")
+        if self.rotamer_mode not in ("legacy", "dunbrack2010", "pyrosetta_dun10"):
+            raise ValueError("rotamer_mode must be legacy, dunbrack2010 or pyrosetta_dun10")
         self.rotamer_library_path = None if rotamer_library_path is None else Path(rotamer_library_path)
         self.rotamer_probability_floor = float(rotamer_probability_floor)
         self.rotamer_sigma_offsets = tuple(float(v) for v in rotamer_sigma_offsets)
@@ -1206,7 +1293,7 @@ class InterfaceQUBOBuilder:
             if np.any(selected & ~vhh):
                 raise ValueError(f"{mask_name} marks a non-VHH node")
         indices = np.flatnonzero(selected)
-        if self.rotamer_mode == "dunbrack2010":
+        if self.rotamer_mode in ("dunbrack2010", "pyrosetta_dun10"):
             if not hasattr(data, "backbone_phi") or not hasattr(data, "backbone_psi"):
                 raise ValueError("Dunbrack mode requires backbone_phi/backbone_psi")
             phi = data.backbone_phi.detach().cpu().numpy().astype(np.float64)
@@ -1642,9 +1729,7 @@ class InterfaceQUBOBuilder:
             )
             for node_index in site_nodes
         }
-        if self.rotamer_mode == "dunbrack2010":
-            if self.rotamer_library_path is None:
-                raise ValueError("Formal Dunbrack mode requires rotamer_library_path")
+        if self.rotamer_mode in ("dunbrack2010", "pyrosetta_dun10"):
             if not hasattr(data, "backbone_phi") or not hasattr(data, "backbone_psi"):
                 raise ValueError("Dunbrack mode requires backbone_phi/backbone_psi graph metadata")
             phi_all=data.backbone_phi.detach().cpu().numpy().astype(np.float64)
@@ -1654,7 +1739,7 @@ class InterfaceQUBOBuilder:
                 aa=amino_acids[int(node_index)]
                 if aa in "AG": continue
                 requested.add((_THREE_LETTER[aa], _nearest_dunbrack_bin(phi_all[int(node_index)]), _nearest_dunbrack_bin(psi_all[int(node_index)])))
-            dunbrack_bins=_load_dunbrack_bins(self.rotamer_library_path, requested) if requested else {}
+            dunbrack_bins=_load_rotamer_bins(self.rotamer_mode, self.rotamer_library_path, requested) if requested else {}
         else:
             phi_all=psi_all=None
             dunbrack_bins={}
@@ -1664,7 +1749,7 @@ class InterfaceQUBOBuilder:
         raw_pool_sizes_actual: list[int] = []
         for site_index, (node_index, count) in enumerate(zip(site_nodes, counts)):
             aa = amino_acids[int(node_index)]
-            if self.rotamer_mode == "dunbrack2010":
+            if self.rotamer_mode in ("dunbrack2010", "pyrosetta_dun10"):
                 templates = _dunbrack_templates_for_site(
                     dunbrack_bins, aa, phi_all[int(node_index)], psi_all[int(node_index)],
                     probability_floor=self.rotamer_probability_floor,
@@ -1819,7 +1904,7 @@ class InterfaceQUBOBuilder:
             "raw_rotamer_pool_sizes": raw_pool_sizes_actual,
             "rotamer_state_policy": (
                 "Dunbrack 2010 backbone-dependent full rotamer states (chi1..chiN); chi1 sigma expansion controls pseudo-atom orientation while distal chi means are retained for exact all-atom reconstruction/calibration; retain 3--6 states/site under <=30 variables"
-                if self.rotamer_mode == "dunbrack2010"
+                if self.rotamer_mode in ("dunbrack2010", "pyrosetta_dun10")
                 else "legacy 6/9/12 raw chi1 sub-rotamers by flexibility; retain 3--6 states/site under <=30 variables"
             ),
             "candidate_guidance": "pre-screen by rotamer prior + VHH-only fixed-environment energy + antigen interaction energy; antigen counted once",
@@ -1833,8 +1918,7 @@ class InterfaceQUBOBuilder:
             "rotamer_model": self.rotamer_mode,
             "state_policy": (f"fixed_{self.fixed_states_per_site}_chi1_coverage" if self.fixed_chi1_wells and self.fixed_states_per_site != 3
                              else "fixed_three_chi1_wells" if self.fixed_chi1_wells else "adaptive_3_to_6"),
-            "rotamer_library_path": (None if self.rotamer_library_path is None else str(self.rotamer_library_path)),
-            "rotamer_library_sha256": _sha256_path(self.rotamer_library_path),
+            **rotamer_source_metadata(self.rotamer_mode, self.rotamer_library_path),
             "rotamer_probability_floor": self.rotamer_probability_floor,
             "rotamer_sigma_offsets": list(self.rotamer_sigma_offsets),
             "energy_calibration": asdict(cal),
@@ -2102,8 +2186,8 @@ class AllAtomInterfaceQUBOBuilder:
             raise ValueError("Candidate relaxation iterations must be nonnegative")
         self.candidate_relax_iterations = candidate_relax_iterations
         self.rotamer_mode=str(rotamer_mode)
-        if self.rotamer_mode not in ("legacy","dunbrack2010"):
-            raise ValueError("rotamer_mode must be legacy or dunbrack2010")
+        if self.rotamer_mode not in ("legacy","dunbrack2010","pyrosetta_dun10"):
+            raise ValueError("rotamer_mode must be legacy, dunbrack2010 or pyrosetta_dun10")
         self.rotamer_library_path=None if rotamer_library_path is None else Path(rotamer_library_path)
         self.rotamer_probability_floor=float(rotamer_probability_floor)
         self.rotamer_sigma_offsets=tuple(float(v) for v in rotamer_sigma_offsets)
@@ -2143,9 +2227,7 @@ class AllAtomInterfaceQUBOBuilder:
         protein=read_atomistic_structure(structure_path)
         allatom_dunbrack_bins={}
         allatom_backbone_angles={}
-        if self.rotamer_mode=="dunbrack2010" and chi1_angles is None:
-            if self.rotamer_library_path is None:
-                raise ValueError("Dunbrack all-atom mode requires rotamer_library_path")
+        if self.rotamer_mode in ("dunbrack2010","pyrosetta_dun10") and chi1_angles is None:
             requested=set()
             for rid in ids:
                 residue_name=protein[rid]["name"]
@@ -2154,7 +2236,7 @@ class AllAtomInterfaceQUBOBuilder:
                 phi,psi=_backbone_phi_psi(protein,rid)
                 allatom_backbone_angles[rid]=(phi,psi)
                 requested.add((_THREE_LETTER[aa],_nearest_dunbrack_bin(phi),_nearest_dunbrack_bin(psi)))
-            allatom_dunbrack_bins=_load_dunbrack_bins(self.rotamer_library_path,requested) if requested else {}
+            allatom_dunbrack_bins=_load_rotamer_bins(self.rotamer_mode,self.rotamer_library_path,requested) if requested else {}
         for rid in ids:
             if rid not in protein or protein[rid]["name"] in ("ALA","GLY","PRO","CYS"):
                 raise ValueError(f"Active site has no supported safe acyclic side-chain search: {rid}")
@@ -2218,7 +2300,7 @@ class AllAtomInterfaceQUBOBuilder:
                 raise ValueError(f"Cyclic/crosslinked Active side chain unsupported: {rid}")
             indices=np.array(sorted(moving),dtype=int)
             if self.chi1_angles_override is None:
-                if self.rotamer_mode=="dunbrack2010" and one_letter not in "AG":
+                if self.rotamer_mode in ("dunbrack2010","pyrosetta_dun10") and one_letter not in "AG":
                     phi,psi=allatom_backbone_angles[rid]
                     templates=_dunbrack_templates_for_site(
                         allatom_dunbrack_bins,one_letter,phi,psi,
@@ -2233,7 +2315,7 @@ class AllAtomInterfaceQUBOBuilder:
             raw_pool_sizes[site]=len(templates)
             variables=[]
             for template in templates:
-                targets=(template.chi_degrees if (self.rotamer_mode=="dunbrack2010" and self.chi1_angles_override is None)
+                targets=(template.chi_degrees if (self.rotamer_mode in ("dunbrack2010","pyrosetta_dun10") and self.chi1_angles_override is None)
                          else (template.chi1_degrees,))
                 full=_apply_sidechain_chis(self.base_positions,atoms,bonds,residue.name,targets)
                 coordinates=full[indices].copy()
@@ -2475,7 +2557,7 @@ class AllAtomInterfaceQUBOBuilder:
         ising_error=validate_qubo_ising_equivalence(q,offset,h,j,ising_offset,tolerance=roundoff_bound)
         return QUBOResult(q,records,self.site_to_variables,penalty,penalty,offset,singles,pairs,
             dict(model=("Amber14 all-atom fixed-backbone Dunbrack full chi1..chiN rotamer states"
-                   if self.rotamer_mode=="dunbrack2010" and self.chi1_angles_override is None
+                   if self.rotamer_mode in ("dunbrack2010","pyrosetta_dun10") and self.chi1_angles_override is None
                    else "Amber14 all-atom fixed-backbone chi1 grid"),energy_unit="kcal/mol",
                 physical_constant_offset=baseline,all_atom_equivalence_max_error=max_error,
                 all_atom_equivalence_rms_error=rms_error,all_atom_equivalence_samples=12,
@@ -2492,11 +2574,10 @@ class AllAtomInterfaceQUBOBuilder:
                 rotamers_per_site=self.retained_rotamers_per_site,
                 site_scores=self.site_scores.tolist(),
                 candidate_chi_degrees=[list(candidate.get("chi_degrees",(candidate["angle"],))) for candidate in self.candidates],
-                rotamer_state_policy=(f"{self.rotamer_mode} full side-chain rotamer states (chi1..chiN) -> 3--6 retained under <=30 variables" if self.rotamer_mode=="dunbrack2010" and self.chi1_angles_override is None else "explicit legacy chi1 angle override"),
-                rotamer_library_path=(None if self.rotamer_library_path is None else str(self.rotamer_library_path)),
-                rotamer_library_sha256=_sha256_path(self.rotamer_library_path),
+                rotamer_state_policy=(f"{self.rotamer_mode} full side-chain rotamer states (chi1..chiN) -> 3--6 retained under <=30 variables" if self.rotamer_mode in ("dunbrack2010","pyrosetta_dun10") and self.chi1_angles_override is None else "explicit legacy chi1 angle override"),
+                **rotamer_source_metadata(self.rotamer_mode, self.rotamer_library_path),
                 candidate_scope=("Dunbrack full side-chain chi state; Amber14 single-candidate prescreen, no affinity claim"
-                    if self.rotamer_mode=="dunbrack2010" and self.chi1_angles_override is None
+                    if self.rotamer_mode in ("dunbrack2010","pyrosetta_dun10") and self.chi1_angles_override is None
                     else "legacy chi1-only candidate; no affinity claim")))
 
     def write_structure(self, positions: np.ndarray, destination: Path) -> None:

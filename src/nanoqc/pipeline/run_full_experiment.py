@@ -561,14 +561,14 @@ def _validate_scientific_config(config: Dict[str, Any]) -> None:
     )
     qc_rot = qc.get("rotamer_model", {}) or {}
     st_rot = structure.get("rotamer_model", {}) or {}
-    rotamer_keys = ("mode", "library_path", "probability_floor", "sigma_offsets")
+    rotamer_keys = ("mode", "library_path", "version_contains", "probability_floor", "sigma_offsets")
     for key in rotamer_keys:
         if qc_rot.get(key) != st_rot.get(key):
             raise ValueError(
                 f"Rotamer protocol mismatch for {key}: "
                 f"qc_benchmark={qc_rot.get(key)!r}, structure_experiment={st_rot.get(key)!r}"
             )
-    if qc_rot.get("mode", "dunbrack2010") == "dunbrack2010":
+    if qc_rot.get("mode", "dunbrack2010") in ("dunbrack2010", "pyrosetta_dun10"):
         floor = float(qc_rot.get("probability_floor", 1e-4))
         offsets = qc_rot.get("sigma_offsets", [-1.0, 0.0, 1.0])
         if not 0.0 < floor < 1.0 or not offsets:
@@ -1919,6 +1919,19 @@ class Orchestrator:
             checks["dunbrack_library"]=library.is_file()
             if not library.is_file():
                 missing_resources.append(str(library))
+        elif rot.get("mode")=="pyrosetta_dun10":
+            try:
+                from nanoqc.qubo.subgraph_to_qubo import PyRosettaRotamerProvider
+                provider=PyRosettaRotamerProvider()
+                checks["pyrosetta_dun10_version"]=provider.version
+                expected=str(rot.get("version_contains", ""))
+                if not expected or expected not in provider.version:
+                    raise RuntimeError(f"PyRosetta version does not match frozen protocol: {provider.version!r}")
+                provider.load_bins({("LYS",-60,-40)})
+                checks["pyrosetta_dun10_sample"]=True
+            except Exception as exc:
+                checks["pyrosetta_dun10_sample"]=False
+                missing_resources.append(f"PyRosetta dun10 unavailable: {type(exc).__name__}: {exc}")
 
         clustering=((self.config.get("queue_freeze", {}) or {}).get("independence_clustering", {}) or {})
         if clustering.get("required",False):
@@ -2012,7 +2025,8 @@ class Orchestrator:
                 "library_path", "data/rotamer/ALL.bbdep.rotamers.lib"
             ),
         )
-        if not smoke_rotamer_library.is_file():
+        smoke_rotamer_mode=(self.config.get("qc_benchmark",{}).get("rotamer_model",{}) or {}).get("mode","dunbrack2010")
+        if smoke_rotamer_mode=="dunbrack2010" and not smoke_rotamer_library.is_file():
             return StageResult(
                 "smoke_check", "failed", started, utc_timestamp(), None,
                 f"Required Dunbrack library missing: {smoke_rotamer_library}",
@@ -2035,7 +2049,7 @@ class Orchestrator:
                 "--outputs", "20",
                 "--sa-passes", "5",
                 "--greedy-passes", "5",
-                "--rotamer-mode", "dunbrack2010",
+                "--rotamer-mode", str(smoke_rotamer_mode),
                 "--rotamer-library", str(smoke_rotamer_library),
             ]))
         else:
@@ -2059,7 +2073,7 @@ class Orchestrator:
             "--max-evals", str(smoke_cfg.get("recovery_pilot_max_evals", 12)),
             "--outputs", str(smoke_cfg.get("recovery_pilot_outputs", 20)),
             "--pruning", "contact",  # avoid requiring a trained checkpoint for the smoke check
-            "--rotamer-mode", "dunbrack2010",
+            "--rotamer-mode", str(smoke_rotamer_mode),
             "--rotamer-library", str(smoke_rotamer_library),
         ]
         if smoke_target:
@@ -2662,7 +2676,7 @@ class Orchestrator:
         rotamer_library = resolve_path(
             self.config, rot_cfg.get("library_path", "data/rotamer/ALL.bbdep.rotamers.lib")
         )
-        if not rotamer_library.is_file():
+        if rot_cfg.get("mode","dunbrack2010")=="dunbrack2010" and not rotamer_library.is_file():
             return StageResult(
                 "energy_calibration", "failed", started, utc_timestamp(), None,
                 f"Required Dunbrack library missing: {rotamer_library}",
@@ -2678,6 +2692,7 @@ class Orchestrator:
             self.venv_python, "-m", module_name("generate_energy_calibration_dataset.py"),
             "--dataset", str(self.dataset_dir()),
             "--data-root", str(resolve_path(self.config, self.config["paths"]["data_root"])),
+            "--rotamer-mode", str(rot_cfg.get("mode","dunbrack2010")),
             "--rotamer-library", str(rotamer_library),
             "--selection-mode", str(cal_cfg.get("selection_mode","egnn")),
             "--checkpoint", str(self.checkpoint_dir()/qc_cfg.get("checkpoint","best_egnn_pruning.pt")),

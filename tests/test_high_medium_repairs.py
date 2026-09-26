@@ -304,7 +304,7 @@ def test_primary_statistics_filter_active_site_scale() -> None:
 def test_smoke_passes_dunbrack_library_to_both_entrypoints() -> None:
     source=inspect.getsource(Orchestrator.stage_smoke_check)
     assert '"--rotamer-library", str(smoke_rotamer_library)' in source
-    assert '"--rotamer-mode", "dunbrack2010"' in source
+    assert '"--rotamer-mode", str(smoke_rotamer_mode)' in source
 
 
 def test_calibration_is_fixed_three_well_and_buffers_complex_rows() -> None:

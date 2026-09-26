@@ -141,8 +141,9 @@ def test_formal_preflight_reuses_exact_scientific_resource_gate() -> None:
     assert "Formal environment/resource gate failed" in source
 
 
-def test_quantum_instance_provenance_includes_rotamer_library_hash() -> None:
+def test_quantum_instance_provenance_includes_rotamer_source() -> None:
     source=(REPO/"src/nanoqc/qubo/subgraph_to_qubo.py").read_text(encoding="utf-8")
     assert "def _sha256_path(" in source
-    assert '"rotamer_library_sha256": _sha256_path(self.rotamer_library_path)' in source
+    assert "**rotamer_source_metadata(self.rotamer_mode, self.rotamer_library_path)" in source
     assert '"rotamer_library_sha256": self.metadata.get("rotamer_library_sha256")' in source
+    assert '"pyrosetta_version": self.metadata.get("pyrosetta_version")' in source

@@ -73,8 +73,8 @@ env_check
 
 ## 一、env_check
 
-检查 Python 依赖、Dunbrack 转子库（`data/rotamer/ALL.bbdep.rotamers.lib`，
-缺失即失败）、FASPR、Phenix clashscore 的可用性。
+检查 Python 依赖、PyRosetta/Rosetta dun10 转子库、FASPR、Phenix
+clashscore 的可用性；所需资源缺失即失败。旧版 Dunbrack 文本库仅供复现旧实验。
 
 ## 二、smoke_check
 

@@ -1758,7 +1758,7 @@ def _ablation_main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--dielectric-base", type=float, default=4.0)
     parser.add_argument("--dielectric-slope", type=float, default=2.0)
     parser.add_argument("--thermal-energy-kcal", type=float, default=0.593)
-    parser.add_argument("--rotamer-mode", choices=("legacy","dunbrack2010"), default="dunbrack2010")
+    parser.add_argument("--rotamer-mode", choices=("legacy","dunbrack2010","pyrosetta_dun10"), default="dunbrack2010")
     parser.add_argument("--rotamer-library", type=Path)
     parser.add_argument("--rotamer-probability-floor", type=float, default=1e-4)
     parser.add_argument("--rotamer-sigma-offsets", type=float, nargs="+", default=[-1.0,0.0,1.0])

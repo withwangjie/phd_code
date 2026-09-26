@@ -601,3 +601,12 @@ they were logged later.
 - **Quantum resource wording:** current two-qubit resource counts are explicitly variational-layer counts (cost ZZ + local XY mixer). Full-circuit counts remain null until a concrete W-state StatePrep decomposition is frozen; no total-gate claim is made by substituting the variational count.
 - **Affected results:** graph labels/protocol hashes, EGNN training, Active-site selection, formal external VHH preparation, structure endpoints and all downstream reports. Old graph v1.10 artifacts are intentionally incompatible.
 - **Results inspected before this amendment:** no formal validation/test result was used to select these protocol changes; they implement the literature and protocol audit performed before formal rerun.
+
+
+## A19. PyRosetta dun10 rotamer source
+
+- **Before:** the frozen formal protocol parsed the external `ALL.bbdep.rotamers.lib` text file directly and selected its nearest 10-degree backbone bin.
+- **After:** both coarse and all-atom candidate builders query the installed PyRosetta dun10 library at the residue's nearest 10-degree φ/ψ bin. The returned probabilities, χ means and standard deviations enter the existing probability filter and χ1 expansion. The installed PyRosetta build is pinned in the frozen configuration; preflight checks the build, active dun10 option and a real LYS sample. Candidate and calibration provenance record the PyRosetta version and source. The old text parser remains available only under its explicit legacy mode.
+- **Why:** a single Rosetta-maintained library API provides the candidate statistics used by the study. This is a scientific source change, not an implementation-only refactor: Rosetta's sample set and interpolation/semibackbone conventions may differ from the earlier text parser.
+- **Affected results:** candidate pools and probabilities, energy calibration, QUBO coefficients, solver results, structure analyses and reports. Complete formal results must be generated in a new run directory; they cannot be resumed from a text-library run.
+- **Results inspected before this amendment:** the investigator supplied progress from the earlier run through queue freeze and eligibility screening, but no final performance or structural endpoint was supplied for this amendment. The change follows the explicit source choice and a direct PyRosetta API check on the server.
