@@ -16,6 +16,7 @@ paths:
   external_vhh_source_dir: "auto"
 
 tools:
+  foldseek_executable: "/opt/foldseek/bin/foldseek"
   # FASPR must live beside its dun2010bbdep.bin rotamer library.
   faspr_executable: "/data/phd_code/FASPR"
   phenix_clashscore_executable: "/opt/phenix-2.2.1-6174/phenix_bin/phenix.clashscore"

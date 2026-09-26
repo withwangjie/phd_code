@@ -848,6 +848,10 @@ class Orchestrator:
     def run_local_foldseek_pairs(self) -> Path:
         return self.run_dir / "independence" / "foldseek_pairs.tsv"
 
+    def foldseek_executable(self) -> str|None:
+        configured=(self.config.get("runtime_resolution",{}) or {}).get("foldseek_executable")
+        return shutil.which(str(configured or os.environ.get("QP_FOLDSEEK") or "foldseek"))
+
     def _verify_run_local_foldseek_pairs(self, universe: Path, audit_jsonl: Path,
                                          min_interface_residues: int) -> tuple[bool, str]:
         pairs=self.run_local_foldseek_pairs()
@@ -880,7 +884,7 @@ class Orchestrator:
         if pairs.is_file() and manifest_path.is_file():
             return self._verify_run_local_foldseek_pairs(universe,audit_jsonl,min_interface_residues)
 
-        foldseek=shutil.which(os.environ.get("QP_FOLDSEEK") or "foldseek")
+        foldseek=self.foldseek_executable()
         if not foldseek:
             return False,"Foldseek executable missing; set QP_FOLDSEEK or add foldseek to PATH"
         pairs.parent.mkdir(parents=True,exist_ok=True)
@@ -1936,7 +1940,7 @@ class Orchestrator:
         clustering=((self.config.get("queue_freeze", {}) or {}).get("independence_clustering", {}) or {})
         if clustering.get("required",False):
             build_per_run=bool(clustering.get("build_per_run",False))
-            foldseek=shutil.which(os.environ.get("QP_FOLDSEEK") or "foldseek") if build_per_run else None
+            foldseek=self.foldseek_executable() if build_per_run else None
             checks["foldseek_executable"]=foldseek if build_per_run else "prebuilt_table"
             cluster_map=resolve_path(self.config,clustering.get("cluster_map","")) if clustering.get("cluster_map") else None
             pairs=resolve_path(self.config,clustering.get("pair_tsv","")) if clustering.get("pair_tsv") else None

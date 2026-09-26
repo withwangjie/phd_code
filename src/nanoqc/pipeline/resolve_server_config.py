@@ -207,6 +207,13 @@ def resolve(scientific: dict[str,Any], server: dict[str,Any]) -> tuple[dict[str,
         if not phenix:
             raise SystemExit("Required phenix.clashscore executable could not be auto-resolved. Set QP_PHENIX_CLASHSCORE or server_config.yaml.")
 
+    clustering=((out.get("queue_freeze",{}) or {}).get("independence_clustering",{}) or {})
+    foldseek=None
+    if clustering.get("required",False) and clustering.get("build_per_run",False):
+        foldseek=_resolve_tool(server,"foldseek_executable","QP_FOLDSEEK",["foldseek"])
+        if not foldseek:
+            raise SystemExit("Required Foldseek executable could not be resolved. Set QP_FOLDSEEK or server_config.yaml:tools.foldseek_executable.")
+
     report={
         "repo_root":str(REPO_ROOT),
         "venv":_resolve_venv(server),
@@ -230,6 +237,7 @@ def resolve(scientific: dict[str,Any], server: dict[str,Any]) -> tuple[dict[str,
         "openmm_device":hw["openmm_device"],
         "openmm_precision":hw["openmm_precision"],
         "faspr_executable":structural.get("faspr_executable"),
+        "foldseek_executable":foldseek,
         "phenix_clashscore_executable":structural.get("phenix_clashscore_executable"),
         "min_free_disk_gb":float(res.get("min_free_disk_gb",50)),
         "min_available_ram_gb":float(res.get("min_available_ram_gb",16)),

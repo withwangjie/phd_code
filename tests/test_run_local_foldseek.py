@@ -15,8 +15,13 @@ def test_foldseek_is_built_once_per_run_and_bound_to_its_audit(tmp_path, monkeyp
     config = {
         "paths": {"repo_root": str(tmp_path), "data_root": str(data)},
         "data_audit": {"workers": 4},
+        "runtime_resolution": {"foldseek_executable": "/opt/foldseek/bin/foldseek"},
     }
-    monkeypatch.setattr(full.shutil, "which", lambda _: "/usr/bin/foldseek")
+    resolved = []
+    def which(name):
+        resolved.append(name)
+        return "/usr/bin/foldseek"
+    monkeypatch.setattr(full.shutil, "which", which)
     calls = []
 
     def make_run(name: str, universe_text: str):
@@ -53,6 +58,7 @@ def test_foldseek_is_built_once_per_run_and_bound_to_its_audit(tmp_path, monkeyp
 
     first, universe, ledger = make_run("run_one", "1abc\n")
     assert first._ensure_run_local_foldseek_pairs(universe, ledger, 15)[0]
+    assert resolved == ["/opt/foldseek/bin/foldseek"]
     assert first._ensure_run_local_foldseek_pairs(universe, ledger, 15)[0]
     assert len(calls) == 1
 
