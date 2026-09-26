@@ -856,10 +856,6 @@ def report(root, rows, ignored, archives, pairs, elapsed, destination):
     '- 分辨率：优先取结构文件自带值；文件未记录时按 PDB ID 回落到整理元数据（SNAC curation summary 的 Resolution 列、SAbDab 汇总表的 resolution 列），逐行记录 resolution_source。一个字段列出多个值时取最差（最大）值。流水线工作目录（external_vhh）下的文件不参与，本报告列出实际使用的元数据文件及其哈希。仍然查不到分辨率的条目按 unknown_resolution 排除，阈值不变。',
     '- VHH通过 = SNAC非TCR单VHH来源标注、唯一H链、无L链、H链序列覆盖≥70%且与标注一致；或SAbDab链级summary明确唯一Hchain、无Lchain/scFv、具有protein/peptide抗原，并在生物学装配中核对VHH链、CDR-H3和额外Ig可变域。SNAC与SAbDab标注独立读取，SAbDab不得借用同PDB的SNAC标签。未知/候选不得当作合格。','',
     '## 核心子集规模与基础质量','', '| 子集 | 结构文件 | 有效 | 解析/坐标失败 | 有主链缺失文件（占有效） | 缺原子残基/观测残基 | 可评估界面 | 弱界面 | 基础合格/有效 |', '|---|---:|---:|---:|---:|---:|---:|---:|---:|']
-    if RESOLUTION_SOURCE_FILES:
-        lines += ['## 分辨率元数据来源','', '| 文件 | 类型 | SHA-256 |','|---|---|---|']
-        lines += [f'| `{f["path"]}` | {f["kind"]} | `{f["sha256"]}` |' for f in RESOLUTION_SOURCE_FILES]
-        lines += ['']
     order=['train_rcsb','sabdab_vhh','snac_db','test_db55']
     def summary(g):
         rr=groups[g];v=[r for r in rr if r['valid']];m=sum(r['missing_residues']>0 for r in v);nr=sum(r['residues'] for r in v);nm=sum(r['missing_residues'] for r in v); ev=sum(r['interface_status']!='not_applicable' for r in v);w=sum(r['interface_status']=='weak' for r in v);good=sum(r['missing_residues']==0 and r['interface_status']=='pass' for r in v)
@@ -870,7 +866,13 @@ def report(root, rows, ignored, archives, pairs, elapsed, destination):
     validpairs=[p for p in pairs if p['valid']];weakpairs=[p for p in validpairs if p['interface_status']=='weak']
     lookup={r['path']:r for r in rows if r['subset']=='test_db55'}
     paired_good=sum(p['interface_status']=='pass' and all(lookup.get(p[k],{}).get('valid') and lookup[p[k]]['missing_residues']==0 for k in ('receptor','ligand')) for p in validpairs)
-    lines += ['',f'DB5.5：发现 {len(pairs)} 个结合态配对，{len(validpairs)} 个成功评估，{len(weakpairs)} 个界面接触残基<15；界面通过率 {pct(len(validpairs)-len(weakpairs),len(validpairs))}。同时满足两侧观测残基主链完整、界面通过的配对为 {paired_good}/{len(validpairs)}（基础合格率 {pct(paired_good,len(validpairs))}）。', '', '## 纳米抗体身份与 CDR-H3','', '| 子集 | 有效 | VHH严格通过 | 单VHH候选 | 不满足单VHH条件 | 未判定 | 严格通过率 |','|---|---:|---:|---:|---:|---:|---:|']
+    lines += ['',f'DB5.5：发现 {len(pairs)} 个结合态配对，{len(validpairs)} 个成功评估，{len(weakpairs)} 个界面接触残基<15；界面通过率 {pct(len(validpairs)-len(weakpairs),len(validpairs))}。同时满足两侧观测残基主链完整、界面通过的配对为 {paired_good}/{len(validpairs)}（基础合格率 {pct(paired_good,len(validpairs))}）。', '']
+    # After the core table, never between its header and its rows.
+    if RESOLUTION_SOURCE_FILES:
+        lines += ['## 分辨率元数据来源','', '| 文件 | 类型 | SHA-256 |','|---|---|---|']
+        lines += [f'| `{f["path"]}` | {f["kind"]} | `{f["sha256"]}` |' for f in RESOLUTION_SOURCE_FILES]
+        lines += ['']
+    lines += ['## 纳米抗体身份与 CDR-H3','', '| 子集 | 有效 | VHH严格通过 | 单VHH候选 | 不满足单VHH条件 | 未判定 | 严格通过率 |','|---|---:|---:|---:|---:|---:|---:|']
     for g in ['sabdab_vhh','snac_db']:
         v=[r for r in groups[g] if r['valid']];c=collections.Counter(r['vhh_status'] for r in v)
         lines.append(f'| {g} | {len(v)} | {c["pass"]} | {c["candidate"]} | {c["fail"]} | {c["unknown"]} | {pct(c["pass"],len(v))} |')

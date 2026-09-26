@@ -144,3 +144,31 @@ def test_the_fetcher_reads_ids_and_the_worst_resolution():
     assert fetch.resolution_of({"rcsb_entry_info": {"resolution_combined": [2.1, 2.4]}}) == 2.4
     assert fetch.resolution_of({"rcsb_entry_info": {"resolution_combined": []}}) is None
     assert fetch.resolution_of({}) is None
+
+
+def test_the_core_table_rows_follow_their_header_before_the_resolution_sources(tmp_path):
+    """The resolution-source table must not split the core subset table."""
+    def row(subset, pdb):
+        return dict(subset=subset, id=f"{subset}/{pdb}", pdb_id=pdb, path=str(tmp_path / pdb), member="",
+                    valid=True, missing_residues=0, residues=100, interface_status="pass",
+                    max_contact_residues=30, vhh_status="pass", cdr3_lengths=[16], cdr3_sequences=["A" * 16],
+                    structure_quality_status="pass", structure_quality_reasons=[], weak_pairs=0, error="",
+                    models_first_only=False, legacy_pdb_tail=False, pairs=[])
+    rows = [row(s, p) for s, p in (("train_rcsb", "1AAA"), ("sabdab_vhh", "2BBB"),
+                                   ("snac_db", "3CCC"), ("test_db55", "4DDD"))]
+    audit.RESOLUTION_SOURCE_FILES[:] = [dict(path="entry_resolution.tsv", kind="rcsb_entry_resolution",
+                                             sha256="0" * 64)]
+    try:
+        out = tmp_path / "data_audit_report.md"
+        audit.report(tmp_path, rows, [], [], [], 1.0, out)
+        lines = out.read_text(encoding="utf-8").splitlines()
+    finally:
+        audit.RESOLUTION_SOURCE_FILES.clear()
+    header = next(i for i, l in enumerate(lines) if l.startswith("| 子集 | 结构文件 |"))
+    sources = lines.index("## 分辨率元数据来源")
+    # Separator, then the four subset rows, all before the resolution section.
+    assert lines[header + 1].startswith("|---")
+    assert [lines[header + 2 + k].split("|")[1].strip() for k in range(4)] == \
+        ["train_rcsb", "sabdab_vhh", "snac_db", "test_db55"]
+    assert sources > header + 5
+    assert "`entry_resolution.tsv`" in "\n".join(lines[sources:])
