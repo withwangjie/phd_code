@@ -185,14 +185,18 @@ If the frozen JSON is absent but the configured training CSV exists,
 `run_full_experiment.py` fits the JSON before the coarse benchmark. If both
 are absent while `require_calibrated: true`, the run fails closed.
 
-The formal rotamer model reads the official Dunbrack 2010
-`ALL.bbdep.rotamers.lib` φ/ψ bins, rotamer probabilities, χ1..χN means and
-σ values. χ1 is expanded by configured σ offsets; distal χ values retain the
-corresponding statistical rotamer means. The all-atom model applies complete
-rotamer χ1..χN states and retains 3--6 states/site under the <=30-variable
-budget. The coarse pseudo-atom model intentionally remains χ1-oriented. The
-official library file is an external scientific input and is never silently
-replaced by the legacy table in formal mode.
+The formal rotamer model reads Dunbrack 2010 samples from the installed
+PyRosetta/Rosetta database (`pyrosetta_dun10`, pinned to build 2026.29 in the
+frozen config). It uses backbone φ/ψ, rotamer probabilities, χ1..χN means and
+standard deviations. χ1 is expanded by configured standard-deviation offsets;
+distal χ values retain their corresponding means. The all-atom model applies
+complete χ1..χN states and retains 3--6 states/site under the <=30-variable
+budget. The coarse pseudo-atom model remains χ1-oriented. PyRosetta is a
+separately installed, licensed dependency. Formal preflight checks its build,
+dun10 option and a real rotamer sample. The prior `dunbrack2010` text-file
+mode remains available for reproduction of earlier runs but is not selected
+by the frozen formal config. See `docs/PROTOCOL_AMENDMENTS.md` A19; calibrations
+and all downstream results from the text-file protocol cannot be reused.
 
 ## Independence, external validation, and structural baselines
 

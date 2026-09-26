@@ -141,7 +141,8 @@ def main() -> int:
     parser.add_argument("--dataset",type=Path,required=True,
         help="Graph dataset directory containing graph_manifest.json and graphs/train.")
     parser.add_argument("--data-root",type=Path,required=True)
-    parser.add_argument("--rotamer-library",type=Path,required=True)
+    parser.add_argument("--rotamer-mode",choices=("dunbrack2010","pyrosetta_dun10"),default="dunbrack2010")
+    parser.add_argument("--rotamer-library",type=Path)
     parser.add_argument("--selection-mode",choices=("egnn","distance"),default="egnn")
     parser.add_argument("--checkpoint",type=Path)
     parser.add_argument("--vhh-identity-threshold",type=float,default=0.80)
@@ -182,7 +183,7 @@ def main() -> int:
         parser.error("--assignments-per-complex must be >=8")
     if args.max_complexes < 0:
         parser.error("--max-complexes must be >=0")
-    if not args.rotamer_library.is_file():
+    if args.rotamer_mode=="dunbrack2010" and (args.rotamer_library is None or not args.rotamer_library.is_file()):
         parser.error("Dunbrack rotamer library not found")
     homology_isolation=dict(
         vhh_full_chain_identity=float(args.vhh_identity_threshold),
@@ -281,7 +282,7 @@ def main() -> int:
                 sub=build_ablation_subgraph(data,active,args.radius)
                 coarse=InterfaceQUBOBuilder(
                     min_variables=3*args.active_sites,max_variables=3*args.active_sites,max_sites=args.active_sites,
-                    force_field=force_field,rotamer_mode="dunbrack2010",
+                    force_field=force_field,rotamer_mode=args.rotamer_mode,
                     rotamer_library_path=args.rotamer_library,
                     rotamer_probability_floor=args.rotamer_probability_floor,
                     rotamer_sigma_offsets=args.rotamer_sigma_offsets,
@@ -322,7 +323,7 @@ def main() -> int:
                     complete_terminal_oxygen(local)
                     atomistic=AllAtomInterfaceQUBOBuilder(
                         local,active_residues,site_scores=[1.0]*len(active_residues),
-                        rotamer_mode="dunbrack2010",rotamer_library_path=args.rotamer_library,
+                        rotamer_mode=args.rotamer_mode,rotamer_library_path=args.rotamer_library,
                         rotamer_probability_floor=args.rotamer_probability_floor,
                         rotamer_sigma_offsets=args.rotamer_sigma_offsets,
                         solvent_model=args.solvent_model,
@@ -361,12 +362,15 @@ def main() -> int:
             handle.flush()
 
     succeeded_complexes=len(train)-len(failures)
+    from nanoqc.qubo.subgraph_to_qubo import rotamer_source_metadata
     provenance=dict(
         scope="training complexes only",
         source_manifest=str(manifest_path),
         source_manifest_sha256=sha256(manifest_path),
-        rotamer_library=str(args.rotamer_library),
-        rotamer_library_sha256=sha256(args.rotamer_library),
+        rotamer_mode=args.rotamer_mode,
+        rotamer_library=(str(args.rotamer_library) if args.rotamer_mode=="dunbrack2010" else None),
+        rotamer_library_sha256=(sha256(args.rotamer_library) if args.rotamer_mode=="dunbrack2010" else None),
+        rotamer_source_metadata=rotamer_source_metadata(args.rotamer_mode,args.rotamer_library),
         active_site_selection=(
             "formal EGNN + antigen-proximity selector on training complexes only"
             if args.selection_mode=="egnn"

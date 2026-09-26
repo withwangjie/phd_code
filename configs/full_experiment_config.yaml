@@ -80,6 +80,7 @@ env_check:
     - pdbfixer
     - parasail
     - anarci  # formal SAbDab/external VHH IMGT numbering is fail-closed
+    - pyrosetta  # formal dun10 rotamers from the installed Rosetta database
     - psutil
     - tqdm
     - yaml  # PyYAML, required by run_full_experiment.py itself
@@ -376,10 +377,9 @@ qc_benchmark:
   antigen_proximity_scale_angstrom: 6.0
   contact_ca_cutoff_angstrom: 8.0
   rotamer_model:
-    mode: "dunbrack2010"  # backbone-dependent Dunbrack 2010 rotamer model [R2]
-    # Local path to the licensed/attributed ALL.bbdep.rotamers.lib file.
-    # Formal runs fail closed if this file is missing.
-    library_path: "data/rotamer/ALL.bbdep.rotamers.lib"
+    mode: "pyrosetta_dun10"  # PyRosetta 2026.29 Rosetta database, Dunbrack 2010 [R2]
+    version_contains: "2026.29+releasequarterly.80a0635615099e1b918474a63acba7b1de6fd107"
+    library_path: "data/rotamer/ALL.bbdep.rotamers.lib"  # legacy ablations only
     probability_floor: 1.0e-4
     sigma_offsets: [-1.0, 0.0, 1.0]
   energy_calibration:
@@ -471,8 +471,9 @@ structure_experiment:
   antigen_proximity_scale_angstrom: 6.0
   contact_ca_cutoff_angstrom: 8.0
   rotamer_model:
-    mode: "dunbrack2010"
-    library_path: "data/rotamer/ALL.bbdep.rotamers.lib"
+    mode: "pyrosetta_dun10"
+    version_contains: "2026.29+releasequarterly.80a0635615099e1b918474a63acba7b1de6fd107"
+    library_path: "data/rotamer/ALL.bbdep.rotamers.lib"  # legacy ablations only
     probability_floor: 1.0e-4
     sigma_offsets: [-1.0, 0.0, 1.0]
   # Formal all-atom search uses complete Dunbrack chi1..chiN states and

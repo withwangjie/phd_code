@@ -19,7 +19,7 @@ import torch
 from tqdm import tqdm
 
 from nanoqc.reporting.generate_figure1_pymol_script import extract_source
-from nanoqc.qubo.subgraph_to_qubo import read_atomistic_structure, _SIDECHAIN_NAMES, AllAtomInterfaceQUBOBuilder
+from nanoqc.qubo.subgraph_to_qubo import read_atomistic_structure, _SIDECHAIN_NAMES, AllAtomInterfaceQUBOBuilder, rotamer_source_metadata
 from nanoqc.common.seed_streams import derive_streams, derive_child_seed, save_stream_map, DEFAULT_MASTER_SEED
 from nanoqc.data.sequence_identity import nw_identity, length_coverage, partner_roles_anchored
 from nanoqc.data.safe_graph_load import load_graph
@@ -134,9 +134,9 @@ def prepare(graph, source: Path, destination: Path, sites: int, *, pruning: str 
         raise ValueError("antigen_proximity_scale must be positive finite")
     if not np.isfinite(contact_ca_cutoff) or contact_ca_cutoff <= 0:
         raise ValueError("contact_ca_cutoff must be positive finite")
-    if rotamer_mode not in ("legacy","dunbrack2010"):
-        raise ValueError("rotamer_mode must be legacy or dunbrack2010")
-    if rotamer_mode=="dunbrack2010":
+    if rotamer_mode not in ("legacy","dunbrack2010","pyrosetta_dun10"):
+        raise ValueError("rotamer_mode must be legacy, dunbrack2010 or pyrosetta_dun10")
+    if rotamer_mode in ("dunbrack2010","pyrosetta_dun10"):
         if not hasattr(graph,"backbone_phi") or not hasattr(graph,"backbone_psi"):
             raise ValueError("Formal Dunbrack site selection requires backbone phi/psi metadata")
         phi_values=graph.backbone_phi.detach().cpu().numpy()
@@ -182,7 +182,7 @@ def prepare(graph, source: Path, destination: Path, sites: int, *, pruning: str 
             continue
         if allowed_residues is not None and rid not in allowed_residues:
             continue
-        if rotamer_mode=="dunbrack2010" and (
+        if rotamer_mode in ("dunbrack2010","pyrosetta_dun10") and (
             not np.isfinite(phi_values[i]) or not np.isfinite(psi_values[i])
         ):
             continue
@@ -320,7 +320,7 @@ def main(argv=None) -> int:
     parser.add_argument("--antigen-guidance-weight",type=float,default=0.25)
     parser.add_argument("--antigen-proximity-scale",type=float,default=6.0)
     parser.add_argument("--contact-ca-cutoff",type=float,default=8.0)
-    parser.add_argument("--rotamer-mode",choices=("legacy","dunbrack2010"),default="dunbrack2010")
+    parser.add_argument("--rotamer-mode",choices=("legacy","dunbrack2010","pyrosetta_dun10"),default="dunbrack2010")
     parser.add_argument("--rotamer-library",type=Path)
     parser.add_argument("--rotamer-probability-floor",type=float,default=1e-4)
     parser.add_argument("--rotamer-sigma-offsets",type=float,nargs="+",default=[-1.0,0.0,1.0])
@@ -676,7 +676,8 @@ def main(argv=None) -> int:
                     solvent_model=args.solvent_model,
                     rotamer_model=dict(
                         mode=args.rotamer_mode,
-                        library_path=(None if args.rotamer_library is None else str(args.rotamer_library)),
+                        library_path=(str(args.rotamer_library) if args.rotamer_mode=="dunbrack2010" and args.rotamer_library is not None else None),
+                        **rotamer_source_metadata(args.rotamer_mode,args.rotamer_library),
                         probability_floor=float(args.rotamer_probability_floor),
                         sigma_offsets=[float(v) for v in args.rotamer_sigma_offsets],
                     ),
