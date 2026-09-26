@@ -610,3 +610,12 @@ they were logged later.
 - **Why:** a single Rosetta-maintained library API provides the candidate statistics used by the study. This is a scientific source change, not an implementation-only refactor: Rosetta's sample set and interpolation/semibackbone conventions may differ from the earlier text parser.
 - **Affected results:** candidate pools and probabilities, energy calibration, QUBO coefficients, solver results, structure analyses and reports. Complete formal results must be generated in a new run directory; they cannot be resumed from a text-library run.
 - **Results inspected before this amendment:** the investigator supplied progress from the earlier run through queue freeze and eligibility screening, but no final performance or structural endpoint was supplied for this amendment. The change follows the explicit source choice and a direct PyRosetta API check on the server.
+
+
+## A20. One-time FP32 continuation after failed EGNN AMP training
+
+- **Before:** the affected formal run completed data audit and queue freeze, then EGNN training failed under FP16 automatic mixed precision. Its downstream stages were blocked.
+- **After:** a dedicated recovery command verifies the completed stage artifacts and their upstream bindings, requires that EGNN failed and no downstream stage completed, and allows only `egnn_train.amp: true` to `false` in the resolved configuration. It archives the original run manifest, frozen configuration and any partial FP16 checkpoints, then records old and new source hashes and the completed-stage result hashes. EGNN trains from scratch in CUDA FP32 on the same frozen graph split; downstream stages use its FP32 checkpoint.
+- **Why:** FP16 can overflow on coordinate and squared-distance computations. Reusing the failed FP16 checkpoint would mix training precision regimes. The completed upstream outputs are retained only after their recorded content hashes and dependency chain pass verification.
+- **Affected results:** EGNN checkpoint and all stages after `queue_freeze`. Data audit and queue freeze remain the original frozen outputs. The resulting run is explicitly marked as an amended protocol lineage, not an unmodified resume.
+- **Results inspected before this amendment:** the reported training failure and missing EGNN artifacts; no downstream performance or structural result was available.

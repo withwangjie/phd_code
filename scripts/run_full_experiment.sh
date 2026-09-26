@@ -19,6 +19,7 @@
 #   ./scripts/run_full_experiment.sh --resume experiments_full_run_20260920_010203
 #   ./scripts/run_full_experiment.sh --only qc_benchmark
 #   ./scripts/run_full_experiment.sh --smoke-only
+#   ./scripts/run_full_experiment.sh --continue-egnn-fp32 --resume experiments_full_run_...
 #
 # Supported run controls are forwarded to run_full_experiment.py. The launcher
 # owns --config and --run-dir because they must match the preflight/provenance.
@@ -30,6 +31,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "$REPO_ROOT"
 export PYTHONPATH="${REPO_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}"
+
+# One-time, audited protocol amendment for a failed FP16 EGNN stage. The
+# switch is launcher-owned and must not reach the Python stage parser.
+CONTINUE_EGNN_FP32=0
+if [ "${1:-}" = "--continue-egnn-fp32" ]; then
+    CONTINUE_EGNN_FP32=1
+    shift
+fi
 
 log() { echo "[run_full_experiment] $*"; }
 fail() { echo "[run_full_experiment] ERROR: $*" >&2; exit 1; }
@@ -192,6 +201,20 @@ else
     done
     mkdir -p "$RUN_DIR"
     FRESH_RUN=1
+fi
+
+if [ "$CONTINUE_EGNN_FP32" -eq 1 ]; then
+    [ "$FRESH_RUN" -eq 0 ] || fail "--continue-egnn-fp32 requires --resume <old-run>"
+    for ARG in "$@"; do
+        case "$ARG" in
+            --only|--only=*|--force-restage|--force-restage=*)
+                fail "--continue-egnn-fp32 owns the EGNN retry; omit --only/--force-restage"
+                ;;
+        esac
+    done
+    python -m nanoqc.pipeline.amend_failed_egnn_fp32 \
+        --run-dir "$RUN_DIR" --config "$RESOLVED_CONFIG"
+    set -- "$@" --force-restage egnn_train
 fi
 
 if [ "$FRESH_RUN" -eq 0 ]; then
