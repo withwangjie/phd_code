@@ -212,7 +212,7 @@ if [ "$CONTINUE_EGNN_FP32" -eq 1 ]; then
                 ;;
         esac
     done
-    python -m nanoqc.pipeline.amend_failed_egnn_fp32 \
+    python "${SCRIPT_DIR}/amend_failed_egnn_fp32.py" \
         --run-dir "$RUN_DIR" --config "$RESOLVED_CONFIG"
     set -- "$@" --force-restage egnn_train
 fi

@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from nanoqc.pipeline import amend_failed_egnn_fp32 as recovery
+from scripts import amend_failed_egnn_fp32 as recovery
 
 
 def _fixture(tmp_path, monkeypatch):
