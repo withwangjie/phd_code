@@ -879,8 +879,11 @@ class PyRosettaRotamerProvider:
             raise RuntimeError("PyRosetta dun10 mode requires an installed PyRosetta distribution") from exc
         if not pyrosetta.rosetta.basic.was_init_called():
             pyrosetta.init(self.init_options)
-        elif not pyrosetta.rosetta.basic.options.get_boolean_option("dun10"):
-            raise RuntimeError("PyRosetta was initialized without the dun10 rotamer library")
+        # Do not query ``get_boolean_option('dun10')`` here.  Some PyRosetta
+        # builds do not register that legacy OptionKey in the Python binding;
+        # the getter then aborts the entire process instead of raising Python
+        # an exception.  ``-dun10`` is supplied on initialization above, and
+        # load_bins() validates the actual Dunbrack sample API and data.
         self.pyrosetta = pyrosetta
         self.rosetta = pyrosetta.rosetta
         self.version = pyrosetta.version()
