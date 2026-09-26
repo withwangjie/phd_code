@@ -266,8 +266,11 @@ root's `entry_resolution.tsv`; `--missing-from-audit` names a different audit.
 Any `*entry_resolution.tsv` under the data root (outside pipeline staging) is
 read, listed in the audit report with its SHA-256, and needs no network again.
 
-With the antigen-fold holdout (the default), the only other input a formal run
-needs beyond the raw data is the frozen Foldseek pair table:
+With the antigen-fold holdout (the default), each new formal run builds its own
+Foldseek pair table after `data_audit` from that run's audited PDB universe.
+The table and manifest are stored under `<run>/independence/`; a resume
+verifies their hashes and reuses them. Foldseek must be installed before launch.
+If it is not on `PATH`, set `QP_FOLDSEEK` to its executable path.
 
 ANARCI also needs HMMER's `hmmscan` executable on `PATH`. The Python package
 alone is insufficient; `env_check` checks both before the data audit. Install
@@ -275,9 +278,8 @@ HMMER on the Linux server (for example, `conda install -c bioconda hmmer=3.3.2`)
 and verify `hmmscan -h` there.
 
 ```bash
-./scripts/prepare_external_vhh.sh audit                     # study PDB IDs from a standalone audit
-./scripts/prepare_external_vhh.sh foldseek --foldseek /path/to/foldseek --threads 32
-./scripts/deploy_launch.sh                                  # queue_freeze carves the holdout
+export QP_FOLDSEEK=/path/to/foldseek  # omit when foldseek is already on PATH
+./scripts/deploy_launch.sh
 ```
 
 The `foldseek` step searches antigen chains only. Antibody chains are
@@ -287,7 +289,7 @@ It runs an exhaustive all-versus-all search (E <= 10) and writes the pair
 table, a manifest of every chain's role, and an explicit self row for a PDB
 without an antigen chain of at least 20 residues. Scores are symmetric
 (`mintmscore`, the chain-pair TM-score normalized by the longer chain; A11), so
-a short chain cannot join whole complexes. `--reuse-raw` rescores the previous
+a short chain cannot join whole complexes. The standalone `--reuse-raw` rescores the previous
 search (`prep/foldseek/foldseek_raw.m8`) without running Foldseek again. A
 layered component larger than one fold's share of the pool always trains (A11).
 The holdout takes `queue_freeze.antigen_fold_holdout.fold`, one index or several
@@ -296,7 +298,8 @@ The holdout takes `queue_freeze.antigen_fold_holdout.fold`, one index or several
 
 To score a **genuinely external** VHH set instead, set
 `external_validation.external_vhh.graph_dir` and `source_structure_dir`, and
-build that set with the two passes below before the Foldseek step, so its
+set `queue_freeze.independence_clustering.build_per_run: false`. Build that set
+with the two passes below before the Foldseek step, so its
 PDBs enter the clustering universe:
 
 ```bash

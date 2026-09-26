@@ -49,7 +49,7 @@ env_check
 |---|---|---|
 | 独立审计 | `./scripts/prepare_external_vhh.sh audit` | `data/external_vhh/prep/study_pdb_ids.txt` |
 | 补齐分辨率 | `python -m nanoqc.data.fetch_entry_resolution` | `data/entry_resolution.tsv` |
-| Foldseek 聚类表 | `./scripts/prepare_external_vhh.sh foldseek --foldseek <路径>` | `data/independence/foldseek_pairs.tsv` + manifest |
+| Foldseek 聚类表 | 正式运行在 `queue_freeze` 自动构建；需安装 Foldseek 或设置 `QP_FOLDSEEK` | `<run>/independence/foldseek_pairs.tsv` + manifest |
 
 ### Foldseek 表的构建规则
 

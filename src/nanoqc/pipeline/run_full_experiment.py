@@ -580,6 +580,10 @@ def _validate_scientific_config(config: Dict[str, Any]) -> None:
         pair_tsv=clustering.get("pair_tsv")
         if not clustering.get("cluster_map"):
             raise ValueError("independence_clustering.cluster_map is required")
+        if clustering.get("build_per_run",False) and not pair_tsv:
+            raise ValueError("run-local Foldseek pairs require independence_clustering.pair_tsv")
+        if clustering.get("build_per_run",False) and str(clustering.get("score_semantics","")) != "mintmscore":
+            raise ValueError("run-local Foldseek pairs require score_semantics=mintmscore")
         if pair_tsv is not None:
             min_score=float(clustering.get("min_score",0.50))
             if not math.isfinite(min_score):
@@ -840,6 +844,63 @@ class Orchestrator:
         """This run's own checkpoint directory (run_dir/<paths.checkpoint_dir>);
         see dataset_dir() -- same run-isolation guarantee."""
         return self.run_dir / self.config["paths"].get("checkpoint_dir", "checkpoints")
+
+    def run_local_foldseek_pairs(self) -> Path:
+        return self.run_dir / "independence" / "foldseek_pairs.tsv"
+
+    def _verify_run_local_foldseek_pairs(self, universe: Path, audit_jsonl: Path,
+                                         min_interface_residues: int) -> tuple[bool, str]:
+        pairs=self.run_local_foldseek_pairs()
+        manifest_path=pairs.with_suffix(".manifest.json")
+        if not pairs.is_file() or not manifest_path.is_file():
+            return False,"Run-local Foldseek table or manifest is missing"
+        try:
+            manifest=json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError,json.JSONDecodeError) as exc:
+            return False,f"Run-local Foldseek manifest is unreadable: {exc}"
+        expected={
+            "schema":"foldseek_pairs_v1",
+            "score":"mintmscore",
+            "pair_table_sha256":sha256_of(pairs),
+            "universe_sha256":sha256_of(universe),
+            "audit_ledger_sha256":sha256_of(audit_jsonl),
+            "min_interface_residues":min_interface_residues,
+        }
+        for key,value in expected.items():
+            if manifest.get(key)!=value:
+                return False,f"Run-local Foldseek {key} does not match this run's audited input"
+        return True,"run-local Foldseek table and manifest verified"
+
+    def _ensure_run_local_foldseek_pairs(self, universe: Path, audit_jsonl: Path,
+                                         min_interface_residues: int) -> tuple[bool, str]:
+        """Build once per run; verify the frozen table on every stage retry."""
+        pairs=self.run_local_foldseek_pairs()
+        manifest_path=pairs.with_suffix(".manifest.json")
+
+        if pairs.is_file() and manifest_path.is_file():
+            return self._verify_run_local_foldseek_pairs(universe,audit_jsonl,min_interface_residues)
+
+        foldseek=shutil.which(os.environ.get("QP_FOLDSEEK") or "foldseek")
+        if not foldseek:
+            return False,"Foldseek executable missing; set QP_FOLDSEEK or add foldseek to PATH"
+        pairs.parent.mkdir(parents=True,exist_ok=True)
+        argv=[
+            self.venv_python,"-m",module_name("build_foldseek_pairs.py"),
+            "--universe",str(universe),"--audit-dir",str(audit_jsonl.parent),
+            "--data-root",str(resolve_path(self.config,self.config["paths"]["data_root"])),
+            "--out",str(pairs),"--work-dir",str(pairs.parent/"foldseek_work"),
+            "--foldseek",foldseek,
+            "--threads",str(max(1,int((self.config.get("data_audit",{}) or {}).get("workers",8)))),
+            "--min-interface-residues",str(min_interface_residues),
+        ]
+        if pairs.exists():
+            # An interrupted build can leave the TSV before writing its manifest.
+            # Both files are run-local and no completed stage has consumed them.
+            argv.append("--force")
+        rc,log=self._run_subprocess("queue_freeze_foldseek",argv)
+        if rc!=0:
+            return False,f"Run-local Foldseek build exited {rc}; see {log}"
+        return self._verify_run_local_foldseek_pairs(universe,audit_jsonl,min_interface_residues)
 
     def external_vhh_dirs(self) -> Tuple[Path, Path, bool]:
         """Graph and raw-structure directories of the external VHH set.
@@ -1438,6 +1499,17 @@ class Orchestrator:
                 self.run_dir/"independence"/"cluster_adequacy.json",
             ])
             if not ok:return ok,detail
+            clustering_cfg=((self.config.get("queue_freeze",{}) or {}).get("independence_clustering",{}) or {})
+            if clustering_cfg.get("build_per_run",False):
+                min_interface=int(((self.config.get("queue_freeze",{}) or {}).get("graph_build",{}) or {})
+                                  .get("min_interface_residues",15))
+                ok,detail=self._verify_run_local_foldseek_pairs(
+                    universe,self.run_dir/"audit"/"data_audit_details.jsonl",min_interface)
+                if not ok:return False,detail
+                provenance,error=read_json(cluster_provenance)
+                if error:return False,error
+                if provenance.get("source_pairs_sha256")!=sha256_of(self.run_local_foldseek_pairs()):
+                    return False,"Frozen cluster map does not match run-local Foldseek pairs"
             adequacy,error=read_json(self.run_dir/"independence"/"cluster_adequacy.json")
             if error:return False,error
             if not adequacy.get("adequate"):
@@ -1850,12 +1922,16 @@ class Orchestrator:
 
         clustering=((self.config.get("queue_freeze", {}) or {}).get("independence_clustering", {}) or {})
         if clustering.get("required",False):
+            build_per_run=bool(clustering.get("build_per_run",False))
+            foldseek=shutil.which(os.environ.get("QP_FOLDSEEK") or "foldseek") if build_per_run else None
+            checks["foldseek_executable"]=foldseek if build_per_run else "prebuilt_table"
             cluster_map=resolve_path(self.config,clustering.get("cluster_map","")) if clustering.get("cluster_map") else None
             pairs=resolve_path(self.config,clustering.get("pair_tsv","")) if clustering.get("pair_tsv") else None
-            available=bool((cluster_map and cluster_map.is_file()) or (pairs and pairs.is_file()))
+            available=bool(foldseek) if build_per_run else bool((cluster_map and cluster_map.is_file()) or (pairs and pairs.is_file()))
             checks["independence_cluster_input"]=available
             if not available:
-                missing_resources.append(f"cluster_map_or_pair_tsv:{cluster_map}|{pairs}")
+                missing_resources.append("foldseek (set QP_FOLDSEEK or add to PATH)" if build_per_run
+                                         else f"cluster_map_or_pair_tsv:{cluster_map}|{pairs}")
 
         external=self.config.get("external_validation", {}) or {}
         if external.get("required",False):
@@ -2137,6 +2213,19 @@ class Orchestrator:
                         f"No external VHH graphs found for frozen clustering universe: {external_graph_dir}")
                 ids.update(external_ids)
             universe_path.write_text("\n".join(sorted(ids))+"\n",encoding="utf-8")
+
+        if clustering_cfg.get("required",False) and clustering_cfg.get("build_per_run",False):
+            external_cfg=(self.config.get("external_validation",{}) or {}).get("external_vhh",{}) or {}
+            if external_cfg.get("required",False) and external_cfg.get("graph_dir"):
+                return StageResult(
+                    "queue_freeze","failed",started,utc_timestamp(),None,
+                    "Run-local Foldseek auto-build requires the internal antigen-fold holdout; "
+                    "external VHH candidates need their own declared Foldseek preparation")
+            pair_path=self.run_local_foldseek_pairs()
+            ok,detail=self._ensure_run_local_foldseek_pairs(
+                universe_path,audit_jsonl,int(qf_cfg["graph_build"].get("min_interface_residues",15)))
+            if not ok:
+                return StageResult("queue_freeze","failed",started,utc_timestamp(),None,detail)
 
         if clustering_cfg.get("required",False) and pair_path is not None and pair_path.is_file():
             universe_ids={

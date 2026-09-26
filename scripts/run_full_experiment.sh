@@ -261,6 +261,7 @@ if [ "$FRESH_RUN" -eq 1 ]; then
         echo "QP_RUN_ROOT=${QP_RUN_ROOT:-}"
         echo "QP_FASPR=${QP_FASPR:-}"
         echo "QP_PHENIX_CLASHSCORE=${QP_PHENIX_CLASHSCORE:-}"
+        echo "QP_FOLDSEEK=${QP_FOLDSEEK:-}"
     } > "$RUN_DIR/provenance/environment.txt"
 fi
 

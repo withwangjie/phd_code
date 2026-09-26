@@ -147,6 +147,9 @@ queue_freeze:
     required: true
     cluster_map: "data/independence/pdb_family_clusters.json"
     pair_tsv: "data/independence/foldseek_pairs.tsv"
+    # Build a fresh, run-local Foldseek table after this run's data audit.
+    # A resumed run verifies and reuses its own frozen table.
+    build_per_run: true
     # Pair TSV must start with: query<TAB>target<TAB>mintmscore, as written by
     # prepare_external_vhh.sh foldseek (build_foldseek_pairs.py). Foldseek's
     # default third column is fident and is rejected. mintmscore is
