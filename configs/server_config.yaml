@@ -42,6 +42,9 @@ resources:
   # OpenMM uses CUDA automatically when available. Device 0 is used because
   # structural targets are intentionally sequential in the formal protocol.
   openmm_platform: "CUDA"
+  # Applies to OpenMM hydrogen placement as well; this can affect coordinates.
+  # Use only for a new run after validating CUDA parity on representative cases.
+  openmm_hydrogen_platform: "CUDA"
   openmm_device: "0"
   openmm_precision: "double"
 

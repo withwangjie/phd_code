@@ -37,6 +37,7 @@ import math
 import os
 import re
 from dataclasses import asdict, dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Optional, Sequence, Tuple
 
@@ -815,32 +816,40 @@ def _nearest_dunbrack_bin(angle: float) -> int:
     while value<-180: value+=360
     return value
 
+@lru_cache(maxsize=2)
+def _dunbrack_library_lines(path: str, size: int, mtime_ns: int) -> Dict[tuple[str,int,int], tuple[str,...]]:
+    """Index a frozen library once per process; retain source rows verbatim."""
+    del size, mtime_ns  # Part of the cache key so a replaced file is reindexed.
+    indexed: Dict[tuple[str,int,int], list[str]] = {}
+    with Path(path).open("r",encoding="utf-8",errors="replace") as handle:
+        for raw in handle:
+            line=raw.strip()
+            if not line or line.startswith("#"): continue
+            fields=line.split()
+            if len(fields)<17: continue
+            try:
+                residue=fields[0].upper()
+                phi=float(fields[1]); psi=float(fields[2])
+                if residue not in _THREE_LETTER.values(): continue
+                if not (-180.0 <= phi <= 180.0 and -180.0 <= psi <= 180.0): continue
+                if abs(phi/10.0-round(phi/10.0))>1e-6 or abs(psi/10.0-round(psi/10.0))>1e-6: continue
+                key=(residue,int(round(phi)),int(round(psi)))
+            except ValueError:
+                continue
+            indexed.setdefault(key,[]).append(line)
+    return {key:tuple(rows) for key,rows in indexed.items()}
+
+
 def _load_dunbrack_bins(library_path: Path, requested_bins: set[tuple[str,int,int]]) -> Dict[tuple[str,int,int], list[RotamerTemplate]]:
     """Read requested residue/phi/psi bins from ALL.bbdep.rotamers.lib."""
     path=Path(library_path)
     if not path.is_file():
         raise FileNotFoundError(f"Dunbrack 2010 rotamer library not found: {path}")
+    source=_dunbrack_library_lines(str(path.resolve()),path.stat().st_size,path.stat().st_mtime_ns)
     found={key:[] for key in requested_bins}
-    with path.open("r",encoding="utf-8",errors="replace") as handle:
-        for raw in handle:
-            line=raw.strip()
-            if not line or line.startswith("#"): continue
+    for key in requested_bins:
+        for line in source.get(key,()):
             fields=line.split()
-            if len(fields)<17:
-                continue
-            try:
-                residue=fields[0].upper()
-                phi=float(fields[1]); psi=float(fields[2])
-                if residue not in _THREE_LETTER.values():
-                    continue
-                if not (-180.0 <= phi <= 180.0 and -180.0 <= psi <= 180.0):
-                    raise ValueError(f"Invalid Dunbrack backbone bin: {residue} {phi} {psi}")
-                if abs(phi/10.0-round(phi/10.0))>1e-6 or abs(psi/10.0-round(psi/10.0))>1e-6:
-                    raise ValueError(f"Dunbrack traditional library must use 10-degree bins: {residue} {phi} {psi}")
-                key=(residue,int(round(phi)),int(round(psi)))
-            except ValueError:
-                continue
-            if key not in found: continue
             probability=float(fields[8])
             chis=tuple(float(v) for v in fields[9:13])
             sigmas=tuple(float(v) for v in fields[13:17])
@@ -2177,7 +2186,11 @@ class AllAtomInterfaceQUBOBuilder:
         state=random.getstate()
         try:
             random.seed(seed)
-            modeller.addHydrogens(self.forcefield, platform=mm.Platform.getPlatformByName("Reference"))
+            hydrogen_platform=os.environ.get("QP_OPENMM_HYDROGEN_PLATFORM","Reference")
+            if hydrogen_platform not in ("Reference","CPU","CUDA"):
+                raise ValueError("QP_OPENMM_HYDROGEN_PLATFORM must be Reference, CPU or CUDA")
+            modeller.addHydrogens(
+                self.forcefield,platform=mm.Platform.getPlatformByName(hydrogen_platform))
         finally:
             random.setstate(state)
         self.topology=modeller.topology

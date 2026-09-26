@@ -185,6 +185,12 @@ def resolve(scientific: dict[str,Any], server: dict[str,Any]) -> tuple[dict[str,
     hw["openmm_cpu_threads"]=max(1,min(int(res.get("openmm_cpu_threads",8)),usable))
     platform=str(res.get("openmm_platform","auto"))
     hw["openmm_platform"]="CUDA" if platform=="auto" and gpus>0 else ("CPU" if platform=="auto" else platform)
+    hydrogen_platform=str(res.get("openmm_hydrogen_platform","Reference"))
+    if hydrogen_platform not in ("Reference","CPU","CUDA"):
+        raise ValueError("resources.openmm_hydrogen_platform must be Reference, CPU or CUDA")
+    if hydrogen_platform=="CUDA" and gpus<1:
+        raise ValueError("resources.openmm_hydrogen_platform=CUDA requires a detected CUDA GPU")
+    hw["openmm_hydrogen_platform"]=hydrogen_platform
     hw["openmm_device"]=str(res.get("openmm_device","0"))
     hw["openmm_precision"]=str(res.get("openmm_precision","double"))
 
@@ -218,7 +224,8 @@ def resolve(scientific: dict[str,Any], server: dict[str,Any]) -> tuple[dict[str,
         "ram_gb":ram,
         "cuda_gpus":gpus,
         "ddp_ranks":ranks,
-        "result_affecting_runtime_parameters":["ddp_ranks"],
+        "result_affecting_runtime_parameters":["ddp_ranks","openmm_platform",
+                                               "openmm_hydrogen_platform","openmm_precision"],
         "target_global_batch_size":target_global,
         "per_gpu_batch_size":per_gpu_batch,
         "data_audit_workers":workers,
@@ -227,6 +234,7 @@ def resolve(scientific: dict[str,Any], server: dict[str,Any]) -> tuple[dict[str,
         "egnn_loader_workers":loader_workers,
         "cpu_threads_per_process":hw["cpu_threads_per_process"],
         "openmm_platform":hw["openmm_platform"],
+        "openmm_hydrogen_platform":hw["openmm_hydrogen_platform"],
         "openmm_device":hw["openmm_device"],
         "openmm_precision":hw["openmm_precision"],
         "faspr_executable":structural.get("faspr_executable"),

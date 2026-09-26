@@ -407,6 +407,16 @@ export QP_PHENIX_CLASHSCORE=/path/to/phenix.clashscore
 
 In auto mode the resolver chooses DDP ranks from available GPUs while preserving the configured target global batch size, derives CPU worker counts from available physical cores, selects the OpenMM platform from available hardware, and records every resolved value in the run configuration/provenance. Scientific thresholds, QAOA protocol values, data-split rules, endpoints, and statistical choices are never hardware-auto-tuned.
 
+OpenMM potential-energy evaluation uses the resolved `openmm_platform`. Hydrogen
+placement uses the separately recorded `openmm_hydrogen_platform` (Reference by
+default; the provided T4 server configuration selects CUDA). Changing either
+platform or OpenMM precision can change prepared coordinates and energies, so
+compare representative structures and rotamer rankings before a new formal run;
+never change these settings during a run. EGNN training uses CUDA, while
+sequence alignment, structure parsing, external executables, and the exact
+feasible-subspace QAOA simulator remain CPU tasks. Those workloads are not
+transferred to a GPU merely because one is available.
+
 ## One-click formal experiment
 
 A formal experiment is launched with one command:

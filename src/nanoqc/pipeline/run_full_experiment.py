@@ -1110,6 +1110,7 @@ class Orchestrator:
             [src_root, *[p for p in full_env.get("PYTHONPATH", "").split(os.pathsep) if p and p != src_root]])
         full_env["OPENMM_CPU_THREADS"] = str(hardware.get("openmm_cpu_threads", 8))
         full_env["QP_OPENMM_PLATFORM"] = str(hardware.get("openmm_platform", "Reference"))
+        full_env["QP_OPENMM_HYDROGEN_PLATFORM"] = str(hardware.get("openmm_hydrogen_platform", "Reference"))
         full_env["QP_OPENMM_DEVICE"] = str(hardware.get("openmm_device", "0"))
         full_env["QP_OPENMM_PRECISION"] = str(hardware.get("openmm_precision", "double"))
         if env:
