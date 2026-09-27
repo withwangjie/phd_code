@@ -403,6 +403,7 @@ qc_benchmark:
       min_cv_spearman: 0.40
       min_rmse_improvement_kcal: 0.0
       max_generation_failure_fraction: 0.10
+      max_input_quality_exclusion_fraction: 0.40  # missing observed heavy atoms; recorded separately from generation failures
       require_family_grouped_cv: true
     selection_mode: "egnn"  # training complexes only, but match the formal downstream site-selection distribution
     max_complexes: 0        # 0 = every eligible training complex

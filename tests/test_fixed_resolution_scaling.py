@@ -6,7 +6,44 @@ import torch
 from torch_geometric.data import Data
 
 from nanoqc.inference.analyze_quantum_scaling import _validate_fixed_state_case
-from nanoqc.qubo.subgraph_to_qubo import AA_INDEX, InterfaceQUBOBuilder, select_chi1_well_representatives
+from nanoqc.qubo.subgraph_to_qubo import (
+    AA_INDEX, InterfaceQUBOBuilder, RotamerTemplate,
+    _dunbrack_templates_for_site, chi1_well_index,
+    select_chi1_well_representatives,
+)
+
+
+def test_fixed_three_wells_rescues_real_low_probability_sample():
+    bins={('TYR',-70,130): [
+        RotamerTemplate(-60.,0.6,(-60.,), (5.,),'pyrosetta_dun10'),
+        RotamerTemplate(180.,0.39999,(180.,), (5.,),'pyrosetta_dun10'),
+        RotamerTemplate(60.,0.00001,(60.,), (5.,),'pyrosetta_dun10'),
+    ]}
+    ordinary=_dunbrack_templates_for_site(
+        bins,'Y',-70.,130.,probability_floor=1e-4,sigma_offsets=(0.,))
+    assert {chi1_well_index(r.chi1_degrees) for r in ordinary} == {1,2}
+    fixed=_dunbrack_templates_for_site(
+        bins,'Y',-70.,130.,probability_floor=1e-4,sigma_offsets=(0.,),
+        ensure_chi1_wells=True)
+    assert {chi1_well_index(r.chi1_degrees) for r in fixed} == {0,1,2}
+    assert min(r.prior_probability for r in fixed) < 1e-4
+
+
+def test_fixed_three_wells_does_not_invent_absent_source_well():
+    bins={('TYR',-70,130): [
+        RotamerTemplate(-60.,0.6,(-60.,),(5.,),'pyrosetta_dun10'),
+        RotamerTemplate(180.,0.4,(180.,),(5.,),'pyrosetta_dun10'),
+    ]}
+    templates=_dunbrack_templates_for_site(
+        bins,'Y',-70.,130.,probability_floor=1e-4,sigma_offsets=(0.,),
+        ensure_chi1_wells=True)
+    assert {chi1_well_index(r.chi1_degrees) for r in templates} == {1,2}
+    try:
+        select_chi1_well_representatives(templates)
+    except ValueError as exc:
+        assert "each chi1 well" in str(exc)
+    else:
+        raise AssertionError("A missing source well was invented")
 
 
 def test_chi1_selection_rejects_three_states_from_one_well():

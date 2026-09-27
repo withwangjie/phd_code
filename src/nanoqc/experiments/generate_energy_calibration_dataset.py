@@ -136,6 +136,14 @@ def calibration_assignments(qubo, count: int, rng: np.random.Generator) -> list[
     return chosen
 
 
+def is_input_quality_exclusion(exc: Exception) -> bool:
+    """Recognize missing observed atoms before any calibration energy is fit."""
+    return isinstance(exc, ValueError) and (
+        str(exc).startswith("Missing heavy atoms ")
+        or str(exc) == "Internal heavy-atom repair would be required"
+    )
+
+
 def main() -> int:
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset",type=Path,required=True,
@@ -249,6 +257,7 @@ def main() -> int:
     ]
     written=0
     failures=[]
+    input_quality_exclusions=[]
     rng=np.random.default_rng(args.seed)
 
     with args.out_csv.open("w",newline="",encoding="utf-8") as handle:
@@ -358,10 +367,16 @@ def main() -> int:
                         written+=1
                     del atomistic
             except Exception as exc:
-                failures.append(dict(pdb_id=pdb,error=f"{type(exc).__name__}: {exc}"))
+                record=dict(pdb_id=pdb,source_id=row.get("source_id"),
+                            error=f"{type(exc).__name__}: {exc}")
+                if is_input_quality_exclusion(exc):
+                    input_quality_exclusions.append(record)
+                else:
+                    failures.append(record)
             handle.flush()
 
-    succeeded_complexes=len(train)-len(failures)
+    attempted_complexes=len(train)-len(input_quality_exclusions)
+    succeeded_complexes=attempted_complexes-len(failures)
     from nanoqc.qubo.subgraph_to_qubo import rotamer_source_metadata
     provenance=dict(
         scope="training complexes only",
@@ -385,13 +400,16 @@ def main() -> int:
             "exact feasible-space ranking; lowest-energy half plus unique uniform legal samples; "
             "anchor is exact coarse physical ground state"
         ),
-        rotamer_state_policy="fixed_three_chi1_wells; exactly three retained states per site, one per chi1 well, matching the formal scaling benchmark",
+        rotamer_state_policy="fixed_three_chi1_wells; exactly three retained states per site, one real Dunbrack sample per chi1 well including top positive-probability sample below the global floor when required",
         active_sites=args.active_sites,radius=args.radius,
         solvent_model=args.solvent_model,
         assignments_per_complex=args.assignments_per_complex,
-        rows_written=written,complexes_attempted=len(train),
+        rows_written=written,complexes_discovered=len(train),
+        complexes_attempted=attempted_complexes,
         complexes_succeeded=succeeded_complexes,
-        generation_failure_fraction=(0.0 if not train else len(failures)/len(train)),
+        input_quality_exclusions=input_quality_exclusions,
+        input_quality_exclusion_fraction=(0.0 if not train else len(input_quality_exclusions)/len(train)),
+        generation_failure_fraction=(1.0 if not attempted_complexes else len(failures)/attempted_complexes),
         cluster_map=(None if args.cluster_map is None else str(args.cluster_map)),
         cluster_map_sha256=cluster_map_sha256,
         failures=failures,seed=args.seed,

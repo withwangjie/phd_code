@@ -672,6 +672,10 @@ def _validate_scientific_config(config: Dict[str, Any]) -> None:
     ridge_alpha = float(calibration_cfg.get("ridge_alpha", 1.0))
     if not math.isfinite(ridge_alpha) or ridge_alpha < 0:
         raise ValueError("energy_calibration.ridge_alpha must be finite and nonnegative")
+    quality_limit=float((calibration_cfg.get("acceptance",{}) or {}).get(
+        "max_input_quality_exclusion_fraction",0.0))
+    if not math.isfinite(quality_limit) or not 0.0 <= quality_limit < 1.0:
+        raise ValueError("energy_calibration.acceptance.max_input_quality_exclusion_fraction must be in [0,1)")
 
     for key, default in shared_pairs:
         left = float(qc.get(key, default))
@@ -1636,9 +1640,31 @@ class Orchestrator:
                 self.run_dir/"calibration"/"calibration_report.md",
             ])
             if not ok:return ok,detail
+            generation,error=read_json(provenance)
+            if error:return False,error
+            discovered=int(generation.get("complexes_discovered",-1))
+            attempted=int(generation.get("complexes_attempted",-1))
+            exclusions=generation.get("input_quality_exclusions")
+            failures=generation.get("failures")
+            if (not isinstance(exclusions,list) or not isinstance(failures,list)
+                    or discovered<=0 or attempted<=0
+                    or discovered!=attempted+len(exclusions)
+                    or attempted!=int(generation.get("complexes_succeeded",-1))+len(failures)):
+                return False,"Calibration input-quality and generation denominators do not close"
+            exclusion_fraction=float(generation.get("input_quality_exclusion_fraction",float("nan")))
+            failure_fraction=float(generation.get("generation_failure_fraction",float("nan")))
+            if (not math.isfinite(exclusion_fraction)
+                    or not math.isclose(exclusion_fraction,len(exclusions)/discovered,abs_tol=1e-12)
+                    or not math.isfinite(failure_fraction)
+                    or not math.isclose(failure_fraction,len(failures)/attempted,abs_tol=1e-12)):
+                return False,"Calibration exclusion or failure fraction does not match counts"
             payload,error=read_json(calibration)
             if error:return False,error
             limits=cal.get("acceptance",{}) or {}
+            if exclusion_fraction>float(limits.get("max_input_quality_exclusion_fraction",0.0)):
+                return False,"Calibration input-quality exclusion fraction exceeds frozen limit"
+            if failure_fraction>float(limits.get("max_generation_failure_fraction",0.0)):
+                return False,"Calibration generation failure fraction exceeds frozen limit"
             checks=[
                 ("cv_rmse_kcal","max_cv_rmse_kcal",lambda value,limit:value<=limit),
                 ("cv_mae_kcal","max_cv_mae_kcal",lambda value,limit:value<=limit),
@@ -2754,6 +2780,16 @@ class Orchestrator:
         limits=cal_cfg.get("acceptance", {}) or {}
         generation_failure_fraction=float(generation.get("generation_failure_fraction",1.0))
         max_failure_fraction=float(limits.get("max_generation_failure_fraction",1.0))
+        quality_exclusion_fraction=float(generation.get("input_quality_exclusion_fraction",1.0))
+        max_quality_exclusion_fraction=float(limits.get("max_input_quality_exclusion_fraction",0.0))
+        if (not math.isfinite(quality_exclusion_fraction)
+                or quality_exclusion_fraction > max_quality_exclusion_fraction):
+            return StageResult(
+                "energy_calibration","failed",started,utc_timestamp(),None,
+                f"Calibration input-quality exclusion fraction {quality_exclusion_fraction:.4f} "
+                f"exceeds {max_quality_exclusion_fraction:.4f}",
+                argv,str(log_path),False,
+            )
         if not math.isfinite(generation_failure_fraction) or generation_failure_fraction > max_failure_fraction:
             return StageResult(
                 "energy_calibration","failed",started,utc_timestamp(),None,
@@ -2835,6 +2871,12 @@ class Orchestrator:
             f"Status: {'accepted' if ok else 'failed'}",
             f"Training CSV: {training_csv}",
             f"Calibration JSON: {calibration_file}",
+            f"Discovered training complexes: {generation.get('complexes_discovered','n/a')}",
+            f"Input-quality exclusions: {len(generation.get('input_quality_exclusions',[]))} "
+            f"({generation.get('input_quality_exclusion_fraction','n/a')})",
+            f"Eligible calibration attempts: {generation.get('complexes_attempted','n/a')}",
+            f"Generation failures among eligible attempts: {len(generation.get('failures',[]))} "
+            f"({generation.get('generation_failure_fraction','n/a')})",
             f"Training complexes: {payload_for_report.get('n_train_complexes','n/a')}",
             f"Training family groups: {payload_for_report.get('n_train_groups','n/a')}",
             f"CV folds: {payload_for_report.get('cv_fold_count','n/a')}",

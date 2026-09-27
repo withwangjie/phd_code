@@ -947,12 +947,28 @@ def rotamer_source_metadata(mode: str, library_path: Optional[Path]) -> dict:
             "rotamer_library_path": None if library_path is None else str(library_path),
             "rotamer_library_sha256": _sha256_path(library_path)}
 
-def _dunbrack_templates_for_site(library_bins, amino_acid: str, phi: float, psi: float, *, probability_floor: float, sigma_offsets: Sequence[float]) -> Tuple[RotamerTemplate, ...]:
-    """Expand Dunbrack rotamers using their reported chi1 sigma."""
+def _dunbrack_templates_for_site(library_bins, amino_acid: str, phi: float, psi: float, *, probability_floor: float, sigma_offsets: Sequence[float], ensure_chi1_wells: bool = False) -> Tuple[RotamerTemplate, ...]:
+    """Expand Dunbrack samples, retaining rare real wells when required.
+
+    The global probability floor can erase an entire chi1 well even when the
+    source library contains it. A fixed three-well experiment keeps the most
+    probable *observed library sample* in each such well. Its original tiny
+    probability is preserved; no rotamer or probability is fabricated.
+    """
     key=(_THREE_LETTER[amino_acid],_nearest_dunbrack_bin(phi),_nearest_dunbrack_bin(psi))
+    source_rows=library_bins[key]
+    retained=[row for row in source_rows if row.prior_probability>=probability_floor]
+    if ensure_chi1_wells:
+        present={chi1_well_index(row.chi1_degrees) for row in retained}
+        for well in range(3):
+            if well in present:
+                continue
+            candidates=[row for row in source_rows
+                        if row.prior_probability>0 and chi1_well_index(row.chi1_degrees)==well]
+            if candidates:
+                retained.append(max(candidates,key=lambda row:row.prior_probability))
     expanded=[]
-    for row in library_bins[key]:
-        if row.prior_probability<probability_floor: continue
+    for row in retained:
         sigma1=row.chi_sigmas[0] if row.chi_sigmas else 0.0
         for z in sigma_offsets:
             angle=((row.chi1_degrees+float(z)*sigma1+180.0)%360.0)-180.0
@@ -1757,6 +1773,7 @@ class InterfaceQUBOBuilder:
                     dunbrack_bins, aa, phi_all[int(node_index)], psi_all[int(node_index)],
                     probability_floor=self.rotamer_probability_floor,
                     sigma_offsets=self.rotamer_sigma_offsets,
+                    ensure_chi1_wells=self.fixed_chi1_wells,
                 )
             else:
                 templates = _expanded_rotamer_templates(aa)
@@ -1919,6 +1936,11 @@ class InterfaceQUBOBuilder:
                 if antigen_scope == "full_complex_antigen"
                 else "antigen nodes present in the supplied graph"),
             "rotamer_model": self.rotamer_mode,
+            "probability_floor_policy": (
+                "retain_positive-probability_top_library_sample_per_missing_chi1_well"
+                if self.fixed_chi1_wells and self.rotamer_mode in ("dunbrack2010","pyrosetta_dun10")
+                else "global_probability_floor"
+            ),
             "state_policy": (f"fixed_{self.fixed_states_per_site}_chi1_coverage" if self.fixed_chi1_wells and self.fixed_states_per_site != 3
                              else "fixed_three_chi1_wells" if self.fixed_chi1_wells else "adaptive_3_to_6"),
             **rotamer_source_metadata(self.rotamer_mode, self.rotamer_library_path),
@@ -2309,6 +2331,7 @@ class AllAtomInterfaceQUBOBuilder:
                         allatom_dunbrack_bins,one_letter,phi,psi,
                         probability_floor=self.rotamer_probability_floor,
                         sigma_offsets=self.rotamer_sigma_offsets,
+                        ensure_chi1_wells=(self.rotamer_mode=="pyrosetta_dun10"),
                     )
                 else:
                     templates=_expanded_rotamer_templates(one_letter)
