@@ -140,7 +140,10 @@ def main() -> int:
             if library is not None:
                 library = Path(config["paths"]["repo_root"]) / library
             templates = _load_rotamer_bins(mode, library, {key})[key]
-            reference = json.loads(extreme["chi_assignment"])
+            # Hold the other active sites at the deterministic low-energy
+            # anchor. The extreme assignment can contain an unrelated clash
+            # that would dominate every well of this one-residue scan.
+            reference = json.loads(anchor["chi_assignment"])
             by_well = {well: [] for well in range(3)}
             for template in templates:
                 if template.prior_probability <= 0:
@@ -157,6 +160,7 @@ def main() -> int:
             for well in range(3):
                 candidates = sorted(by_well[well], key=lambda row: row["energy_kcal"])
                 print(json.dumps({"scan_residue": rid, "well": well,
+                                  "scan_background_assignment_index": 0,
                                   "candidate_count": len(candidates),
                                   "best_candidates": candidates[:3]}))
             if args.scan_only:
