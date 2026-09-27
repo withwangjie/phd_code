@@ -16,6 +16,7 @@ from pathlib import Path
 
 import gemmi
 import numpy as np
+from scipy.spatial import cKDTree
 
 from nanoqc.data.audit_all_datasets import materialize_graph_complex
 from nanoqc.data.safe_graph_load import load_graph
@@ -26,6 +27,34 @@ from nanoqc.experiments.run_real_complex_pilot import (
 )
 from nanoqc.qubo.subgraph_to_qubo import AllAtomInterfaceQUBOBuilder, read_atomistic_structure
 from nanoqc.reporting.generate_figure1_pymol_script import extract_source
+
+
+def closest_nonbonded_pair(builder: AllAtomInterfaceQUBOBuilder, positions: np.ndarray) -> dict:
+    """Report the nearest pair separated by more than three covalent bonds."""
+    atoms = list(builder.topology.atoms())
+    neighbors = {atom.index: set() for atom in atoms}
+    for left, right in builder.topology.bonds():
+        neighbors[left.index].add(right.index)
+        neighbors[right.index].add(left.index)
+    best = None
+    for left, right in cKDTree(positions).query_pairs(r=.2):
+        visited = {left}
+        frontier = {left}
+        for _ in range(3):
+            frontier = set().union(*(neighbors[index] for index in frontier)) - visited
+            visited.update(frontier)
+        if right in visited:
+            continue
+        distance = float(np.linalg.norm(positions[left] - positions[right]) * 10.)
+        if best is None or distance < best[0]:
+            best = distance, atoms[left], atoms[right]
+    if best is None:
+        return {"distance_angstrom": None}
+    distance, left, right = best
+    def label(atom):
+        residue = atom.residue
+        return f"{residue.chain.id}:{residue.id}:{residue.name}:{atom.name}"
+    return {"distance_angstrom": distance, "atoms": [label(left), label(right)]}
 
 
 def main() -> int:
@@ -98,8 +127,8 @@ def main() -> int:
             positions = builder.positions_for_chi_assignment(assignment)
             raw = builder.energy(positions)
             recorded = float(row["anchor_amber_kcal"]) + float(row["amber_delta_kcal"])
-            if not math.isclose(raw, recorded, rel_tol=1e-8, abs_tol=1e-3):
-                raise ValueError(f"Recomputed raw energy differs from frozen CSV at row {index}")
+            raw_matches_csv = math.isclose(raw, recorded, rel_tol=1e-8, abs_tol=1e-3)
+            closest = closest_nonbonded_pair(builder, positions)
             result = builder.relax_positions(
                 positions, temp / f"assignment_{index}.cif",
                 minimize_iterations=args.iterations,
@@ -110,7 +139,10 @@ def main() -> int:
             print(json.dumps({"assignment_index": index, "raw_kcal": raw,
                               "relaxed_kcal": relaxed,
                               "relaxed_delta_kcal": relaxed - anchor_relaxed,
-                              "recorded_delta_kcal": float(row["amber_delta_kcal"])}))
+                              "recorded_delta_kcal": float(row["amber_delta_kcal"]),
+                              "recorded_raw_kcal": recorded,
+                              "raw_matches_csv": raw_matches_csv,
+                              "closest_nonbonded_pair": closest}))
     return 0
 
 
