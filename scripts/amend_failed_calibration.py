@@ -48,6 +48,9 @@ def amend(run_dir: Path, config_path: Path) -> Path:
         old_acceptance["max_input_quality_exclusion_fraction"] = None
     else:
         old_acceptance["max_input_quality_exclusion_fraction"] = None
+    # A prior A21 amendment may already contain the old 0.40 field; A22
+    # additionally introduces the predeclared usable-complexity floor.
+    old_acceptance["min_eligible_complexes"] = 100
     if config != expected_config:
         raise ValueError("Only the calibrated input-quality exclusion limit may change")
     seed_path = run_dir / "seed_streams.json"

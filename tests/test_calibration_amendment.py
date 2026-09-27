@@ -17,6 +17,7 @@ def _run(tmp_path, monkeypatch):
     }
     new = copy.deepcopy(old)
     new["qc_benchmark"]["energy_calibration"]["acceptance"]["max_input_quality_exclusion_fraction"] = None
+    new["qc_benchmark"]["energy_calibration"]["acceptance"]["min_eligible_complexes"] = 100
     config_path = tmp_path / "resolved.yaml"
     config_path.write_text(yaml.safe_dump(new))
     old_hashes = {name: "old" for name in recovery.ALLOWED_CHANGED_SOURCES}
