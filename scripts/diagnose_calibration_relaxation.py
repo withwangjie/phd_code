@@ -25,7 +25,11 @@ from nanoqc.experiments.run_real_complex_pilot import (
     complete_terminal_oxygen,
     strip_to_protein_conformer,
 )
-from nanoqc.qubo.subgraph_to_qubo import AllAtomInterfaceQUBOBuilder, read_atomistic_structure
+from nanoqc.qubo.subgraph_to_qubo import (
+    AllAtomInterfaceQUBOBuilder, _THREE_LETTER, _backbone_phi_psi,
+    _load_rotamer_bins, _nearest_dunbrack_bin, chi1_well_index,
+    read_atomistic_structure,
+)
 from nanoqc.reporting.generate_figure1_pymol_script import extract_source
 
 
@@ -62,9 +66,13 @@ def main() -> int:
     parser.add_argument("--run-dir", type=Path, required=True)
     parser.add_argument("--limit", type=int, default=4)
     parser.add_argument("--iterations", type=int, default=200)
+    parser.add_argument("--scan-residue", help="Optional active residue, e.g. H:108, to scan actual Dunbrack samples by chi1 well")
+    parser.add_argument("--scan-only", action="store_true", help="Only inspect Dunbrack alternatives; skip repeated relaxation")
     args = parser.parse_args()
     if args.limit < 2 or args.iterations < 1:
         parser.error("--limit must be >=2 and --iterations must be >=1")
+    if args.scan_only and not args.scan_residue:
+        parser.error("--scan-only requires --scan-residue")
 
     run_dir = args.run_dir.resolve(strict=True)
     config = json.loads((run_dir / "run_manifest.json").read_text(encoding="utf-8"))["config"]
@@ -120,6 +128,39 @@ def main() -> int:
         print(json.dumps({"pdb_id": extreme["pdb_id"], "source_id": extreme["source_id"],
                           "graph_sha256": extreme["graph_sha256"], "assignments": len(selected),
                           "iterations": args.iterations, "mode": "read_only_diagnostic"}))
+        if args.scan_residue:
+            rid = args.scan_residue
+            if rid not in active or rid not in residues:
+                raise ValueError(f"Scan residue must be one of the active residues: {active}")
+            phi, psi = _backbone_phi_psi(residues, rid)
+            one_letter = gemmi.find_tabulated_residue(residues[rid]["name"]).one_letter_code
+            key = (_THREE_LETTER[one_letter], _nearest_dunbrack_bin(phi), _nearest_dunbrack_bin(psi))
+            mode = config["qc_benchmark"]["rotamer_model"]["mode"]
+            library = config["qc_benchmark"]["rotamer_model"].get("library_path")
+            if library is not None:
+                library = Path(config["paths"]["repo_root"]) / library
+            templates = _load_rotamer_bins(mode, library, {key})[key]
+            reference = json.loads(extreme["chi_assignment"])
+            by_well = {well: [] for well in range(3)}
+            for template in templates:
+                if template.prior_probability <= 0:
+                    continue
+                proposal = dict(reference)
+                proposal[rid] = template.chi_degrees
+                positions = builder.positions_for_chi_assignment(proposal)
+                energy = builder.energy(positions)
+                by_well[chi1_well_index(template.chi1_degrees)].append({
+                    "energy_kcal": energy, "chi_degrees": template.chi_degrees,
+                    "probability": template.prior_probability,
+                    "closest_nonbonded_pair": closest_nonbonded_pair(builder, positions),
+                })
+            for well in range(3):
+                candidates = sorted(by_well[well], key=lambda row: row["energy_kcal"])
+                print(json.dumps({"scan_residue": rid, "well": well,
+                                  "candidate_count": len(candidates),
+                                  "best_candidates": candidates[:3]}))
+            if args.scan_only:
+                return 0
         anchor_relaxed = None
         for row in selected:
             index = int(row["assignment_index"])
