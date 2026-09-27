@@ -672,10 +672,11 @@ def _validate_scientific_config(config: Dict[str, Any]) -> None:
     ridge_alpha = float(calibration_cfg.get("ridge_alpha", 1.0))
     if not math.isfinite(ridge_alpha) or ridge_alpha < 0:
         raise ValueError("energy_calibration.ridge_alpha must be finite and nonnegative")
-    quality_limit=float((calibration_cfg.get("acceptance",{}) or {}).get(
-        "max_input_quality_exclusion_fraction",0.0))
-    if not math.isfinite(quality_limit) or not 0.0 <= quality_limit < 1.0:
-        raise ValueError("energy_calibration.acceptance.max_input_quality_exclusion_fraction must be in [0,1)")
+    quality_limit=(calibration_cfg.get("acceptance",{}) or {}).get(
+        "max_input_quality_exclusion_fraction")
+    if quality_limit is not None and (
+            not math.isfinite(float(quality_limit)) or not 0.0 <= float(quality_limit) < 1.0):
+        raise ValueError("energy_calibration.acceptance.max_input_quality_exclusion_fraction must be null or in [0,1)")
 
     for key, default in shared_pairs:
         left = float(qc.get(key, default))
@@ -1661,8 +1662,12 @@ class Orchestrator:
             payload,error=read_json(calibration)
             if error:return False,error
             limits=cal.get("acceptance",{}) or {}
-            if exclusion_fraction>float(limits.get("max_input_quality_exclusion_fraction",0.0)):
+            quality_limit=limits.get("max_input_quality_exclusion_fraction")
+            if quality_limit is not None and exclusion_fraction>float(quality_limit):
                 return False,"Calibration input-quality exclusion fraction exceeds frozen limit"
+            min_eligible=int(limits.get("min_eligible_complexes",0))
+            if attempted < min_eligible:
+                return False,f"Calibration has only {attempted} eligible complexes; minimum is {min_eligible}"
             if failure_fraction>float(limits.get("max_generation_failure_fraction",0.0)):
                 return False,"Calibration generation failure fraction exceeds frozen limit"
             checks=[
@@ -2780,14 +2785,22 @@ class Orchestrator:
         limits=cal_cfg.get("acceptance", {}) or {}
         generation_failure_fraction=float(generation.get("generation_failure_fraction",1.0))
         max_failure_fraction=float(limits.get("max_generation_failure_fraction",1.0))
+        attempted_complexes=int(generation.get("complexes_attempted",0))
         quality_exclusion_fraction=float(generation.get("input_quality_exclusion_fraction",1.0))
-        max_quality_exclusion_fraction=float(limits.get("max_input_quality_exclusion_fraction",0.0))
+        quality_limit=limits.get("max_input_quality_exclusion_fraction")
         if (not math.isfinite(quality_exclusion_fraction)
-                or quality_exclusion_fraction > max_quality_exclusion_fraction):
+                or (quality_limit is not None and quality_exclusion_fraction > float(quality_limit))):
             return StageResult(
                 "energy_calibration","failed",started,utc_timestamp(),None,
                 f"Calibration input-quality exclusion fraction {quality_exclusion_fraction:.4f} "
-                f"exceeds {max_quality_exclusion_fraction:.4f}",
+                f"exceeds configured limit {float(quality_limit):.4f}",
+                argv,str(log_path),False,
+            )
+        min_eligible=int(limits.get("min_eligible_complexes",0))
+        if attempted_complexes < min_eligible:
+            return StageResult(
+                "energy_calibration","failed",started,utc_timestamp(),None,
+                f"Calibration has only {attempted_complexes} eligible complexes; minimum is {min_eligible}",
                 argv,str(log_path),False,
             )
         if not math.isfinite(generation_failure_fraction) or generation_failure_fraction > max_failure_fraction:

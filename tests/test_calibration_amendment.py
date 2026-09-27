@@ -16,7 +16,7 @@ def _run(tmp_path, monkeypatch):
         "qc_benchmark": {"energy_calibration": {"acceptance": {"max_generation_failure_fraction": 0.1}}},
     }
     new = copy.deepcopy(old)
-    new["qc_benchmark"]["energy_calibration"]["acceptance"]["max_input_quality_exclusion_fraction"] = .4
+    new["qc_benchmark"]["energy_calibration"]["acceptance"]["max_input_quality_exclusion_fraction"] = None
     config_path = tmp_path / "resolved.yaml"
     config_path.write_text(yaml.safe_dump(new))
     old_hashes = {name: "old" for name in recovery.ALLOWED_CHANGED_SOURCES}
@@ -63,7 +63,7 @@ def test_calibration_amendment_keeps_upstream_and_archives_downstream(tmp_path, 
     assert not (run / "stage_status" / "energy_calibration.json").exists()
     assert (archive / "calibration" / "old.csv").read_text() == "old"
     assert (archive / "validation_queue" / "results" / "old.csv").read_text() == "old"
-    assert json.loads((run / "run_manifest.json").read_text())["config"]["qc_benchmark"]["energy_calibration"]["acceptance"]["max_input_quality_exclusion_fraction"] == .4
+    assert json.loads((run / "run_manifest.json").read_text())["config"]["qc_benchmark"]["energy_calibration"]["acceptance"]["max_input_quality_exclusion_fraction"] is None
 
 
 def test_calibration_amendment_rejects_unrelated_code_change(tmp_path, monkeypatch):

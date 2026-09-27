@@ -43,8 +43,11 @@ def amend(run_dir: Path, config_path: Path) -> Path:
     expected_config = copy.deepcopy(old_config)
     old_acceptance = expected_config["qc_benchmark"]["energy_calibration"]["acceptance"]
     if "max_input_quality_exclusion_fraction" in old_acceptance:
-        raise ValueError("Input-quality amendment has already been applied")
-    old_acceptance["max_input_quality_exclusion_fraction"] = 0.40
+        if old_acceptance["max_input_quality_exclusion_fraction"] != 0.40:
+            raise ValueError("Unexpected existing input-quality exclusion limit")
+        old_acceptance["max_input_quality_exclusion_fraction"] = None
+    else:
+        old_acceptance["max_input_quality_exclusion_fraction"] = None
     if config != expected_config:
         raise ValueError("Only the calibrated input-quality exclusion limit may change")
     seed_path = run_dir / "seed_streams.json"
@@ -80,9 +83,9 @@ def amend(run_dir: Path, config_path: Path) -> Path:
     if not calibration or calibration.get("status") != "failed":
         raise ValueError("This amendment requires a failed energy_calibration stage")
 
-    amendment_dir = run_dir / "provenance" / "calibration_eligibility_amendment"
+    amendment_dir = run_dir / "provenance" / "calibration_coverage_amendment"
     if amendment_dir.exists():
-        raise ValueError(f"Calibration amendment already exists: {amendment_dir}")
+        raise ValueError(f"Calibration coverage amendment already exists: {amendment_dir}")
     archived = amendment_dir / "superseded_downstream"
     output_paths = [
         run_dir / name for name in (
