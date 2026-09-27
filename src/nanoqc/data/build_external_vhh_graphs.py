@@ -150,7 +150,8 @@ def contacting_antigen_chains(chains: list, cdrs: dict, meta: dict,
     return kept, meta
 
 
-def interface_quality(model, vhh_name: str, antigen_names: Sequence[str], resolution: Optional[float]) -> dict:
+def interface_quality(model, vhh_name: str, antigen_names: Sequence[str],
+                      resolution: Optional[float], *, minimum_heavy_distance: float = 1.0) -> dict:
     """The audit's structure-quality gates, on every VHH-antigen interface residue."""
     chains = {chain["name"]: chain for chain in audit.chain_data(model)[0]}
     vhh = chains[vhh_name]
@@ -179,9 +180,17 @@ def interface_quality(model, vhh_name: str, antigen_names: Sequence[str], resolu
         reasons.append("interface_altloc")
     if min_occ is not None and min_occ < audit.MIN_INTERFACE_OCCUPANCY:
         reasons.append("low_interface_occupancy")
+    overlap = audit.interresidue_heavy_overlap(
+        [chains[name] for name in dict.fromkeys([vhh_name, *antigen_names])],
+        minimum_heavy_distance)
+    if overlap["count"]:
+        reasons.append("nonphysical_interresidue_heavy_overlap")
     return dict(resolution_angstrom=resolution, interface_residues=len(unique),
                 interface_missing_sidechain_residues=missing,
                 interface_altloc_residues=altloc, interface_min_occupancy=min_occ,
+                interresidue_heavy_overlap_count=overlap["count"],
+                interresidue_heavy_min_distance_angstrom=overlap["minimum_distance_angstrom"],
+                interresidue_heavy_closest_pair=overlap["closest_pair"],
                 structure_quality_status="pass" if not reasons else "fail",
                 structure_quality_reasons=reasons)
 
@@ -210,7 +219,8 @@ def unannotated_antibody_chains(chains: list, known: Sequence[str], annotated_an
 def prepare_external_complex(structure_path: Path, vhh_chain: str,
                              other_antibody_chains: Sequence[str] = (),
                              annotated_antigen_chains: Sequence[str] = (),
-                             *, require_anarci: bool = False) -> dict:
+                             *, require_anarci: bool = False,
+                             minimum_heavy_distance: float = 1.0) -> dict:
     """Assembly, partner chains, CDRs and quality for one external complex."""
     st = gemmi.read_structure(str(structure_path))
     if not len(st):
@@ -236,7 +246,8 @@ def prepare_external_complex(structure_path: Path, vhh_chain: str,
     for chain in kept:
         chain["complex_meta"] = meta
     antigen_names = [c["name"] for c in kept if c["group"] == 1]
-    quality = interface_quality(st[0], vhh_chain, antigen_names, resolution)
+    quality = interface_quality(st[0], vhh_chain, antigen_names, resolution,
+                                minimum_heavy_distance=minimum_heavy_distance)
     return dict(chains=kept, meta=meta, cdrs=cdrs, quality=quality, vhh_sequence=vhh_sequence,
                 unannotated_antibody_chains=extra_antibody,
                 antigen_sequences=["".join(n["aa"] for n in c["nodes"]) for c in kept if c["group"] == 1],
@@ -267,7 +278,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--out-dir", type=Path, required=True, help="Graph directory (formal graph_dir)")
     parser.add_argument("--representatives-only", action="store_true",
                         help="Build one graph per independent group (the final formal set)")
+    parser.add_argument("--min-interresidue-heavy-distance", type=float, default=1.0)
     args = parser.parse_args(argv)
+    if not math.isfinite(args.min_interresidue_heavy_distance) or not 0<args.min_interresidue_heavy_distance<=1.0:
+        parser.error("--min-interresidue-heavy-distance must be in (0,1.0] A")
 
     from nanoqc.data.audit_external_vhh_independence import source_structure_for_pdb
     payload = json.loads(args.candidates.read_text(encoding="utf-8"))
@@ -298,7 +312,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             if row.get("source_structure_sha256") and sha256(source) != row["source_structure_sha256"]:
                 raise ValueError("raw structure changed since candidate selection")
             prepared = prepare_external_complex(source, row["vhh_chain"], row.get("other_antibody_chains", []),
-                                                row.get("sabdab_antigen_chains", []), require_anarci=True)
+                                                row.get("sabdab_antigen_chains", []), require_anarci=True,
+                                                minimum_heavy_distance=args.min_interresidue_heavy_distance)
             graph = build_graph(prepared, pdb, source)
             path = args.out_dir / f"{SUBSET}__{pdb.upper()}.pt"
             torch.save(graph, path)
@@ -314,6 +329,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             failures.append(dict(pdb_id=pdb, reason=type(exc).__name__, detail=str(exc)))
     manifest = dict(schema="external_vhh_graphs_v1", graph_version=builder.VERSION, subset=SUBSET,
                     candidates_sha256=sha256(args.candidates), graphs=built, failures=failures,
+                    min_interresidue_heavy_distance_angstrom=args.min_interresidue_heavy_distance,
                     note="Independence from training is certified per run by audit_external_vhh_independence.py.")
     (args.out_dir / "external_graph_manifest.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")

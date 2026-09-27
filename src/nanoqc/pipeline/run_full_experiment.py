@@ -543,6 +543,10 @@ def _validate_scientific_config(config: Dict[str, Any]) -> None:
         raise ValueError("Formal interface sensitivity cutoffs must remain [3.5, 5.0] A")
     audit_interface=float((config.get("data_audit",{}) or {}).get(
         "interface_contact_cutoff_angstrom",4.5))
+    minimum_heavy_distance=float((config.get("data_audit",{}) or {}).get(
+        "min_interresidue_heavy_distance_angstrom",1.0))
+    if not math.isfinite(minimum_heavy_distance) or not 0<minimum_heavy_distance<=1.0:
+        raise ValueError("data_audit.min_interresidue_heavy_distance_angstrom must be in (0,1.0]")
     if not math.isclose(audit_interface,primary_interface,rel_tol=0.0,abs_tol=1e-12):
         raise ValueError("data_audit and graph_build primary interface cutoffs must match")
     if int(structure.get("loop_relax_iterations",0) or 0) != 0:
@@ -1498,12 +1502,49 @@ class Orchestrator:
             if inventory.get("partial_run"):
                 return False,"Formal data audit is marked partial_run=true"
             expected=int(inventory.get("tasks",-1))
-            observed=sum(
-                1 for line in (audit_root/"data_audit_details.jsonl").read_text(
-                    encoding="utf-8").splitlines() if line.strip()
-            )
+            observed=0; evaluated=0; excluded=0; atom_pairs=0
+            floor=float((self.config.get("data_audit",{}) or {}).get(
+                "min_interresidue_heavy_distance_angstrom",1.0))
+            with (audit_root/"data_audit_details.jsonl").open(encoding="utf-8") as handle:
+                for line in handle:
+                    if not line.strip():
+                        continue
+                    row=json.loads(line)
+                    observed+=1
+                    if row.get("valid") and row.get("pairs"):
+                        evaluated+=1
+                    count=row.get("interresidue_heavy_overlap_count")
+                    if type(count) is not int or count<0:
+                        return False,"Data audit lacks a valid per-row heavy-atom overlap count"
+                    atom_pairs+=count
+                    if count:
+                        excluded+=1
+                        distance=row.get("interresidue_heavy_min_distance_angstrom")
+                        pair=row.get("interresidue_heavy_closest_pair")
+                        if (not row.get("valid") or not row.get("pairs")
+                                or distance is None or not 0<=float(distance)<floor
+                                or not isinstance(pair,list) or len(pair)!=2):
+                            return False,"Data audit has an unaccounted nonphysical overlap"
+                        if (row.get("subset") in ("snac_db","sabdab_vhh")
+                                and row.get("structure_quality_status")!="fail"):
+                            return False,"Formal nonphysical structure was not quality-excluded"
             if expected<0 or observed!=expected:
                 return False,f"Data-audit denominator mismatch: discovered={expected}, audited_rows={observed}"
+            protocol=inventory.get("structure_quality_protocol") or {}
+            if protocol.get("min_interresidue_heavy_distance_angstrom")!=floor:
+                return False,"Data audit did not apply the frozen heavy-atom distance floor"
+            overlap_audit=inventory.get("interresidue_heavy_overlap_audit") or {}
+            if (overlap_audit.get("scope")!="strongest_allowed_protein_chain_pair_in_first_model"
+                    or type(overlap_audit.get("evaluated_rows")) is not int
+                    or type(overlap_audit.get("excluded_rows")) is not int
+                    or type(overlap_audit.get("overlap_atom_pairs")) is not int):
+                return False,"Data audit lacks closed nonphysical-overlap counts"
+            if not (0<=overlap_audit["excluded_rows"]<=overlap_audit["evaluated_rows"]<=observed):
+                return False,"Data-audit nonphysical-overlap denominators are inconsistent"
+            if (overlap_audit["evaluated_rows"]!=evaluated
+                    or overlap_audit["excluded_rows"]!=excluded
+                    or overlap_audit["overlap_atom_pairs"]!=atom_pairs):
+                return False,"Data-audit nonphysical-overlap counts do not match per-row evidence"
             return True,f"data audit closed exactly over {observed} discovered structures"
         if stage=="queue_freeze":
             dataset=self.dataset_dir()
@@ -2199,6 +2240,8 @@ class Orchestrator:
             "--out", str(self.run_dir / "audit"),
             "--interface-contact-cutoff", str(cfg.get("interface_contact_cutoff_angstrom", 4.5)),
             "--max-resolution", str(cfg.get("max_resolution_angstrom", 3.0)),
+            "--min-interresidue-heavy-distance", str(cfg.get(
+                "min_interresidue_heavy_distance_angstrom",1.0)),
             "--min-interface-occupancy", str(cfg.get("min_interface_occupancy", 0.90)),
         ]
         if cfg.get("allow_interface_altloc", False):

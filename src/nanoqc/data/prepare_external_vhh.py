@@ -145,6 +145,8 @@ def settings(config: dict, prep_dir: Optional[Path]) -> dict:
                     "--antigen-threshold", str(homology.get("antigen_identity", 0.30)),
                     "--antigen-min-length-coverage", str(homology.get("antigen_min_length_coverage", 0.70))],
         max_resolution=str(config.get("data_audit", {}).get("max_resolution_angstrom", 3.0)),
+        min_interresidue_heavy_distance=str(config.get("data_audit", {}).get(
+            "min_interresidue_heavy_distance_angstrom", 1.0)),
     )
 
 
@@ -215,6 +217,7 @@ def _build(s, candidates: Path, representatives_only: bool) -> dict:
         print(f"[prepare_external_vhh] previous graphs moved to {backup}")
     run_module("nanoqc.data.build_external_vhh_graphs", [
         "--candidates", str(candidates), "--structures-dir", str(s["source_dir"]), "--out-dir", str(graph_dir),
+        "--min-interresidue-heavy-distance", s["min_interresidue_heavy_distance"],
         *(["--representatives-only"] if representatives_only else [])])
     return json.loads((graph_dir / "external_graph_manifest.json").read_text(encoding="utf-8"))
 

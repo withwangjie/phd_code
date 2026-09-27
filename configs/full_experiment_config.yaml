@@ -116,6 +116,10 @@ data_audit:
   # sensitivity cutoffs rather than alternative primary outcomes.
   interface_contact_cutoff_angstrom: 4.5
   max_resolution_angstrom: 3.0
+  # Conservative absolute floor for distinct-residue protein heavy atoms in
+  # the deposited/prepared biological assembly. This is not clashscore and
+  # does not classify generated rotamer or added-hydrogen clashes as bad input.
+  min_interresidue_heavy_distance_angstrom: 1.0
   min_interface_occupancy: 0.90
   allow_interface_altloc: false
   allow_unknown_resolution: false

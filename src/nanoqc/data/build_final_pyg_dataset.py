@@ -183,7 +183,8 @@ def load_inputs(root):
     rows=[json.loads(line) for line in paths[2].open(encoding='utf-8')]
     for r in rows:
         q=table[r['id']]
-        for key in ['subset','valid','missing_residues','interface_status','vhh_status']:
+        for key in ['subset','valid','missing_residues','interface_status','vhh_status',
+                    'structure_quality_status','interresidue_heavy_overlap_count']:
             if str(r[key]) != q[key]:raise ValueError(f'CSV/JSONL audit mismatch: {r["id"]} {key}')
     if len(table)!=len(rows):raise ValueError('Audit row count mismatch')
     pairs=json.loads(paths[3].read_text(encoding='utf-8'))

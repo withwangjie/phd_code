@@ -55,6 +55,9 @@ BACKBONE = set(BACKBONE_ATOMS)
 SIDECHAIN_HEAVY = {name: set(atoms) for name, atoms in SIDECHAIN_HEAVY_ATOMS.items()}
 INTERFACE_CONTACT_CUTOFF_ANGSTROM = 4.5
 MAX_RESOLUTION_ANGSTROM = 3.0
+# Conservative absolute floor for distinct-residue protein heavy atoms;
+# this is a coordinate-overlap screen, not a MolProbity clashscore.
+MIN_INTERRESIDUE_HEAVY_DISTANCE_ANGSTROM = 1.0
 MIN_INTERFACE_OCCUPANCY = 0.90
 ALLOW_INTERFACE_ALTLOC = False
 REQUIRE_RESOLUTION = True
@@ -379,7 +382,7 @@ def chain_data(model):
     for chain in model:
         coords, owners, sequence = [], [], []
         residue_names=[]; residue_atoms=[]; residue_altloc=[]; residue_min_occ=[]
-        residue_mean_b=[]; residue_missing_sidechain=[]
+        residue_mean_b=[]; residue_missing_sidechain=[]; atom_names=[]; residue_seqids=[]
         for res in chain:
             info = gemmi.find_tabulated_residue(res.name)
             if not info.is_amino_acid() or res.entity_type in (gemmi.EntityType.Water, gemmi.EntityType.NonPolymer):
@@ -397,6 +400,7 @@ def chain_data(model):
             rid = len(sequence)
             sequence.append(info.one_letter_code.upper())
             residue_names.append(res.name.upper())
+            residue_seqids.append(str(res.seqid))
             residue_atoms.append(sorted(atoms))
             residue_altloc.append(any(str(atom.altloc).strip().strip('\x00') for atom in observed))
             residue_min_occ.append(float(min(atom.occ for atom in atoms.values())))
@@ -412,17 +416,52 @@ def chain_data(model):
             for atom in atoms.values():
                 coords.append((atom.pos.x, atom.pos.y, atom.pos.z))
                 owners.append(rid)
+                atom_names.append(atom.name)
         if coords:
             xyz = np.array(coords, dtype=np.float64)
             chains.append(dict(
                 name=chain.name, sequence=''.join(sequence), xyz=xyz,
                 owners=np.array(owners), tree=cKDTree(xyz), low=xyz.min(0), high=xyz.max(0),
                 residue_names=residue_names, residue_atoms=residue_atoms,
+                residue_seqids=residue_seqids, atom_names=atom_names,
                 residue_altloc=residue_altloc, residue_min_occ=residue_min_occ,
                 residue_mean_b=residue_mean_b,
                 residue_missing_sidechain=residue_missing_sidechain,
             ))
     return chains, missing, total, details
+
+
+def interresidue_heavy_overlap(chains, minimum_distance=None):
+    """Count protein heavy-atom pairs on distinct residues below a hard floor."""
+    floor=float(MIN_INTERRESIDUE_HEAVY_DISTANCE_ANGSTROM if minimum_distance is None
+                else minimum_distance)
+    if not math.isfinite(floor) or not 0 < floor <= 1.0:
+        raise ValueError('interresidue heavy-atom floor must be in (0, 1.0] A')
+    xyz=[]; owners=[]; labels=[]
+    for chain_index, chain in enumerate(chains):
+        for atom_index, point in enumerate(chain['xyz']):
+            residue_index=int(chain['owners'][atom_index])
+            xyz.append(point)
+            owners.append((chain_index,residue_index))
+            labels.append(f"{chain['name']}:{chain['residue_seqids'][residue_index]}:"
+                          f"{chain['residue_names'][residue_index]}:"
+                          f"{chain['atom_names'][atom_index]}")
+    if len(xyz)<2:
+        return dict(count=0,minimum_distance_angstrom=None,closest_pair=None)
+    coordinates=np.asarray(xyz,dtype=np.float64)
+    pairs=cKDTree(coordinates).query_pairs(floor,output_type='ndarray')
+    count=0; nearest=None; closest=None
+    for i,j in pairs:
+        if owners[i]==owners[j]:
+            continue
+        distance=float(np.linalg.norm(coordinates[i]-coordinates[j]))
+        if distance>=floor:
+            continue
+        count+=1
+        if nearest is None or distance<nearest:
+            nearest=distance
+            closest=[labels[i],labels[j]]
+    return dict(count=count,minimum_distance_angstrom=nearest,closest_pair=closest)
 
 def contact_residue_ids(a, b, cutoff=None):
     # Nearest-neighbour queries avoid enumerating every atom-atom pair.
@@ -732,7 +771,9 @@ def audit(task):
         resolution_angstrom=None, resolution_source=None, structure_quality_status='not_evaluated',
         structure_quality_reasons=[], interface_missing_sidechain_residues=0,
         interface_altloc_residues=0, interface_min_occupancy=None,
-        interface_mean_bfactor=None)
+        interface_mean_bfactor=None, interresidue_heavy_overlap_count=0,
+        interresidue_heavy_min_distance_angstrom=None,
+        interresidue_heavy_closest_pair=None)
     try:
         st, multi = read_structure(task)
         if task.get('subset') in FORMAL_VHH_SUBSETS or task.get('subset') == 'test_db55':
@@ -769,6 +810,10 @@ def audit(task):
             best=max(pairs,key=lambda p:p[2]+p[3])
             cmap={chain['name']:chain for chain in chains}
             left,right=cmap[best[0]],cmap[best[1]]
+            overlap=interresidue_heavy_overlap([left,right])
+            out.update(interresidue_heavy_overlap_count=overlap['count'],
+                       interresidue_heavy_min_distance_angstrom=overlap['minimum_distance_angstrom'],
+                       interresidue_heavy_closest_pair=overlap['closest_pair'])
             left_ids,right_ids=contact_residue_ids(left,right)
             interface_records=[]
             for chain,ids in ((left,left_ids),(right,right_ids)):
@@ -795,6 +840,8 @@ def audit(task):
                 reasons.append('interface_altloc')
             if min_occ is not None and min_occ<MIN_INTERFACE_OCCUPANCY:
                 reasons.append('low_interface_occupancy')
+            if overlap['count']:
+                reasons.append('nonphysical_interresidue_heavy_overlap')
             out.update(
                 interface_missing_sidechain_residues=missing_sc,
                 interface_altloc_residues=altloc_sc,
@@ -863,6 +910,16 @@ def report(root, rows, ignored, archives, pairs, elapsed, destination):
         if g.endswith('nb_unbound'):quality='N/A（未结合单链）'
         return f'| {g} | {len(rr)} | {len(v)} | {len(rr)-len(v)} | {m} ({pct(m,len(v))}) | {nm}/{nr} ({pct(nm,nr,3)}) | {ev} | {w} | {quality} |'
     lines += [summary(g) for g in order]
+    lines += ['', '## 非物理重原子重叠筛查', '',
+              f'- 门槛：首模型最强许可蛋白链对的不同残基重原子中心距 <{MIN_INTERRESIDUE_HEAVY_DISTANCE_ANGSTROM:g} Å；同残基原子对不计。该绝对下限只筛明显坐标重叠，不是 MolProbity clashscore，也不筛生成的氢或候选 rotamer。',
+              '| 子集 | 有效且可评估界面 | 距离门槛排除 | 重叠原子对 |',
+              '|---|---:|---:|---:|']
+    for g in ['snac_db','sabdab_vhh']:
+        eligible=[r for r in groups[g] if r['valid'] and r.get('pairs')]
+        excluded=[r for r in eligible if int(r.get('interresidue_heavy_overlap_count') or 0)>0]
+        lines.append(f'| {g} | {len(eligible)} | {len(excluded)} | '
+                     f'{sum(int(r.get("interresidue_heavy_overlap_count") or 0) for r in eligible)} |')
+    lines += ['', '逐结构最近原子对、距离和计数见 `data_audit_details.csv` / `data_audit_details.jsonl`。', '']
     validpairs=[p for p in pairs if p['valid']];weakpairs=[p for p in validpairs if p['interface_status']=='weak']
     lookup={r['path']:r for r in rows if r['subset']=='test_db55'}
     paired_good=sum(p['interface_status']=='pass' and all(lookup.get(p[k],{}).get('valid') and lookup[p[k]]['missing_residues']==0 for k in ('receptor','ligand')) for p in validpairs)
@@ -900,13 +957,16 @@ def report(root, rows, ignored, archives, pairs, elapsed, destination):
 
 def main():
     global INTERFACE_CONTACT_CUTOFF_ANGSTROM, MAX_RESOLUTION_ANGSTROM, MIN_INTERFACE_OCCUPANCY
+    global MIN_INTERRESIDUE_HEAVY_DISTANCE_ANGSTROM
     global ALLOW_INTERFACE_ALTLOC, REQUIRE_RESOLUTION, REQUIRE_COMPLETE_INTERFACE_SIDECHAINS
-    parser=argparse.ArgumentParser();parser.add_argument('--data',type=pathlib.Path,default=BASE/'data');parser.add_argument('--workers',type=int,default=4);parser.add_argument('--limit',type=int,default=0);parser.add_argument('--out',type=pathlib.Path,default=BASE);parser.add_argument('--interface-contact-cutoff',type=float,default=INTERFACE_CONTACT_CUTOFF_ANGSTROM);parser.add_argument('--max-resolution',type=float,default=MAX_RESOLUTION_ANGSTROM);parser.add_argument('--min-interface-occupancy',type=float,default=MIN_INTERFACE_OCCUPANCY);parser.add_argument('--allow-interface-altloc',action='store_true');parser.add_argument('--allow-unknown-resolution',action='store_true');parser.add_argument('--allow-incomplete-interface-sidechains',action='store_true');parser.add_argument('--reuse-non-nano',action='store_true',help='Explicitly reuse valid non-nano geometry from this output directory; assumes unchanged files and geometry rules. Nano annotations and failed entries are recomputed.');args=parser.parse_args()
+    parser=argparse.ArgumentParser();parser.add_argument('--data',type=pathlib.Path,default=BASE/'data');parser.add_argument('--workers',type=int,default=4);parser.add_argument('--limit',type=int,default=0);parser.add_argument('--out',type=pathlib.Path,default=BASE);parser.add_argument('--interface-contact-cutoff',type=float,default=INTERFACE_CONTACT_CUTOFF_ANGSTROM);parser.add_argument('--max-resolution',type=float,default=MAX_RESOLUTION_ANGSTROM);parser.add_argument('--min-interresidue-heavy-distance',type=float,default=MIN_INTERRESIDUE_HEAVY_DISTANCE_ANGSTROM);parser.add_argument('--min-interface-occupancy',type=float,default=MIN_INTERFACE_OCCUPANCY);parser.add_argument('--allow-interface-altloc',action='store_true');parser.add_argument('--allow-unknown-resolution',action='store_true');parser.add_argument('--allow-incomplete-interface-sidechains',action='store_true');parser.add_argument('--reuse-non-nano',action='store_true',help='Explicitly reuse valid non-nano geometry from this output directory; assumes unchanged files and geometry rules. Nano annotations and failed entries are recomputed.');args=parser.parse_args()
     if not math.isfinite(args.interface_contact_cutoff) or args.interface_contact_cutoff<=0: parser.error('--interface-contact-cutoff must be positive finite')
     if not math.isfinite(args.max_resolution) or args.max_resolution<=0: parser.error('--max-resolution must be positive finite')
+    if not math.isfinite(args.min_interresidue_heavy_distance) or not 0<args.min_interresidue_heavy_distance<=1.0: parser.error('--min-interresidue-heavy-distance must be in (0,1.0] A')
     if not 0 < args.min_interface_occupancy <= 1: parser.error('--min-interface-occupancy must be in (0,1]')
     INTERFACE_CONTACT_CUTOFF_ANGSTROM=float(args.interface_contact_cutoff)
     MAX_RESOLUTION_ANGSTROM=float(args.max_resolution)
+    MIN_INTERRESIDUE_HEAVY_DISTANCE_ANGSTROM=float(args.min_interresidue_heavy_distance)
     MIN_INTERFACE_OCCUPANCY=float(args.min_interface_occupancy)
     ALLOW_INTERFACE_ALTLOC=bool(args.allow_interface_altloc)
     REQUIRE_RESOLUTION=not bool(args.allow_unknown_resolution)
@@ -932,7 +992,7 @@ def main():
             rows.append(r);handle.write(json.dumps(r,ensure_ascii=False)+'\n')
             if len(rows)%250==0:handle.flush();print(f'{len(rows)}/{len(tasks)} audited, {time.time()-start:.0f}s',flush=True)
     pairs=db55_pairs(tasks)
-    fields=['subset','id','pdb_id','valid','error','chains','residues','missing_residues','interface_status','max_contact_residues','weak_pairs','vhh_status','vhh_reason','vhh_chain','cdr_annotation_method','cdr3_lengths','sabdab_antigen_chains','other_antibody_chains','source_structure_sha256','models_first_only','legacy_pdb_tail','resolution_angstrom','resolution_source','structure_quality_status','structure_quality_reasons','interface_missing_sidechain_residues','interface_altloc_residues','interface_min_occupancy','interface_mean_bfactor']
+    fields=['subset','id','pdb_id','valid','error','chains','residues','missing_residues','interface_status','max_contact_residues','weak_pairs','vhh_status','vhh_reason','vhh_chain','cdr_annotation_method','cdr3_lengths','sabdab_antigen_chains','other_antibody_chains','source_structure_sha256','models_first_only','legacy_pdb_tail','resolution_angstrom','resolution_source','structure_quality_status','structure_quality_reasons','interface_missing_sidechain_residues','interface_altloc_residues','interface_min_occupancy','interface_mean_bfactor','interresidue_heavy_overlap_count','interresidue_heavy_min_distance_angstrom','interresidue_heavy_closest_pair']
     with (args.out/'data_audit_details.csv').open('w',encoding='utf-8-sig',newline='') as handle:
         writer=csv.DictWriter(handle,fieldnames=fields,extrasaction='ignore');writer.writeheader();writer.writerows(rows)
     (args.out/'data_audit_db55_pairs.json').write_text(json.dumps(pairs,ensure_ascii=False,indent=2),encoding='utf-8')
@@ -945,10 +1005,17 @@ def main():
         ),
         structure_quality_protocol=dict(interface_contact_cutoff_angstrom=INTERFACE_CONTACT_CUTOFF_ANGSTROM,
             max_resolution_angstrom=MAX_RESOLUTION_ANGSTROM,
+            min_interresidue_heavy_distance_angstrom=MIN_INTERRESIDUE_HEAVY_DISTANCE_ANGSTROM,
             min_interface_occupancy=MIN_INTERFACE_OCCUPANCY,
             allow_interface_altloc=ALLOW_INTERFACE_ALTLOC,
             require_resolution=REQUIRE_RESOLUTION,
-            require_complete_interface_sidechains=REQUIRE_COMPLETE_INTERFACE_SIDECHAINS)
+            require_complete_interface_sidechains=REQUIRE_COMPLETE_INTERFACE_SIDECHAINS),
+        interresidue_heavy_overlap_audit=dict(
+            scope='strongest_allowed_protein_chain_pair_in_first_model',
+            evaluated_rows=sum(bool(r.get('valid') and r.get('pairs')) for r in rows),
+            excluded_rows=sum(bool(r.get('valid') and r.get('interresidue_heavy_overlap_count',0)>0)
+                              for r in rows),
+            overlap_atom_pairs=sum(int(r.get('interresidue_heavy_overlap_count') or 0) for r in rows))
     ),ensure_ascii=False,indent=2),encoding='utf-8')
     report(root,rows,ignored,archives,pairs,time.time()-start,args.out/'data_audit_report.md')
     print(f'Done: {args.out / "data_audit_report.md"}',flush=True)

@@ -192,6 +192,11 @@ The solver benchmark optimizes a coarse surrogate; the independent structural
 experiment supplies atomistic outcomes. This protocol change and its inspected
 training diagnostics are recorded in `docs/PROTOCOL_AMENDMENTS.md` A23.
 
+Input complex quality also includes the A24 conservative 1.0 Å minimum
+distinct-residue protein heavy-atom distance screen. The audit counts rejected
+complexes and records the closest offending pair before formal graph selection;
+generated rotamer clashes are reported separately.
+
 The formal rotamer model reads Dunbrack 2010 samples from the installed
 PyRosetta/Rosetta database (`pyrosetta_dun10`, pinned to build 2026.29 in the
 frozen config). It uses backbone φ/ψ, rotamer probabilities, χ1..χN means and
