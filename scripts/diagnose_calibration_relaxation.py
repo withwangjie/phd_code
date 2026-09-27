@@ -27,7 +27,8 @@ from nanoqc.experiments.run_real_complex_pilot import (
 )
 from nanoqc.qubo.subgraph_to_qubo import (
     AllAtomInterfaceQUBOBuilder, _THREE_LETTER, _backbone_phi_psi,
-    _load_rotamer_bins, _nearest_dunbrack_bin, chi1_well_index,
+    _dunbrack_templates_for_site, _load_rotamer_bins, _nearest_dunbrack_bin,
+    chi1_well_index,
     read_atomistic_structure,
 )
 from nanoqc.reporting.generate_figure1_pymol_script import extract_source
@@ -139,7 +140,14 @@ def main() -> int:
             library = config["qc_benchmark"]["rotamer_model"].get("library_path")
             if library is not None:
                 library = Path(config["paths"]["repo_root"]) / library
-            templates = _load_rotamer_bins(mode, library, {key})[key]
+            bins = _load_rotamer_bins(mode, library, {key})
+            model = config["qc_benchmark"]["rotamer_model"]
+            templates = _dunbrack_templates_for_site(
+                bins, one_letter, phi, psi,
+                probability_floor=float(model["probability_floor"]),
+                sigma_offsets=tuple(float(value) for value in model["sigma_offsets"]),
+                ensure_chi1_wells=True,
+            )
             # Hold the other active sites at the deterministic low-energy
             # anchor. The extreme assignment can contain an unrelated clash
             # that would dominate every well of this one-residue scan.
@@ -161,6 +169,7 @@ def main() -> int:
                 candidates = sorted(by_well[well], key=lambda row: row["energy_kcal"])
                 print(json.dumps({"scan_residue": rid, "well": well,
                                   "scan_background_assignment_index": 0,
+                                  "scan_policy": "formal_probability_floor_plus_sigma_offsets",
                                   "candidate_count": len(candidates),
                                   "best_candidates": candidates[:3]}))
             if args.scan_only:
