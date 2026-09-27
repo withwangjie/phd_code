@@ -8,6 +8,13 @@ complex pose/backbone. It is a retrospective side-chain recovery benchmark,
 not blind docking, de novo complex prediction, or quantitative binding-affinity
 prediction.
 
+The study's object is the **quantum algorithm itself**, not a speed claim
+against classical solvers. Earlier inspected benchmark cases showed simulated
+annealing reaching the ground state consistently; that observation does not
+predetermine outcomes in a new formal run. The confirmatory endpoints are
+QAOA's own ground-state amplification and its finite-range scaling slope
+(`docs/PROTOCOL_AMENDMENTS.md` A7, A25).
+
 ## Formal research pipeline
 
 1. **Leakage-controlled data construction**
@@ -15,30 +22,40 @@ prediction.
      `sabdab_vhh` is auxiliary training data, and generic `train_rcsb` is audit-only
      because a strongest-contact chain pair does not establish VHH identity.
      Cross-source duplicate PDBs are resolved before quality/outcome inspection with
-     fixed priority SNAC-DB > SAbDab > RCSB.
+     fixed priority SNAC-DB > SAbDab > RCSB (A16).
    - Complex definition: `sabdab_vhh` is read as the first author-determined biological
      assembly (entries without assembly annotation are excluded); SAbDab H/L/antigen
      metadata defines the VHH entry and only annotated antigen chains within 7.5 A of the
      VHH paratope are retained. `snac_db` uses SNAC-DB's assembly-curated complexes [R34].
+     A file already served as an assembly (`<entry>_assembly<N>`) is read as that assembly
+     and never transformed twice (A14).
+   - Entry resolution comes from the structure file, else by PDB ID from curation
+     metadata (SNAC summaries, SAbDab summaries, a fetched RCSB table), worst value
+     of a multi-valued field; every used metadata file is listed with its SHA-256 in
+     the audit report (A12, A15).
    - Interface labels: primary cross-partner heavy-atom contact <= 4.5 A [R49]. Node-aligned 3.5 A and 5.0 A labels are frozen in graph v1.11 for strict/permissive sensitivity analyses; graph edges remain threshold-independent KNN.
    - Graph edges: intra-chain CA radius < 8 A plus fixed cross-partner KNN. An 8 A C-alpha residue-graph cutoff has direct protein-GNN precedent [R22]; the cross-partner KNN degree k=3 remains a study-specific leakage-control choice rather than a literature-optimal constant.
    - EGNN train/validation split: layered connected components. Complexes are
      joined if VHH full-chain identity >=80% [R24], CDR-H3 loop-only identity >=50% [R23], or
      antigen full-chain identity >=30% with >=70% minimum length coverage [R25]; no random 90/10 split.
      All formal training graphs have annotation-anchored VHH/antigen roles.
-   - Antigen-fold holdout: layered components are built jointly from SNAC and SAbDab so auxiliary homologues cannot remain in training. Scored targets are SNAC-only (one deterministic graph per PDB); SAbDab and duplicate same-PDB members of selected components are quarantined outside both training and evaluation. Holdout raw structures are bound by exact audit source_id + SHA-256.
+   - Antigen-fold holdout: layered components are built jointly from SNAC and SAbDab so auxiliary homologues cannot remain in training. Scored targets are SNAC-only (one deterministic graph per PDB); SAbDab and duplicate same-PDB members of selected components are quarantined outside both training and evaluation. Holdout raw structures are bound by exact audit source_id + SHA-256 (A17).
 
 2. **Antigen-conditioned Active-site selection**
    - E(n)-equivariant EGNN [R1] provides residue-level interface probabilities.
    - Formal EGNN ranking uses
      `(1-w) * EGNN + w * exp(-d_Ag/6A)`, with `w=0.25` by default.
    - Contact, nearest-distance, CDR and random strategies are explicit ablation baselines.
+   - Formal training runs in CUDA FP32. FP16 automatic mixed precision is disabled
+     because unnormalized squared distances and the unbounded coordinate update
+     path can overflow the FP16 range (A20).
 
 3. **Adaptive side-chain state construction**
    - Formal coarse modeling uses a chi1-oriented pseudo-atom approximation,
      while formal all-atom validation uses complete backbone-dependent Dunbrack
-     2010 rotamer states [R2] (chi1..chiN) queried from residue phi/psi context.
-     Legacy hand-written chi1 priors are debug/compatibility only.
+     2010 rotamer states [R2] (chi1..chiN) queried from the installed PyRosetta
+     dun10 database at the residue's nearest 10-degree phi/psi bin (A19).
+     Legacy text-library and hand-written chi1 priors are debug/compatibility only.
    - Candidate pre-screening uses local environment / antigen-conditioned
      interaction scoring (coarse model; the antigen and fixed-VHH terms see
      every residue of the full complex, limited only by the 8 A atom-pair
@@ -48,6 +65,10 @@ prediction.
      compared with Amber delta-E on training complexes as a diagnostic. The
      current formal branch uses the uncalibrated coarse QUBO for matched solver
      comparisons and evaluates atomistic structural outcomes separately.
+   - Fixed-resolution three-well cases keep the highest positive-probability actual
+     library sample in each chi1 well even below the global probability floor; the
+     rescued sample keeps its own probability and prior-energy penalty, and a well
+     with no positive-probability sample still fails (A21).
    - 3--6 states per Active residue are retained under a global <=30-variable
      budget. Adaptive residue-dependent coarse rotamer counts including 1/3/6-state schemes have direct precedent [R26]; this study's minimum of 3 states and <=30-bit global cap remain preregistered resource constraints.
    - Formal quantum-classical scaling axis: 4, 6, 8, and 10 Active residues. Six sites remains the preregistered primary confirmatory/all-atom size; the other sizes are scaling conditions, not literature-defined standards.
@@ -55,7 +76,8 @@ prediction.
 4. **Constrained discrete optimization**
    - Fixed-backbone rotamer selection is treated as a combinatorial side-chain positioning problem [R10-R12] and encoded with one-hot QUBO/Ising variables.
    - QAOA follows the hybrid variational framework of Farhi et al. [R7]; protein/peptide quantum-optimization precedent is provided by [R16-R18].
-   - XY-mixer QAOA preserves local Hamming weight and therefore feasibility.
+   - XY-mixer QAOA preserves local Hamming weight and therefore feasibility [R28,R30];
+     the initial state is a product of local one-hot W states.
    - Classical baselines include exact feasible-state enumeration and simulated annealing [R13].
    - Mean-energy and finite-shot CVaR objectives are compared. CVaR is supported by [R8], which explicitly evaluates alpha=0.10 and recommends approximately 0.1-0.25 as a useful empirical range; alpha=0.1 is therefore literature-supported but still preregistered and sensitivity-tested here.
    - Primary (confirmatory) endpoint: log10 exact ground-state amplification of
@@ -64,6 +86,10 @@ prediction.
      shots is descriptive abstract accounting [R37,R45]. Other matched-output
      solver effects are secondary under the gatekeeping rule. See
      `docs/PROTOCOL_AMENDMENTS.md` A1, A7, A25.
+   - Reported two-qubit resource counts are variational-layer counts (cost ZZ plus
+     local XY mixer). Full-circuit counts stay null until a concrete W-state
+     StatePrep decomposition is frozen; the variational count is never presented
+     as a total-gate count (A18).
    - Exploratory `quantum_exploration` stage: depth p in {1,2,3,4,6} at 20
      optimizer evaluations per parameter, and QAOA angles fitted on training
      complexes transferred untrained to the hard set [R45-R47].
@@ -71,6 +97,8 @@ prediction.
 5. **Structure-level validation**
    - Solver assignments are reconstructed as side-chain conformations.
    - OpenMM [R19] constrained relaxation with the ff14SB protein force field [R15] evaluates whether discrete energy gains persist after continuous structural refinement.
+   - Formal all-atom runs are strict fixed backbone (`loop_relax_iterations: 0`),
+     validated before execution: N/CA/C/O coordinates cannot move (A18).
    - Structural metrics include Active side-chain RMSD, Fnat, interface RMSD,
      ligand RMSD, clash measures, and related trajectory metrics.
 
@@ -120,6 +148,14 @@ prediction.
 - Independent-cluster adequacy is checked at queue freeze, before any outcome
   (`--stop-after queue_freeze`), and EGNN training-seed variance is reported
   from development-only replicates.
+- Cluster-level confirmatory tests are two-sided sign-flip tests, whose
+  smallest attainable p value with G independent clusters is 2/2^G; G >= 6 is
+  the first that can reach p < 0.05 [R43]. This arithmetic, not power, sets the
+  preregistered minimum cluster counts.
+- The default external-validation population is an antigen-fold holdout carved
+  from the same audited snapshot, not an independent database. The manuscript
+  must call it an antigen-fold holdout and report its component and graph
+  counts with the result (A10, A13).
 - Coarse antigen interaction scores are not binding free energies; contact
   number is a geometry baseline, not an affinity estimator.
 - All-atom primary experiments are strict fixed-backbone: N/CA/C/O coordinates
@@ -131,44 +167,24 @@ prediction.
 - Smoke checks and legacy explicit `chi1_angles` overrides are engineering or
   ablation paths and are not the formal main protocol.
 - Every protocol change after the original freeze is listed, with its reason
-  and inspection status, in `docs/PROTOCOL_AMENDMENTS.md`.
+  and inspection status, in `docs/PROTOCOL_AMENDMENTS.md` (currently A1-A25).
 
 ## Scientific configuration
 
 The formal pipeline separates **configurable experimental parameters** from
 **fixed model-definition constants**.
 
-Configurable in `configs/full_experiment_config.yaml`:
+`configs/full_experiment_config.yaml` is the single source of truth for the
+frozen scientific protocol: stage toggles, the master seed, homology-isolation
+thresholds, the graph protocol, the antigen-fold holdout, the QAOA protocol
+(`quantum_protocol.primary`: depth 2, 90 evaluations, CVaR alpha 0.10, 4
+restarts, 500 evaluation shots, 1000 output shots), calibration acceptance
+gates, and the statistical plan. Validation and test results are never used to
+retune it.
 
-- Frozen quantum protocol: XY-QAOA encoding/mixer semantics, primary depth,
-  finite-shot objective/budgets, benchmark objective/restart ablations, and
-  development-only QAOA sensitivity are centralized under `quantum_protocol`.
-  Downstream benchmark, structural, external-validation and statistical stages
-  read this single source of truth; duplicated QAOA settings in stage-specific
-  blocks are rejected.
-- Dataset/graph protocol: sequence identity threshold, heavy-atom interface
-  label cutoff, intra-chain CA radius, cross-partner KNN degree, and minimum
-  interface-residue count.
-- Site-selection protocol: Active-site count, antigen-guidance weight,
-  antigen-proximity decay length, contact-baseline CA cutoff, and environment
-  radius.
-- Coarse interaction model: non-bonded cutoff, soft-core delta, hard-core
-  fraction/penalty, LJ caps, Coulomb cap, dielectric model parameters, and kT.
-- Benchmark resources: classical baseline budgets, matched-output curves and
-  low-energy windows remain under `qc_benchmark`; QAOA-specific budgets live
-  only under `quantum_protocol`.
-- Structural experiment budgets: perturbation range, local/final relaxation
-  iterations, output shots, and optimization budget.
-
-Every graph records its graph protocol; every EGNN checkpoint records the
-identity split threshold and graph protocol; every QUBO records its force-field
-parameters; run manifests record CLI arguments/config hashes. Resume is
-fail-closed when these protocol-defining values differ.
-
-Deliberately fixed model-definition constants include the Coulomb conversion
-constant, one-hot register semantics, amino-acid chemistry tables, and the
-current 3--6-state / <=30-variable formal representation. Those should only be
-changed as a new method/version, not casually swept as run-time hyperparameters.
+Fixed model-definition constants (residue tables, side-chain atom sets,
+symmetry conventions) live in code and change only through a dated protocol
+amendment.
 
 ## Training-only Amber calibration diagnostic
 
@@ -193,6 +209,14 @@ coefficient constraints, ridge alpha, and source SHA256. Validation/test rows
 are rejected at fit time, and the JSON loader rejects files that do not state
 training-only provenance.
 
+A source complex missing observed protein heavy atoms is excluded before any
+calibration energy row is accepted; provenance separately records discovered
+complexes, input-quality exclusions, eligible attempts and generation
+failures, and the fractions must close arithmetically (A21). The diagnostic
+retains the historical minimum of 100 eligible complexes, at least 20
+independent family groups and five grouped CV folds. The exclusion fraction
+is recorded as a coverage descriptor rather than a pass/fail gate (A22).
+
 The pipeline attempts the CSV and fit before the coarse benchmark. An absent
 fit or one with inadequate predictive quality receives a `completed_with_failures`
 diagnostic status and its coefficients remain unused. Provenance and result
@@ -212,11 +236,11 @@ generated rotamer clashes are reported separately.
 
 The formal rotamer model reads Dunbrack 2010 samples from the installed
 PyRosetta/Rosetta database (`pyrosetta_dun10`, pinned to build 2026.29 in the
-frozen config). It uses backbone φ/ψ, rotamer probabilities, χ1..χN means and
-standard deviations. χ1 is expanded by configured standard-deviation offsets;
-distal χ values retain their corresponding means. The all-atom model applies
-complete χ1..χN states and retains 3--6 states/site under the <=30-variable
-budget. The coarse pseudo-atom model remains χ1-oriented. PyRosetta is a
+frozen config). It uses backbone phi/psi, rotamer probabilities, chi1..chiN means and
+standard deviations. chi1 is expanded by configured standard-deviation offsets;
+distal chi values retain their corresponding means. The all-atom model applies
+complete chi1..chiN states and retains 3--6 states/site under the <=30-variable
+budget. The coarse pseudo-atom model remains chi1-oriented. PyRosetta is a
 separately installed, licensed dependency. Formal preflight checks its build,
 dun10 option and a real rotamer sample. The prior `dunbrack2010` text-file
 mode remains available for reproduction of earlier runs but is not selected
@@ -230,17 +254,35 @@ PDB-to-family/structure cluster map. The same cluster map is used for
 train/test exclusion, validation-queue eligibility, and cluster-level
 statistics. Missing required cluster metadata fails closed.
 
+Structure clusters come from an antigen-chain-only Foldseek search. Antibody
+chains share the Ig fold and are removed first, or single linkage would join
+almost every complex (A9). A chain pair scores
+`mintmscore = min(qtmscore q->t, qtmscore t->q)`, the TM-score normalized by
+the longer chain, so a short chain cannot bridge whole complexes through a
+query-normalized hit; a PDB pair takes the maximum over its chain pairs and
+the threshold stays 0.50 [R5,R27] (A11). The clustering universe contains only
+source-verified, row-level QC-eligible formal VHH candidates from the same
+preferred source used by graph admission (A16).
+
+A layered component larger than one fold's share of the training pool is
+pinned to training and never becomes the internal validation fold or the
+antigen-fold holdout (A11).
+
 The formal pipeline also has an external-validation stage. By default it
-scores an **antigen-fold holdout** (`docs/PROTOCOL_AMENDMENTS.md` A10): whole
+scores an **antigen-fold holdout** (`docs/PROTOCOL_AMENDMENTS.md` A10, A13): whole
 layered-isolation components are carved out of the training split at
 `queue_freeze`, before any training, and the frozen EGNN, uncalibrated coarse
 model and primary solver protocol are applied to them without refitting. The
-claim it supports is that the frozen pipeline still holds on antigen folds
-training never saw; it is a cluster-level holdout of the same audited
-snapshot, not a separate database. Setting
-`external_validation.external_vhh.graph_dir` and `source_structure_dir`
+holdout takes `queue_freeze.antigen_fold_holdout.fold` — one index or several
+(`"1,2"`); several are taken, lowest index first, when one fold does not reach
+`min_components`, which is a rule fixed in advance rather than a search for the
+fold holding the most components (A13). The claim it supports is that the
+frozen pipeline still holds on antigen folds training never saw; it is a
+cluster-level holdout of the same audited snapshot, not a separate database.
+Setting `external_validation.external_vhh.graph_dir` and `source_structure_dir`
 scores an independently certified graph-v1.11 VHH dataset instead, with the
 identical independence audit.
+
 FASPR is supported as a mature biological side-chain packing baseline and
 Phenix clashscore as a standard steric-quality diagnostic. These are
 scientific external dependencies: they are never substituted or fabricated
@@ -255,19 +297,21 @@ family-cluster bootstrap confidence intervals.
 ## Formal external resources and fail-closed preflight
 
 A formal run intentionally fails before expensive computation when required
-scientific inputs are unavailable. The preflight verifies the Dunbrack 2010
-library, a frozen family/structure similarity input (cluster map or pair TSV),
-FASPR, Phenix clashscore, and OpenMM GBN2 parameters when the declared solvent
-sensitivity is enabled. When a genuinely external VHH set is configured, its
-graph/raw-structure inputs are also required; under the default antigen-fold
-holdout protocol those run-local inputs are created later by queue_freeze and
-are therefore not required at preflight time.
+scientific inputs are unavailable. The preflight verifies the configured
+rotamer source (the installed PyRosetta build, its active dun10 option and a
+real rotamer sample; or the legacy text library when that mode is selected),
+ANARCI with HMMER when formal IMGT numbering is required (A18), a Foldseek
+executable when the run builds its own pair table, FASPR and its rotamer
+binary, Phenix clashscore, and OpenMM GBN2 parameters when the declared
+solvent sensitivity is enabled. When a genuinely external VHH set is
+configured, its graph/raw-structure inputs are also required; under the
+default antigen-fold holdout protocol those run-local inputs are created later
+by queue_freeze and are therefore not required at preflight time.
 
-Family/structure clusters can be reproducibly built from a frozen Foldseek (or
-equivalent) pair table with `build_independence_cluster_map.py`. The script
-keeps connected components, supports singleton universe IDs, and records the
-pair-table SHA256 and threshold. Dataset resume is invalidated if the frozen
-cluster map changes.
+With `independence_clustering.build_per_run: true` the Foldseek pair table is
+built inside each formal run after its own data audit, and a resumed run
+verifies and reuses its own frozen table. A prebuilt table can still be
+supplied at the configured path.
 
 External VHH independence is not accepted from a hand-written Boolean alone.
 `audit_external_vhh_independence.py` compares every external graph against
@@ -276,10 +320,7 @@ the same family/structure cluster map, then writes a per-target auditable
 manifest. The external-validation stage verifies that manifest before running
 the frozen model.
 
-### Preparing the external VHH set
-
-External complexes are built with the training-graph definition (graph v1.11,
-biological assembly, 7.5 A SAbDab antigen rule, the same labels and edges):
+### Preparing external inputs
 
 Structure files that carry no resolution record need the entry table the audit
 reads by PDB ID. Ask a finished audit which entries those are, so one table
@@ -291,45 +332,13 @@ python -m nanoqc.data.fetch_entry_resolution      # --resume continues an interr
 
 With no arguments it takes the most recent run's audit and writes the data
 root's `entry_resolution.tsv`; `--missing-from-audit` names a different audit.
-
 Any `*entry_resolution.tsv` under the data root (outside pipeline staging) is
 read, listed in the audit report with its SHA-256, and needs no network again.
 
-With the antigen-fold holdout (the default), each new formal run builds its own
-Foldseek pair table after `data_audit` from that run's audited PDB universe.
-The table and manifest are stored under `<run>/independence/`; a resume
-verifies their hashes and reuses them. Foldseek must be installed before launch.
-If it is not on `PATH`, set `QP_FOLDSEEK` to its executable path.
-
-ANARCI also needs HMMER's `hmmscan` executable on `PATH`. The Python package
-alone is insufficient; `env_check` checks both before the data audit. Install
-HMMER on the Linux server (for example, `conda install -c bioconda hmmer=3.3.2`)
-and verify `hmmscan -h` there.
-
-```bash
-export QP_FOLDSEEK=/path/to/foldseek  # omit when foldseek is already on PATH
-./scripts/deploy_launch.sh
-```
-
-The `foldseek` step searches antigen chains only. Antibody chains are
-recognised from SNAC/SAbDab annotations, SAbDab chain IDs, or an Ig V-domain
-detector (ANARCI when installed); annotated antigen chains are always kept.
-It runs an exhaustive all-versus-all search (E <= 10) and writes the pair
-table, a manifest of every chain's role, and an explicit self row for a PDB
-without an antigen chain of at least 20 residues. Scores are symmetric
-(`mintmscore`, the chain-pair TM-score normalized by the longer chain; A11), so
-a short chain cannot join whole complexes. The standalone `--reuse-raw` rescores the previous
-search (`prep/foldseek/foldseek_raw.m8`) without running Foldseek again. A
-layered component larger than one fold's share of the pool always trains (A11).
-The holdout takes `queue_freeze.antigen_fold_holdout.fold`, one index or several
-(`"1,2"`); several are taken, lowest first, when one fold does not reach
-`min_components` (A13).
-
-To score a **genuinely external** VHH set instead, set
-`external_validation.external_vhh.graph_dir` and `source_structure_dir`, and
-set `queue_freeze.independence_clustering.build_per_run: false`. Build that set
-with the two passes below before the Foldseek step, so its
-PDBs enter the clustering universe:
+To score a **genuinely external** VHH set instead of the run-local holdout,
+set `external_validation.external_vhh.graph_dir` and `source_structure_dir`,
+and build that set with the two passes below, so its PDBs enter the clustering
+universe:
 
 ```bash
 ./scripts/prepare_external_vhh.sh pass1 --sabdab-summary sabdab_summary_all.tsv --download
@@ -340,34 +349,24 @@ PDBs enter the clustering universe:
 ```
 
 `--released-after YYYY-MM-DD` adds a temporal holdout when PDB releases
-postdate the training snapshot. Pass 2 refuses to run if the pair table
-changed after pass 1, because
-external PDBs can link internal clusters. With the table unchanged, the fresh
-run rebuilds the identical training/test split.
+postdate the training snapshot. Pass 2 refuses to run if the pair table changed
+after pass 1, because external PDBs can link internal clusters. Formal SAbDab
+and external-VHH candidate selection require ANARCI with IMGT numbering and
+fail closed without it (A18).
 
-Each graph is one VHH-antigen complex, as in the SNAC-DB per-VHH complexes
-behind the training and hard test sets. Entries with several nanobodies give
-one complex per PDB: the VHH with the largest passing interface. Other
-antibody chains are never antigen, and entries with a VH/VL chain are
-excluded. The final set (pass 2) keeps one representative per layered
-homology group. Selection also requires a protein or peptide antigen, resolution
-<= 3.0 A, and the audit's interface quality gates. It then groups the complexes by the layered
-homology rule and reports whether `min_clusters` independent groups exist.
-CDR-H3 follows IMGT (105-117), like the training SNAC `Region_Split_VH.cdr3`;
-with `--training-dataset` the report states how often the external CDR-H3
-rule reproduces the training annotation. Formal SAbDab/external candidates
-require ANARCI IMGT numbering and fail closed when ANARCI is unavailable.
-The motif locator is retained only for non-formal debug/legacy paths and
-cannot define a formal external graph. Every formal run re-certifies
-independence against its own frozen training set and cluster map.
+The `foldseek` step searches antigen chains only, exactly as the in-run build
+does. `--reuse-raw` rescores the previous search without running Foldseek
+again; `--run-dir <run>` binds the table to that run's own frozen universe.
 
-The primary all-atom protocol uses vacuum/NoCutoff Amber14 packing energy.
-GBN2 energies are not exactly pair-decomposable (Born radii depend on every atom), so
-the GBN2 QUBO is a recorded pairwise approximation (`pair_decomposition`,
-`all_atom_equivalence_max_error/rms_error`, per-structure `qubo_energy_discrepancy_kcal`);
-the vacuum primary protocol still requires exact decomposition (1e-4 kcal/mol).
-A pre-declared GBN2 sensitivity run is performed on development targets only;
-the validation queue never chooses its solvent model after inspecting results.
+Each external graph is one VHH-antigen complex, as in the SNAC-DB per-VHH
+complexes behind the training and hard test sets. Entries with several
+nanobodies give one complex per PDB: the VHH with the largest passing
+interface. Other antibody chains are never antigen, and entries with a VH/VL
+chain are excluded. The final set (pass 2) keeps one representative per layered
+homology group. Selection also requires a protein or peptide antigen,
+resolution <= 3.0 A, and the audit's interface quality gates. It then groups
+the complexes by the layered homology rule and reports whether `min_clusters`
+independent groups exist.
 
 ## Repository layout
 
@@ -376,12 +375,18 @@ configs/   full_experiment_config.yaml (frozen scientific protocol), server_conf
 docs/      METHODS_EVIDENCE.md (design-to-literature register), RESULTS_CONTRACT.md (required outputs),
            PROTOCOL_AMENDMENTS.md (dated post-freeze protocol changes),
            PIPELINE_WALKTHROUGH.md (stage-by-stage walkthrough of what each stage does and why)
-scripts/   deploy_launch.sh, run_full_experiment.sh, formal_preflight.sh, check_status.sh, repair_openmm_cuda.sh,
-           prepare_external_vhh.sh
+scripts/   deploy_launch.sh, run_full_experiment.sh, formal_preflight.sh, check_status.sh,
+           repair_openmm_cuda.sh, prepare_external_vhh.sh,
+           amend_failed_egnn_fp32.py, amend_failed_calibration.py (one-time amended-lineage recovery),
+           diagnose_calibration_eligibility.py, diagnose_calibration_relaxation.py (read-only),
+           discover_external_vhh.py (candidate discovery for manual curation)
 src/nanoqc/
   pipeline/     run_full_experiment.py (end-to-end orchestrator), resolve_server_config.py
   data/         audit_all_datasets.py, build_final_pyg_dataset.py (audited graphs + split),
-                build_independence_cluster_map.py, audit_external_vhh_independence.py, sequence_identity.py,
+                build_foldseek_pairs.py (antigen-chain-only pair table),
+                build_independence_cluster_map.py, carve_holdout_clusters.py (antigen-fold holdout),
+                audit_external_vhh_independence.py, sequence_identity.py, safe_graph_load.py,
+                fetch_entry_resolution.py, convert_sabdab2_summary.py,
                 select_external_vhh_candidates.py, build_external_vhh_graphs.py,
                 prepare_external_vhh.py (external VHH set)
   model/        model_egnn_pruning.py (interface scoring, Active-site selection, checkpoint loading),
@@ -392,7 +397,7 @@ src/nanoqc/
   solvers/      qaoa_interface_sampler.py (XY-mixer QAOA)
   experiments/  batch_benchmark_hard_set.py (matched quantum/classical benchmark),
                 fit_qaoa_transfer_parameters.py (train-split QAOA angle transfer),
-                run_real_complex_pilot.py (all-atom retrospective recovery),
+                run_real_complex_pilot.py (all-atom retrospective recovery, queue-freeze eligibility),
                 generate_energy_calibration_dataset.py, run_external_structure_baselines.py (FASPR / Phenix)
   structure/    evaluate_complex_metrics.py, structural_quality.py, residue_tables.py
   inference/    paired_statistics.py (incl. serial gatekeeping), analyze_quantum_scaling.py,
@@ -406,12 +411,18 @@ Every stage runs as `python -m nanoqc.<package>.<module>` from the repository
 root with `src/` on `PYTHONPATH`; the scripts in `scripts/` set this up. Run
 manifests keep fingerprinting modules under their bare file names
 (`code_sha256["subgraph_to_qubo.py"]`), resolved through
-`nanoqc.common.repo_io.MODULE_LAYOUT`. `tests/test_refactor_equivalence.py`
-checks the shared helpers against the implementations they replaced.
+`nanoqc.common.repo_io.MODULE_LAYOUT`; every module under `src/nanoqc/` must be
+registered there, which `tests/test_refactor_equivalence.py` enforces.
+One-time recovery helpers live in `scripts/` precisely so they stay outside
+that formal module layout.
 
 ## Literature basis
 
-The authoritative design-to-literature mapping is maintained in `docs/METHODS_EVIDENCE.md`. Reference labels [R1]–[R47] in this README refer to that file. The register explicitly separates direct literature support from literature-informed preregistration and study-specific preregistration so that exact numerical choices are never misrepresented as published standards.
+The authoritative design-to-literature mapping is maintained in
+`docs/METHODS_EVIDENCE.md`. Reference labels [R1]-[R49] in this README refer to
+that file. The register explicitly separates direct literature support from
+literature-informed preregistration and study-specific preregistration so that
+exact numerical choices are never misrepresented as published standards.
 
 ## Portable server runtime configuration
 
@@ -430,6 +441,7 @@ export QP_VENV=/path/to/.venv
 export QP_DATA_ROOT=/path/to/data
 export QP_RUN_ROOT=/path/to/runs
 export QP_FASPR=/path/to/FASPR
+export QP_FOLDSEEK=/path/to/foldseek
 export QP_PHENIX_CLASHSCORE=/path/to/phenix.clashscore
 ./scripts/deploy_launch.sh
 ```
@@ -442,6 +454,15 @@ A formal experiment is launched with one command:
 
 ```bash
 ./scripts/deploy_launch.sh
+```
+
+Useful variants, all passed straight through to `run_full_experiment.sh`:
+
+```bash
+./scripts/deploy_launch.sh --stop-after queue_freeze        # check cluster adequacy before training
+./scripts/deploy_launch.sh --resume=<run directory name>    # continue an existing run
+./scripts/deploy_launch.sh --resume=<run> --force-restage egnn_train
+./scripts/deploy_launch.sh --only <stage>                   # prerequisites must already be complete
 ```
 
 The launcher resolves the current server, creates exactly one timestamped run directory before preflight, and stores the complete experiment archive under that directory. A fresh run contains:
@@ -490,6 +511,28 @@ The launcher resolves the current server, creates exactly one timestamped run di
 If preflight fails, the same run directory is retained with its provenance and preflight log. If a run is resumed, new timestamped preflight/launch logs are appended as new files inside the same original run directory rather than creating a second result tree.
 
 The formal manuscript/analysis should treat one run directory as the atomic reproducibility unit.
+
+## Amended-lineage recovery
+
+A protocol repair that must reuse already verified upstream stages is applied
+by an explicit one-time command, never by editing a frozen run in place. Each
+recovery verifies the completed stage artifacts and their upstream bindings,
+refuses to run unless the intended stage actually failed and no downstream
+stage completed, archives the superseded manifest/config and outputs, records
+old and new source hashes, and reruns the repaired stage and everything after
+it. The result is marked an **amended protocol lineage**, not an unmodified
+resume.
+
+- `scripts/amend_failed_egnn_fp32.py` — FP32 continuation after FP16 EGNN
+  training failed; allows only `egnn_train.amp` to change (A20).
+- `scripts/amend_failed_calibration.py` — calibration protocol repair, keeping
+  the verified audit, queue freeze and FP32 checkpoint (A21, A22).
+
+Two read-only diagnostics change nothing in a run:
+`scripts/diagnose_calibration_eligibility.py` inspects calibration exclusions,
+and `scripts/diagnose_calibration_relaxation.py` compares raw against
+fixed-backbone-relaxed Amber energies from rows an earlier calibration already
+generated.
 
 ## Mandatory experiment-result audit
 
