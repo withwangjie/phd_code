@@ -4491,8 +4491,12 @@ class Orchestrator:
                     for effect in output_payload.get("effects",[]):
                         key="qc:"+str(effect.get("baseline"))+":"+str(effect.get("metric"))
                         targets[key]=effect
-                        secondary_family[key]=effect.get("p_value")
-                        effect["gatekeeping_family"]="secondary"
+                        if str(effect.get("metric","")).startswith("log10_qts99"):
+                            effect["gatekeeping_family"]="descriptive_abstract_resource"
+                            effect["p_gatekeeping_adjusted"]=None
+                        else:
+                            secondary_family[key]=effect.get("p_value")
+                            effect["gatekeeping_family"]="secondary"
                     scaling_primary["gatekeeping_family"]="primary"
                     amplification_primary["gatekeeping_family"]="primary"
                     adjusted=serial_gatekeeping(primary_family,secondary_family)
@@ -4501,7 +4505,9 @@ class Orchestrator:
                     family_note=(
                         "serial gatekeeping: primary family {primary-size QAOA ground-state amplification, "
                         "amplification scaling slope} Holm-adjusted alone; QAOA-vs-classical matched-output "
-                        "effects are secondary, tested only after both primary hypotheses are rejected")
+                        "effects other than abstract shot/query QTS99 are secondary, tested only after both "
+                        "primary hypotheses are rejected; QTS99 is descriptive because shots and classical "
+                        "energy queries are not equivalent computational costs")
                     output_payload["multiplicity_procedure"]=family_note
                     output_payload["multiplicity_primary_family"]=sorted(primary_family)
                     output_stats_path.write_text(json.dumps(output_payload,indent=2,sort_keys=True)+"\n",encoding="utf-8")

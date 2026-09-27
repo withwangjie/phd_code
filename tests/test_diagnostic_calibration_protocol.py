@@ -3,7 +3,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from nanoqc.pipeline.run_full_experiment import Orchestrator, calibration_solver_args
+from nanoqc.reporting.generate_final_research_report import training_coarse_atomistic_rank_diagnostic
 
 
 def test_diagnostic_calibration_is_never_passed_to_solvers(tmp_path: Path) -> None:
@@ -15,6 +18,26 @@ def test_diagnostic_calibration_is_never_passed_to_solvers(tmp_path: Path) -> No
     assert calibration_solver_args({"mode": "frozen", "require_calibrated": True}, fit) == [
         "--require-calibrated-energy", "--energy-calibration-file", str(fit)
     ]
+
+
+def test_training_assignment_rank_diagnostic_keeps_nonestimable_groups() -> None:
+    def row(pdb: str, coarse: float, amber: float) -> dict[str, str]:
+        return dict(pdb_id=pdb, split="train", prior_energy=str(coarse),
+                    vhh_environment_energy="0", antigen_energy="0", pair_energy="0",
+                    amber_delta_kcal=str(amber))
+    result=training_coarse_atomistic_rank_diagnostic([
+        row("1ABC",0,2),row("1ABC",1,1),row("1ABC",2,0),
+        row("2DEF",0,0),row("2DEF",0,1),row("2DEF",0,2),
+    ])
+    assert result["n_pdb"]==2
+    assert result["n_estimable"]==1
+    assert result["n_nonestimable"]==1
+    assert result["median_within_pdb_spearman"]==-1.0
+    assert result["per_pdb"][1]["spearman_rho"] is None
+    held_out=row("3GHI",0,0)
+    held_out["split"]="test_snac_hard"
+    with pytest.raises(ValueError, match="training rows only"):
+        training_coarse_atomistic_rank_diagnostic([held_out])
 
 
 def test_failed_amber_fit_acceptance_remains_auditable_diagnostic(tmp_path: Path) -> None:

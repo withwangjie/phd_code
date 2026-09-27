@@ -22,7 +22,7 @@ no earlier run directory can be resumed; a fresh formal run is required.
 
 | ID | Change | Affected stages | Inspection status |
 |---|---|---|---|
-| A1 | Resource-normalized time-to-solution (`log10_qts99`) replaces best-of-N gap (secondary since A7) | qc_benchmark, statistics, external_validation, final_report | to be completed |
+| A1 | Abstract time-to-solution (`log10_qts99`) replaces best-of-N gap (secondary after A7, descriptive after A25) | qc_benchmark, statistics, external_validation, final_report | to be completed |
 | A2 | Pre-specified non-estimable RQ5 outcomes | statistics (structural), final_report | to be completed |
 | A3 | Code-level fixes preceding A1 (seeds, symmetry, full-complex environment, biological assembly) | dataset through final_report | to be completed |
 | A4 | Serial gatekeeping replaces one flat Holm family | statistics (QC), final_report | to be completed |
@@ -39,11 +39,12 @@ no earlier run directory can be resumed; a fresh formal run is required.
 | A15 | Entry resolution fetched from RCSB for files that carry none | audit, dataset (admission), everything downstream | not applicable (admission counts only; no result existed) |
 | A16 | Formal VHH sources and cross-source PDB precedence | audit, Foldseek universe, dataset admission, EGNN/calibration and everything downstream | to be completed |
 | A17 | SNAC-only primary antigen-fold targets; SAbDab quarantine; exact source_id binding | queue_freeze, external_validation, final_report | to be completed |
+| A25 | Training-only same-assignment rank diagnostic and explicit finite-range/resource interpretation | final_report, scaling analysis prose | to be completed |
 
 ## A1. Primary coarse solver endpoint: resource-normalized time-to-solution
 
-> **Partly superseded by A7:** `log10_qts99` is now a *secondary* QAOA-vs-classical
-> effect, and the scaling response is QAOA exact ground-state amplification.
+> **Superseded by A7 and A25:** the scaling response is QAOA exact ground-state
+> amplification; `log10_qts99` remains an abstract descriptive diagnostic.
 
 - **Before:** primary QAOA-vs-SA contrast on best-of-N energy gap at 1000
   matched outputs; scaling response = QAOA-minus-SA gap.
@@ -169,10 +170,10 @@ they were logged later.
      configuration count (scaling).
   Exact subspace probabilities are a noiseless-simulator property of the
   algorithm; the shot-based Jeffreys amplification is reported alongside.
-- **Secondary:** every QAOA-vs-classical matched-output effect, including
-  the A1 `log10_qts99` (now secondary) and a new execution-only
-  `log10_qts99_execution` that excludes training shots, separating training
-  from execution cost as in Shaydulin et al. [R45].
+- **Secondary under A7:** QAOA-vs-classical matched-output effects. The A1
+  `log10_qts99` and execution-only `log10_qts99_execution` separated training
+  from execution cost as in Shaydulin et al. [R45]; A25 later made these
+  abstract shot/query comparisons descriptive only.
 - **Exploratory, descriptive (new `quantum_exploration` stage):**
   (a) depth p in {1,2,3,4,6} with optimizer budget 20 evaluations per
   parameter, separating depth from optimizer budget [R7,R45];
@@ -655,3 +656,11 @@ they were logged later.
 - **Frozen rule:** on the first model of each prepared biological assembly, select the strongest allowed VHH–antigen protein-chain pair using the existing interface rule. For each chain, retain one positive-occupancy heavy atom per name (highest occupancy). Exclude atom pairs within the same residue, then reject a formal complex if any distinct-residue heavy-atom centers are **strictly closer than 1.0 Å**. Ordinary peptide and disulfide bond lengths exceed this hard floor. The threshold is a deliberately conservative absolute coordinate-overlap rule, **not** the MolProbity clashscore or its 0.4 Å van der Waals overlap definition ([MolProbity 2007](https://pmc.ncbi.nlm.nih.gov/articles/PMC1933162/), [MolProbity 2010](https://pmc.ncbi.nlm.nih.gov/articles/PMC2803126/)).
 - **Accounting:** the audit writes the offending pair, minimum observed distance below the floor, and pair count per structure; the inventory gives evaluated, excluded, and atom-pair totals. A structure with this reason receives `structure_quality_status=fail`, cannot enter formal graph construction or the Foldseek universe, and remains visible in the audit denominator. The external VHH quality check uses the same rule on its chosen VHH and antigen chains.
 - **Scope and limitation:** the screen uses experimentally deposited protein heavy atoms after assembly selection. It does not inspect added hydrogens, ligand atoms, alternate conformer combinations, or every generated rotamer. It must not be used to erase difficult solver cases after outcomes are seen. Previously frozen audits and queues do not satisfy the revised contract; rerun affected stages under a new manifest before evaluating held-out results.
+
+## A25. Surrogate rank and finite-range resource interpretation
+
+- **Trigger:** independent workflow review found that the coarse χ1-oriented score and atomistic energy had no displayed same-assignment rank diagnostic, that the four-size slope could be overread as asymptotic scaling, and that shots and single-state energy queries were presented in a shared QTS99 unit.
+- **Change:** the final report computes within-PDB Spearman ranks from the existing training-only calibration CSV, including constant groups and extreme raw Amber deltas. No fitted coefficient or target/test outcome enters solver selection. The scaling output states that 4/6/8/10 sites at three states each is a finite-range trend with changing residues and landscapes; exact enumeration remains feasible. The resource section displays measurement shots, energy queries and elapsed time in separate columns. Historical QTS99 becomes descriptive abstract accounting: its formula and raw values are unchanged, but it is removed from the secondary gatekeeping inference family because the two operation types cannot be cost-equated.
+- **Claim boundary:** a training-only unrelaxed rank correlation cannot establish held-out physical fidelity or all-atom RMSD improvement. No asymptotic or hardware advantage claim follows from the slope or QTS99. Independent structural outcomes remain the only evidence for recovery.
+- **Affected results:** final report, scaling metadata/prose and secondary multiplicity interpretation. Frozen solver instances, optimizer settings and raw p-values are unchanged; adjusted secondary-family p-values can change because QTS99 tests are removed. The source/config hash contract requires a new run for these changes.
+- **Results inspected before this amendment:** the earlier training-only failed Amber calibration and generated-clash diagnostics described in A23 were inspected; whether any validation/test outcomes had been inspected requires investigator confirmation.

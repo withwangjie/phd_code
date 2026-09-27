@@ -536,15 +536,12 @@ external_validation:
 statistics:
   resamples: 10000
   primary_qc_baseline: "sa"
-  # Resource-normalized time-to-solution (Ronnow et al. 2014): log10 of the
-  # measurement shots / energy queries needed to see a ground state with 99%
-  # probability, QAOA optimization shots included. Best-of-N gap/hit saturate
-  # (SA reaches the ground state in every case at <=10 sites), so they are
-  # reported as secondary effects only. See docs/PROTOCOL_AMENDMENTS.md.
-  # Since A7 every QAOA-vs-classical effect (this one included) is secondary;
-  # the primary family is QAOA's own ground-state amplification and its slope.
+  # Historical QTS99 paired-denominator adequacy check. Its one-shot-equals-
+  # one-energy-query conversion is descriptive abstract accounting, not
+  # matched hardware cost; A25 excludes it from secondary gatekeeping tests.
+  # The primary family remains QAOA ground-state amplification and its slope.
   primary_qc_metric: "log10_qts99"
-  min_qc_clusters: 10  # adequacy gate for the frozen coarse QAOA-vs-classical primary contrast
+  min_qc_clusters: 10  # adequacy gate for the frozen coarse paired denominator
   min_scaling_clusters: 10  # independent family/structure clusters for the fixed-p=2 scaling slope
   min_primary_clusters: 10  # adequacy gate, not a formal power guarantee
   min_rq5_clusters: 10

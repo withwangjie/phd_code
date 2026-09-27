@@ -2,13 +2,13 @@
 """Formal size-scaling analysis for the quantum-classical coarse benchmark.
 
 Primary estimand:
-    within-PDB slope of (QAOA gap - classical gap) versus log10(feasible
-    configuration count), followed by equal-weight family/structure-cluster
-    aggregation. Negative slope means QAOA's relative energy-gap performance
-    becomes more favorable as combinatorial complexity increases.
+    within-PDB slope of QAOA's exact log10 ground-state amplification over
+    uniform feasible sampling versus log10(feasible configuration count),
+    followed by equal-weight family/structure-cluster aggregation.
 
-This is a simulator-level algorithmic scaling analysis, not evidence of
-hardware quantum speedup.
+The four frozen site counts are a finite-size, fixed-budget comparison. Site
+selection and the energy landscape change with count; the slope is not an
+asymptotic complexity exponent or evidence of hardware quantum speedup.
 """
 from __future__ import annotations
 import argparse,csv,json,math
@@ -301,6 +301,12 @@ def main(argv:Optional[Sequence[str]]=None)->int:
         definition="within-PDB slope of QAOA's exact log10 ground-state amplification over uniform feasible sampling versus log10 feasible configuration count under a fixed three-chi1-well state policy; PDB slopes averaged within family/structure cluster",
         sign_interpretation="positive slope means QAOA concentrates relatively more probability on the ground state as the feasible space grows; negative means its advantage over random sampling shrinks",
         simulator_scope="classical exact-subspace finite-shot QAOA; not hardware quantum speedup",
+        interpretation_scope=(
+            "finite-size trend over the listed active-site levels at fixed depth and optimizer budget; "
+            "adding sites also changes selected residues and the QUBO landscape; exact enumeration "
+            "is feasible throughout; no asymptotic complexity or hardware advantage inference"
+        ),
+        max_feasible_configurations=max(3**size for size in sizes),
         primary_predictor="log10_configuration_count",
         descriptive_resource_axes=[
             "num_qubits","qaoa_variational_two_qubit_gates","qaoa_xy_gates","qaoa_zz_gates",
@@ -332,6 +338,7 @@ def main(argv:Optional[Sequence[str]]=None)->int:
         f"Primary pruning: {args.primary_pruning}; baseline: {args.baseline}; p={args.primary_depth}; "
         f"outputs={args.primary_outputs}; objective={args.primary_objective}; restarts={args.primary_restarts}.",
         f"Primary predictor: log10(feasible configuration count). Active-site levels: {sizes}.",
+        f"Largest feasible space: {max(3**size for size in sizes):,} assignments; exact enumeration remains feasible.",
         "Descriptive quantum-resource axes: logical qubits and pre-transpilation variational-layer "
         "two-qubit gates (ZZ cost + XY mixer). W-state StatePrep decomposition is unspecified, "
         "so these are not full-circuit gate counts.",
@@ -357,8 +364,8 @@ def main(argv:Optional[Sequence[str]]=None)->int:
             f"{row['mean_delta_gap']:.6g} | {row['mean_delta_hit']:.6g} |"
         )
     lines += ["",
-        "Every size uses exactly three rotamer states per site, with one representative from each chi1 well. The configuration count therefore changes with site count at fixed state resolution. QAOA depth and optimizer evaluations remain fixed across sizes. Logical qubit and two-qubit-gate counts are reported as descriptive implementation resources rather than additional confirmatory hypotheses, so this remains a single preregistered primary scaling test.",
-        "This is a fixed-resource shallow-QAOA scaling analysis; it does not establish hardware quantum advantage or computational speedup.",
+        "Every size uses exactly three rotamer states per site, with one representative from each chi1 well. The configuration count changes with site count at fixed state resolution, but the selected residues and QUBO landscape also change. QAOA depth and optimizer evaluations remain fixed across sizes. Logical qubit and two-qubit-gate counts are descriptive implementation resources rather than additional confirmatory hypotheses.",
+        "This is a finite-range, fixed-resource shallow-QAOA trend, not an asymptotic complexity exponent. Classical exact enumeration is tractable at every included size. QTS99 combines unlike shots and energy queries only under an abstract accounting convention; it is not hardware-normalized cost. No hardware quantum advantage or computational speedup is established.",
     ]
     args.out_md.write_text("\n".join(lines)+"\n",encoding="utf-8")
     return 0

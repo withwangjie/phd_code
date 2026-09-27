@@ -108,13 +108,22 @@ covering exactly `seed_replicates + 1` models against the primary checkpoint's
 SHA256.
 
 ### energy_calibration
-Required:
+Required when a fit completes successfully:
 - `calibration/coarse_to_amber_train.csv`
 - `calibration/coarse_to_amber_train.provenance.json`
 - `calibration/coarse_to_amber.json`
 - `calibration/calibration_report.md`
 
-The frozen calibration must pass all configured acceptance gates.
+Always required in diagnostic mode:
+- `calibration/diagnostic_assessment.json`
+- `calibration/calibration_report.md`
+
+In the current diagnostic protocol, calibration may record
+`completed_with_failures`; its fitted coefficients are not applied to solver
+benchmarks. A failed fit may lack the CSV or fitted JSON, but must have
+`calibration/diagnostic_assessment.json` and `calibration/calibration_report.md`
+with explicit failure reasons and hashes of any generated artifacts. A frozen
+calibration protocol still requires all configured acceptance gates.
 Calibration rows are buffered per training complex and committed only after
 that complex completes; calibration uses the same fixed three-chi1-well state
 policy as the formal scaling benchmark.
@@ -166,7 +175,11 @@ These solver metrics do not establish native chi1/chi2 or all-atom recovery.
 Endpoint fields. Every benchmark row records `ground_hits`,
 `success_probability_jeffreys`, `resource_fixed_units`,
 `resource_units_per_sample`, `queries_to_solution_99` and `log10_qts99`
-(resource-normalized queries-to-solution, PROTOCOL_AMENDMENTS.md A1). Every
+(secondary abstract queries-to-solution under the one-shot-equals-one-query
+convention, PROTOCOL_AMENDMENTS.md A1/A25). They do not establish matched
+hardware cost. Separate `qaoa_total_measurement_shots`,
+`single_state_energy_queries` and `solver_seconds` fields support independent
+resource reporting. Every
 QAOA row additionally records `exact_ground_probability`,
 `log10_ground_amplification_exact` (the primary quantum-intrinsic endpoint,
 A7), `log10_ground_amplification` (Jeffreys, shot-based),
@@ -207,7 +220,7 @@ exactly against frozen target × pre-registered seed × four-method denominators
 ### external_validation
 
 By default this stage scores the run's own antigen-fold holdout
-(`dataset/graphs/holdout`, A10): the frozen EGNN, calibrated coarse model and
+(`dataset/graphs/holdout`, A10): the frozen EGNN, uncalibrated coarse surrogate and
 primary solver protocol are applied, without refitting, to antigen folds that
 training never saw. Setting `external_validation.external_vhh.graph_dir` and
 `source_structure_dir` scores a genuinely external VHH set instead. The
@@ -267,8 +280,10 @@ fraction, and zero failed targets in the formal validation queue.
 
 #### Coarse QC and scaling inference
 
-`statistics.primary_qc_metric` (`log10_qts99`) names the QAOA-vs-classical
-matched-output contrast, which is secondary since A7. Time-matched effects
+`statistics.primary_qc_metric` (`log10_qts99`) identifies a paired-denominator
+adequacy check retained for compatibility. Since A25 this abstract shot/query
+metric is descriptive and excluded from the secondary gatekeeping family;
+other matched-output QAOA-vs-classical effects remain secondary. Time-matched effects
 measure classical emulation cost of QAOA and are descriptive.
 The coarse solver inference is restricted to the frozen primary pruning path,
 radius, QAOA depth, optimization-evaluation budget, active-site size, output budget,
@@ -287,11 +302,12 @@ descriptive. Scaling inference uses the pre-declared active-site levels under th
 radius/depth/evaluation budget and a cluster-aware within-PDB slope analysis with
 log10(feasible configuration count) as the primary complexity axis.
 
-Coarse QC multiplicity uses serial gatekeeping (PROTOCOL_AMENDMENTS.md A4, A7): the
+Coarse QC multiplicity uses serial gatekeeping (PROTOCOL_AMENDMENTS.md A4, A7, A25): the
 primary family {primary-size QAOA exact ground-state amplification
 (`quantum_scaling_statistics.json` `primary_amplification`), amplification scaling
-slope (`primary`)} is Holm-adjusted alone; every QAOA-vs-classical matched-output
-effect is secondary and gated behind it
+slope (`primary`)} is Holm-adjusted alone; matched-output QAOA-vs-classical
+effects other than abstract shot/query QTS99 are secondary and gated behind it.
+QTS99 effects are descriptive only
 (`gatekeeping_family`, `p_gatekeeping_adjusted`); raw p values are retained. Structural primary
 and RQ5 tests retain their separate two-test Holm family.
 

@@ -27,9 +27,14 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 import sys
+from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
+
+import numpy as np
+from scipy.stats import spearmanr
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT / "src"))
@@ -67,6 +72,44 @@ def _read_csv_rows(path: Path) -> List[Dict[str, str]]:
         return list(csv.DictReader(handle))
 
 
+def training_coarse_atomistic_rank_diagnostic(rows: List[Dict[str, str]]) -> Dict[str, Any]:
+    """Describe within-complex raw-energy ranks without claiming validation.
+
+    The calibration CSV maps each coarse bit assignment to the same full-chi
+    atomistic assignment. Its energies are unrelaxed, training-only values.
+    Constant or nonfinite groups are counted rather than silently omitted.
+    """
+    by_pdb: Dict[str, List[tuple[float, float]]] = defaultdict(list)
+    for row in rows:
+        if row.get("split") != "train":
+            raise ValueError("Coarse/atomistic rank diagnostic requires training rows only")
+        try:
+            coarse = sum(float(row[key]) for key in (
+                "prior_energy", "vhh_environment_energy", "antigen_energy", "pair_energy"))
+            atomistic = float(row["amber_delta_kcal"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("Incomplete coarse/atomistic calibration row") from exc
+        if not math.isfinite(coarse) or not math.isfinite(atomistic):
+            raise ValueError("Nonfinite coarse/atomistic calibration energy")
+        by_pdb[str(row["pdb_id"]).lower()].append((coarse, atomistic))
+    per_pdb = []
+    for pdb, values in sorted(by_pdb.items()):
+        coarse = np.asarray([v[0] for v in values], dtype=float)
+        atomistic = np.asarray([v[1] for v in values], dtype=float)
+        estimable = len(values) >= 3 and len(set(coarse)) > 1 and len(set(atomistic)) > 1
+        rho = float(spearmanr(coarse, atomistic).statistic) if estimable else None
+        if rho is not None and not math.isfinite(rho):
+            rho = None
+        per_pdb.append(dict(pdb_id=pdb, assignments=len(values), spearman_rho=rho,
+                            max_abs_amber_delta_kcal=float(np.max(np.abs(atomistic)))))
+    estimable_rhos = [r["spearman_rho"] for r in per_pdb if r["spearman_rho"] is not None]
+    return dict(scope="training_only_unrelaxed_same_assignment",
+                n_pdb=len(per_pdb), n_estimable=len(estimable_rhos),
+                n_nonestimable=len(per_pdb)-len(estimable_rhos),
+                median_within_pdb_spearman=(float(np.median(estimable_rhos)) if estimable_rhos else None),
+                per_pdb=per_pdb)
+
+
 def _read_text(path: Path) -> Optional[str]:
     return path.read_text(encoding="utf-8") if path.is_file() else None
 
@@ -93,7 +136,8 @@ def _paired_inference_multiplicity_note(mode: str) -> str:
             "(primary-size exact ground-state amplification and its scaling slope) is "
             "Holm-adjusted alone; matched-output QAOA-vs-classical effects are secondary "
             "and can be interpreted inferentially only after both primary hypotheses are "
-            "rejected. The all-effects Holm column is descriptive."
+            "rejected, except abstract shot/query QTS99 effects, which are descriptive only. "
+            "The all-effects Holm column is descriptive."
         )
     if mode=="time":
         return (
@@ -519,6 +563,34 @@ def section_search_performance(ctx: ReportContext) -> List[str]:
         lines.append("No successful Amber diagnostic fit was produced; see the assessment and stage log."
                      if diagnostic else "Frozen calibration artifact is missing or unreadable.")
     lines.append("")
+    if diagnostic:
+        training_csv=Path(calibration_cfg.get("training_csv","calibration/coarse_to_amber_train.csv"))
+        if not training_csv.is_absolute():
+            training_csv=ctx.run_dir/training_csv
+        training_rows=_read_csv_rows(training_csv)
+        lines.append("#### Training-only coarse versus atomistic rank diagnostic")
+        lines.append("")
+        if training_rows and all("amber_delta_kcal" in row for row in training_rows):
+            ranking=training_coarse_atomistic_rank_diagnostic(training_rows)
+            lines.append(
+                f"The same full-chi assignment was scored by the uncalibrated coarse surrogate and "
+                f"unrelaxed Amber14 on {ranking['n_pdb']} training complexes. Within-PDB Spearman rank "
+                f"correlation is estimable for {ranking['n_estimable']}; "
+                f"median rho={_fmt(ranking['median_within_pdb_spearman'])}. "
+                f"It is undefined for {ranking['n_nonestimable']} complexes."
+            )
+            lines.append("| Training PDB | Assignments | Within-PDB Spearman rho | Largest absolute raw Amber delta (kcal/mol) |")
+            lines.append("|---|---:|---:|---:|")
+            for item in ranking["per_pdb"]:
+                lines.append(f"| {item['pdb_id']} | {item['assignments']} | "
+                             f"{_fmt(item['spearman_rho'])} | {_fmt(item['max_abs_amber_delta_kcal'])} |")
+            lines.append("")
+        else:
+            lines.append("No complete training assignment pairs were available for a rank diagnostic.")
+        lines.append("This diagnostic is training-only and uses raw, unrelaxed energies. Extreme overlaps can "
+                     "dominate Amber values. It does not validate coarse energy on held-out structures, "
+                     "establish cross-stage rotamer equality, or show that a solver gain improves RMSD.")
+        lines.append("")
 
     lines.append("### 3.1 Output-budget curve (equal OUTPUT count across solvers; not equal total compute)")
     lines.append("")
@@ -625,9 +697,11 @@ def section_search_performance(ctx: ReportContext) -> List[str]:
             "Positive slope means QAOA concentrates relatively more probability on the ground state "
             "(relative to uniform sampling) as the feasible configuration space grows. Every scaling size uses three states "
             "per site, one from each chi1 well; the analysis rejects cases lacking this policy. "
-            "QAOA depth and optimizer evaluations stay fixed, so the slope estimates fixed-resource "
-            "scaling rather than equal-compute scaling. This simulator-level analysis does "
-            "not establish hardware quantum speedup."
+            "QAOA depth and optimizer evaluations stay fixed. Added sites also change which residues and "
+            "energy landscape are studied, so this is a finite-range, fixed-budget trend, not an "
+            "asymptotic complexity exponent or equal-compute comparison. Exact enumeration remains feasible "
+            "through 10 sites (59,049 assignments). This simulator-level analysis does not establish "
+            "hardware quantum speedup."
         )
         lines.append("")
     elif stage_ok(ctx,"statistics"):
@@ -1042,6 +1116,34 @@ def section_cost(ctx: ReportContext) -> List[str]:
                     "This separation follows resource-transparent quantum-optimization benchmarking guidance [R20,R29]."
                 )
                 lines.append("")
+            lines.append("### 8.3 Measurement shots and classical energy queries")
+            lines.append("")
+            lines.append("| Active sites | Solver | Rows | Mean QAOA measurement shots | Mean classical single-state energy queries | Mean solver seconds |")
+            lines.append("|---:|---|---:|---:|---:|---:|")
+            for sites in sorted({int(float(r["active_sites"])) for r in rows if r.get("active_sites") not in (None,"","None")}):
+                for solver in ("qaoa","sa","greedy","uniform"):
+                    group=[r for r in rows if r.get("solver")==solver
+                           and int(float(r.get("active_sites",0) or 0))==sites
+                           and int(float(r.get("outputs",0) or 0))==int(qprimary.get("output_shots",1000))
+                           and str(r.get("pruning",""))==primary_pruning
+                           and r.get("budget_mode") in (None,"", "matched_outputs")
+                           and (solver!="qaoa" or (r.get("qaoa_objective")==str(qprimary.get("objective","cvar"))
+                               and int(float(r.get("qaoa_restarts",0) or 0))==int(qprimary.get("restarts",4))))]
+                    if not group:
+                        continue
+                    def mean_field(field: str) -> Optional[float]:
+                        values=[float(r[field]) for r in group if r.get(field) not in (None,"","None")]
+                        return sum(values)/len(values) if values else None
+                    lines.append(f"| {sites} | {solver} | {len(group)} | "
+                                 f"{_fmt(mean_field('qaoa_total_measurement_shots'))} | "
+                                 f"{_fmt(mean_field('single_state_energy_queries'))} | "
+                                 f"{_fmt(mean_field('solver_seconds'))} |")
+            lines.append("")
+            lines.append("Shots and single-state energy queries are different operations. The legacy "
+                         "cross-method `log10_qts99` adds them as abstract accounting units under an explicit "
+                         "one-shot-equals-one-query convention; it is not a hardware-normalized cost or runtime "
+                         "measure. Circuit state preparation and transpilation are not included.")
+            lines.append("")
     for label, directory in (("dev queue", ctx.run_dir / "dev_queue"), ("validation queue", ctx.run_dir / "validation_queue")):
         rows = _load_recovery_rows(directory)
         if not rows:

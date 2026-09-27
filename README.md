@@ -60,9 +60,10 @@ prediction.
    - Mean-energy and finite-shot CVaR objectives are compared. CVaR is supported by [R8], which explicitly evaluates alpha=0.10 and recommends approximately 0.1-0.25 as a useful empirical range; alpha=0.1 is therefore literature-supported but still preregistered and sensitivity-tested here.
    - Primary (confirmatory) endpoint: log10 exact ground-state amplification of
      QAOA over uniform feasible sampling at 6 sites, and its scaling slope
-     [R29,R37]. QAOA-vs-classical time-to-solution (`log10_qts99`, with and
-     without training shots) is secondary [R37,R45]. See
-     `docs/PROTOCOL_AMENDMENTS.md` A1, A7.
+     [R29,R37]. QAOA-vs-classical `log10_qts99` with and without training
+     shots is descriptive abstract accounting [R37,R45]. Other matched-output
+     solver effects are secondary under the gatekeeping rule. See
+     `docs/PROTOCOL_AMENDMENTS.md` A1, A7, A25.
    - Exploratory `quantum_exploration` stage: depth p in {1,2,3,4,6} at 20
      optimizer evaluations per parameter, and QAOA angles fitted on training
      complexes transferred untrained to the hard set [R45-R47].
@@ -80,8 +81,8 @@ prediction.
 2. Does feasibility-preserving XY-QAOA concentrate probability on the ground
    state beyond uniform feasible sampling (primary: log10 exact ground-state
    amplification at the preregistered size), and how does it compare with
-   classical baselines in resource-normalized time-to-solution with and
-   without training shots [R37,R45] (secondary)?
+   classical baselines under a declared abstract shot/query accounting
+   convention with and without training shots [R37,R45] (descriptive)?
 3. How does QAOA's ground-state amplification change as feasible
    configuration count, logical qubit count, and logical two-qubit-gate count
    grow across the preregistered problem-size axis (primary scaling slope)?
@@ -104,6 +105,13 @@ prediction.
   matched-output/matched-time and scaling results are interpreted only as
   algorithmic relative-performance evidence [R20]. Matched-time comparisons
   measure the classical cost of emulating QAOA and are descriptive.
+- The 4/6/8/10-site slope is a finite-range, fixed-depth and fixed-optimizer-budget
+  trend. Added sites also change residue identities and the QUBO landscape;
+  exact enumeration remains feasible even at 10 sites (59,049 assignments).
+  The slope is not an asymptotic complexity exponent. Quantum measurement
+  shots and classical single-state energy queries are reported separately;
+  the historical QTS99 conversion is descriptive abstract accounting, not
+  matched hardware or total computational cost.
 - Coarse QC multiplicity uses serial gatekeeping: only QAOA's primary-size
   ground-state amplification and its scaling slope are confirmatory at first;
   QAOA-vs-classical effects are confirmatory only after both are rejected
@@ -117,8 +125,9 @@ prediction.
 - All-atom primary experiments are strict fixed-backbone: N/CA/C/O coordinates
   never move (`loop_relax_iterations: 0`). Formal recovery perturbs and
   reconstructs every defined Active side-chain chi. The coarse
-  energy surrogate remains chi1-oriented and is calibrated against Amber14 on
-  training complexes only.
+  energy surrogate remains chi1-oriented. Amber14 calibration is a failed or
+  successful training-only diagnostic under the current protocol; fitted
+  coefficients are never applied to solver benchmarks.
 - Smoke checks and legacy explicit `chi1_angles` overrides are engineering or
   ablation paths and are not the formal main protocol.
 - Every protocol change after the original freeze is listed, with its reason
@@ -191,6 +200,10 @@ integrity checks still stop the run if recorded artifacts are inconsistent.
 The solver benchmark optimizes a coarse surrogate; the independent structural
 experiment supplies atomistic outcomes. This protocol change and its inspected
 training diagnostics are recorded in `docs/PROTOCOL_AMENDMENTS.md` A23.
+The final report also computes within-complex rank correlations between the
+same assignment's coarse and raw Amber scores in the training CSV. This is a
+diagnostic of the unrelaxed training cases, not held-out evidence that lower
+coarse energy produces better structures.
 
 Input complex quality also includes the A24 conservative 1.0 Å minimum
 distinct-residue protein heavy-atom distance screen. The audit counts rejected
@@ -220,7 +233,7 @@ statistics. Missing required cluster metadata fails closed.
 The formal pipeline also has an external-validation stage. By default it
 scores an **antigen-fold holdout** (`docs/PROTOCOL_AMENDMENTS.md` A10): whole
 layered-isolation components are carved out of the training split at
-`queue_freeze`, before any training, and the frozen EGNN, calibrated coarse
+`queue_freeze`, before any training, and the frozen EGNN, uncalibrated coarse
 model and primary solver protocol are applied to them without refitting. The
 claim it supports is that the frozen pipeline still holds on antigen folds
 training never saw; it is a cluster-level holdout of the same audited

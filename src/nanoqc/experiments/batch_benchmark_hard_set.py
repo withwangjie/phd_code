@@ -1037,13 +1037,15 @@ QTS_TARGET_CONFIDENCE = 0.99
 def queries_to_solution(counts: dict, energies: dict, ground: float, *,
                         fixed_units: float, units_per_sample: float,
                         configuration_count: Optional[int] = None) -> dict:
-    """Resource-normalized time-to-solution in energy-query/measurement units.
+    """Abstract time-to-solution under a declared shot/query conversion.
 
     Following the time-to-solution definition of Ronnow et al. (Science 2014),
     R99 = fixed + c * ln(1-0.99)/ln(1-p), the resources needed to observe a
     ground state at least once with 99% probability. One unit is one
-    measurement shot or one single-state energy query, so QAOA optimization
-    shots (fixed) and SA per-read energy queries (c) are charged alike.
+    measurement shot or one single-state energy query by convention, so QAOA
+    optimization shots (fixed) and SA per-read energy queries (c) are charged
+    alike in this descriptive metric. They are different physical operations;
+    this is not hardware-normalized cost or matched total computation.
     p uses the Jeffreys estimate (k+1/2)/(n+1) (Brown, Cai & DasGupta 2001),
     which stays finite for k=0 or k=n; unlike best-of-N gap/hit it does not
     saturate when a baseline always reaches the ground state.

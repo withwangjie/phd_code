@@ -147,6 +147,7 @@ def test_confirmatory_family_is_quantum_intrinsic():
     source = inspect.getsource(full.Orchestrator.stage_statistics)
     assert '"amplification:primary"' in source and '"scaling:primary"' in source
     assert 'effect["gatekeeping_family"]="secondary"' in source
+    assert 'effect["gatekeeping_family"]="descriptive_abstract_resource"' in source
 
 
 def test_transfer_parameter_file_is_validated(tmp_path: Path):
