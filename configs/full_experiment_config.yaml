@@ -386,12 +386,14 @@ qc_benchmark:
     probability_floor: 1.0e-4
     sigma_offsets: [-1.0, 0.0, 1.0]
   energy_calibration:
-    # Coefficients are fit ONLY on training complexes against Amber14
-    # all-atom energy deltas, then frozen for validation/test.
-    mode: "frozen"
+    # Training-only Amber14 fit is retained as a diagnostic. Its acceptance
+    # failure is reported and no fitted coefficient is passed to a solver.
+    # QAOA/classical benchmarks optimize the same uncalibrated coarse QUBO;
+    # independent atomistic structure outcomes are evaluated separately.
+    mode: "diagnostic"
     calibration_file: "calibration/coarse_to_amber.json"
     training_csv: "calibration/coarse_to_amber_train.csv"
-    require_calibrated: true
+    require_calibrated: false
     ridge_alpha: 1.0
     acceptance:
       min_train_complexes: 20

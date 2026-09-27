@@ -481,6 +481,21 @@ def section_search_performance(ctx: ReportContext) -> List[str]:
     calibration=_read_json(calibration_path) or {}
     lines.append("### 3.0 Training-only coarse-to-Amber calibration")
     lines.append("")
+    diagnostic=calibration_cfg.get("mode","frozen")=="diagnostic"
+    assessment=_read_json(ctx.run_dir/"calibration"/"diagnostic_assessment.json") or {}
+    if diagnostic and assessment.get("fit_status")!="completed":
+        calibration={}
+    if diagnostic:
+        lines.append(
+            "- Protocol amendment: Amber calibration is a reported diagnostic and its fitted "
+            "coefficients are **not** used by any solver benchmark. Solver energies refer to "
+            "the frozen coarse-grained surrogate; atomistic structural outcomes are evaluated separately."
+        )
+        lines.append(
+            f"- Amber fit status: {assessment.get('fit_status', 'unavailable')}; "
+            f"historical acceptance: {'passed' if assessment.get('accepted') is True else 'failed'}; "
+            f"reasons={assessment.get('failure_reasons', [])}."
+        )
     if calibration:
         lines.append(
             f"- Training complexes={calibration.get('n_train_complexes')}; samples={calibration.get('n_train_samples')}; "
@@ -494,13 +509,15 @@ def section_search_performance(ctx: ReportContext) -> List[str]:
             f"uncalibrated Spearman={_fmt(calibration.get('uncalibrated_spearman'))}; "
             f"RMSE improvement={_fmt(calibration.get('calibration_rmse_improvement_kcal'))} kcal/mol."
         )
-        lines.append(
-            "- Side-chain state construction follows the backbone-dependent Dunbrack rotamer framework [R2]. "
-            "Calibration uses training complexes only, PDB-grouped cross-validation, nonnegative component "
-            "weights, and must satisfy the frozen acceptance thresholds before the formal benchmark can run."
-        )
+        if not diagnostic:
+            lines.append(
+                "- Side-chain state construction follows the backbone-dependent Dunbrack rotamer framework [R2]. "
+                "Calibration uses training complexes only, PDB-grouped cross-validation, nonnegative component "
+                "weights, and must satisfy the frozen acceptance thresholds before the formal benchmark can run."
+            )
     else:
-        lines.append("Frozen calibration artifact is missing or unreadable.")
+        lines.append("No successful Amber diagnostic fit was produced; see the assessment and stage log."
+                     if diagnostic else "Frozen calibration artifact is missing or unreadable.")
     lines.append("")
 
     lines.append("### 3.1 Output-budget curve (equal OUTPUT count across solvers; not equal total compute)")

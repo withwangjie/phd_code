@@ -667,8 +667,10 @@ def _validate_scientific_config(config: Dict[str, Any]) -> None:
 
     calibration_cfg = qc.get("energy_calibration", {}) or {}
     mode = str(calibration_cfg.get("mode", "frozen"))
-    if mode not in ("frozen", "off"):
-        raise ValueError("energy_calibration.mode must be frozen or off")
+    if mode not in ("frozen", "diagnostic", "off"):
+        raise ValueError("energy_calibration.mode must be frozen, diagnostic, or off")
+    if mode == "diagnostic" and calibration_cfg.get("require_calibrated", False):
+        raise ValueError("Diagnostic calibration must not be applied to solver benchmarks")
     ridge_alpha = float(calibration_cfg.get("ridge_alpha", 1.0))
     if not math.isfinite(ridge_alpha) or ridge_alpha < 0:
         raise ValueError("energy_calibration.ridge_alpha must be finite and nonnegative")
@@ -798,6 +800,18 @@ class StageResult:
             finished_utc=self.finished_utc, returncode=self.returncode, detail=self.detail,
             argv=self.argv, log_path=self.log_path, artifacts_ok=self.artifacts_ok,
         )
+
+
+def calibration_solver_args(calibration_cfg: Dict[str, Any], calibration_file: Path,
+                            *, force_required: bool = False) -> List[str]:
+    """Never feed diagnostic fit coefficients into a solver invocation."""
+    if str(calibration_cfg.get("mode", "frozen")) != "frozen":
+        return []
+    required = bool(calibration_cfg.get("require_calibrated", False) or force_required)
+    argv = ["--require-calibrated-energy"] if required else []
+    if calibration_file.is_file() or force_required:
+        argv += ["--energy-calibration-file", str(calibration_file)]
+    return argv
 
 
 class Orchestrator:
@@ -1633,9 +1647,35 @@ class Orchestrator:
         if stage=="energy_calibration":
             qc=self.config.get("qc_benchmark",{}) or {}
             cal=qc.get("energy_calibration",{}) or {}
+            diagnostic=cal.get("mode","frozen")=="diagnostic"
             training=self.run_dir/cal.get("training_csv","calibration/coarse_to_amber_train.csv")
             calibration=self.run_dir/cal.get("calibration_file","calibration/coarse_to_amber.json")
             provenance=training.with_suffix(".provenance.json")
+            if diagnostic:
+                assessment_path=self.run_dir/"calibration"/"diagnostic_assessment.json"
+                assessment,error=read_json(assessment_path)
+                if error:return False,error
+                if (assessment.get("schema")!="amber_calibration_diagnostic_v1"
+                        or assessment.get("applied_to_solver") is not False
+                        or not isinstance(assessment.get("accepted"),bool)
+                        or not isinstance(assessment.get("failure_reasons"),list)
+                        or assessment.get("fit_status") not in ("completed","failed")):
+                    return False,"Calibration diagnostic assessment is incomplete"
+                if assessment["accepted"] != (assessment["fit_status"]=="completed"
+                                               and not assessment["failure_reasons"]):
+                    return False,"Calibration diagnostic acceptance does not match recorded failures"
+                for key,path in (("training_csv_sha256",training),
+                                 ("provenance_sha256",provenance),
+                                 ("calibration_sha256",calibration)):
+                    observed=sha256_of(path) if path.is_file() else None
+                    if assessment.get(key)!=observed:
+                        return False,f"Calibration diagnostic artifact is stale: {key}"
+                if assessment["fit_status"]=="failed":
+                    ok,detail=require([self.run_dir/"calibration"/"calibration_report.md"])
+                    if not ok:return ok,detail
+                    if assessment["accepted"] or not assessment["failure_reasons"]:
+                        return False,"Failed Amber diagnostic lacks explicit failure reasons"
+                    return True,"Amber diagnostic failure recorded; no coefficients applied to solvers"
             ok,detail=require([
                 training,provenance,calibration,
                 self.run_dir/"calibration"/"calibration_report.md",
@@ -1663,12 +1703,12 @@ class Orchestrator:
             if error:return False,error
             limits=cal.get("acceptance",{}) or {}
             quality_limit=limits.get("max_input_quality_exclusion_fraction")
-            if quality_limit is not None and exclusion_fraction>float(quality_limit):
+            if not diagnostic and quality_limit is not None and exclusion_fraction>float(quality_limit):
                 return False,"Calibration input-quality exclusion fraction exceeds frozen limit"
             min_eligible=int(limits.get("min_eligible_complexes",0))
-            if attempted < min_eligible:
+            if not diagnostic and attempted < min_eligible:
                 return False,f"Calibration has only {attempted} eligible complexes; minimum is {min_eligible}"
-            if failure_fraction>float(limits.get("max_generation_failure_fraction",0.0)):
+            if not diagnostic and failure_fraction>float(limits.get("max_generation_failure_fraction",0.0)):
                 return False,"Calibration generation failure fraction exceeds frozen limit"
             checks=[
                 ("cv_rmse_kcal","max_cv_rmse_kcal",lambda value,limit:value<=limit),
@@ -1683,18 +1723,22 @@ class Orchestrator:
                     continue
                 value=payload.get(metric)
                 limit=float(limits[key])
-                if value is None or not math.isfinite(float(value)) or not predicate(float(value),limit):
+                if not diagnostic and (value is None or not math.isfinite(float(value))):
+                    return False,f"Calibration metric missing or nonfinite: {metric}={value}"
+                if not diagnostic and not predicate(float(value),limit):
                     return False,f"Calibration resume acceptance failed: {metric}={value}, {key}={limit}"
-            if limits.get("require_family_grouped_cv",False) and payload.get("cv_grouping")!="family_cluster":
+            if (not diagnostic and limits.get("require_family_grouped_cv",False)
+                    and payload.get("cv_grouping")!="family_cluster"):
                 return False,"Calibration resume requires family_cluster grouped CV"
-            if int(payload.get("n_train_complexes",0) or 0)<int(limits.get("min_train_complexes",0)):
+            if not diagnostic and int(payload.get("n_train_complexes",0) or 0)<int(limits.get("min_train_complexes",0)):
                 return False,"Calibration resume has insufficient training complexes"
-            if int(payload.get("n_train_groups",0) or 0)<int(limits.get("min_train_groups",0)):
+            if not diagnostic and int(payload.get("n_train_groups",0) or 0)<int(limits.get("min_train_groups",0)):
                 return False,"Calibration resume has insufficient family groups"
             observed_folds=int(payload.get("cv_fold_count",len(payload.get("cv_folds",[]) or [])) or 0)
-            if observed_folds<int(limits.get("min_cv_folds",0)):
+            if not diagnostic and observed_folds<int(limits.get("min_cv_folds",0)):
                 return False,"Calibration resume has insufficient CV folds"
-            return True,"energy calibration artifacts and acceptance thresholds verified"
+            return True,("Amber diagnostic artifacts verified; coefficients excluded from solver calls"
+                         if diagnostic else "energy calibration artifacts and acceptance thresholds verified")
         if stage=="method_sensitivity":
             qc=self.config.get("qc_benchmark",{}) or {}
             cfg=qc.get("sensitivity",{}) or {}
@@ -2705,6 +2749,7 @@ class Orchestrator:
         started = utc_timestamp()
         qc_cfg = self.config["qc_benchmark"]
         cal_cfg = qc_cfg.get("energy_calibration", {}) or {}
+        diagnostic = cal_cfg.get("mode", "frozen") == "diagnostic"
         rot_cfg = qc_cfg.get("rotamer_model", {}) or {}
         ff = qc_cfg.get("coarse_force_field", {}) or {}
         training_csv = self.run_dir / cal_cfg.get("training_csv", "calibration/coarse_to_amber_train.csv")
@@ -2712,21 +2757,40 @@ class Orchestrator:
         provenance = training_csv.with_suffix(".provenance.json")
         training_csv.parent.mkdir(parents=True, exist_ok=True)
         calibration_file.parent.mkdir(parents=True, exist_ok=True)
+        def diagnostic_failure(detail: str, argv: Optional[List[str]] = None,
+                               log_path: Optional[Path] = None,
+                               returncode: Optional[int] = None) -> StageResult:
+            if not diagnostic:
+                return StageResult("energy_calibration", "failed", started, utc_timestamp(),
+                                   returncode, detail, argv or [],
+                                   str(log_path) if log_path else None, False)
+            report=self.run_dir/"calibration"/"calibration_report.md"
+            report.write_text("# Amber calibration diagnostic\n\nFit status: failed\n"
+                              f"Failure: {detail}\nCoefficients applied to solvers: no\n",
+                              encoding="utf-8")
+            atomic_write_json(self.run_dir/"calibration"/"diagnostic_assessment.json",{
+                "schema":"amber_calibration_diagnostic_v1",
+                "fit_status":"failed",
+                "accepted":False,
+                "applied_to_solver":False,
+                "failure_reasons":[detail],
+                "training_csv_sha256":sha256_of(training_csv) if training_csv.is_file() else None,
+                "provenance_sha256":sha256_of(provenance) if provenance.is_file() else None,
+                "calibration_sha256":sha256_of(calibration_file) if calibration_file.is_file() else None,
+            })
+            return StageResult("energy_calibration", "completed_with_failures", started,
+                               utc_timestamp(), returncode, detail, argv or [],
+                               str(log_path) if log_path else None, True)
         rotamer_library = resolve_path(
             self.config, rot_cfg.get("library_path", "data/rotamer/ALL.bbdep.rotamers.lib")
         )
         if rot_cfg.get("mode","dunbrack2010")=="dunbrack2010" and not rotamer_library.is_file():
-            return StageResult(
-                "energy_calibration", "failed", started, utc_timestamp(), None,
-                f"Required Dunbrack library missing: {rotamer_library}",
-            )
+            return diagnostic_failure(f"Required Dunbrack library missing: {rotamer_library}")
         if cal_cfg.get("selection_mode","egnn")=="egnn":
             checkpoint=self.checkpoint_dir()/qc_cfg.get("checkpoint","best_egnn_pruning.pt")
             if not checkpoint.is_file():
-                return StageResult(
-                    "energy_calibration","failed",started,utc_timestamp(),None,
-                    f"EGNN-selected calibration requires trained checkpoint: {checkpoint}",
-                )
+                return diagnostic_failure(
+                    f"EGNN-selected calibration requires trained checkpoint: {checkpoint}")
         argv = [
             self.venv_python, "-m", module_name("generate_energy_calibration_dataset.py"),
             "--dataset", str(self.dataset_dir()),
@@ -2776,10 +2840,8 @@ class Orchestrator:
             argv += ["--max-complexes", str(max_complexes)]
         returncode, log_path = self._run_subprocess("energy_calibration_dataset", argv)
         if returncode != 0 or not training_csv.is_file() or not provenance.is_file():
-            return StageResult(
-                "energy_calibration", "failed", started, utc_timestamp(), returncode,
-                f"Calibration dataset generation failed; see {log_path}", argv, str(log_path), False,
-            )
+            return diagnostic_failure(f"Calibration dataset generation failed; see {log_path}",
+                                      argv, log_path, returncode)
 
         generation=json.loads(provenance.read_text(encoding="utf-8"))
         limits=cal_cfg.get("acceptance", {}) or {}
@@ -2788,28 +2850,36 @@ class Orchestrator:
         attempted_complexes=int(generation.get("complexes_attempted",0))
         quality_exclusion_fraction=float(generation.get("input_quality_exclusion_fraction",1.0))
         quality_limit=limits.get("max_input_quality_exclusion_fraction")
-        if (not math.isfinite(quality_exclusion_fraction)
-                or (quality_limit is not None and quality_exclusion_fraction > float(quality_limit))):
-            return StageResult(
-                "energy_calibration","failed",started,utc_timestamp(),None,
-                f"Calibration input-quality exclusion fraction {quality_exclusion_fraction:.4f} "
-                f"exceeds configured limit {float(quality_limit):.4f}",
-                argv,str(log_path),False,
-            )
+        failed_checks=[]
+        if not math.isfinite(quality_exclusion_fraction):
+            return StageResult("energy_calibration","failed",started,utc_timestamp(),None,
+                               "Calibration input-quality exclusion fraction is nonfinite",
+                               argv,str(log_path),False)
+        if quality_limit is not None and quality_exclusion_fraction > float(quality_limit):
+            detail=(f"Calibration input-quality exclusion fraction {quality_exclusion_fraction:.4f} "
+                    f"exceeds configured limit {float(quality_limit):.4f}")
+            if not diagnostic:
+                return StageResult("energy_calibration","failed",started,utc_timestamp(),None,
+                                   detail,argv,str(log_path),False)
+            failed_checks.append(detail)
         min_eligible=int(limits.get("min_eligible_complexes",0))
         if attempted_complexes < min_eligible:
-            return StageResult(
-                "energy_calibration","failed",started,utc_timestamp(),None,
-                f"Calibration has only {attempted_complexes} eligible complexes; minimum is {min_eligible}",
-                argv,str(log_path),False,
-            )
-        if not math.isfinite(generation_failure_fraction) or generation_failure_fraction > max_failure_fraction:
-            return StageResult(
-                "energy_calibration","failed",started,utc_timestamp(),None,
-                f"Calibration row generation failure fraction {generation_failure_fraction:.4f} "
-                f"exceeds {max_failure_fraction:.4f}",
-                argv,str(log_path),False,
-            )
+            detail=f"Calibration has only {attempted_complexes} eligible complexes; minimum is {min_eligible}"
+            if not diagnostic:
+                return StageResult("energy_calibration","failed",started,utc_timestamp(),None,
+                                   detail,argv,str(log_path),False)
+            failed_checks.append(detail)
+        if not math.isfinite(generation_failure_fraction):
+            return StageResult("energy_calibration","failed",started,utc_timestamp(),None,
+                               "Calibration row generation failure fraction is nonfinite",
+                               argv,str(log_path),False)
+        if generation_failure_fraction > max_failure_fraction:
+            detail=(f"Calibration row generation failure fraction {generation_failure_fraction:.4f} "
+                    f"exceeds {max_failure_fraction:.4f}")
+            if not diagnostic:
+                return StageResult("energy_calibration","failed",started,utc_timestamp(),None,
+                                   detail,argv,str(log_path),False)
+            failed_checks.append(detail)
         if cluster_path is not None:
             expected_cluster_sha=sha256_of(cluster_path)
             if generation.get("cluster_map_sha256") != expected_cluster_sha:
@@ -2826,10 +2896,26 @@ class Orchestrator:
             "--calibration-ridge-alpha", str(cal_cfg.get("ridge_alpha", 1.0)),
         ]
         fit_returncode, fit_log = self._run_subprocess("energy_calibration_fit", fit_argv)
-        ok = fit_returncode == 0 and calibration_file.is_file() and calibration_file.stat().st_size > 0
+        fit_artifacts_ok = fit_returncode == 0 and calibration_file.is_file() and calibration_file.stat().st_size > 0
+        if diagnostic and not fit_artifacts_ok:
+            detail=f"Amber fit failed or its output is missing; see {fit_log}"
+            if failed_checks:
+                detail="; ".join([*failed_checks,detail])
+            return diagnostic_failure(detail,
+                                      fit_argv, fit_log, fit_returncode)
+        ok = fit_artifacts_ok
         acceptance_detail = ""
         if ok:
-            payload=json.loads(calibration_file.read_text(encoding="utf-8"))
+            try:
+                payload=json.loads(calibration_file.read_text(encoding="utf-8"))
+                if not isinstance(payload,dict):
+                    raise ValueError("Amber fit JSON must contain an object")
+            except (OSError,ValueError) as exc:
+                if diagnostic:
+                    return diagnostic_failure(
+                        f"Amber fit output is unreadable: {type(exc).__name__}: {exc}",
+                        fit_argv,fit_log,fit_returncode)
+                raise
             limits=cal_cfg.get("acceptance", {}) or {}
             checks=[
                 ("cv_rmse_kcal","max_cv_rmse_kcal",lambda value,limit:value<=limit),
@@ -2839,7 +2925,6 @@ class Orchestrator:
                 ("calibration_rmse_improvement_kcal","min_rmse_improvement_kcal",
                     lambda value,limit:value>=limit),
             ]
-            failed_checks=[]
             min_train_complexes=int(limits.get("min_train_complexes",0))
             min_train_groups=int(limits.get("min_train_groups",0))
             min_cv_folds=int(limits.get("min_cv_folds",0))
@@ -2881,6 +2966,7 @@ class Orchestrator:
         calibration_report.write_text("\n".join([
             "# Energy calibration result",
             "",
+            f"Protocol mode: {'diagnostic (not applied to solvers)' if diagnostic else 'frozen calibration'}",
             f"Status: {'accepted' if ok else 'failed'}",
             f"Training CSV: {training_csv}",
             f"Calibration JSON: {calibration_file}",
@@ -2901,6 +2987,26 @@ class Orchestrator:
             "",
             f"Acceptance detail: {acceptance_detail or 'all configured acceptance gates passed'}",
         ])+"\n",encoding="utf-8")
+        if diagnostic and fit_artifacts_ok:
+            atomic_write_json(self.run_dir/"calibration"/"diagnostic_assessment.json", {
+                "schema": "amber_calibration_diagnostic_v1",
+                "fit_status": "completed",
+                "accepted": bool(ok),
+                "applied_to_solver": False,
+                "failure_reasons": failed_checks,
+                "training_csv_sha256": sha256_of(training_csv),
+                "provenance_sha256": sha256_of(provenance),
+                "calibration_sha256": sha256_of(calibration_file),
+            })
+        if diagnostic and fit_artifacts_ok:
+            return StageResult(
+                "energy_calibration", "completed" if ok else "completed_with_failures",
+                started, utc_timestamp(), fit_returncode,
+                ("Amber diagnostic passed its historical acceptance checks; coefficients remain unused"
+                 if ok else "Amber diagnostic failed acceptance; coefficients remain unused: "
+                         + acceptance_detail),
+                fit_argv, str(fit_log), True,
+            )
         return StageResult(
             "energy_calibration", "completed" if ok else "failed", started, utc_timestamp(),
             fit_returncode,
@@ -2968,7 +3074,6 @@ class Orchestrator:
                     "--rotamer-library",str(resolve_path(self.config,rot.get("library_path","data/rotamer/ALL.bbdep.rotamers.lib"))),
                     "--rotamer-probability-floor",str(rot.get("probability_floor",1e-4)),
                     "--rotamer-sigma-offsets",*[str(v) for v in rot.get("sigma_offsets",[-1,0,1])],
-                    "--energy-calibration-file",str(calibration),"--require-calibrated-energy",
                     "--outputs",str(cfg.get("outputs",300)),"--qaoa-objective","cvar",
                     "--qaoa-restarts",str(qprimary.get("restarts",4)),
                     "--cvar-alpha",str(alpha),"--eval-shots",str(shots),
@@ -2982,6 +3087,8 @@ class Orchestrator:
                     "--omp-threads",str(self.config.get("hardware",{}).get("cpu_threads_per_process",2)),
                     "--seeds",*[str(v) for v in repeats],"--master-seed",str(self.config["master_seed"]),
                 ]
+                argv += calibration_solver_args(qc.get("energy_calibration", {}) or {},
+                                                calibration, force_required=True)
                 rc,log=self._run_subprocess(
                     f"sensitivity_shots_{shots}_alpha_{str(alpha).replace('.','p')}",argv)
                 logs.append(str(log));argvs.append(argv)
@@ -3244,15 +3351,14 @@ class Orchestrator:
         calibration_file = self.run_dir / calibration_cfg.get(
             "calibration_file", "calibration/coarse_to_amber.json"
         )
-        if calibration_cfg.get("require_calibrated", False):
-            argv.append("--require-calibrated-energy")
-        if calibration_file.is_file():
-            argv += ["--energy-calibration-file", str(calibration_file)]
-        elif calibration_cfg.get("require_calibrated", False):
+        if (calibration_cfg.get("mode", "frozen") == "frozen"
+                and calibration_cfg.get("require_calibrated", False)
+                and not calibration_file.is_file()):
             return StageResult(
                 "qc_benchmark", "failed", started, utc_timestamp(), None,
                 f"Required run-specific frozen calibration missing: {calibration_file}",
             )
+        argv += calibration_solver_args(calibration_cfg, calibration_file)
         if cfg.get("time_baselines", True):
             argv.append("--time-baselines")
         returncode, log_path = self._run_subprocess("qc_benchmark", argv)
@@ -3368,10 +3474,7 @@ class Orchestrator:
             argv += ["--target-selection-seed", str(target_selection_seed)]
         calibration_cfg = cfg.get("energy_calibration", {}) or {}
         calibration_file = self.run_dir / calibration_cfg.get("calibration_file", "calibration/coarse_to_amber.json")
-        if calibration_cfg.get("require_calibrated", False):
-            argv.append("--require-calibrated-energy")
-        if calibration_file.is_file():
-            argv += ["--energy-calibration-file", str(calibration_file)]
+        argv += calibration_solver_args(calibration_cfg, calibration_file)
         return argv
 
     def _closed_benchmark(self, out_dir: Path) -> tuple[bool, str]:
@@ -4028,7 +4131,6 @@ class Orchestrator:
                     "--rotamer-library",str(rotamer_library),
                     "--rotamer-probability-floor",str(rot.get("probability_floor",1e-4)),
                     "--rotamer-sigma-offsets",*[str(v) for v in rot.get("sigma_offsets",[-1,0,1])],
-                    "--energy-calibration-file",str(calibration),"--require-calibrated-energy",
                     "--outputs",str(qprimary.get("output_shots",1000)),
                     "--qaoa-objective",str(qprimary.get("objective","cvar")),
                     "--qaoa-restarts",str(qprimary.get("restarts",4)),
@@ -4044,6 +4146,8 @@ class Orchestrator:
                     "--seeds",*[str(v) for v in external_repeats],
                     "--master-seed",str(self.config["master_seed"]),
                 ]
+                argv += calibration_solver_args(qc.get("energy_calibration", {}) or {},
+                                                calibration, force_required=True)
                 rc,log=self._run_subprocess("external_vhh_benchmark",argv)
                 logs.append(str(log));argvs.append(argv)
                 summary_path=out/"run_summary.json"

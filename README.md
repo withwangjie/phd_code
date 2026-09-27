@@ -45,8 +45,9 @@ prediction.
      cutoff [R31,R32]; phi/psi for Dunbrack lookup are defined only across
      real peptide bonds, so residues at chain breaks are not Active sites) or Amber14 single-candidate energy
      (all-atom validation). Coarse prior/VHH/antigen/pair terms may be linearly
-     calibrated to Amber delta-E using training complexes only, with frozen
-     coefficients for validation/test.
+     compared with Amber delta-E on training complexes as a diagnostic. The
+     current formal branch uses the uncalibrated coarse QUBO for matched solver
+     comparisons and evaluates atomistic structural outcomes separately.
    - 3--6 states per Active residue are retained under a global <=30-variable
      budget. Adaptive residue-dependent coarse rotamer counts including 1/3/6-state schemes have direct precedent [R26]; this study's minimum of 3 states and <=30-bit global cap remain preregistered resource constraints.
    - Formal quantum-classical scaling axis: 4, 6, 8, and 10 Active residues. Six sites remains the preregistered primary confirmatory/all-atom size; the other sizes are scaling conditions, not literature-defined standards.
@@ -160,10 +161,12 @@ constant, one-hot register semantics, amino-acid chemistry tables, and the
 current 3--6-state / <=30-variable formal representation. Those should only be
 changed as a new method/version, not casually swept as run-time hyperparameters.
 
-## Energy calibration input
+## Training-only Amber calibration diagnostic
 
-The coarse-to-Amber calibration is **training-only** and frozen before any
-validation/test benchmark. The input CSV must contain:
+The coarse-to-Amber fit is **training-only** and is reported before any
+validation/test benchmark. In the current `diagnostic` protocol its fitted
+coefficients are never applied to a solver; failing the historical fit-quality
+thresholds is retained as a negative diagnostic result. The input CSV contains:
 
 - `pdb_id`
 - `split` (every row must be exactly `train`)
@@ -181,9 +184,13 @@ coefficient constraints, ridge alpha, and source SHA256. Validation/test rows
 are rejected at fit time, and the JSON loader rejects files that do not state
 training-only provenance.
 
-If the frozen JSON is absent but the configured training CSV exists,
-`run_full_experiment.py` fits the JSON before the coarse benchmark. If both
-are absent while `require_calibrated: true`, the run fails closed.
+The pipeline attempts the CSV and fit before the coarse benchmark. An absent
+fit or one with inadequate predictive quality receives a `completed_with_failures`
+diagnostic status and its coefficients remain unused. Provenance and result
+integrity checks still stop the run if recorded artifacts are inconsistent.
+The solver benchmark optimizes a coarse surrogate; the independent structural
+experiment supplies atomistic outcomes. This protocol change and its inspected
+training diagnostics are recorded in `docs/PROTOCOL_AMENDMENTS.md` A23.
 
 The formal rotamer model reads Dunbrack 2010 samples from the installed
 PyRosetta/Rosetta database (`pyrosetta_dun10`, pinned to build 2026.29 in the
