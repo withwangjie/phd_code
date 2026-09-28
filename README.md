@@ -381,7 +381,14 @@ scripts/   deploy_launch.sh, run_full_experiment.sh, formal_preflight.sh, check_
            diagnose_calibration_eligibility.py, diagnose_calibration_relaxation.py (read-only),
            discover_external_vhh.py (candidate discovery for manual curation)
 src/nanoqc/
-  pipeline/     run_full_experiment.py (end-to-end orchestrator), resolve_server_config.py
+  pipeline/     run_full_experiment.py (entry point: Orchestrator core, resume, main),
+                orchestrator_common.py (stage order, fingerprint list, StageResult),
+                config_validation.py (frozen-protocol validator), run_records.py (manifest, results audit),
+                stages_data.py (env_check .. queue_freeze), stages_training.py (egnn_train,
+                energy_calibration, method_sensitivity), stages_quantum.py (qc_benchmark,
+                quantum_exploration), stages_structure.py (structure_experiment, external_validation),
+                stages_reporting.py (statistics, final_report), stage_contracts.py (result contracts),
+                resolve_server_config.py
   data/         audit_all_datasets.py, build_final_pyg_dataset.py (audited graphs + split),
                 build_foldseek_pairs.py (antigen-chain-only pair table),
                 build_independence_cluster_map.py, carve_holdout_clusters.py (antigen-fold holdout),
@@ -392,10 +399,16 @@ src/nanoqc/
   model/        model_egnn_pruning.py (interface scoring, Active-site selection, checkpoint loading),
                 train_egnn_pruning.py (leakage-controlled training),
                 egnn_seed_sensitivity.py (development-only seed variance)
-  qubo/         subgraph_to_qubo.py (coarse / all-atom adaptive side-chain QUBO builders)
+  qubo/         subgraph_to_qubo.py (entry point, re-exports, self-test CLI),
+                coarse_qubo.py (InterfaceQUBOBuilder), allatom_qubo.py (AllAtomInterfaceQUBOBuilder),
+                rotamer_library.py (PyRosetta dun10 / legacy library), qubo_types.py (config, states,
+                QUBOResult), atomistic_structure.py (parsing, chi angles, evaluation), ising.py
   quantum/      instance.py (quantum instance contract), resource_estimation.py (logical resources)
   solvers/      qaoa_interface_sampler.py (XY-mixer QAOA)
-  experiments/  batch_benchmark_hard_set.py (matched quantum/classical benchmark),
+  experiments/  batch_benchmark_hard_set.py (benchmark CLI: dispatches to one module per mode),
+                hard_set_evaluation.py (default mode), research_ablation.py (--research-ablation),
+                calibration_fit.py (ridge calibration fit), benchmark_statistics.py (--paired-statistics),
+                structure_benchmarks.py (all-atom modes), benchmark_common.py (fingerprint list),
                 fit_qaoa_transfer_parameters.py (train-split QAOA angle transfer),
                 run_real_complex_pilot.py (all-atom retrospective recovery, queue-freeze eligibility),
                 generate_energy_calibration_dataset.py, run_external_structure_baselines.py (FASPR / Phenix)
@@ -413,6 +426,13 @@ manifests keep fingerprinting modules under their bare file names
 (`code_sha256["subgraph_to_qubo.py"]`), resolved through
 `nanoqc.common.repo_io.MODULE_LAYOUT`; every module under `src/nanoqc/` must be
 registered there, which `tests/test_refactor_equivalence.py` enforces.
+
+The three former multi-thousand-line files (`run_full_experiment.py`,
+`subgraph_to_qubo.py`, `batch_benchmark_hard_set.py`) are now entry points over
+focused modules. Each still re-exports every name it used to define, so existing
+imports keep working, and every split-out module is in the code fingerprints
+(`ORCHESTRATED_SCRIPTS`, the benchmark's `SHARED_HELPER_MODULES`), which tests
+check against the actual imports.
 One-time recovery helpers live in `scripts/` precisely so they stay outside
 that formal module layout.
 

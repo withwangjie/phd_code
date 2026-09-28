@@ -17,7 +17,7 @@
 
 ## 阶段依赖
 
-`src/nanoqc/pipeline/run_full_experiment.py` 的 `STAGE_PREREQUISITES` 是唯一来源：
+`src/nanoqc/pipeline/orchestrator_common.py` 的 `STAGE_PREREQUISITES` 是唯一来源（各阶段的实现按组分布在 `stages_*.py` 中）：
 
 ```
 env_check
