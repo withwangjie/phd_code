@@ -549,3 +549,28 @@ def test_build_run_manifest_fails_closed_on_missing_script(tmp_path):
     stub(full.ORCHESTRATED_SCRIPTS[0])
     manifest = full.build_run_manifest({"master_seed": 1}, tmp_path)
     assert set(manifest["code_sha256"]) == set(full.ORCHESTRATED_SCRIPTS)
+
+
+def test_benchmark_fingerprint_covers_the_split_benchmark_and_qubo_modules():
+    """Code moved out of the two entry files must stay in the benchmark's code_sha256.
+
+    batch_benchmark_hard_set.py and subgraph_to_qubo.py re-export modules in their
+    own package; a module missing from SHARED_HELPER_MODULES could change without
+    changing any benchmark provenance fingerprint.
+    """
+    from nanoqc.common.repo_io import MODULE_LAYOUT, repo_path
+    from nanoqc.experiments.batch_benchmark_hard_set import SHARED_HELPER_MODULES
+    by_dotted = {path[len("src/"):-len(".py")].replace("/", "."): name
+                 for name, path in MODULE_LAYOUT.items()}
+    for entry, package in (("batch_benchmark_hard_set.py", "src/nanoqc/experiments/"),
+                           ("subgraph_to_qubo.py", "src/nanoqc/qubo/")):
+        tree = ast.parse(repo_path(entry).read_text(encoding="utf-8"))
+        same_package = {
+            by_dotted[node.module] for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and node.module in by_dotted
+            and MODULE_LAYOUT[by_dotted[node.module]].startswith(package)
+        }
+        # A separate mode that writes its own provenance record.
+        same_package.discard("run_real_complex_pilot.py")
+        assert same_package, entry
+        assert same_package <= set(SHARED_HELPER_MODULES), sorted(same_package - set(SHARED_HELPER_MODULES))

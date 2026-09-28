@@ -185,6 +185,13 @@ ORCHESTRATED_SCRIPTS: List[str] = [
     "egnn_seed_sensitivity.py",
     "generate_energy_calibration_dataset.py",
     "batch_benchmark_hard_set.py",
+    # batch_benchmark_hard_set dispatches to these mode modules; each is fingerprinted.
+    "benchmark_common.py",
+    "hard_set_evaluation.py",
+    "research_ablation.py",
+    "calibration_fit.py",
+    "benchmark_statistics.py",
+    "structure_benchmarks.py",
     "run_real_complex_pilot.py",
     "run_external_structure_baselines.py",
     "audit_external_vhh_independence.py",

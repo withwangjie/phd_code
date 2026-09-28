@@ -14,6 +14,18 @@ REPO=Path(__file__).resolve().parents[1]
 
 
 
+
+def _benchmark_package_source() -> str:
+    """batch_benchmark_hard_set.py plus the mode modules it dispatches to and re-exports."""
+    import ast
+    entry=REPO/"src/nanoqc/experiments/batch_benchmark_hard_set.py"
+    tree=ast.parse(entry.read_text(encoding="utf-8"))
+    modules=sorted({n.module for n in tree.body if isinstance(n,ast.ImportFrom)
+                    and (n.module or "").startswith("nanoqc.experiments.")})
+    assert modules
+    files=[entry]+[REPO/"src"/(m.replace(".","/")+".py") for m in modules]
+    return "".join(f.read_text(encoding="utf-8") for f in files)
+
 def _qubo_package_source() -> str:
     """All QUBO code: subgraph_to_qubo.py re-exports builders split across the package."""
     files=sorted((REPO/"src/nanoqc/qubo").glob("*.py"))
@@ -85,7 +97,7 @@ def test_qaoa_resource_estimate_matches_implemented_xy_ansatz() -> None:
 
 
 def test_benchmark_contract_separates_proposed_baselines_and_oracle() -> None:
-    source=(REPO/"src/nanoqc/experiments/batch_benchmark_hard_set.py").read_text(encoding="utf-8")
+    source=_benchmark_package_source()
     assert 'method_role="proposed_quantum_method"' in source
     assert 'method_role="classical_baseline"' in source
     assert '"schema":"quantum_classical_benchmark_v1"' in source

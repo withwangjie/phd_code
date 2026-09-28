@@ -497,7 +497,10 @@ def main(argv=None) -> int:
          "model_egnn_pruning.py","sequence_identity.py","repo_io.py","paired_statistics.py","residue_tables.py",
          # subgraph_to_qubo.py re-exports these; the QUBO builders themselves live here.
          "atomistic_structure.py","qubo_types.py","rotamer_library.py","coarse_qubo.py","ising.py",
-         "allatom_qubo.py")},
+         "allatom_qubo.py",
+         # batch_benchmark_hard_set.py dispatches; _recovery_benchmark_main lives in these.
+         "benchmark_common.py","hard_set_evaluation.py","research_ablation.py","calibration_fit.py",
+         "benchmark_statistics.py","structure_benchmarks.py")},
         checkpoint_sha256=_ablation_digest(args.checkpoint) if args.pruning=='egnn' else None,
         pdb_allowlist_sha256=(
             _ablation_digest(args.pdb_allowlist_file) if args.pdb_allowlist_file else None),
