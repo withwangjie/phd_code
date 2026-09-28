@@ -37,7 +37,7 @@ resources:
   cpu_reserve_cores: 8
   # 80-core/256-GB host: independent CPU jobs use one BLAS/OpenMP thread.
   # Graph construction has its own cap because dense geometry uses more RAM.
-  max_workers: 48
+  max_workers: 64
   max_graph_workers: 16
   max_external_audit_workers: 12
   max_foldseek_prepare_workers: 12

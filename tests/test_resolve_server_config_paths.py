@@ -20,8 +20,8 @@ def test_80_core_server_cpu_budget_and_graph_cap(tmp_path, monkeypatch):
     monkeypatch.setattr(resolver,"_resolve_venv",lambda server:str(tmp_path/"venv"))
     monkeypatch.setattr(resolver,"_resolve_tool",lambda *args:None)
     config,report=resolver.resolve({},server)
-    assert config["qc_benchmark"]["workers"]==48
-    assert config["data_audit"]["workers"]==48
+    assert config["qc_benchmark"]["workers"]==64
+    assert config["data_audit"]["workers"]==64
     assert config["queue_freeze"]["graph_build"]["workers"]==16
     assert config["egnn_train"]["nproc_per_node"]==2
     assert config["hardware"]["cpu_threads_per_process"]==1

@@ -152,6 +152,8 @@ def is_input_quality_exclusion(exc: Exception) -> bool:
 def _calibration_shard(argv: list[str], device: str, log_path: Path) -> int:
     env=os.environ.copy()
     env["QP_OPENMM_DEVICE"]=device
+    for variable in ("OMP_NUM_THREADS","MKL_NUM_THREADS","OPENBLAS_NUM_THREADS"):
+        env[variable]="1"
     with log_path.open("w",encoding="utf-8") as log:
         return subprocess.run([sys.executable,"-m",
             "nanoqc.experiments.generate_energy_calibration_dataset",*argv],
@@ -159,23 +161,24 @@ def _calibration_shard(argv: list[str], device: str, log_path: Path) -> int:
 
 
 def _run_parallel_shards(args: argparse.Namespace) -> int:
-    """Evaluate disjoint training complexes on separate GPUs; merge in input order."""
+    """Evaluate disjoint training complexes on declared GPUs; merge in input order."""
     args.out_csv.parent.mkdir(parents=True,exist_ok=True)
     provenance_path=args.out_provenance or args.out_csv.with_suffix(".provenance.json")
     with tempfile.TemporaryDirectory(prefix="calibration_shards_",dir=args.out_csv.parent) as scratch:
         root=Path(scratch)
         jobs=[]
         for index in range(args.workers):
+            device=args.gpu_devices[index % len(args.gpu_devices)]
             csv_path=root/f"shard_{index}.csv"
             prov_path=root/f"shard_{index}.json"
             log_path=root/f"shard_{index}.log"
             if getattr(args,"dual_energy_diagnostic",False):
-                log_path=args.out_csv.parent/"worker_logs"/f"gpu_{args.gpu_devices[index]}_shard_{index}.log"
+                log_path=args.out_csv.parent/"worker_logs"/f"gpu_{device}_shard_{index}.log"
                 log_path.parent.mkdir(parents=True,exist_ok=True)
             child=[*sys.argv[1:],"--workers","1","--shard-count",str(args.workers),
                 "--shard-index",str(index),"--out-csv",str(csv_path),
                 "--out-provenance",str(prov_path)]
-            jobs.append((child,args.gpu_devices[index],csv_path,prov_path,log_path))
+            jobs.append((child,device,csv_path,prov_path,log_path))
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as pool:
             futures=[pool.submit(_calibration_shard,child,device,log)
                 for child,device,_,_,log in jobs]
@@ -226,6 +229,9 @@ def _run_parallel_shards(args: argparse.Namespace) -> int:
         provenance["generation_failure_fraction"]=(
             len(provenance["failures"])/attempted if attempted else 1.0)
         provenance.update(parallel_workers=args.workers,gpu_devices=args.gpu_devices,
+            workers_per_gpu_limit=getattr(args,"workers_per_gpu",1),
+            worker_gpu_assignment=[job[1] for job in jobs],
+            worker_compute_threads=1,
             shard_count=args.workers,seed_policy="per_training_manifest_row_seedsequence",
             csv_sha256=sha256(args.out_csv))
         provenance_path.write_text(json.dumps(provenance,indent=2,sort_keys=True)+"\n",encoding="utf-8")
@@ -253,6 +259,8 @@ def main() -> int:
     parser.add_argument("--cluster-map",type=Path,
         help="Frozen PDB->family/structure cluster map used for grouped calibration CV.")
     parser.add_argument("--workers",type=int,default=1)
+    parser.add_argument("--workers-per-gpu",type=int,default=1,
+        help="Explicit maximum processes per GPU; shared devices require opting in")
     parser.add_argument("--gpu-devices",nargs="+",default=["0"])
     parser.add_argument("--shard-index",type=int,default=0,help=argparse.SUPPRESS)
     parser.add_argument("--shard-count",type=int,default=1,help=argparse.SUPPRESS)
@@ -295,8 +303,9 @@ def main() -> int:
         parser.error("--max-complexes must be >=0")
     if args.workers < 1 or args.shard_count < 1 or not 0 <= args.shard_index < args.shard_count:
         parser.error("Invalid calibration worker or shard count")
-    if args.workers > len(args.gpu_devices) or len(set(args.gpu_devices))!=len(args.gpu_devices):
-        parser.error("Each calibration worker requires a distinct gpu-device")
+    if (args.workers_per_gpu<1 or args.workers>len(args.gpu_devices)*args.workers_per_gpu
+            or len(set(args.gpu_devices))!=len(args.gpu_devices)):
+        parser.error("Distinct GPU indices and workers <= GPUs * workers-per-gpu required")
     if any(not device.isdecimal() for device in args.gpu_devices):
         parser.error("gpu-devices must be nonnegative CUDA device indices")
     if args.rotamer_mode=="dunbrack2010" and (args.rotamer_library is None or not args.rotamer_library.is_file()):

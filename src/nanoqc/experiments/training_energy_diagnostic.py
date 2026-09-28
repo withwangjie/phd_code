@@ -153,7 +153,7 @@ def summarize(csv_path: Path, provenance_path: Path, output: Path) -> dict:
 
 
 def diagnostic_command(run: Path, config: dict, output: Path, *, workers: int,
-                       devices: list[str], iterations: int) -> list[str]:
+                       devices: list[str], iterations: int, workers_per_gpu: int=1) -> list[str]:
     """Use frozen scientific settings but enforce the complete training manifest."""
     paths=config["paths"];repo=Path(paths["repo_root"])
     def source(value):
@@ -175,6 +175,7 @@ def diagnostic_command(run: Path, config: dict, output: Path, *, workers: int,
         "active-sites":cal.get("active_sites",6),"radius":cal.get("radius_angstrom",6.),
         "seed":derive_child_seed(derive_streams(config["master_seed"])["partition"],"energy_calibration"),
         "solvent-model":config.get("structure_experiment",{}).get("solvent_model","vacuum"),"workers":workers,
+        "workers-per-gpu":workers_per_gpu,
         "vhh-identity-threshold":hom.get("vhh_full_chain_identity",.8),"cdr-h3-identity-threshold":hom.get("cdr_h3_identity",.5),
         "antigen-identity-threshold":hom.get("antigen_identity",.3),"antigen-min-length-coverage":hom.get("antigen_min_length_coverage",.7),
         "antigen-guidance-weight":qc.get("antigen_guidance_weight",.25),
@@ -197,13 +198,15 @@ def main() -> int:
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-dir",type=Path,required=True)
     parser.add_argument("--out-dir",type=Path,required=True,help="New diagnostic directory outside the frozen run")
-    parser.add_argument("--workers",type=int,default=2)
+    parser.add_argument("--workers",type=int,default=8)
+    parser.add_argument("--workers-per-gpu",type=int,default=4)
     parser.add_argument("--gpu-devices",nargs="+",default=["0","1"])
     parser.add_argument("--iterations",type=int,default=200)
     args=parser.parse_args()
     run=args.run_dir.resolve(strict=True);output=args.out_dir.resolve()
     if output==run or output.is_relative_to(run):parser.error("Diagnostic output must be outside the frozen run")
-    if args.iterations<1 or args.workers<1 or args.workers>len(args.gpu_devices):parser.error("Invalid iteration/worker settings")
+    if (args.iterations<1 or args.workers<1 or args.workers_per_gpu<1
+            or args.workers>len(args.gpu_devices)*args.workers_per_gpu):parser.error("Invalid iteration/worker settings")
     if len(set(args.gpu_devices))!=len(args.gpu_devices) or any(not d.isdecimal() for d in args.gpu_devices):parser.error("Distinct numeric GPU indices required")
     if output.exists() and any(output.iterdir()):parser.error("Use a new empty output directory; previous diagnostics are preserved")
     config=json.loads((run/"run_manifest.json").read_text(encoding="utf-8"))["config"]
@@ -217,7 +220,8 @@ def main() -> int:
     for variable,key,default in (("QP_OPENMM_PLATFORM","openmm_platform","Reference"),
                                  ("QP_OPENMM_PRECISION","openmm_precision","double")):
         os.environ.setdefault(variable,str(hardware.get(key,default)))
-    command=diagnostic_command(run,config,output,workers=args.workers,devices=args.gpu_devices,iterations=args.iterations)
+    command=diagnostic_command(run,config,output,workers=args.workers,devices=args.gpu_devices,
+                               iterations=args.iterations,workers_per_gpu=args.workers_per_gpu)
     output.mkdir(parents=True,exist_ok=True)
     with FileLock(str(output/".lock"),timeout=0):
         atomic_write_json_fsync(output/"diagnostic_manifest.json",dict(

@@ -6,6 +6,7 @@ import csv
 import json
 import multiprocessing as mp
 import os
+import pytest
 from pathlib import Path
 
 from nanoqc.experiments import generate_energy_calibration_dataset as calibration
@@ -14,7 +15,8 @@ from nanoqc.data import audit_all_datasets as audit
 from nanoqc.data import build_foldseek_pairs as foldseek_pairs
 
 
-def test_calibration_shards_merge_in_training_manifest_order(tmp_path, monkeypatch):
+@pytest.mark.parametrize("workers,per_gpu",[(2,1),(8,4)])
+def test_calibration_shards_merge_in_training_manifest_order(tmp_path, monkeypatch,workers,per_gpu):
     def fake_shard(argv, device, log_path):
         shard=int(argv[argv.index("--shard-index")+1])
         csv_path=Path(argv[argv.index("--out-csv")+1])
@@ -31,15 +33,31 @@ def test_calibration_shards_merge_in_training_manifest_order(tmp_path, monkeypat
 
     monkeypatch.setattr(calibration,"_calibration_shard",fake_shard)
     args=argparse.Namespace(out_csv=tmp_path/"train.csv",out_provenance=None,
-        workers=2,gpu_devices=["0","1"])
+        workers=workers,gpu_devices=["0","1"],workers_per_gpu=per_gpu)
     assert calibration._run_parallel_shards(args)==0
     with args.out_csv.open(newline="",encoding="utf-8") as handle:
         rows=list(csv.DictReader(handle))
-    assert [(row["training_row_index"],row["device"]) for row in rows]==[("0","0"),("1","1")]
+    expected=[(str(index),str(index%2)) for index in range(workers)]
+    assert [(row["training_row_index"],row["device"]) for row in rows]==expected
     provenance=json.loads((tmp_path/"train.provenance.json").read_text(encoding="utf-8"))
-    assert provenance["complexes_succeeded"]==2
-    assert provenance["parallel_workers"]==2
+    assert provenance["complexes_succeeded"]==workers
+    assert provenance["parallel_workers"]==workers
+    assert provenance["worker_gpu_assignment"]==[device for _,device in expected]
+    assert provenance["workers_per_gpu_limit"]==per_gpu
     assert provenance["csv_sha256"]==calibration.sha256(args.out_csv)
+
+
+def test_calibration_worker_bounds_cpu_threads_and_pins_device(tmp_path,monkeypatch):
+    seen={}
+    def capture(command,**kwargs):
+        seen.update(kwargs["env"])
+        return argparse.Namespace(returncode=0)
+    monkeypatch.setattr(calibration.subprocess,"run",capture)
+    monkeypatch.setenv("OMP_NUM_THREADS","80")
+    assert calibration._calibration_shard([],"1",tmp_path/"worker.log")==0
+    assert seen["QP_OPENMM_DEVICE"]=="1"
+    for variable in ("OMP_NUM_THREADS","MKL_NUM_THREADS","OPENBLAS_NUM_THREADS"):
+        assert seen[variable]=="1"
 
 
 def test_structural_worker_sets_openmm_device_before_solver(monkeypatch):

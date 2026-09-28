@@ -19,13 +19,27 @@ export QP_OPENMM_PRECISION=double
 python -m nanoqc.experiments.training_energy_diagnostic \
   --run-dir /data/phd_code/runs/experiments_full_run_20260926_060041 \
   --out-dir /data/phd_code/runs/training_dual_energy_$(date +%Y%m%d_%H%M%S) \
-  --workers 2 --gpu-devices 0 1 --iterations 200
+  --workers 8 --workers-per-gpu 4 --gpu-devices 0 1 --iterations 200
 ```
 
 Use the actual completed training run as `--run-dir`. Its dataset manifest,
 checkpoint, family map, scientific configuration, rotamer version and seed stream
-are the sources. Two workers receive separate CUDA devices. Explicit CUDA
+are the sources. Eight workers share the two CUDA devices, four per device,
+with one BLAS/OpenMP thread each. The worker-to-device map is recorded in
+provenance; random sampling uses the global training row, not the worker index.
+Explicit CUDA
 selection fails on CUDA problems; it does not silently fall back to CPU.
+
+This is a starting configuration for the 80-core/256-GB/two-T4 host, not a
+measured optimum. Shared workers can overlap CPU preparation with GPU work.
+Without NVIDIA MPS, different CUDA contexts use GPU time slices; MPS can permit
+concurrent kernels when a single client underuses the GPU. See NVIDIA's
+[architecture](https://docs.nvidia.com/deploy/mps/architecture.html) and
+[usage guidance](https://docs.nvidia.com/deploy/mps/when-to-use-mps.html).
+The program does not start an MPS service. Compare completed complexes/hour,
+GPU memory and RAM at 2, 4 and 8 workers before increasing concurrency further.
+The server CPU task cap is now 64; graph and memory-heavy task caps remain
+separate. Existing frozen formal runs keep their resolved runtime configuration.
 
 The output must be an empty directory outside the source run. The command rejects
 overwriting a previous diagnostic. This initial implementation has no resume
