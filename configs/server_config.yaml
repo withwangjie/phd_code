@@ -40,6 +40,7 @@ resources:
   max_foldseek_prepare_workers: 4
   max_exploration_depth_workers: 2
   max_sensitivity_case_workers: 2
+  max_statistics_mode_workers: 2
   cpu_threads_per_process: 2
   max_egnn_loader_workers: 4
   openmm_cpu_threads: 8

@@ -201,6 +201,8 @@ def resolve(scientific: dict[str,Any], server: dict[str,Any]) -> tuple[dict[str,
         int(res.get("max_exploration_depth_workers",1)),workers))
     hw["sensitivity_case_workers"]=max(1,min(
         int(res.get("max_sensitivity_case_workers",1)),workers))
+    hw["statistics_mode_workers"]=max(1,min(
+        int(res.get("max_statistics_mode_workers",1)),workers))
 
     structural=out.setdefault("external_validation",{}).setdefault("structural_baselines",{})
     faspr=_resolve_tool(
@@ -257,6 +259,7 @@ def resolve(scientific: dict[str,Any], server: dict[str,Any]) -> tuple[dict[str,
         "foldseek_prepare_workers":hw["foldseek_prepare_workers"],
         "exploration_depth_workers":hw["exploration_depth_workers"],
         "sensitivity_case_workers":hw["sensitivity_case_workers"],
+        "statistics_mode_workers":hw["statistics_mode_workers"],
         "faspr_executable":structural.get("faspr_executable"),
         "foldseek_executable":foldseek,
         "phenix_clashscore_executable":structural.get("phenix_clashscore_executable"),

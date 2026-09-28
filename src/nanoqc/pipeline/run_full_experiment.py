@@ -4439,13 +4439,17 @@ class Orchestrator:
         if primary_restarts not in [int(v) for v in qablation.get("restarts",[])]:
             failures.append(
                 f"quantum primary restarts={primary_restarts} is not present in benchmark_ablation.restarts")
+        paired_jobs=[]
+        budget_modes=list(cfg.get("budget_modes", ["outputs", "time"]))
+        if len(set(budget_modes))!=len(budget_modes):
+            raise ValueError("Paired-statistics budget modes must be unique")
         for results_dir in results_dirs:
             if not results_dir.is_dir():
                 failures.append(f"statistics input directory is missing: {results_dir}")
                 continue
             if failures:
                 continue
-            for budget_mode in cfg.get("budget_modes", ["outputs", "time"]):
+            for budget_mode in budget_modes:
                 argv = [
                     self.venv_python, "-m", module_name("batch_benchmark_hard_set.py"), "--paired-statistics",
                     "--results-dir", str(results_dir),
@@ -4467,8 +4471,16 @@ class Orchestrator:
                     failures.append(f"Missing required run-local cluster map for statistics: {cluster_path}")
                     continue
                 argv += ["--cluster-map", str(cluster_path)]
-                returncode, log_path = self._run_subprocess(
-                    f"statistics_{results_dir.name}_{budget_mode}", argv)
+                paired_jobs.append((results_dir,budget_mode,argv))
+        def run_paired_mode(job):
+            results_dir,budget_mode,argv=job
+            returncode,log_path=self._run_subprocess(
+                f"statistics_{results_dir.name}_{budget_mode}",argv)
+            return results_dir,budget_mode,argv,returncode,log_path
+        paired_workers=max(1,min(len(paired_jobs),int(self.config.get("hardware",{}).get(
+            "statistics_mode_workers",1))))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=paired_workers) as pool:
+            for results_dir,budget_mode,argv,returncode,log_path in pool.map(run_paired_mode,paired_jobs):
                 logs.append(str(log_path)); argvs.append(argv)
                 expected = [
                     results_dir / f"statistics_{budget_mode}.json",

@@ -450,7 +450,7 @@ In auto mode the resolver chooses DDP ranks from available GPUs while preserving
 
 On the two-T4 server, EGNN training uses two DDP ranks. After sequential queue selection, independent structural targets run in separate spawned processes on CUDA devices 0 and 1. Training-only Amber diagnostic complexes are sharded across those devices and merged in frozen manifest order; their per-complex random streams are independent of worker scheduling. Data audit, Foldseek, grouped regression/statistics, and the formal legal-subspace QAOA simulator remain CPU tasks. This execution and calibration sampling change requires a **new formal run**, not resume of an older frozen directory (A26).
 
-The CPU stages also use bounded parallelism: data audit, Foldseek antigen-input preparation and external VHH sequence checks use spawned processes; the Foldseek search uses its own threads; the solver benchmark uses a process pool. Sensitivity cases and exploratory QAOA depths run in parallel while each depth's training fit, parameter transfer and hard-set evaluation stay ordered. Development structural targets can occupy both T4s; frozen validation target selection remains sequential (A27).
+The CPU stages also use bounded parallelism: data audit, Foldseek antigen-input preparation and external VHH sequence checks use spawned processes; the Foldseek search uses its own threads; the solver benchmark uses a process pool. Sensitivity cases, exploratory QAOA depths and paired-statistics budget modes run in parallel while each depth's training fit, parameter transfer and hard-set evaluation stay ordered. Development structural targets can occupy both T4s; frozen validation target selection remains sequential (A27).
 
 ## One-click formal experiment
 
