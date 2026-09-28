@@ -13,6 +13,13 @@ from nanoqc.quantum.resource_estimation import estimate_qaoa_resources
 REPO=Path(__file__).resolve().parents[1]
 
 
+
+def _qubo_package_source() -> str:
+    """All QUBO code: subgraph_to_qubo.py re-exports builders split across the package."""
+    files=sorted((REPO/"src/nanoqc/qubo").glob("*.py"))
+    assert any(f.name=="subgraph_to_qubo.py" for f in files)
+    return "".join(f.read_text(encoding="utf-8") for f in files)
+
 def _instance() -> QuantumOptimizationInstance:
     physical_self=np.asarray([1.0,2.0,3.0,4.0])
     physical_pair=np.zeros((4,4),dtype=float)
@@ -90,7 +97,7 @@ def test_benchmark_contract_separates_proposed_baselines_and_oracle() -> None:
 
 
 def test_qubo_result_exports_quantum_instance_contract() -> None:
-    source=(REPO/"src/nanoqc/qubo/subgraph_to_qubo.py").read_text(encoding="utf-8")
+    source=_qubo_package_source()
     assert "def to_quantum_instance(self)" in source
     assert '"quantum_instance": quantum_path' in source
 
@@ -142,7 +149,7 @@ def test_formal_preflight_reuses_exact_scientific_resource_gate() -> None:
 
 
 def test_quantum_instance_provenance_includes_rotamer_source() -> None:
-    source=(REPO/"src/nanoqc/qubo/subgraph_to_qubo.py").read_text(encoding="utf-8")
+    source=_qubo_package_source()
     assert "def _sha256_path(" in source
     assert "**rotamer_source_metadata(self.rotamer_mode, self.rotamer_library_path)" in source
     assert '"rotamer_library_sha256": self.metadata.get("rotamer_library_sha256")' in source

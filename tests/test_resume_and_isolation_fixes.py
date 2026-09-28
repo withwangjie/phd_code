@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -299,7 +300,10 @@ def test_antigen_neighbour_prefilter_is_exact(monkeypatch):
     data, _ = _graph_with_antigen_outside_radius()
     sub = build_ablation_subgraph(data, torch.arange(5), 6.0)
     filtered = _coarse_builder().build(sub).metadata
-    monkeypatch.setattr(qubo, "_MAX_PSEUDO_ATOM_OFFSET", 1.0e6)
+    # Patch the module the builder actually reads the constant from; patching a
+    # re-export would leave the prefilter active and make this check vacuous.
+    builder_module = sys.modules[qubo.InterfaceQUBOBuilder.__module__]
+    monkeypatch.setattr(builder_module, "_MAX_PSEUDO_ATOM_OFFSET", 1.0e6)
     unfiltered = _coarse_builder().build(sub).metadata
     # Same atom pairs are scored; only float summation order differs.
     for key in ("raw_antigen_energy", "raw_vhh_environment_energy"):

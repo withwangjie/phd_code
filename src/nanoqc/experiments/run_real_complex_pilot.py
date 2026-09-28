@@ -494,7 +494,10 @@ def main(argv=None) -> int:
         graph_manifest_sha256=_ablation_digest(manifest), code_sha256={n:_ablation_digest(repo_path(n)) for n in
         ("run_real_complex_pilot.py","batch_benchmark_hard_set.py","subgraph_to_qubo.py","qaoa_interface_sampler.py",
          "structural_quality.py","prediction_contract.py","evaluate_complex_metrics.py",
-         "model_egnn_pruning.py","sequence_identity.py","repo_io.py","paired_statistics.py","residue_tables.py")},
+         "model_egnn_pruning.py","sequence_identity.py","repo_io.py","paired_statistics.py","residue_tables.py",
+         # subgraph_to_qubo.py re-exports these; the QUBO builders themselves live here.
+         "atomistic_structure.py","qubo_types.py","rotamer_library.py","coarse_qubo.py","ising.py",
+         "allatom_qubo.py")},
         checkpoint_sha256=_ablation_digest(args.checkpoint) if args.pruning=='egnn' else None,
         pdb_allowlist_sha256=(
             _ablation_digest(args.pdb_allowlist_file) if args.pdb_allowlist_file else None),

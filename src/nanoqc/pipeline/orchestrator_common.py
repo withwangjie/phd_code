@@ -196,6 +196,13 @@ ORCHESTRATED_SCRIPTS: List[str] = [
     "fit_qaoa_transfer_parameters.py",
     "model_egnn_pruning.py",
     "subgraph_to_qubo.py",
+    # subgraph_to_qubo is split across these modules; each is fingerprinted.
+    "atomistic_structure.py",
+    "qubo_types.py",
+    "rotamer_library.py",
+    "coarse_qubo.py",
+    "ising.py",
+    "allatom_qubo.py",
     "qaoa_interface_sampler.py",
     # Formal QUBO/Ising instance and QAOA logical-resource accounting,
     # imported by subgraph_to_qubo / qaoa_interface_sampler / the benchmark.
