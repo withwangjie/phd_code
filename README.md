@@ -167,7 +167,7 @@ QAOA's own ground-state amplification and its finite-range scaling slope
 - Smoke checks and legacy explicit `chi1_angles` overrides are engineering or
   ablation paths and are not the formal main protocol.
 - Every protocol change after the original freeze is listed, with its reason
-  and inspection status, in `docs/PROTOCOL_AMENDMENTS.md` (currently A1-A25).
+  and inspection status, in `docs/PROTOCOL_AMENDMENTS.md` (currently A1-A27).
 
 ## Scientific configuration
 
@@ -484,7 +484,7 @@ Useful variants, all passed straight through to `run_full_experiment.sh`:
 
 ```bash
 ./scripts/deploy_launch.sh --stop-after queue_freeze        # check cluster adequacy before training
-./scripts/deploy_launch.sh --resume=<run directory name>    # continue an existing run
+./scripts/deploy_launch.sh --resume=<run directory name>    # same code/evidence/config only; otherwise refused
 ./scripts/deploy_launch.sh --resume=<run> --force-restage egnn_train
 ./scripts/deploy_launch.sh --only <stage>                   # prerequisites must already be complete
 ```
@@ -551,6 +551,14 @@ resume.
   training failed; allows only `egnn_train.amp` to change (A20).
 - `scripts/amend_failed_calibration.py` — calibration protocol repair, keeping
   the verified audit, queue freeze and FP32 checkpoint (A21, A22).
+
+Both scripts belong to runs launched **before** the module split (the
+orchestrator, QUBO and benchmark modules were split into focused files; see
+Repository layout). The split adds new file names to the code fingerprint, so
+`amend_failed_calibration.py` refuses a pre-split run as an unexpected source
+change, and neither script is a route for continuing such a run on the current
+code. A23-A27 already require a new formal run; start one fresh
+(`./scripts/deploy_launch.sh`) instead of amending an old directory.
 
 Two read-only diagnostics change nothing in a run:
 `scripts/diagnose_calibration_eligibility.py` inspects calibration exclusions,
