@@ -35,13 +35,16 @@ resources:
   # CPU concurrency policy. Auto worker counts never exceed max_workers and
   # reserve at least cpu_reserve_cores for the OS/orchestrator.
   cpu_reserve_cores: 8
-  max_workers: 16
-  max_external_audit_workers: 4
-  max_foldseek_prepare_workers: 4
+  # 80-core/256-GB host: independent CPU jobs use one BLAS/OpenMP thread.
+  # Graph construction has its own cap because dense geometry uses more RAM.
+  max_workers: 48
+  max_graph_workers: 16
+  max_external_audit_workers: 12
+  max_foldseek_prepare_workers: 12
   max_exploration_depth_workers: 2
-  max_sensitivity_case_workers: 2
+  max_sensitivity_case_workers: 3
   max_statistics_mode_workers: 2
-  cpu_threads_per_process: 2
+  cpu_threads_per_process: 1
   max_egnn_loader_workers: 4
   openmm_cpu_threads: 8
 

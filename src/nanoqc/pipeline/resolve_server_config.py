@@ -142,9 +142,10 @@ def resolve(scientific: dict[str,Any], server: dict[str,Any]) -> tuple[dict[str,
     reserve=max(0,int(res.get("cpu_reserve_cores",2)))
     usable=max(1,cpu-reserve)
     max_workers=max(1,int(res.get("max_workers",16)))
-    workers=max(1,min(max_workers,usable))
     threads=max(1,int(res.get("cpu_threads_per_process",2)))
-    graph_workers=max(1,min(workers,max(1,usable//2)))
+    workers=max(1,min(max_workers,max(1,usable//threads)))
+    graph_workers=max(1,min(workers,max(1,usable//2),
+        int(res.get("max_graph_workers",workers))))
     loader_workers=max(1,min(int(res.get("max_egnn_loader_workers",8)),usable))
 
     target_global=max(1,int(res.get("target_global_batch_size",4)))
