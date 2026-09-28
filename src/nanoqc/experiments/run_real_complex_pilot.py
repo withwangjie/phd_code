@@ -38,6 +38,34 @@ def _run_recovery_on_device(argv: list[str], device: str) -> int:
     return _recovery_benchmark_main(argv)
 
 
+def _initialize_recovery_worker(device: str) -> None:
+    os.environ["QP_OPENMM_DEVICE"]=device
+    for variable in ("OMP_NUM_THREADS","MKL_NUM_THREADS","OPENBLAS_NUM_THREADS"):
+        os.environ[variable]="1"
+    torch.set_num_threads(1)
+
+
+def _structural_worker_devices(workers: int, devices: list[str], per_gpu: int) -> list[str]:
+    if (workers<1 or per_gpu<1 or not devices or len(set(devices))!=len(devices)
+            or any(not device.isdecimal() for device in devices)
+            or workers>len(devices)*per_gpu):
+        raise ValueError("Require distinct numeric GPU indices and workers <= GPUs * workers-per-gpu")
+    return [devices[index % len(devices)] for index in range(workers)]
+
+
+def _submit_structural_jobs(jobs: list, devices: list[str], stack) -> list:
+    """Fixed device per spawned process, preserving frozen submission/merge order."""
+    # Spawned interpreters must inherit these before importing NumPy/Torch.
+    for variable in ("OMP_NUM_THREADS","MKL_NUM_THREADS","OPENBLAS_NUM_THREADS"):
+        os.environ[variable]="1"
+    pools=[stack.enter_context(concurrent.futures.ProcessPoolExecutor(
+        max_workers=1,mp_context=mp.get_context("spawn"),
+        initializer=_initialize_recovery_worker,initargs=(device,))) for device in devices]
+    return [(pdb,destination,argv,pools[index % len(pools)].submit(
+        _run_recovery_on_device,argv,devices[index % len(pools)]))
+        for index,(pdb,destination,argv) in enumerate(jobs)]
+
+
 def _manifest_graph_path(root: Path, relative: object) -> Path:
     """Resolve a graph-manifest path without permitting directory escape."""
     if not isinstance(relative, str) or not relative or Path(relative).is_absolute():
@@ -314,8 +342,10 @@ def main(argv=None) -> int:
     parser.add_argument("--sites", type=int, default=6)
     parser.add_argument("--target-workers", type=int, default=1,
         help="Independent structural targets to evaluate concurrently after sequential eligibility.")
+    parser.add_argument("--workers-per-gpu", type=int, default=1,
+        help="Maximum structural processes per CUDA device; sharing requires opting in.")
     parser.add_argument("--gpu-devices", nargs="+", default=["0"],
-        help="OpenMM CUDA device indices, one dedicated spawned worker per device.")
+        help="Distinct OpenMM CUDA device indices; workers are assigned round-robin.")
     parser.add_argument("--vhh-identity-threshold", type=float, default=0.80)
     parser.add_argument("--cdr-h3-identity-threshold", type=float, default=0.50)
     parser.add_argument("--antigen-identity-threshold", type=float, default=0.30)
@@ -391,12 +421,10 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     if not 1 <= args.sites <= 10 or args.targets < 0 or args.qaoa_depth <= 0:
         parser.error("Require 1..10 sites, positive qaoa-depth, and a nonnegative target count (0 = unlimited)")
-    if args.target_workers < 1 or len(set(args.gpu_devices)) != len(args.gpu_devices):
-        parser.error("Require positive target-workers and distinct gpu-devices")
-    if args.target_workers > len(args.gpu_devices):
-        parser.error("Each structural worker requires a dedicated gpu-device")
-    if any(not device.isdecimal() for device in args.gpu_devices):
-        parser.error("gpu-devices must be nonnegative CUDA device indices")
+    try:
+        worker_devices=_structural_worker_devices(args.target_workers,args.gpu_devices,args.workers_per_gpu)
+    except ValueError as exc:
+        parser.error(str(exc))
     if args.eligibility_only and not args.prepare_only:
         parser.error("--eligibility-only is valid only together with --prepare-only")
     if not 0.0 < args.min_perturb_degrees <= args.max_perturb_degrees <= 180.0:
@@ -807,22 +835,20 @@ def main(argv=None) -> int:
                            "--parameter-scale",args.parameter_scale] if args.robust_qaoa else [])]
                 jobs.append((pdb,destination,job_argv))
             with contextlib.ExitStack() as stack:
-                pools=[]
-                if args.target_workers > 1:
-                    for _ in range(args.target_workers):
-                        pools.append(stack.enter_context(concurrent.futures.ProcessPoolExecutor(
-                            max_workers=1, mp_context=mp.get_context("spawn"))))
-                futures=[]
-                for index,(pdb,destination,job_argv) in enumerate(jobs):
-                    if pools:
-                        future=pools[index % len(pools)].submit(
-                            _run_recovery_on_device,job_argv,args.gpu_devices[index % len(pools)])
-                    else:
-                        future=None
-                    futures.append((pdb,destination,job_argv,future))
+                active_devices=worker_devices[:min(len(jobs),len(worker_devices))]
+                (out/"structure_execution.json").write_text(json.dumps(dict(
+                    requested_workers=args.target_workers,workers_per_gpu=args.workers_per_gpu,
+                    worker_gpu_assignment=active_devices,targets_submitted=len(jobs),
+                    cpu_threads_per_worker=1 if len(active_devices)>1 else None,
+                    openmm_precision=os.environ.get("QP_OPENMM_PRECISION","double"),
+                    openmm_platform=os.environ.get("QP_OPENMM_PLATFORM","Reference")),
+                    indent=2)+"\n",encoding="utf-8")
+                futures=(_submit_structural_jobs(jobs,active_devices,stack)
+                         if len(active_devices)>1 else [(pdb,dest,argv,None) for pdb,dest,argv in jobs])
                 for pdb,destination,job_argv,future in futures:
                     try:
-                        status=(future.result() if future is not None else _recovery_benchmark_main(job_argv))
+                        status=(future.result() if future is not None else
+                                _run_recovery_on_device(job_argv,args.gpu_devices[0]))
                         metrics_path=destination/"recovery_metrics.csv"
                         if not metrics_path.is_file():
                             raise FileNotFoundError(metrics_path)

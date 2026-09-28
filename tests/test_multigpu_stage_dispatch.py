@@ -2,6 +2,7 @@
 
 import argparse
 import concurrent.futures
+import contextlib
 import csv
 import json
 import multiprocessing as mp
@@ -68,6 +69,40 @@ def test_structural_worker_sets_openmm_device_before_solver(monkeypatch):
     monkeypatch.setenv("QP_OPENMM_DEVICE","0")
     assert pilot._run_recovery_on_device(["--manifest","frozen.json"],"1")==0
     assert seen==[(["--manifest","frozen.json"],"1")]
+
+
+def test_shared_gpu_structural_dispatch_keeps_fixed_device_and_target_order(monkeypatch):
+    assignments=[]
+    pools=[]
+    class Pool:
+        def __init__(self,**kwargs):
+            for variable in ("OMP_NUM_THREADS","MKL_NUM_THREADS","OPENBLAS_NUM_THREADS"):
+                assert os.environ[variable]=="1"
+            self.device=kwargs["initargs"][0]
+            assert kwargs["initializer"] is pilot._initialize_recovery_worker
+            pools.append(self)
+        def __enter__(self):return self
+        def __exit__(self,*args):pass
+        def submit(self,fn,argv,device):
+            assert device==self.device
+            assignments.append((argv[0],device))
+            future=concurrent.futures.Future()
+            future.set_result(int(argv[0]))
+            return future
+    monkeypatch.setattr(pilot.concurrent.futures,"ProcessPoolExecutor",Pool)
+    devices=pilot._structural_worker_devices(8,["0","1"],4)
+    jobs=[(str(i),None,[str(i)]) for i in range(11)]
+    with contextlib.ExitStack() as stack:
+        futures=pilot._submit_structural_jobs(jobs,devices,stack)
+        assert [future.result() for *_,future in futures]==list(range(11))
+    assert len(pools)==8
+    assert assignments==[(str(i),str(i%2)) for i in range(11)]
+
+
+@pytest.mark.parametrize("workers,devices,cap",[(8,["0","1"],1),(9,["0","1"],4),
+    (2,["0","0"],4),(1,[],4),(1,["bad"],4),(1,["0"],0)])
+def test_structural_sharing_requires_valid_explicit_limit(workers,devices,cap):
+    with pytest.raises(ValueError):pilot._structural_worker_devices(workers,devices,cap)
 
 
 def test_audit_spawned_processes_preserve_discovery_order(tmp_path):

@@ -196,7 +196,11 @@ def resolve(scientific: dict[str,Any], server: dict[str,Any]) -> tuple[dict[str,
         [str(index) for index in range(min(gpus,max_openmm_gpus))]
         if hw["openmm_platform"]=="CUDA" else [hw["openmm_device"]]
     )
-    hw["structural_target_workers"]=len(hw["structural_gpu_devices"])
+    per_device=int(res.get("structural_workers_per_gpu",1))
+    if per_device<1:
+        raise SystemExit("structural_workers_per_gpu must be positive")
+    hw["structural_workers_per_gpu"]=per_device if hw["openmm_platform"]=="CUDA" else 1
+    hw["structural_target_workers"]=len(hw["structural_gpu_devices"])*hw["structural_workers_per_gpu"]
     hw["external_audit_workers"]=max(1,min(workers,
         int(res.get("max_external_audit_workers",4))))
     hw["foldseek_prepare_workers"]=max(1,min(workers,
@@ -264,6 +268,7 @@ def resolve(scientific: dict[str,Any], server: dict[str,Any]) -> tuple[dict[str,
         "openmm_precision":hw["openmm_precision"],
         "structural_gpu_devices":hw["structural_gpu_devices"],
         "structural_target_workers":hw["structural_target_workers"],
+        "structural_workers_per_gpu":hw["structural_workers_per_gpu"],
         "external_audit_workers":hw["external_audit_workers"],
         "foldseek_prepare_workers":hw["foldseek_prepare_workers"],
         "exploration_depth_workers":hw["exploration_depth_workers"],

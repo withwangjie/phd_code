@@ -125,7 +125,10 @@ class StructureStagesMixin:
             if label == "validation_queue":
                 gpu_devices=[str(device) for device in self.config.get("hardware",{}).get(
                     "structural_gpu_devices",[self.config.get("hardware",{}).get("openmm_device","0")])]
-                argv += ["--target-workers",str(len(gpu_devices)),"--gpu-devices",*gpu_devices]
+                hardware=self.config.get("hardware",{})
+                argv += ["--target-workers",str(hardware.get("structural_target_workers",len(gpu_devices))),
+                         "--workers-per-gpu",str(hardware.get("structural_workers_per_gpu",1)),
+                         "--gpu-devices",*gpu_devices]
             if label == "dev_queue":
                 # Historical dev targets are run individually. Each subprocess
                 # therefore has an exact denominator of one target.
@@ -145,14 +148,18 @@ class StructureStagesMixin:
                         "--targets", "1",
                         "--pdb-id", pdb,
                         "--out-dir", str(out_dir / pdb),
+                        "--gpu-devices",gpu_devices[index % len(gpu_devices)],
                     ]
                     returncode,log_path=self._run_subprocess(
                         f"structure_experiment_dev_{pdb}",sub_argv,
-                        env={"QP_OPENMM_DEVICE":gpu_devices[index % len(gpu_devices)]})
+                        env={"QP_OPENMM_DEVICE":gpu_devices[index % len(gpu_devices)],
+                             "OMP_NUM_THREADS":"1","MKL_NUM_THREADS":"1","OPENBLAS_NUM_THREADS":"1"})
                     return pdb,sub_argv,returncode,log_path
                 with contextlib.ExitStack() as stack:
+                    dev_workers=max(1,min(len(explicit_targets),int(self.config.get("hardware",{}).get(
+                        "structural_target_workers",len(gpu_devices)))))
                     pools=[stack.enter_context(concurrent.futures.ThreadPoolExecutor(max_workers=1))
-                           for _ in gpu_devices]
+                           for _ in range(dev_workers)]
                     futures=[pools[index % len(pools)].submit(run_dev,(index,pdb))
                              for index,pdb in enumerate(explicit_targets)]
                     dev_runs=[future.result() for future in futures]
