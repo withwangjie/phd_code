@@ -2870,6 +2870,9 @@ class Orchestrator:
             "--rotamer-sigma-offsets", *[str(v) for v in rot_cfg.get("sigma_offsets", [-1.0,0.0,1.0])],
             "--solvent-model", str((self.config.get("structure_experiment",{}) or {}).get("solvent_model","vacuum")),
         ]
+        calibration_devices=[str(device) for device in self.config.get("hardware",{}).get(
+            "structural_gpu_devices",[self.config.get("hardware",{}).get("openmm_device","0")])]
+        argv += ["--workers",str(len(calibration_devices)),"--gpu-devices",*calibration_devices]
         cluster_path=self.frozen_cluster_map_path()
         if cluster_path is not None:
             if not cluster_path.is_file():
@@ -3704,6 +3707,10 @@ class Orchestrator:
                 "--dev-exposed-pdb", *qf_cfg["dev_queue"].get("excluded_pdb", []),
                 "--queue-role", "dev" if label == "dev_queue" else "validation",
             ] + shared_flags()
+            if label == "validation_queue":
+                gpu_devices=[str(device) for device in self.config.get("hardware",{}).get(
+                    "structural_gpu_devices",[self.config.get("hardware",{}).get("openmm_device","0")])]
+                argv += ["--target-workers",str(len(gpu_devices)),"--gpu-devices",*gpu_devices]
             if label == "dev_queue":
                 # Historical dev targets are run individually. Each subprocess
                 # therefore has an exact denominator of one target.

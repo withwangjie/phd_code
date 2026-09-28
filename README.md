@@ -448,6 +448,8 @@ export QP_PHENIX_CLASHSCORE=/path/to/phenix.clashscore
 
 In auto mode the resolver chooses DDP ranks from available GPUs while preserving the configured target global batch size, derives CPU worker counts from available physical cores, selects the OpenMM platform from available hardware, and records every resolved value in the run configuration/provenance. Scientific thresholds, QAOA protocol values, data-split rules, endpoints, and statistical choices are never hardware-auto-tuned.
 
+On the two-T4 server, EGNN training uses two DDP ranks. After sequential queue selection, independent structural targets run in separate spawned processes on CUDA devices 0 and 1. Training-only Amber diagnostic complexes are sharded across those devices and merged in frozen manifest order; their per-complex random streams are independent of worker scheduling. Data audit, Foldseek, grouped regression/statistics, and the formal legal-subspace QAOA simulator remain CPU tasks. This execution and calibration sampling change requires a **new formal run**, not resume of an older frozen directory (A26).
+
 ## One-click formal experiment
 
 A formal experiment is launched with one command:

@@ -6,10 +6,14 @@ The original benchmark driver remains the solver/evaluation implementation.
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
+import contextlib
 import csv
 import hashlib
 import json
+import os
 import random
+import multiprocessing as mp
 from pathlib import Path
 import traceback
 
@@ -23,6 +27,13 @@ from nanoqc.qubo.subgraph_to_qubo import read_atomistic_structure, _SIDECHAIN_NA
 from nanoqc.common.seed_streams import derive_streams, derive_child_seed, save_stream_map, DEFAULT_MASTER_SEED
 from nanoqc.data.sequence_identity import nw_identity, length_coverage, partner_roles_anchored
 from nanoqc.data.safe_graph_load import load_graph
+
+
+def _run_recovery_on_device(argv: list[str], device: str) -> int:
+    """Run one frozen target in an isolated spawned process on one CUDA device."""
+    os.environ["QP_OPENMM_DEVICE"] = device
+    from nanoqc.experiments.batch_benchmark_hard_set import _recovery_benchmark_main
+    return _recovery_benchmark_main(argv)
 
 
 def _manifest_graph_path(root: Path, relative: object) -> Path:
@@ -283,6 +294,10 @@ def main(argv=None) -> int:
              "before the run starts (never adjusted after inspecting results). The actual coverage "
              "(selected vs. examined qualifying pool) is always stated in real_complex_report.md.")
     parser.add_argument("--sites", type=int, default=6)
+    parser.add_argument("--target-workers", type=int, default=1,
+        help="Independent structural targets to evaluate concurrently after sequential eligibility.")
+    parser.add_argument("--gpu-devices", nargs="+", default=["0"],
+        help="OpenMM CUDA device indices, one dedicated spawned worker per device.")
     parser.add_argument("--vhh-identity-threshold", type=float, default=0.80)
     parser.add_argument("--cdr-h3-identity-threshold", type=float, default=0.50)
     parser.add_argument("--antigen-identity-threshold", type=float, default=0.30)
@@ -358,6 +373,12 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     if not 1 <= args.sites <= 10 or args.targets < 0 or args.qaoa_depth <= 0:
         parser.error("Require 1..10 sites, positive qaoa-depth, and a nonnegative target count (0 = unlimited)")
+    if args.target_workers < 1 or len(set(args.gpu_devices)) != len(args.gpu_devices):
+        parser.error("Require positive target-workers and distinct gpu-devices")
+    if args.target_workers > len(args.gpu_devices):
+        parser.error("Each structural worker requires a dedicated gpu-device")
+    if any(not device.isdecimal() for device in args.gpu_devices):
+        parser.error("gpu-devices must be nonnegative CUDA device indices")
     if args.eligibility_only and not args.prepare_only:
         parser.error("--eligibility-only is valid only together with --prepare-only")
     if not 0.0 < args.min_perturb_degrees <= args.max_perturb_degrees <= 180.0:
@@ -730,27 +751,20 @@ def main(argv=None) -> int:
         })
         results=[];failed=[]
         if not args.prepare_only:
+            jobs=[]
             for case in selected:
                 pdb=case["target"]
-                try:
-                    destination=out/"results"/pdb
-                    # Independent, saved, per-target optimize/sample sub-seeds
-                    # (never equal to --seeds, and never each other) -- derived
-                    # from the master-seed optimize/sample streams keyed by
-                    # (target pdb, repeat identity), so this target's structural
-                    # search and its finite-shot output sampling never share
-                    # randomness, and the derivation is reproducible from
-                    # (master_seed, pdb, seed) alone regardless of scheduling order.
-                    optimize_seeds=[derive_child_seed(streams["optimize"],"structure",pdb,str(s)) for s in args.seeds]
-                    measurement_seeds=[derive_child_seed(streams["measurement"],"structure",pdb,str(s)) for s in args.seeds]
-                    sample_seeds=[derive_child_seed(streams["sample"],"structure",pdb,str(s)) for s in args.seeds]
-                    status=_recovery_benchmark_main(["--manifest",str(out/"prepared"/pdb/"recovery_manifest.json"),
+                destination=out/"results"/pdb
+                # Seeds are keyed by target and repeat, independent of scheduling.
+                optimize_seeds=[derive_child_seed(streams["optimize"],"structure",pdb,str(s)) for s in args.seeds]
+                measurement_seeds=[derive_child_seed(streams["measurement"],"structure",pdb,str(s)) for s in args.seeds]
+                sample_seeds=[derive_child_seed(streams["sample"],"structure",pdb,str(s)) for s in args.seeds]
+                job_argv=["--manifest",str(out/"prepared"/pdb/"recovery_manifest.json"),
                         "--out-dir",str(destination),"--solvent-model",args.solvent_model,
                         "--perturbation-mode",args.perturbation_mode,
                         "--min-perturb-degrees",str(args.min_perturb_degrees),
                         "--max-perturb-degrees",str(args.max_perturb_degrees),
                         "--seeds",*[str(s) for s in args.seeds],
-                        "--perturbation-mode",args.perturbation_mode,
                         "--optimize-seeds",*[str(s) for s in optimize_seeds],
                         "--measurement-seeds",*[str(s) for s in measurement_seeds],
                         "--sample-seeds",*[str(s) for s in sample_seeds],
@@ -761,12 +775,35 @@ def main(argv=None) -> int:
                         *(["--eval-shots",str(args.eval_shots)] if args.eval_shots else []),
                         *(["--robust-qaoa","--qaoa-restarts",str(args.qaoa_restarts),
                            "--qaoa-objective",args.qaoa_objective,"--cvar-alpha",str(args.cvar_alpha),
-                           "--parameter-scale",args.parameter_scale] if args.robust_qaoa else [])])
-                    results.extend(csv.DictReader((destination/"recovery_metrics.csv").open(encoding="utf-8")))
-                    if status: failed.append(pdb)
-                except Exception:
-                    failed.append(pdb)
-                    with (out/"failures.log").open("a",encoding="utf-8") as f: f.write(pdb+"\n"+traceback.format_exc())
+                           "--parameter-scale",args.parameter_scale] if args.robust_qaoa else [])]
+                jobs.append((pdb,destination,job_argv))
+            with contextlib.ExitStack() as stack:
+                pools=[]
+                if args.target_workers > 1:
+                    for _ in range(args.target_workers):
+                        pools.append(stack.enter_context(concurrent.futures.ProcessPoolExecutor(
+                            max_workers=1, mp_context=mp.get_context("spawn"))))
+                futures=[]
+                for index,(pdb,destination,job_argv) in enumerate(jobs):
+                    if pools:
+                        future=pools[index % len(pools)].submit(
+                            _run_recovery_on_device,job_argv,args.gpu_devices[index % len(pools)])
+                    else:
+                        future=None
+                    futures.append((pdb,destination,job_argv,future))
+                for pdb,destination,job_argv,future in futures:
+                    try:
+                        status=(future.result() if future is not None else _recovery_benchmark_main(job_argv))
+                        metrics_path=destination/"recovery_metrics.csv"
+                        if not metrics_path.is_file():
+                            raise FileNotFoundError(metrics_path)
+                        with metrics_path.open(encoding="utf-8") as metrics_handle:
+                            results.extend(csv.DictReader(metrics_handle))
+                        if status: failed.append(pdb)
+                    except Exception:
+                        failed.append(pdb)
+                        with (out/"failures.log").open("a",encoding="utf-8") as f:
+                            f.write(pdb+"\n"+traceback.format_exc())
         if results:
             with (out/"real_complex_metrics.csv").open("w",newline="",encoding="utf-8") as f:
                 writer=csv.DictWriter(f,fieldnames=list(results[0]));writer.writeheader();writer.writerows(results)

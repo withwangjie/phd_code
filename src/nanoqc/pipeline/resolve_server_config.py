@@ -187,6 +187,12 @@ def resolve(scientific: dict[str,Any], server: dict[str,Any]) -> tuple[dict[str,
     hw["openmm_platform"]="CUDA" if platform=="auto" and gpus>0 else ("CPU" if platform=="auto" else platform)
     hw["openmm_device"]=str(res.get("openmm_device","0"))
     hw["openmm_precision"]=str(res.get("openmm_precision","double"))
+    max_openmm_gpus=max(1,int(res.get("max_openmm_gpus",1)))
+    hw["structural_gpu_devices"]=(
+        [str(index) for index in range(min(gpus,max_openmm_gpus))]
+        if hw["openmm_platform"]=="CUDA" else [hw["openmm_device"]]
+    )
+    hw["structural_target_workers"]=len(hw["structural_gpu_devices"])
 
     structural=out.setdefault("external_validation",{}).setdefault("structural_baselines",{})
     faspr=_resolve_tool(
@@ -225,7 +231,8 @@ def resolve(scientific: dict[str,Any], server: dict[str,Any]) -> tuple[dict[str,
         "ram_gb":ram,
         "cuda_gpus":gpus,
         "ddp_ranks":ranks,
-        "result_affecting_runtime_parameters":["ddp_ranks"],
+        "result_affecting_runtime_parameters":["ddp_ranks","openmm_platform",
+            "openmm_precision","structural_gpu_devices"],
         "target_global_batch_size":target_global,
         "per_gpu_batch_size":per_gpu_batch,
         "data_audit_workers":workers,
@@ -236,6 +243,8 @@ def resolve(scientific: dict[str,Any], server: dict[str,Any]) -> tuple[dict[str,
         "openmm_platform":hw["openmm_platform"],
         "openmm_device":hw["openmm_device"],
         "openmm_precision":hw["openmm_precision"],
+        "structural_gpu_devices":hw["structural_gpu_devices"],
+        "structural_target_workers":hw["structural_target_workers"],
         "faspr_executable":structural.get("faspr_executable"),
         "foldseek_executable":foldseek,
         "phenix_clashscore_executable":structural.get("phenix_clashscore_executable"),

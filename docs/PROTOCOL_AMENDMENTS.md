@@ -40,6 +40,7 @@ no earlier run directory can be resumed; a fresh formal run is required.
 | A16 | Formal VHH sources and cross-source PDB precedence | audit, Foldseek universe, dataset admission, EGNN/calibration and everything downstream | to be completed |
 | A17 | SNAC-only primary antigen-fold targets; SAbDab quarantine; exact source_id binding | queue_freeze, external_validation, final_report | to be completed |
 | A25 | Training-only same-assignment rank diagnostic and explicit finite-range/resource interpretation | final_report, scaling analysis prose | to be completed |
+| A26 | Independent calibration complexes and frozen structural targets run on separate CUDA workers | energy_calibration, structure_experiment | to be completed |
 
 ## A1. Primary coarse solver endpoint: resource-normalized time-to-solution
 
@@ -664,3 +665,11 @@ they were logged later.
 - **Claim boundary:** a training-only unrelaxed rank correlation cannot establish held-out physical fidelity or all-atom RMSD improvement. No asymptotic or hardware advantage claim follows from the slope or QTS99. Independent structural outcomes remain the only evidence for recovery.
 - **Affected results:** final report, scaling metadata/prose and secondary multiplicity interpretation. Frozen solver instances, optimizer settings and raw p-values are unchanged; adjusted secondary-family p-values can change because QTS99 tests are removed. The source/config hash contract requires a new run for these changes.
 - **Results inspected before this amendment:** the earlier training-only failed Amber calibration and generated-clash diagnostics described in A23 were inspected; whether any validation/test outcomes had been inspected requires investigator confirmation.
+
+## A26. Multi-process, multi-GPU execution for independent complexes
+
+- **Trigger:** on the two-T4 server, the diagnostic Amber row generator and independent frozen structural targets were sequential and used only CUDA device 0. The investigator requested multi-process, multi-GPU execution for a **new** formal run.
+- **Change:** after sequential eligibility and independence selection, structural targets run in distinct spawned processes, one per assigned CUDA device. Calibration training complexes are sharded across distinct CUDA processes; each complex has an RNG stream derived from the frozen seed and its sorted training-manifest row index, independent of worker count. The parent merges CSV rows in manifest and assignment order and aggregates all exclusions and failures. EGNN DDP and the existing CPU benchmark workers remain as configured.
+- **Reproducibility:** device list, worker count and code hashes are recorded in the resolved config or output provenance. CUDA device/precision can affect floating-point results; this is a new protocol, not a valid resume of an earlier frozen run. GPU assignment never changes the queue membership, target denominator, solver budgets or per-target structural seed streams.
+- **Affected results:** calibration samples and fit can change because the earlier global RNG stream is replaced by per-complex streams. Structural numerical outputs may differ across CUDA devices. The Amber fit remains diagnostic and its coefficients remain unused by solvers. The formal run must start in a new directory.
+- **Results inspected before this amendment:** the training-only failed Amber calibration diagnostics were inspected. Validation/test inspection status requires investigator confirmation.

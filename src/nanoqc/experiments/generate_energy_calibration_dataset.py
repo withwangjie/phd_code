@@ -11,10 +11,14 @@ removes arbitrary per-complex absolute energy offsets before cross-complex fit.
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import csv
 import itertools
 import json
 import math
+import os
+import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -144,6 +148,87 @@ def is_input_quality_exclusion(exc: Exception) -> bool:
     )
 
 
+def _calibration_shard(argv: list[str], device: str, log_path: Path) -> int:
+    env=os.environ.copy()
+    env["QP_OPENMM_DEVICE"]=device
+    with log_path.open("w",encoding="utf-8") as log:
+        return subprocess.run([sys.executable,"-m",
+            "nanoqc.experiments.generate_energy_calibration_dataset",*argv],
+            env=env,stdout=log,stderr=subprocess.STDOUT,check=False).returncode
+
+
+def _run_parallel_shards(args: argparse.Namespace) -> int:
+    """Evaluate disjoint training complexes on separate GPUs; merge in input order."""
+    args.out_csv.parent.mkdir(parents=True,exist_ok=True)
+    provenance_path=args.out_provenance or args.out_csv.with_suffix(".provenance.json")
+    with tempfile.TemporaryDirectory(prefix="calibration_shards_",dir=args.out_csv.parent) as scratch:
+        root=Path(scratch)
+        jobs=[]
+        for index in range(args.workers):
+            csv_path=root/f"shard_{index}.csv"
+            prov_path=root/f"shard_{index}.json"
+            log_path=root/f"shard_{index}.log"
+            child=[*sys.argv[1:],"--workers","1","--shard-count",str(args.workers),
+                "--shard-index",str(index),"--out-csv",str(csv_path),
+                "--out-provenance",str(prov_path)]
+            jobs.append((child,args.gpu_devices[index],csv_path,prov_path,log_path))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as pool:
+            futures=[pool.submit(_calibration_shard,child,device,log)
+                for child,device,_,_,log in jobs]
+            codes=[future.result() for future in futures]
+        if any(codes):
+            detail="; ".join(f"shard {i} exit={code}: {jobs[i][4].read_text(encoding='utf-8')[-2000:]}"
+                for i,code in enumerate(codes) if code)
+            raise RuntimeError("Calibration shard failed: "+detail)
+        chunks=[];provenances=[];fieldnames=None
+        for _,_,csv_path,prov_path,_ in jobs:
+            with csv_path.open(newline="",encoding="utf-8") as handle:
+                reader=csv.DictReader(handle)
+                if fieldnames is None: fieldnames=reader.fieldnames
+                elif fieldnames!=reader.fieldnames: raise ValueError("Calibration shard schema mismatch")
+                chunks.extend(reader)
+            provenances.append(json.loads(prov_path.read_text(encoding="utf-8")))
+        for key in ("source_manifest_sha256","cluster_map_sha256","checkpoint_sha256",
+                    "rotamer_mode","seed_policy"):
+            if any(part.get(key)!=provenances[0].get(key) for part in provenances[1:]):
+                raise ValueError(f"Calibration shards disagree on {key}")
+        chunks.sort(key=lambda row:(int(row["training_row_index"]),int(row["assignment_index"])))
+        succeeded={int(row["training_row_index"]) for row in chunks}
+        excluded={int(record["training_row_index"]) for part in provenances
+                  for record in part["input_quality_exclusions"]}
+        failed={int(record["training_row_index"]) for part in provenances
+                for record in part["failures"]}
+        expected=set(range(sum(int(part["complexes_discovered"]) for part in provenances)))
+        if (succeeded & excluded or succeeded & failed or excluded & failed
+                or succeeded | excluded | failed != expected):
+            raise ValueError("Calibration shards do not close the training manifest denominator")
+        temp_csv=args.out_csv.with_suffix(args.out_csv.suffix+".tmp")
+        with temp_csv.open("w",newline="",encoding="utf-8") as handle:
+            writer=csv.DictWriter(handle,fieldnames=fieldnames)
+            writer.writeheader();writer.writerows(chunks)
+        temp_csv.replace(args.out_csv)
+        provenance=provenances[0]
+        for key in ("complexes_discovered","complexes_attempted","complexes_succeeded",
+                    "rows_written"):
+            provenance[key]=sum(int(part[key]) for part in provenances)
+        for key in ("failures","input_quality_exclusions"):
+            provenance[key]=sorted((record for part in provenances for record in part[key]),
+                key=lambda record:int(record["training_row_index"]))
+        discovered=provenance["complexes_discovered"]
+        attempted=provenance["complexes_attempted"]
+        provenance["input_quality_exclusion_fraction"]=(
+            len(provenance["input_quality_exclusions"])/discovered if discovered else 0.0)
+        provenance["generation_failure_fraction"]=(
+            len(provenance["failures"])/attempted if attempted else 1.0)
+        provenance.update(parallel_workers=args.workers,gpu_devices=args.gpu_devices,
+            shard_count=args.workers,seed_policy="per_training_manifest_row_seedsequence",
+            csv_sha256=sha256(args.out_csv))
+        provenance_path.write_text(json.dumps(provenance,indent=2,sort_keys=True)+"\n",encoding="utf-8")
+        if not chunks: raise RuntimeError("No calibration rows generated")
+    print(args.out_csv)
+    return 0
+
+
 def main() -> int:
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset",type=Path,required=True,
@@ -162,6 +247,10 @@ def main() -> int:
     parser.add_argument("--out-provenance",type=Path)
     parser.add_argument("--cluster-map",type=Path,
         help="Frozen PDB->family/structure cluster map used for grouped calibration CV.")
+    parser.add_argument("--workers",type=int,default=1)
+    parser.add_argument("--gpu-devices",nargs="+",default=["0"])
+    parser.add_argument("--shard-index",type=int,default=0,help=argparse.SUPPRESS)
+    parser.add_argument("--shard-count",type=int,default=1,help=argparse.SUPPRESS)
     parser.add_argument("--max-complexes",type=int,default=0)
     parser.add_argument("--assignments-per-complex",type=int,default=64)
     parser.add_argument("--active-sites",type=int,default=6)
@@ -191,8 +280,18 @@ def main() -> int:
         parser.error("--assignments-per-complex must be >=8")
     if args.max_complexes < 0:
         parser.error("--max-complexes must be >=0")
+    if args.workers < 1 or args.shard_count < 1 or not 0 <= args.shard_index < args.shard_count:
+        parser.error("Invalid calibration worker or shard count")
+    if args.workers > len(args.gpu_devices) or len(set(args.gpu_devices))!=len(args.gpu_devices):
+        parser.error("Each calibration worker requires a distinct gpu-device")
+    if any(not device.isdecimal() for device in args.gpu_devices):
+        parser.error("gpu-devices must be nonnegative CUDA device indices")
     if args.rotamer_mode=="dunbrack2010" and (args.rotamer_library is None or not args.rotamer_library.is_file()):
         parser.error("Dunbrack rotamer library not found")
+    if args.workers>1:
+        if args.shard_count!=1:
+            parser.error("Only the parent calibration process can create shards")
+        return _run_parallel_shards(args)
     homology_isolation=dict(
         vhh_full_chain_identity=float(args.vhh_identity_threshold),
         cdr_h3_identity=float(args.cdr_h3_identity_threshold),
@@ -232,6 +331,8 @@ def main() -> int:
     train=sorted(train,key=lambda row:(str(row.get("pdb_id","")).lower(),row["path"]))
     if args.max_complexes:
         train=train[:args.max_complexes]
+    train=[(index,row) for index,row in enumerate(train)
+           if index % args.shard_count == args.shard_index]
     if not train:
         raise ValueError("No training graphs found")
 
@@ -250,7 +351,7 @@ def main() -> int:
 
     args.out_csv.parent.mkdir(parents=True,exist_ok=True)
     fieldnames=[
-        "pdb_id","family_cluster","split","assignment_index",
+        "pdb_id","family_cluster","split","training_row_index","assignment_index",
         "prior_energy","vhh_environment_energy","antigen_energy","pair_energy",
         "amber_delta_kcal","anchor_amber_kcal","active_residues","chi_assignment",
         "graph_sha256","source_id",
@@ -258,17 +359,16 @@ def main() -> int:
     written=0
     failures=[]
     input_quality_exclusions=[]
-    rng=np.random.default_rng(args.seed)
-
     with args.out_csv.open("w",newline="",encoding="utf-8") as handle:
         writer=csv.DictWriter(handle,fieldnames=fieldnames)
         writer.writeheader()
-        for row in train:
+        for training_row_index,row in train:
             # Buffer one complex at a time. A failed complex must contribute
             # zero rows; otherwise low-energy assignments written before the
             # exception would bias the calibration fit.
             complex_rows=[]
             pdb=str(row.get("pdb_id","")).lower()
+            rng=np.random.default_rng(np.random.SeedSequence([args.seed,training_row_index]))
             graph_path=_manifest_graph_path(args.dataset, row.get("path"))
             try:
                 if cluster_map is not None and pdb not in cluster_map:
@@ -351,7 +451,8 @@ def main() -> int:
                         angles=chi_assignment(coarse,selected)
                         amber=atomistic.energy_for_chi_assignment(angles)-anchor_amber
                         complex_rows.append(dict(
-                            pdb_id=pdb,family_cluster=family_cluster,split="train",assignment_index=index,
+                            pdb_id=pdb,family_cluster=family_cluster,split="train",
+                            training_row_index=training_row_index,assignment_index=index,
                             prior_energy=components[0],
                             vhh_environment_energy=components[1],
                             antigen_energy=components[2],
@@ -368,6 +469,7 @@ def main() -> int:
                     del atomistic
             except Exception as exc:
                 record=dict(pdb_id=pdb,source_id=row.get("source_id"),
+                            training_row_index=training_row_index,
                             error=f"{type(exc).__name__}: {exc}")
                 if is_input_quality_exclusion(exc):
                     input_quality_exclusions.append(record)
@@ -413,12 +515,14 @@ def main() -> int:
         cluster_map=(None if args.cluster_map is None else str(args.cluster_map)),
         cluster_map_sha256=cluster_map_sha256,
         failures=failures,seed=args.seed,
+        parallel_workers=args.workers,gpu_devices=args.gpu_devices,
+        shard_count=args.shard_count,seed_policy="per_training_manifest_row_seedsequence",
         force_field=force_field.__dict__,
         csv_sha256=sha256(args.out_csv),
     )
     provenance_path=args.out_provenance or args.out_csv.with_suffix(".provenance.json")
     provenance_path.write_text(json.dumps(provenance,indent=2,sort_keys=True)+"\n",encoding="utf-8")
-    if written==0:
+    if written==0 and args.shard_count==1:
         raise RuntimeError("No calibration rows generated")
     print(args.out_csv)
     return 0
