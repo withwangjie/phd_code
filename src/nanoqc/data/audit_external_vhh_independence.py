@@ -8,6 +8,8 @@ read. The resulting JSON is suitable for run_full_experiment.py's external
 validation gate.
 """
 from __future__ import annotations
+import concurrent.futures
+import multiprocessing as mp
 
 import argparse
 import json
@@ -227,6 +229,32 @@ def graph_sequences(path: Path, source_dir: Path | None = None) -> dict:
     )
 
 
+def _external_target_audit(task: tuple) -> tuple[dict, str]:
+    path,source_dir,train,cluster_map,train_clusters,thresholds=task
+    vhh_threshold,cdr_threshold,antigen_threshold,min_coverage=thresholds
+    ext=graph_sequences(path,source_dir)
+    pdb=ext["pdb_id"]
+    if pdb not in cluster_map:
+        raise ValueError(f"Cluster map missing external PDB {pdb}")
+    overlap=max_training_identities(ext,train,min_coverage)
+    max_vhh=overlap["max_vhh_full_chain_identity"]
+    max_cdr=overlap["max_cdr_h3_loop_identity"]
+    max_ag=overlap["max_antigen_full_chain_identity"]
+    ag_cov=overlap["antigen_length_coverage"]
+    family_overlap=cluster_map[pdb] in train_clusters
+    return dict(
+        pdb_id=pdb,graph_sha256=ext["sha256"],
+        source_structure=ext["source_structure"],
+        source_structure_sha256=ext["source_structure_sha256"],
+        family_cluster=cluster_map[pdb],family_cluster_overlap=family_overlap,
+        max_vhh_full_chain_identity=max_vhh,max_cdr_h3_loop_identity=max_cdr,
+        max_antigen_full_chain_identity=max_ag,antigen_length_coverage=ag_cov,
+        passes=bool(max_vhh<vhh_threshold and max_cdr<cdr_threshold
+            and not (max_ag>=antigen_threshold and ag_cov>=min_coverage)
+            and not family_overlap),
+    ),ext["graph_version"]
+
+
 def main() -> int:
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--training-dataset",type=Path,required=True,
@@ -240,7 +268,11 @@ def main() -> int:
     parser.add_argument("--cdr-h3-threshold",type=float,default=0.50)
     parser.add_argument("--antigen-threshold",type=float,default=0.30)
     parser.add_argument("--antigen-min-length-coverage",type=float,default=0.70)
+    parser.add_argument("--workers",type=int,default=1,
+        help="Spawned processes for independent external-target sequence audits.")
     args=parser.parse_args()
+    if args.workers<1:
+        parser.error("--workers must be positive")
 
     thresholds=(
         args.vhh_threshold,args.cdr_h3_threshold,args.antigen_threshold,
@@ -273,45 +305,26 @@ def main() -> int:
     external_paths=sorted(args.external_graph_dir.glob("*.pt"))
     if not external_paths:
         raise ValueError("No external .pt graphs")
+    tasks=[(path,args.external_source_dir,train,cluster_map,train_clusters,thresholds)
+           for path in external_paths]
+    if args.workers==1:
+        audited=map(_external_target_audit,tasks)
+        audited=list(audited)
+    else:
+        with concurrent.futures.ProcessPoolExecutor(
+                max_workers=min(args.workers,len(tasks)),
+                mp_context=mp.get_context("spawn")) as pool:
+            audited=list(pool.map(_external_target_audit,tasks))
     audits=[]
     graph_versions=set()
     external_pdbs=set()
-    for path in external_paths:
-        ext=graph_sequences(path,args.external_source_dir)
-        graph_versions.add(ext["graph_version"])
-        pdb=ext["pdb_id"]
+    for path,(row,graph_version) in zip(external_paths,audited):
+        graph_versions.add(graph_version)
+        pdb=row["pdb_id"]
         if pdb in external_pdbs:
             raise ValueError(f"Duplicate external PDB ID {pdb}: {path}")
         external_pdbs.add(pdb)
-        if pdb not in cluster_map:
-            raise ValueError(f"Cluster map missing external PDB {pdb}")
-        overlap=max_training_identities(ext,train,args.antigen_min_length_coverage)
-        max_vhh=overlap["max_vhh_full_chain_identity"]
-        max_cdr=overlap["max_cdr_h3_loop_identity"]
-        max_ag=overlap["max_antigen_full_chain_identity"]
-        ag_cov=overlap["antigen_length_coverage"]
-        family_overlap=cluster_map[pdb] in train_clusters
-        audits.append(dict(
-            pdb_id=pdb,
-            graph_sha256=ext["sha256"],
-            source_structure=ext["source_structure"],
-            source_structure_sha256=ext["source_structure_sha256"],
-            family_cluster=cluster_map[pdb],
-            family_cluster_overlap=family_overlap,
-            max_vhh_full_chain_identity=max_vhh,
-            max_cdr_h3_loop_identity=max_cdr,
-            max_antigen_full_chain_identity=max_ag,
-            antigen_length_coverage=ag_cov,
-            passes=bool(
-                max_vhh < args.vhh_threshold
-                and max_cdr < args.cdr_h3_threshold
-                and not (
-                    max_ag >= args.antigen_threshold
-                    and ag_cov >= args.antigen_min_length_coverage
-                )
-                and not family_overlap
-            ),
-        ))
+        audits.append(row)
 
     failed=[row for row in audits if not row["passes"]]
     payload=dict(

@@ -1,13 +1,17 @@
 """Multi-GPU dispatch must preserve the frozen target and calibration order."""
 
 import argparse
+import concurrent.futures
 import csv
 import json
+import multiprocessing as mp
 import os
 from pathlib import Path
 
 from nanoqc.experiments import generate_energy_calibration_dataset as calibration
 from nanoqc.experiments import run_real_complex_pilot as pilot
+from nanoqc.data import audit_all_datasets as audit
+from nanoqc.data import build_foldseek_pairs as foldseek_pairs
 
 
 def test_calibration_shards_merge_in_training_manifest_order(tmp_path, monkeypatch):
@@ -46,3 +50,24 @@ def test_structural_worker_sets_openmm_device_before_solver(monkeypatch):
     monkeypatch.setenv("QP_OPENMM_DEVICE","0")
     assert pilot._run_recovery_on_device(["--manifest","frozen.json"],"1")==0
     assert seen==[(["--manifest","frozen.json"],"1")]
+
+
+def test_audit_spawned_processes_preserve_discovery_order(tmp_path):
+    thresholds=(4.5,3.0,1.0,.9,False,True,True)
+    tasks=[({"id":str(i)},{"id":str(i),"valid":True}) for i in range(4)]
+    with concurrent.futures.ProcessPoolExecutor(
+            max_workers=2,mp_context=mp.get_context("spawn"),
+            initializer=audit._initialize_audit_process,
+            initargs=(str(tmp_path),thresholds)) as pool:
+        rows=list(pool.map(audit._audit_or_cached,tasks))
+    assert [row["id"] for row in rows]==["0","1","2","3"]
+
+
+def test_foldseek_preparation_spawned_processes_preserve_universe_order(tmp_path):
+    tasks=[(pdb,[],[],[],15,tmp_path) for pdb in ("1abc","2def","3ghi")]
+    with concurrent.futures.ProcessPoolExecutor(
+            max_workers=2,mp_context=mp.get_context("spawn"),
+            initializer=audit.load_annotations,initargs=(tmp_path,)) as pool:
+        rows=list(pool.map(foldseek_pairs._prepare_antigen_worker,tasks))
+    assert [row[0] for row in rows]==["1abc","2def","3ghi"]
+    assert all(row[2] and row[3]==0 for row in rows)

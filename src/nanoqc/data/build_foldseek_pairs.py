@@ -40,6 +40,8 @@ the build fail unless ``--allow-missing-hits`` is given. Sequence-level
 isolation still applies to all PDBs.
 """
 from __future__ import annotations
+import concurrent.futures
+import multiprocessing as mp
 
 import argparse
 import json
@@ -308,6 +310,18 @@ def verify_reused_raw(raw: Path, inputs: dict[str, str], options: Sequence[str])
     return binding
 
 
+def _prepare_antigen_worker(task: tuple) -> tuple[str, dict, bool, int]:
+    pdb,pdb_sources,antibody_chains,antigen_chains,min_chain_length,input_dir=task
+    structure,record=antigen_structure(
+        pdb,pdb_sources,antibody_chains,min_chain_length,antigen_chains)
+    if structure is None:
+        record["self_only_reason"]=("no_readable_structure" if not record["chains"]
+                                    else "no_antigen_chain_for_structure_search")
+        return pdb,record,True,0
+    structure.make_mmcif_document().write_file(str(input_dir/f"{pdb}.cif"))
+    return pdb,record,False,len(structure[0])
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--universe", type=Path, required=True, help="One PDB ID per line (foldseek_universe.txt)")
@@ -320,6 +334,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--work-dir", type=Path, required=True)
     parser.add_argument("--foldseek", default="foldseek")
     parser.add_argument("--threads", type=int, default=8)
+    parser.add_argument("--prepare-workers", type=int, default=1,
+                        help="Spawned CPU processes for independent antigen input structures.")
     parser.add_argument("--foldseek-arg", action="append", default=None,
                         help=f"Replaces the default search options {' '.join(FOLDSEEK_ARGS)} (repeatable)")
     parser.add_argument("--min-chain-length", type=int, default=MIN_CHAIN_LENGTH)
@@ -330,6 +346,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--reuse-raw", type=Path, default=None,
                         help="Score an existing foldseek_raw.m8 of the same antigen chains instead of searching")
     args = parser.parse_args(argv)
+    if args.prepare_workers < 1:
+        parser.error("--prepare-workers must be positive")
     # Fail before building thousands of antigen structures, not after.
     args.foldseek = resolve_foldseek(args.foldseek)
     if args.reuse_raw is not None and not args.reuse_raw.is_file():
@@ -339,6 +357,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         raise SystemExit(f"{args.out} exists; the pair table is frozen once used (pass --force to rebuild)")
     universe = sorted({line.strip().lower() for line in args.universe.read_text(encoding="utf-8").splitlines()
                        if line.strip()})
+    if not universe:
+        raise SystemExit("Foldseek universe is empty")
     audit.load_annotations(args.data_root.resolve())
     audit_jsonl = args.audit_dir / "data_audit_details.jsonl"
     ledger_rows = [json.loads(line) for line in audit_jsonl.read_text(encoding="utf-8").splitlines()
@@ -359,6 +379,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         shutil.rmtree(input_dir)
     input_dir.mkdir(parents=True)
     records, self_only, entries = {}, [], 0
+    preparation_tasks=[]
     for pdb in universe:
         pdb_sources = list(sources.get(pdb, []))
         antibody_chains: list[str] = []
@@ -378,16 +399,21 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             antigen_chains = list(external[pdb].get("sabdab_antigen_chains") or [])
         if pdb not in sources and pdb not in external:
             raise SystemExit(f"No audited or external structure for universe PDB {pdb}")
-        structure, record = antigen_structure(pdb, pdb_sources, antibody_chains, args.min_chain_length,
-                                              antigen_chains)
-        if structure is None:
+        preparation_tasks.append((pdb,pdb_sources,antibody_chains,antigen_chains,
+                                  args.min_chain_length,input_dir))
+    if args.prepare_workers==1:
+        prepared=map(_prepare_antigen_worker,preparation_tasks)
+        prepared=list(prepared)
+    else:
+        with concurrent.futures.ProcessPoolExecutor(
+                max_workers=min(args.prepare_workers,len(preparation_tasks)),
+                mp_context=mp.get_context("spawn"),initializer=audit.load_annotations,
+                initargs=(args.data_root.resolve(),)) as pool:
+            prepared=list(pool.map(_prepare_antigen_worker,preparation_tasks))
+    for pdb,record,is_self_only,chain_count in prepared:
+        if is_self_only:
             self_only.append(pdb)
-            # Unparseable files never become graphs; they are in the universe only for coverage.
-            record["self_only_reason"] = ("no_readable_structure" if not record["chains"]
-                                          else "no_antigen_chain_for_structure_search")
-        else:
-            structure.make_mmcif_document().write_file(str(input_dir / f"{pdb}.cif"))
-            entries += len(structure[0])
+        entries += chain_count
         records[pdb] = record
     if entries == 0:
         raise SystemExit("No antigen chains to search")

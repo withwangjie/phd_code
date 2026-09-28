@@ -15,6 +15,7 @@ def test_foldseek_is_built_once_per_run_and_bound_to_its_audit(tmp_path, monkeyp
     config = {
         "paths": {"repo_root": str(tmp_path), "data_root": str(data)},
         "data_audit": {"workers": 4},
+        "hardware": {"foldseek_prepare_workers": 3},
         "runtime_resolution": {"foldseek_executable": "/opt/foldseek/bin/foldseek"},
     }
     resolved = []
@@ -40,6 +41,7 @@ def test_foldseek_is_built_once_per_run_and_bound_to_its_audit(tmp_path, monkeyp
             assert argv[argv.index("--universe") + 1] == str(universe)
             assert argv[argv.index("--audit-dir") + 1] == str(audit)
             assert argv[argv.index("--foldseek") + 1] == "/usr/bin/foldseek"
+            assert argv[argv.index("--prepare-workers") + 1] == "3"
             output = Path(argv[argv.index("--out") + 1])
             output.write_text("query\ttarget\tmintmscore\n1abc\t1abc\t1.0000\n")
             manifest = {

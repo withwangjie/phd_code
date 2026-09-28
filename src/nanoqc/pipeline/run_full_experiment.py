@@ -43,6 +43,8 @@ Requires PyYAML and ``filelock`` (both listed in requirements.txt).
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
+import contextlib
 import csv
 import hashlib
 import json
@@ -918,6 +920,7 @@ class Orchestrator:
             "--out",str(pairs),"--work-dir",str(pairs.parent/"foldseek_work"),
             "--foldseek",foldseek,
             "--threads",str(max(1,int((self.config.get("data_audit",{}) or {}).get("workers",8)))),
+            "--prepare-workers",str(max(1,int((self.config.get("hardware",{}) or {}).get("foldseek_prepare_workers",1)))),
             "--min-interface-residues",str(min_interface_residues),
         ]
         if pairs.exists():
@@ -3086,6 +3089,10 @@ class Orchestrator:
         # eval_shots and CVaR alpha are separate axes; batch driver accepts one
         # of each per invocation, so run a frozen Cartesian set of sub-runs.
         failures=[];logs=[];argvs=[]
+        sensitivity_workers=max(1,min(int(qc.get("workers",1)),int(
+            self.config.get("hardware",{}).get("sensitivity_case_workers",1))))
+        per_case_workers=max(1,int(qc.get("workers",1))//sensitivity_workers)
+        sensitivity_jobs=[]
         for shots in qsensitivity.get("eval_shots",[200,500,1000]):
             for alpha in qsensitivity.get("cvar_alpha",[0.05,0.1,0.25,0.5,1.0]):
                 sub=out/f"shots_{shots}_alpha_{str(alpha).replace('.','p')}"
@@ -3129,14 +3136,23 @@ class Orchestrator:
                     "--energy-window",str(qc.get("energy_window",2.0)),
                     "--max-targets",str(cfg.get("max_targets",20)),
                     "--target-selection-seed",str(target_selection_seed),
-                    "--workers",str(qc.get("workers",1)),
+                    "--workers",str(per_case_workers),
                     "--omp-threads",str(self.config.get("hardware",{}).get("cpu_threads_per_process",2)),
                     "--seeds",*[str(v) for v in repeats],"--master-seed",str(self.config["master_seed"]),
                 ]
                 argv += calibration_solver_args(qc.get("energy_calibration", {}) or {},
                                                 calibration, force_required=True)
-                rc,log=self._run_subprocess(
-                    f"sensitivity_shots_{shots}_alpha_{str(alpha).replace('.','p')}",argv)
+                sensitivity_jobs.append((shots,alpha,sub,argv))
+        if len({job[2] for job in sensitivity_jobs})!=len(sensitivity_jobs):
+            raise ValueError("Method sensitivity cases must have unique output directories")
+        def run_sensitivity_case(job):
+            shots,alpha,sub,argv=job
+            rc,log=self._run_subprocess(
+                f"sensitivity_shots_{shots}_alpha_{str(alpha).replace('.','p')}",argv)
+            return shots,alpha,sub,argv,rc,log
+        with concurrent.futures.ThreadPoolExecutor(max_workers=sensitivity_workers) as pool:
+            sensitivity_results=pool.map(run_sensitivity_case,sensitivity_jobs)
+            for shots,alpha,sub,argv,rc,log in sensitivity_results:
                 logs.append(str(log));argvs.append(argv)
                 summary_path=sub/"run_summary.json"
                 if rc!=0 or not summary_path.is_file():
@@ -3202,6 +3218,7 @@ class Orchestrator:
                     while end<len(arguments) and not arguments[end].startswith("--"):
                         end+=1
                     return arguments[:start]+values+arguments[end:]
+                resolution_jobs=[]
                 for sites in resolution_cfg.get("active_sites",[4,5]):
                     for states in resolution_cfg.get("states_per_site",[3,4,5,6]):
                         sub=out/"rotamer_resolution"/f"sites_{sites}_states_{states}"
@@ -3216,7 +3233,16 @@ class Orchestrator:
                             ("--cvar-alpha",[str(qprimary.get("cvar_alpha",0.1))]),
                         ):
                             command=replace_option(command,name,values)
-                        rc,log=self._run_subprocess(f"rotamer_resolution_{sites}_{states}",command)
+                        resolution_jobs.append((sites,states,sub,command))
+                if len({job[2] for job in resolution_jobs})!=len(resolution_jobs):
+                    raise ValueError("Rotamer resolution cases must have unique output directories")
+                def run_resolution_case(job):
+                    sites,states,sub,command=job
+                    rc,log=self._run_subprocess(f"rotamer_resolution_{sites}_{states}",command)
+                    return sites,states,sub,command,rc,log
+                with concurrent.futures.ThreadPoolExecutor(max_workers=sensitivity_workers) as pool:
+                    resolution_results=pool.map(run_resolution_case,resolution_jobs)
+                    for sites,states,sub,command,rc,log in resolution_results:
                         logs.append(str(log));argvs.append(command)
                         summary_path=sub/"run_summary.json"
                         if rc!=0 or not summary_path.is_file():
@@ -3467,7 +3493,8 @@ class Orchestrator:
     def _coarse_benchmark_argv(self, *, input_dir: Path, out_dir: Path, seeds: Sequence[int],
                                depth: int, max_evals: int, active_sites: Sequence[int],
                                outputs: Sequence[int], max_targets: int,
-                               target_selection_seed: Optional[int] = None) -> List[str]:
+                               target_selection_seed: Optional[int] = None,
+                               worker_override: Optional[int] = None) -> List[str]:
         """Benchmark argv with the frozen coarse model and primary QAOA settings."""
         cfg = self.config["qc_benchmark"]
         qprimary = quantum_primary(self.config)
@@ -3513,7 +3540,7 @@ class Orchestrator:
             "--greedy-passes", str(cfg.get("greedy_passes", 50)),
             "--energy-window", str(cfg.get("energy_window", 2.0)),
             "--max-targets", str(max_targets),
-            "--workers", str(cfg.get("workers", 1)),
+            "--workers", str(worker_override if worker_override is not None else cfg.get("workers", 1)),
             "--omp-threads", str(self.config.get("hardware", {}).get("cpu_threads_per_process", 2)),
         ]
         if target_selection_seed is not None:
@@ -3558,19 +3585,29 @@ class Orchestrator:
                    for i in range(int(cfg.get("repeats", 3)))]
         fit_seed = [derive_child_seed(streams["perturb"], "transfer_fit_repeat", "0")]
         argvs, logs, failures, hard_dirs = [], [], [], []
-        for depth in depths:
+        if len(set(depths))!=len(depths) or not depths:
+            raise ValueError("Exploration depths must be nonempty and unique")
+        depth_workers=min(len(depths),int(self.config.get("hardware",{}).get(
+            "exploration_depth_workers",1)))
+        if depth_workers<1:
+            raise ValueError("exploration_depth_workers must be positive")
+        per_depth_workers=max(1,int(self.config["qc_benchmark"].get("workers",1))//depth_workers)
+        def run_depth(depth: int) -> tuple[list,list,list,Optional[Path]]:
+            depth_argvs=[];depth_logs=[];depth_failures=[]
             max_evals = per_parameter * 2 * depth
             fit_dir = root / "transfer_fit" / f"p{depth}"
             fit_argv = self._coarse_benchmark_argv(
                 input_dir=self.dataset_dir() / "graphs" / "train", out_dir=fit_dir, seeds=fit_seed,
                 depth=depth, max_evals=max_evals, active_sites=sites, outputs=[output_shots],
                 max_targets=int(transfer_cfg.get("train_max_targets", 40)),
-                target_selection_seed=derive_child_seed(streams["partition"], "transfer_fit_targets"))
+                target_selection_seed=derive_child_seed(streams["partition"], "transfer_fit_targets"),
+                worker_override=per_depth_workers)
             rc, log = self._run_subprocess(f"quantum_exploration_fit_p{depth}", fit_argv)
-            argvs.append(fit_argv); logs.append(str(log))
+            depth_argvs.append(fit_argv); depth_logs.append(str(log))
             ok, detail = self._closed_benchmark(fit_dir)
             if rc not in (0, 1) or not ok:
-                failures.append(f"transfer fit p={depth}: exit={rc}; {detail}"); break
+                depth_failures.append(f"transfer fit p={depth}: exit={rc}; {detail}")
+                return depth_argvs,depth_logs,depth_failures,None
             transfer_file = root / "transfer_parameters" / f"p{depth}.json"
             fit_params_argv = [
                 self.venv_python, "-m", module_name("fit_qaoa_transfer_parameters.py"),
@@ -3579,21 +3616,30 @@ class Orchestrator:
                 "--min-instances", str(int(transfer_cfg.get("min_instances", 10))),
                 "--out", str(transfer_file)]
             rc, log = self._run_subprocess(f"quantum_exploration_transfer_p{depth}", fit_params_argv)
-            argvs.append(fit_params_argv); logs.append(str(log))
+            depth_argvs.append(fit_params_argv); depth_logs.append(str(log))
             if rc != 0 or not transfer_file.is_file():
-                failures.append(f"transfer parameter fit p={depth} failed (see {log})"); break
+                depth_failures.append(f"transfer parameter fit p={depth} failed (see {log})")
+                return depth_argvs,depth_logs,depth_failures,None
             hard_dir = root / "hard_set" / f"p{depth}"
             hard_argv = self._coarse_benchmark_argv(
                 input_dir=self.dataset_dir() / self.config["qc_benchmark"]["input_dir"], out_dir=hard_dir,
                 seeds=repeats, depth=depth, max_evals=max_evals, active_sites=sites, outputs=[output_shots],
-                max_targets=int(self.config["qc_benchmark"].get("max_targets", 0))) + [
+                max_targets=int(self.config["qc_benchmark"].get("max_targets", 0)),
+                worker_override=per_depth_workers) + [
                 "--transfer-parameters", str(transfer_file)]
             rc, log = self._run_subprocess(f"quantum_exploration_hard_p{depth}", hard_argv)
-            argvs.append(hard_argv); logs.append(str(log))
+            depth_argvs.append(hard_argv); depth_logs.append(str(log))
             ok, detail = self._closed_benchmark(hard_dir)
             if rc not in (0, 1) or not ok:
-                failures.append(f"hard-set exploration p={depth}: exit={rc}; {detail}"); break
-            hard_dirs.append(hard_dir)
+                depth_failures.append(f"hard-set exploration p={depth}: exit={rc}; {detail}")
+                return depth_argvs,depth_logs,depth_failures,None
+            return depth_argvs,depth_logs,depth_failures,hard_dir
+        with concurrent.futures.ThreadPoolExecutor(max_workers=depth_workers) as pool:
+            # map preserves the frozen depth order while subprocesses run concurrently.
+            for depth_argvs,depth_logs,depth_failures,hard_dir in pool.map(run_depth,depths):
+                argvs.extend(depth_argvs);logs.extend(depth_logs);failures.extend(depth_failures)
+                if hard_dir is not None:
+                    hard_dirs.append(hard_dir)
         if not failures:
             analysis_argv = [
                 self.venv_python, "-m", module_name("analyze_quantum_exploration.py"),
@@ -3720,13 +3766,28 @@ class Orchestrator:
                 # under out_dir/<pdb>/, keeping the dev queue fully separate
                 # from the validation queue's own directory.
                 dev_completed=[]; dev_failed=[]; dev_summaries={}
-                for pdb in explicit_targets:
+                if len({str(pdb).lower() for pdb in explicit_targets})!=len(explicit_targets):
+                    raise ValueError("Development structural target IDs must be unique")
+                gpu_devices=[str(device) for device in self.config.get("hardware",{}).get(
+                    "structural_gpu_devices",[self.config.get("hardware",{}).get("openmm_device","0")])]
+                def run_dev(task):
+                    index,pdb=task
                     sub_argv = argv + [
                         "--targets", "1",
                         "--pdb-id", pdb,
                         "--out-dir", str(out_dir / pdb),
                     ]
-                    returncode, log_path = self._run_subprocess(f"structure_experiment_dev_{pdb}", sub_argv)
+                    returncode,log_path=self._run_subprocess(
+                        f"structure_experiment_dev_{pdb}",sub_argv,
+                        env={"QP_OPENMM_DEVICE":gpu_devices[index % len(gpu_devices)]})
+                    return pdb,sub_argv,returncode,log_path
+                with contextlib.ExitStack() as stack:
+                    pools=[stack.enter_context(concurrent.futures.ThreadPoolExecutor(max_workers=1))
+                           for _ in gpu_devices]
+                    futures=[pools[index % len(pools)].submit(run_dev,(index,pdb))
+                             for index,pdb in enumerate(explicit_targets)]
+                    dev_runs=[future.result() for future in futures]
+                for pdb,sub_argv,returncode,log_path in dev_runs:
                     logs.append(str(log_path)); argvs.append(sub_argv)
                     summary_path = out_dir / pdb / "run_summary.json"
                     if returncode != 0:
@@ -4041,6 +4102,7 @@ class Orchestrator:
                         "--antigen-threshold",str(homology.get("antigen_identity",0.30)),
                         "--antigen-min-length-coverage",
                             str(homology.get("antigen_min_length_coverage",0.70)),
+                        "--workers",str(self.config.get("hardware",{}).get("external_audit_workers",1)),
                     ]
                     audit_rc,audit_log=self._run_subprocess("audit_external_vhh_independence",audit_argv)
                     logs.append(str(audit_log));argvs.append(audit_argv)

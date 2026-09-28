@@ -13,6 +13,7 @@ import gzip
 import hashlib
 import json
 import math
+import multiprocessing as mp
 import pathlib
 import re
 import sys
@@ -955,6 +956,23 @@ def report(root, rows, ignored, archives, pairs, elapsed, destination):
     lines += ['', '## 可复现性与限制','', '- 逐文件结果：`data_audit_details.csv`、`data_audit_details.jsonl`；DB5.5配对：`data_audit_db55_pairs.json`；范围清单：`data_audit_inventory.json`。', '- 本次不去重、不划分训练集/测试集、不判断跨库泄漏、不生成生物学装配、不做能量松弛；目录名train/test仅为用户指定用途映射。', '- 原子缺失和小界面阈值属于初筛，不等同实验结构质量、亲和力或生物学真实性。单链/无合适抗原链为界面不适用，不标成伪复合物。', '- 解析实现参考：[Gemmi 官方接口](https://project-gemmi.github.io/python-api/gemmi.html)；SNAC链命名、TCR标识、IMGT分区依据本地README和CSV标注。']
     destination.write_text('\n'.join(lines)+'\n',encoding='utf-8')
 
+def _initialize_audit_process(root, thresholds):
+    """Recreate the parent's immutable annotation and threshold snapshot."""
+    global INTERFACE_CONTACT_CUTOFF_ANGSTROM, MAX_RESOLUTION_ANGSTROM
+    global MIN_INTERRESIDUE_HEAVY_DISTANCE_ANGSTROM, MIN_INTERFACE_OCCUPANCY
+    global ALLOW_INTERFACE_ALTLOC, REQUIRE_RESOLUTION, REQUIRE_COMPLETE_INTERFACE_SIDECHAINS
+    load_annotations(pathlib.Path(root))
+    (INTERFACE_CONTACT_CUTOFF_ANGSTROM, MAX_RESOLUTION_ANGSTROM,
+     MIN_INTERRESIDUE_HEAVY_DISTANCE_ANGSTROM, MIN_INTERFACE_OCCUPANCY,
+     ALLOW_INTERFACE_ALTLOC, REQUIRE_RESOLUTION,
+     REQUIRE_COMPLETE_INTERFACE_SIDECHAINS) = thresholds
+
+
+def _audit_or_cached(item):
+    task, cached_record = item
+    return cached_record if cached_record is not None else audit(task)
+
+
 def main():
     global INTERFACE_CONTACT_CUTOFF_ANGSTROM, MAX_RESOLUTION_ANGSTROM, MIN_INTERFACE_OCCUPANCY
     global MIN_INTERRESIDUE_HEAVY_DISTANCE_ANGSTROM
@@ -984,11 +1002,16 @@ def main():
             if r['valid'] and r['subset'] not in ('sabdab_vhh','snac_db') and not r['subset'].startswith('extra_snac_') and pathlib.Path(r['path']).exists() and pathlib.Path(r['path']).stat().st_mtime<=stamp:
                 cached[r['id']]=r
         print(f'Reusing {len(cached)} valid non-nano geometry records; rechecking all nano annotations and failures',flush=True)
-    def work(task):
-        return cached[task['id']] if task['id'] in cached else audit(task)
     rows=[]
-    with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as pool, (args.out/'data_audit_details.jsonl').open('w',encoding='utf-8') as handle:
-        for r in pool.map(work,tasks):
+    thresholds=(INTERFACE_CONTACT_CUTOFF_ANGSTROM,MAX_RESOLUTION_ANGSTROM,
+                MIN_INTERRESIDUE_HEAVY_DISTANCE_ANGSTROM,MIN_INTERFACE_OCCUPANCY,
+                ALLOW_INTERFACE_ALTLOC,REQUIRE_RESOLUTION,REQUIRE_COMPLETE_INTERFACE_SIDECHAINS)
+    if args.workers < 1: parser.error('--workers must be positive')
+    with concurrent.futures.ProcessPoolExecutor(
+            max_workers=args.workers,mp_context=mp.get_context('spawn'),
+            initializer=_initialize_audit_process,initargs=(str(root),thresholds)) as pool, \
+            (args.out/'data_audit_details.jsonl').open('w',encoding='utf-8') as handle:
+        for r in pool.map(_audit_or_cached,((task,cached.get(task['id'])) for task in tasks)):
             rows.append(r);handle.write(json.dumps(r,ensure_ascii=False)+'\n')
             if len(rows)%250==0:handle.flush();print(f'{len(rows)}/{len(tasks)} audited, {time.time()-start:.0f}s',flush=True)
     pairs=db55_pairs(tasks)
@@ -998,6 +1021,7 @@ def main():
     (args.out/'data_audit_db55_pairs.json').write_text(json.dumps(pairs,ensure_ascii=False,indent=2),encoding='utf-8')
     (args.out/'data_audit_inventory.json').write_text(json.dumps(dict(
         ignored=ignored,archives=archives,tasks=len(tasks),partial_run=bool(args.limit),
+        execution=dict(mode='spawned_processes',workers=args.workers,ordered_output=True),
         source_hash_contract=dict(
             algorithm='sha256',
             bound_subsets=sorted(FORMAL_VHH_SUBSETS | {'test_db55'}),
