@@ -524,7 +524,11 @@ def test_benchmark_code_fingerprint_covers_quantum_instance_modules():
 
 
 def test_orchestrator_never_passes_the_bare_master_seed_to_statistics():
-    source = (REPO / "src/nanoqc/pipeline/run_full_experiment.py").read_text(encoding="utf-8")
+    # The orchestrator spans several modules; scan all of them.
+    sources = sorted((REPO / "src/nanoqc/pipeline").glob("*.py"))
+    assert len(sources) > 5
+    source = "".join(path.read_text(encoding="utf-8") for path in sources)
+    assert "stage_statistics" in source
     assert '"--seed",str(self.config["master_seed"])' not in source
     assert '"--seed", str(self.config["master_seed"])' not in source
 

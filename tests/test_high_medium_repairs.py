@@ -18,6 +18,12 @@ import nanoqc.pipeline.resolve_server_config as server_resolver
 from nanoqc.pipeline.run_full_experiment import Orchestrator, StageResult, apply_runtime_mode_overrides
 
 
+
+def _result_contract_source() -> str:
+    """The full stage result contract: generic manifest checks plus per-stage table."""
+    return (inspect.getsource(full.Orchestrator._validate_completed_stage_artifacts)
+            + inspect.getsource(full.Orchestrator._validate_stage_contract))
+
 def test_no_hidden_4s10_target_fallback() -> None:
     source=inspect.getsource(pilot.main)
     assert "requested_pdb=args.pdb_id" in source
@@ -400,7 +406,7 @@ def test_one_click_launcher_uses_precreated_run_directory() -> None:
 
 
 def test_formal_result_contract_requires_core_experimental_outputs() -> None:
-    source=inspect.getsource(full.Orchestrator._validate_completed_stage_artifacts)
+    source=_result_contract_source()
     for token in (
         'root/"metrics.csv"',
         'root/"summary.md"',
@@ -455,7 +461,7 @@ def test_results_contract_is_frozen_and_archived() -> None:
 
 
 def test_structure_contract_requires_per_target_recovery_outputs() -> None:
-    source=inspect.getsource(full.Orchestrator._validate_completed_stage_artifacts)
+    source=_result_contract_source()
     assert 'target/"run_manifest.json"' in source
     assert 'target/"recovery_metrics.csv"' in source
     assert 'target/"recovery_report.md"' in source
@@ -500,7 +506,7 @@ def test_structural_statistics_use_shared_sign_flip_protocol() -> None:
 
 
 def test_formal_statistics_require_scaling_outputs() -> None:
-    source=inspect.getsource(full.Orchestrator._validate_completed_stage_artifacts)
+    source=_result_contract_source()
     assert "quantum_scaling_statistics.json" in source
     assert "quantum_scaling_statistics.md" in source
     assert "min_scaling_clusters" in inspect.getsource(full._validate_scientific_config)

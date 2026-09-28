@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 from nanoqc.common.repo_io import sha256_file
@@ -22,7 +23,7 @@ def test_foldseek_is_built_once_per_run_and_bound_to_its_audit(tmp_path, monkeyp
     def which(name):
         resolved.append(name)
         return "/usr/bin/foldseek"
-    monkeypatch.setattr(full.shutil, "which", which)
+    monkeypatch.setattr(shutil, "which", which)
     calls = []
 
     def make_run(name: str, universe_text: str):

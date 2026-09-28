@@ -65,6 +65,15 @@ MODULE_LAYOUT = {
     "generate_final_research_report.py": "src/nanoqc/reporting/generate_final_research_report.py",
     "generate_figure1_pymol_script.py": "src/nanoqc/reporting/generate_figure1_pymol_script.py",
     "run_full_experiment.py": "src/nanoqc/pipeline/run_full_experiment.py",
+    "orchestrator_common.py": "src/nanoqc/pipeline/orchestrator_common.py",
+    "config_validation.py": "src/nanoqc/pipeline/config_validation.py",
+    "run_records.py": "src/nanoqc/pipeline/run_records.py",
+    "stages_data.py": "src/nanoqc/pipeline/stages_data.py",
+    "stages_training.py": "src/nanoqc/pipeline/stages_training.py",
+    "stages_quantum.py": "src/nanoqc/pipeline/stages_quantum.py",
+    "stages_structure.py": "src/nanoqc/pipeline/stages_structure.py",
+    "stages_reporting.py": "src/nanoqc/pipeline/stages_reporting.py",
+    "stage_contracts.py": "src/nanoqc/pipeline/stage_contracts.py",
     "resolve_server_config.py": "src/nanoqc/pipeline/resolve_server_config.py",
 }
 
