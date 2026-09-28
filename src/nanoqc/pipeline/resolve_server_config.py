@@ -142,6 +142,9 @@ def resolve(scientific: dict[str,Any], server: dict[str,Any]) -> tuple[dict[str,
     reserve=max(0,int(res.get("cpu_reserve_cores",2)))
     usable=max(1,cpu-reserve)
     max_workers=max(1,int(res.get("max_workers",16)))
+    min_workers=int(res.get("min_workers",1))
+    if not 1<=min_workers<=max_workers:
+        raise SystemExit("CPU worker range requires 1 <= min_workers <= max_workers")
     threads=max(1,int(res.get("cpu_threads_per_process",2)))
     workers=max(1,min(max_workers,max(1,usable//threads)))
     graph_workers=max(1,min(workers,max(1,usable//2),
@@ -247,6 +250,11 @@ def resolve(scientific: dict[str,Any], server: dict[str,Any]) -> tuple[dict[str,
         "target_global_batch_size":target_global,
         "per_gpu_batch_size":per_gpu_batch,
         "data_audit_workers":workers,
+        "cpu_min_workers_target":min_workers,
+        "cpu_max_workers":max_workers,
+        "cpu_min_workers_target_met":workers>=min_workers,
+        "cpu_worker_limit_reason":(
+            "available cores / threads per process" if workers<min_workers else None),
         "graph_build_workers":graph_workers,
         "qc_workers":workers,
         "egnn_loader_workers":loader_workers,

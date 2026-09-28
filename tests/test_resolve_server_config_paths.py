@@ -22,12 +22,21 @@ def test_80_core_server_cpu_budget_and_graph_cap(tmp_path, monkeypatch):
     config,report=resolver.resolve({},server)
     assert config["qc_benchmark"]["workers"]==64
     assert config["data_audit"]["workers"]==64
+    assert report["cpu_min_workers_target"]==48
+    assert report["cpu_max_workers"]==64
+    assert report["cpu_min_workers_target_met"] is True
     assert config["queue_freeze"]["graph_build"]["workers"]==16
     assert config["egnn_train"]["nproc_per_node"]==2
     assert config["hardware"]["cpu_threads_per_process"]==1
     assert config["hardware"]["structural_gpu_devices"]==["0","1"]
     assert report["external_audit_workers"]==12
     server["resources"]["cpu_threads_per_process"]=4
-    config,_=resolver.resolve({},server)
+    config,report=resolver.resolve({},server)
     assert config["qc_benchmark"]["workers"]==18
     assert 18*config["hardware"]["cpu_threads_per_process"]<=72
+    assert report["cpu_min_workers_target_met"] is False
+    assert report["cpu_worker_limit_reason"]=="available cores / threads per process"
+    server["resources"]["max_workers"]=32
+    import pytest
+    with pytest.raises(SystemExit,match="min_workers <= max_workers"):
+        resolver.resolve({},server)

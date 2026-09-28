@@ -37,6 +37,9 @@ resources:
   cpu_reserve_cores: 8
   # 80-core/256-GB host: independent CPU jobs use one BLAS/OpenMP thread.
   # Graph construction has its own cap because dense geometry uses more RAM.
+  # Target range for independent data-audit/QC jobs; available cores and tasks
+  # may reduce actual concurrency. Memory-heavy stages retain separate caps.
+  min_workers: 48
   max_workers: 64
   max_graph_workers: 16
   max_external_audit_workers: 12
