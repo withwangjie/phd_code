@@ -14,6 +14,8 @@ SHARED_HELPER_MODULES = ("repo_io.py", "paired_statistics.py", "residue_tables.p
                          "coarse_qubo.py",
                          "ising.py",
                          "allatom_qubo.py",
+                         "physical_quality.py",
+                         "training_energy_diagnostic.py",
                          # batch_benchmark_hard_set.py dispatches; the modes themselves live here.
                          "benchmark_common.py",
                          "hard_set_evaluation.py",

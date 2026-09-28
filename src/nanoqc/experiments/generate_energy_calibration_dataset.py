@@ -142,10 +142,11 @@ def calibration_assignments(qubo, count: int, rng: np.random.Generator) -> list[
 
 def is_input_quality_exclusion(exc: Exception) -> bool:
     """Recognize missing observed atoms before any calibration energy is fit."""
-    return isinstance(exc, ValueError) and (
+    from nanoqc.structure.physical_quality import StructureQualityError
+    return (isinstance(exc,StructureQualityError) and exc.category.startswith("input_")) or (isinstance(exc, ValueError) and (
         str(exc).startswith("Missing heavy atoms ")
         or str(exc) == "Internal heavy-atom repair would be required"
-    )
+    ))
 
 
 def _calibration_shard(argv: list[str], device: str, log_path: Path) -> int:
@@ -168,6 +169,9 @@ def _run_parallel_shards(args: argparse.Namespace) -> int:
             csv_path=root/f"shard_{index}.csv"
             prov_path=root/f"shard_{index}.json"
             log_path=root/f"shard_{index}.log"
+            if getattr(args,"dual_energy_diagnostic",False):
+                log_path=args.out_csv.parent/"worker_logs"/f"gpu_{args.gpu_devices[index]}_shard_{index}.log"
+                log_path.parent.mkdir(parents=True,exist_ok=True)
             child=[*sys.argv[1:],"--workers","1","--shard-count",str(args.workers),
                 "--shard-index",str(index),"--out-csv",str(csv_path),
                 "--out-provenance",str(prov_path)]
@@ -189,7 +193,8 @@ def _run_parallel_shards(args: argparse.Namespace) -> int:
                 chunks.extend(reader)
             provenances.append(json.loads(prov_path.read_text(encoding="utf-8")))
         for key in ("source_manifest_sha256","cluster_map_sha256","checkpoint_sha256",
-                    "rotamer_mode","seed_policy"):
+                    "rotamer_mode","seed_policy","diagnostic_mode","diagnostic_iterations",
+                    "solvent_model","active_sites","assignments_per_complex"):
             if any(part.get(key)!=provenances[0].get(key) for part in provenances[1:]):
                 raise ValueError(f"Calibration shards disagree on {key}")
         chunks.sort(key=lambda row:(int(row["training_row_index"]),int(row["assignment_index"])))
@@ -224,7 +229,7 @@ def _run_parallel_shards(args: argparse.Namespace) -> int:
             shard_count=args.workers,seed_policy="per_training_manifest_row_seedsequence",
             csv_sha256=sha256(args.out_csv))
         provenance_path.write_text(json.dumps(provenance,indent=2,sort_keys=True)+"\n",encoding="utf-8")
-        if not chunks: raise RuntimeError("No calibration rows generated")
+        if not chunks and not args.dual_energy_diagnostic: raise RuntimeError("No calibration rows generated")
     print(args.out_csv)
     return 0
 
@@ -253,6 +258,10 @@ def main() -> int:
     parser.add_argument("--shard-count",type=int,default=1,help=argparse.SUPPRESS)
     parser.add_argument("--max-complexes",type=int,default=0)
     parser.add_argument("--assignments-per-complex",type=int,default=64)
+    parser.add_argument("--dual-energy-diagnostic",action="store_true",
+        help="Record every sampled training state and raw/relaxed physics; never fit coefficients")
+    parser.add_argument("--diagnostic-iterations",type=int,default=200)
+    parser.add_argument("--diagnostic-artifacts",type=Path)
     parser.add_argument("--active-sites",type=int,default=6)
     parser.add_argument("--radius",type=float,default=6.0)
     parser.add_argument("--seed",type=int,default=DEFAULT_MASTER_SEED)
@@ -273,6 +282,10 @@ def main() -> int:
     parser.add_argument("--solvent-model",choices=("vacuum","gbn2"),default="vacuum",
         help="Must match the frozen primary structural energy model.")
     args=parser.parse_args()
+    if args.dual_energy_diagnostic:
+        if args.max_complexes!=0:parser.error("Full training diagnostics require --max-complexes 0")
+        if args.diagnostic_iterations<1 or args.diagnostic_artifacts is None:
+            parser.error("Diagnostic mode requires positive iterations and --diagnostic-artifacts")
 
     if not 5 <= args.active_sites <= 8:
         parser.error("--active-sites must be in 5..8")
@@ -331,6 +344,7 @@ def main() -> int:
     train=sorted(train,key=lambda row:(str(row.get("pdb_id","")).lower(),row["path"]))
     if args.max_complexes:
         train=train[:args.max_complexes]
+    train_total=len(train)
     train=[(index,row) for index,row in enumerate(train)
            if index % args.shard_count == args.shard_index]
     if not train:
@@ -356,6 +370,9 @@ def main() -> int:
         "amber_delta_kcal","anchor_amber_kcal","active_residues","chi_assignment",
         "graph_sha256","source_id",
     ]
+    if args.dual_energy_diagnostic:
+        from nanoqc.experiments.training_energy_diagnostic import DIAGNOSTIC_FIELDS
+        fieldnames.extend(DIAGNOSTIC_FIELDS)
     written=0
     failures=[]
     input_quality_exclusions=[]
@@ -363,14 +380,16 @@ def main() -> int:
         writer=csv.DictWriter(handle,fieldnames=fieldnames)
         writer.writeheader()
         for training_row_index,row in train:
+            if args.dual_energy_diagnostic:
+                print(f"[dual-energy] training row {training_row_index+1}/{train_total}: {row.get('pdb_id')}",flush=True)
             # Buffer one complex at a time. A failed complex must contribute
             # zero rows; otherwise low-energy assignments written before the
             # exception would bias the calibration fit.
             complex_rows=[]
             pdb=str(row.get("pdb_id","")).lower()
             rng=np.random.default_rng(np.random.SeedSequence([args.seed,training_row_index]))
-            graph_path=_manifest_graph_path(args.dataset, row.get("path"))
             try:
+                graph_path=_manifest_graph_path(args.dataset, row.get("path"))
                 if cluster_map is not None and pdb not in cluster_map:
                     raise ValueError(f"Calibration cluster map missing training PDB {pdb}")
                 family_cluster=(cluster_map[pdb] if cluster_map is not None else pdb)
@@ -389,7 +408,8 @@ def main() -> int:
                     contact_ca_cutoff=args.contact_ca_cutoff,
                 )
                 sub=build_ablation_subgraph(data,active,args.radius)
-                coarse=InterfaceQUBOBuilder(
+                def build_coarse():
+                    return InterfaceQUBOBuilder(
                     min_variables=3*args.active_sites,max_variables=3*args.active_sites,max_sites=args.active_sites,
                     force_field=force_field,rotamer_mode=args.rotamer_mode,
                     rotamer_library_path=args.rotamer_library,
@@ -397,11 +417,15 @@ def main() -> int:
                     rotamer_sigma_offsets=args.rotamer_sigma_offsets,
                     fixed_chi1_wells=True,fixed_states_per_site=3,
                     energy_calibration=EnergyCalibration(),
-                ).build(sub)
-                active_residues=[]
-                for site in sorted(coarse.site_to_variables):
-                    first=coarse.variable_map[coarse.site_to_variables[site][0]]
-                    active_residues.append(first.residue_id)
+                    ).build(sub)
+                coarse=None if args.dual_energy_diagnostic else build_coarse()
+                if coarse is None:
+                    active_residues=[data.residue_ids[i] for i in active.tolist()]
+                else:
+                    active_residues=[]
+                    for site in sorted(coarse.site_to_variables):
+                        first=coarse.variable_map[coarse.site_to_variables[site][0]]
+                        active_residues.append(first.residue_id)
 
                 with tempfile.TemporaryDirectory(prefix=f"cal_{pdb}_") as temp:
                     temp=Path(temp)
@@ -437,6 +461,20 @@ def main() -> int:
                         rotamer_sigma_offsets=args.rotamer_sigma_offsets,
                         solvent_model=args.solvent_model,
                     )
+                    if args.dual_energy_diagnostic:
+                        from nanoqc.common.repo_io import atomic_write_json_fsync
+                        diagnostic_dir=args.diagnostic_artifacts/f"train_{training_row_index:06d}_{pdb}"
+                        diagnostic_dir.mkdir(parents=True,exist_ok=True)
+                        atomistic.write_structure(atomistic.base_positions,diagnostic_dir/"prepared_native.cif")
+                        atomic_write_json_fsync(diagnostic_dir/"preparation.json",dict(
+                            graph_sha256=row["sha256"],source_id=data.source_id,active_residues=active_residues,
+                            source=atomistic.input_quality,hydrogenated=atomistic.preparation_quality,
+                            cdr3_uniquely_observed=bool(getattr(data,"cdr3_seq","") and
+                                any(str(sequence).count(data.cdr3_seq)==1 for sequence in getattr(data,"chain_sequences",[])))))
+                        coarse=build_coarse()
+                        coarse.export(diagnostic_dir,"coarse")
+                        if {v.residue_id for v in coarse.variable_map}!=set(active_residues):
+                            raise ValueError("Diagnostic coarse and atomistic Active residue identities differ")
 
                     assignments=calibration_assignments(
                         coarse,args.assignments_per_complex,rng
@@ -444,12 +482,30 @@ def main() -> int:
                     anchor=assignments[0]
                     anchor_components=np.asarray(assignment_components(coarse,anchor),dtype=float)
                     anchor_angles=chi_assignment(coarse,anchor)
-                    anchor_amber=atomistic.energy_for_chi_assignment(anchor_angles)
+                    if args.dual_energy_diagnostic:
+                        from nanoqc.experiments.training_energy_diagnostic import diagnostic_assignment
+                        evaluations=[]
+                        for index,state in enumerate(assignments):
+                            evaluations.append(diagnostic_assignment(atomistic,chi_assignment(coarse,state),
+                                diagnostic_dir/f"assignment_{index:04d}.cif",args.diagnostic_iterations))
+                            if (index+1)%8==0 or index+1==len(assignments):
+                                print(f"[dual-energy] {pdb}: {index+1}/{len(assignments)} states assessed",flush=True)
+                        anchor_amber=evaluations[0]["raw_amber_kcal"]
+                        anchor_relaxed=evaluations[0]["relaxed_amber_kcal"]
+                    else:
+                        anchor_amber=atomistic.energy_for_chi_assignment(anchor_angles)
 
                     for index,selected in enumerate(assignments):
                         components=np.asarray(assignment_components(coarse,selected),dtype=float)-anchor_components
                         angles=chi_assignment(coarse,selected)
-                        amber=atomistic.energy_for_chi_assignment(angles)-anchor_amber
+                        if args.dual_energy_diagnostic:
+                            evaluated=evaluations[index]
+                            raw=evaluated["raw_amber_kcal"];relaxed=evaluated["relaxed_amber_kcal"]
+                            amber=None if raw is None or anchor_amber is None else raw-anchor_amber
+                            evaluated["coarse_delta"]=coarse_physical_energy(coarse,selected)-coarse_physical_energy(coarse,anchor)
+                            evaluated["relaxed_amber_delta_kcal"]=(None if relaxed is None or anchor_relaxed is None else relaxed-anchor_relaxed)
+                        else:
+                            amber=atomistic.energy_for_chi_assignment(angles)-anchor_amber
                         complex_rows.append(dict(
                             pdb_id=pdb,family_cluster=family_cluster,split="train",
                             training_row_index=training_row_index,assignment_index=index,
@@ -463,6 +519,14 @@ def main() -> int:
                             chi_assignment=json.dumps(angles,separators=(",",":"),sort_keys=True),
                             graph_sha256=row["sha256"],source_id=data.source_id,
                         ))
+                        if args.dual_energy_diagnostic:
+                            complex_rows[-1].update(evaluated)
+                            artifact=Path(evaluated["diagnostic_artifact"])
+                            payload=json.loads(artifact.read_text(encoding="utf-8"))
+                            payload.update(result=evaluated,anchor_assignment_index=0,
+                                coarse_components_delta=components.tolist(),
+                                graph_sha256=row["sha256"],family_cluster=family_cluster)
+                            atomic_write_json_fsync(artifact,payload)
                     for output_row in complex_rows:
                         writer.writerow(output_row)
                         written+=1
@@ -471,6 +535,13 @@ def main() -> int:
                 record=dict(pdb_id=pdb,source_id=row.get("source_id"),
                             training_row_index=training_row_index,
                             error=f"{type(exc).__name__}: {exc}")
+                if args.dual_energy_diagnostic:
+                    from nanoqc.common.repo_io import atomic_write_json_fsync
+                    record.update(category=getattr(exc,"category","preparation_or_generation"),
+                                  audit=getattr(exc,"audit",None),graph_sha256=row["sha256"])
+                    failure_path=args.diagnostic_artifacts/f"train_{training_row_index:06d}_{pdb}"/"failure.json"
+                    failure_path.parent.mkdir(parents=True,exist_ok=True)
+                    atomic_write_json_fsync(failure_path,record)
                 if is_input_quality_exclusion(exc):
                     input_quality_exclusions.append(record)
                 else:
@@ -519,10 +590,12 @@ def main() -> int:
         shard_count=args.shard_count,seed_policy="per_training_manifest_row_seedsequence",
         force_field=force_field.__dict__,
         csv_sha256=sha256(args.out_csv),
+        diagnostic_mode=("raw_relaxed_training_only_v1" if args.dual_energy_diagnostic else None),
+        diagnostic_iterations=(args.diagnostic_iterations if args.dual_energy_diagnostic else None),
     )
     provenance_path=args.out_provenance or args.out_csv.with_suffix(".provenance.json")
     provenance_path.write_text(json.dumps(provenance,indent=2,sort_keys=True)+"\n",encoding="utf-8")
-    if written==0 and args.shard_count==1:
+    if written==0 and args.shard_count==1 and not args.dual_energy_diagnostic:
         raise RuntimeError("No calibration rows generated")
     print(args.out_csv)
     return 0

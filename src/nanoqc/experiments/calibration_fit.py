@@ -31,6 +31,8 @@ def fit_energy_calibration_csv(input_csv: Path, output_json: Path, ridge_alpha: 
         rows=list(csv.DictReader(handle))
     if not rows:
         raise ValueError("Calibration CSV is empty")
+    if "diagnostic_mode" in rows[0]:
+        raise ValueError("Dual-energy diagnostic CSV is not a calibration fitting input")
     required=(
         "pdb_id","split","prior_energy","vhh_environment_energy",
         "antigen_energy","pair_energy","amber_delta_kcal",

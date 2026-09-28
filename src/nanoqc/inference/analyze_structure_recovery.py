@@ -63,6 +63,8 @@ def grouped_primary(
     resamples: int, seed: int,
 ) -> dict:
     """Strict paired-seed primary contrast, then target and cluster averaging."""
+    from nanoqc.structure.physical_quality import assert_structural_row_acceptance
+    assert_structural_row_acceptance(rows)
 
     baseline_map={
         "qaoa_vs_sa":"sa",
@@ -162,6 +164,8 @@ def rq5_energy_structure(
     family/structure cluster before Spearman inference, so repeated seeds and
     homologous PDBs are not treated as independent observations.
     """
+    from nanoqc.structure.physical_quality import assert_structural_row_acceptance
+    assert_structural_row_acceptance(rows)
 
     baseline_map={
         "qaoa_vs_sa":"sa",

@@ -220,6 +220,8 @@ ORCHESTRATED_SCRIPTS: List[str] = [
     "coarse_qubo.py",
     "ising.py",
     "allatom_qubo.py",
+    "physical_quality.py",
+    "training_energy_diagnostic.py",
     "qaoa_interface_sampler.py",
     # qaoa_interface_sampler is split across these modules; each is fingerprinted.
     "qaoa_results.py",

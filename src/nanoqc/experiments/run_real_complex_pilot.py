@@ -6,6 +6,7 @@ The original benchmark driver remains the solver/evaluation implementation.
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import concurrent.futures
 import contextlib
 import csv
@@ -27,6 +28,7 @@ from nanoqc.qubo.subgraph_to_qubo import read_atomistic_structure, _SIDECHAIN_NA
 from nanoqc.common.seed_streams import derive_streams, derive_child_seed, save_stream_map, DEFAULT_MASTER_SEED
 from nanoqc.data.sequence_identity import nw_identity, length_coverage, partner_roles_anchored
 from nanoqc.data.safe_graph_load import load_graph
+from nanoqc.structure.physical_quality import StructureQualityError, topology_geometry_audit
 
 
 def _run_recovery_on_device(argv: list[str], device: str) -> int:
@@ -163,7 +165,21 @@ def prepare(graph, source: Path, destination: Path, sites: int, *, pruning: str 
     expected = set(graph.residue_ids)
     if set(residues) != expected:
         raise ValueError("Raw/graph protein residue identities differ")
-    changes = strip_to_protein_conformer(st, residues)
+    try:
+        changes = strip_to_protein_conformer(st, residues)
+    except ValueError as exc:
+        raise StructureQualityError(str(exc),category="input_heavy_atoms",
+            audit=dict(reason=str(exc),policy="no internal atom or loop reconstruction")) from exc
+    # Audit experimental coordinates before selection or deliberate perturbation.
+    # IMGT residue-number gaps are not evidence of a missing peptide bond.
+    import io
+    from openmm import app, unit
+    parsed=app.PDBxFile(io.StringIO(st.make_mmcif_document().as_string()))
+    preparation_quality=topology_geometry_audit(parsed.topology,
+        np.asarray(parsed.positions.value_in_unit(unit.nanometer)))
+    if not preparation_quality["topology_passed"] or not preparation_quality["geometry_passed"]:
+        raise StructureQualityError("Source structure failed topology/near-coincidence audit",
+            category="input_quality",audit=preparation_quality)
     for i, rid in enumerate(graph.residue_ids):
         if not np.allclose(residues[rid]["atoms"]["CA"], graph.pos[i].numpy(), atol=.002):
             raise ValueError(f"Raw/graph coordinates differ at {rid}")
@@ -175,7 +191,9 @@ def prepare(graph, source: Path, destination: Path, sites: int, *, pruning: str 
     sequence = graph.chain_sequences[graph.chain_ids.index(vhh[0])]
     cdr = graph.cdr3_seq
     if not cdr or sequence.count(cdr) != 1:
-        raise ValueError("CDR-H3 does not map uniquely")
+        raise StructureQualityError("CDR-H3 does not map uniquely; no loop reconstruction attempted",
+            category="input_annotation",audit=dict(cdr3_sequence=cdr,
+                observed_sequence=sequence,reason="cdr3_not_uniquely_observed"))
     start = sequence.index(cdr)
     cdr_ids = [graph.residue_ids[i] for i in chain_nodes[start:start+len(cdr)]]
     partners = sorted(r for r in residues if groups[r.rsplit(":", 1)[0]] == 1)
@@ -216,7 +234,7 @@ def prepare(graph, source: Path, destination: Path, sites: int, *, pruning: str 
             active_residues=[], active_site_scores=[],
             eligible_residues=[item[1] for item in scored],
             alignment_residues=partners, partner_residues=partners,
-            preparation_changes=changes, cdr3_residues=cdr_ids,
+            preparation_changes=changes, preparation_quality=preparation_quality, cdr3_residues=cdr_ids,
             pruning="eligibility_only", pruning_candidate_count=len(scored),
             pruning_seed=None, model_status=None,
             antigen_guidance_weight=float(antigen_guidance_weight),
@@ -272,7 +290,7 @@ def prepare(graph, source: Path, destination: Path, sites: int, *, pruning: str 
     st.make_mmcif_document().write_file(str(destination))
     return dict(active_residues=active, active_site_scores=active_site_scores,
                 alignment_residues=partners, partner_residues=partners,
-                preparation_changes=changes, cdr3_residues=cdr_ids,pruning=pruning,
+                preparation_changes=changes, preparation_quality=preparation_quality, cdr3_residues=cdr_ids,pruning=pruning,
                 pruning_candidate_count=len(scored),pruning_seed=seed,model_status=model_status,
                 antigen_guidance_weight=float(antigen_guidance_weight),
                 antigen_proximity_scale=float(antigen_proximity_scale),
@@ -498,6 +516,7 @@ def main(argv=None) -> int:
          # subgraph_to_qubo.py re-exports these; the QUBO builders themselves live here.
          "atomistic_structure.py","qubo_types.py","rotamer_library.py","coarse_qubo.py","ising.py",
          "allatom_qubo.py",
+         "physical_quality.py",
          # batch_benchmark_hard_set.py dispatches; _recovery_benchmark_main lives in these.
          "benchmark_common.py","hard_set_evaluation.py","research_ablation.py","calibration_fit.py",
          "benchmark_statistics.py","structure_benchmarks.py",
@@ -734,6 +753,8 @@ def main(argv=None) -> int:
                     chain_identity_audit=chain_identity_audit))
             except Exception as exc:
                 decisions.append(dict(pdb_id=pdb,status="excluded",reason=str(exc),
+                    failure_category=getattr(exc,"category","eligibility_or_execution"),
+                    physical_quality_audit=getattr(exc,"audit",None),
                     development_exposed=development_exposed,independence_status=independence_status,
                     chain_identity_audit=chain_identity_audit,max_cdr_h3_loop_identity=max_cdr_h3_loop_identity))
             _ablation_atomic_json(out/"eligibility.json",decisions)
@@ -846,6 +867,10 @@ def main(argv=None) -> int:
             structure_experiment_completed_targets=completed_targets,
             structure_experiment_completed_target_ids=sorted(completed_ids),
             structure_experiment_failed_targets=sorted(failed_ids),
+            eligibility_failure_categories=dict(Counter(
+                d.get("failure_category","eligibility") for d in decisions if d["status"]=="excluded")),
+            physical_output_rows_failed=sum(r.get("evaluation_status")!="passed" for r in results),
+            physical_control_rows_failed=sum(r.get("control_evaluation_status")!="passed" for r in results),
             frozen_set_accounting_ok=frozen_set_accounting_ok,
             closed=closed))
         coverage_pct = (len(selected)/len(decisions)*100) if decisions else 0.0
@@ -861,13 +886,15 @@ def main(argv=None) -> int:
             f"Independence uses PDB-disjointness, layered sequence screening (VHH {args.vhh_identity_threshold*100:.0f}%, CDR-H3 {args.cdr_h3_identity_threshold*100:.0f}%, antigen {args.antigen_identity_threshold*100:.0f}% with minimum length coverage {args.antigen_min_length_coverage*100:.0f}%) and the supplied family/structure cluster map when present (details in eligibility.json). Development exposure is recorded separately. This remains a retrospective recovery benchmark.",
             "", "| Method | Targets with results | Mean RMSD gain vs input (A) | Mean gain vs relax-only (A) |", "|---|---:|---:|---:|"]
         for method in ("qaoa","sa","uniform","greedy"):
-            group=[r for r in results if r["method"]==method]
+            group=[r for r in results if r["method"]==method and
+                   r.get("evaluation_status")=="passed" and r.get("control_evaluation_status")=="passed"]
             targets=sorted({r["target"] for r in group})
             if targets:
                 gains=[np.mean([float(r["improvement_vs_input"]) for r in group if r["target"]==t]) for t in targets]
                 controls=[np.mean([float(r["improvement_vs_relax_only"]) for r in group if r["target"]==t]) for t in targets]
                 report.append(f"| {method} | {len(targets)} | {np.mean(gains):.6g} | {np.mean(controls):.6g} |")
-        report += ["", "Eligibility and every exclusion reason are in eligibility.json; no replacement based on solver results. Failed/incomplete targets remain listed. Target means weight seeds within each target first. No significance or quantum advantage is inferred from a small pilot."]
+        report += ["", f"Descriptive means above use physically accepted method/control rows only; all {len(results)} recorded rows, including failures, remain in real_complex_metrics.csv. Formal inference rejects failed physical acceptance rather than excluding rows.",
+            "Eligibility and every exclusion reason are in eligibility.json; no replacement based on solver results. Failed/incomplete targets remain listed. Target means weight seeds within each target first. No significance or quantum advantage is inferred from a small pilot."]
         if args.solvent_model!="vacuum":
             report += ["", f"Energy-model note: {args.solvent_model} implicit solvent is not exactly "
                 "pair-decomposable, so its QUBO is a pairwise approximation of the full energy. "

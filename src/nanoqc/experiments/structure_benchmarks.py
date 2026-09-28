@@ -20,6 +20,23 @@ from nanoqc.solvers.qaoa_interface_sampler import XYMixerQAOASampler
 from nanoqc.common.repo_io import sha256_file as _ablation_digest, atomic_write_json_fsync as _ablation_atomic_json, repo_path
 from nanoqc.experiments.benchmark_common import SHARED_HELPER_MODULES
 from nanoqc.experiments.research_ablation import _ablation_classical_counts, _ablation_summarize
+from nanoqc.structure.physical_quality import StructureQualityError
+
+
+def _structure_quality_assessment(relaxation: dict) -> dict:
+    """Assess a saved output, without changing its energy or reference metrics."""
+    failures=[]
+    geometry=relaxation.get("stage2_physical_quality",relaxation["physical_quality_after"])
+    forces=relaxation.get("stage2_force_quality",relaxation)
+    if not geometry["topology_passed"]: failures.append("peptide_topology")
+    if not geometry["geometry_passed"]: failures.append("extreme_nonbonded_overlap")
+    # Skipped minimization is explicit and cannot be described as converged.
+    if not forces["relaxation_converged"]: failures.append("relaxation_"+forces["relaxation_status"])
+    return dict(evaluation_status="passed" if not failures else "failed",
+                evaluation_failure_reasons=failures,
+                movable_force_rms_kj_mol_nm=forces["movable_force_rms_kj_mol_nm"],
+                movable_force_max_kj_mol_nm=forces["movable_force_max_kj_mol_nm"],
+                extreme_nonbonded_pair_count=geometry["extreme_nonbonded_pair_count"])
 
 
 
@@ -209,12 +226,25 @@ def _allatom_experiment_main(argv: Optional[Sequence[str]] = None) -> int:
             rotamer_sigma_offsets=rotamer_cfg.get("sigma_offsets",[-1.0,0.0,1.0]),
             solvent_model=args.solvent_model)
         builder.write_structure(builder.base_positions,out/"prepared_input.cif")
+        _ablation_atomic_json(out/"structure_preparation_audit.json",dict(
+            source=builder.input_quality,after_hydrogen_addition=builder.preparation_quality,
+            input_role=case["protocol"],
+            generated_input_policy="perturbed recovery inputs are retained, not relabelled as source exclusions"))
         # Candidate coordinates make reconstruction independently auditable.
         np.savez_compressed(out/"candidate_coordinates.npz",base_positions_nm=builder.base_positions,
             **{f"indices_{i}":c["indices"] for i,c in enumerate(builder.candidates)},
             **{f"positions_nm_{i}":c["positions"] for i,c in enumerate(builder.candidates)})
         print("Decomposing full force-field energies and checking equivalence",flush=True)
-        qubo=builder.build();qubo.export(out,"allatom")
+        try:
+            qubo=builder.build()
+        except Exception as exc:
+            _ablation_atomic_json(out/"allatom_build_failure.json",dict(
+                error=str(exc),category="candidate_or_model_construction",
+                preparation=builder.preparation_quality,
+                decomposition=getattr(builder,"decomposition_quality",None)))
+            raise
+        _ablation_atomic_json(out/"candidate_geometry_audit.json",builder.decomposition_quality)
+        qubo.export(out,"allatom")
         # ONE sampler instance: XYMixerQAOASampler.optimize_robust/.sample/
         # .simulated_annealing already accept explicit optimize_seed/
         # measurement_seed/sample_seed overrides directly.
@@ -235,7 +265,9 @@ def _allatom_experiment_main(argv: Optional[Sequence[str]] = None) -> int:
         if args.loop_relax_iterations:
             relax_only.update(builder.relax_cdr_loop(relax_only_path,case.get('cdr3_residues',[]),iterations=args.loop_relax_iterations))
         _ablation_atomic_json(out/"relax_only_result.json",dict(relaxation=relax_only,
+            **_structure_quality_assessment(relax_only),
             structure_after_relaxation=evaluate(relax_only_path) if reference else None))
+        quality_outcomes={"relax_only":_structure_quality_assessment(relax_only)}
         with (out/"allatom_metrics.csv").open("w",newline="",encoding="utf-8") as handle:
             writer=None
             for method in ("qaoa","sa","uniform","greedy"):
@@ -313,6 +345,7 @@ def _allatom_experiment_main(argv: Optional[Sequence[str]] = None) -> int:
                 before=evaluate(prediction.with_name(prediction.stem+"_discrete.cif")) if reference else None
                 after=evaluate(prediction) if reference else None
                 result=dict(**budget_metrics,method=method,protocol=case["protocol"],selected_bits=list(selected),
+                    **_structure_quality_assessment(relaxation),
                     counts=[dict(bits=list(b),count=c) for b,c in sorted(counts.items())],
                     sampling=_ablation_summarize(counts,energies,truth.energy,2.),relaxation=relaxation,
                     structure_before_relaxation=before,structure_after_relaxation=after,solver_seconds=elapsed)
@@ -324,6 +357,8 @@ def _allatom_experiment_main(argv: Optional[Sequence[str]] = None) -> int:
                     bits=len(selected),ground_gap=energies[selected]-truth.energy,solver_seconds=elapsed,**relaxation,
                     sidechain_rmsd_before=before["sidechain_rmsd_angstrom"] if before else None,
                     sidechain_rmsd_after=after["sidechain_rmsd_angstrom"] if after else None)
+                quality_outcomes[method]=_structure_quality_assessment(relaxation)
+                row.update(quality_outcomes[method])
                 if writer is None:
                     writer=csv.DictWriter(handle,fieldnames=list(row),extrasaction="ignore");writer.writeheader()
                 writer.writerow(row);handle.flush();os.fsync(handle.fileno());records.append(row)
@@ -333,10 +368,18 @@ def _allatom_experiment_main(argv: Optional[Sequence[str]] = None) -> int:
             "Same output count and same relaxation conditions; not equal total computational cost. The native reference never enters candidate selection or energy ranking.",
             "Only the lowest discrete-energy sampled state per method is relaxed; no reference-based selection. Iteration cap does not guarantee convergence.",
             "Sampling uses classical exact-subspace simulation. These results do not establish quantum advantage.",
-            "", "| Method | Discrete energy (kcal/mol) | Relaxed energy | SC RMSD before | SC RMSD after |", "|---|---:|---:|---:|---:|"]
+            "", "| Method | Discrete energy (kcal/mol) | Relaxed energy | SC RMSD before | SC RMSD after | Physical acceptance | RMS force (kJ/mol/nm) |", "|---|---:|---:|---:|---:|---|---:|"]
         for r in records:
-            lines.append(f"| {r['method']} | {r['discrete_energy_kcal']:.6g} | {r['relaxed_energy_kcal']:.6g} | {r['sidechain_rmsd_before']} | {r['sidechain_rmsd_after']} |")
+            lines.append(f"| {r['method']} | {r['discrete_energy_kcal']:.6g} | {r['relaxed_energy_kcal']:.6g} | {r['sidechain_rmsd_before']} | {r['sidechain_rmsd_after']} | {r['evaluation_status']} | {r['movable_force_rms_kj_mol_nm']:.6g} |")
         (out/"allatom_report.md").write_text("\n".join(lines),encoding="utf-8")
+        _ablation_atomic_json(out/"structure_quality_summary.json",dict(
+            outputs_requested=5,outputs_evaluated=len(quality_outcomes),
+            outputs_failed=sum(x["evaluation_status"]=="failed" for x in quality_outcomes.values()),
+            outcomes=quality_outcomes,
+            failure_category="method_output; not an input-data exclusion"))
+        if any(x["evaluation_status"]=="failed" for x in quality_outcomes.values()):
+            print("Structure quality acceptance failed; all evaluated outputs and metrics retained",flush=True)
+            return 1
         files=[p for p in out.iterdir() if p.is_file() and p.name not in (".lock","completed.json")]
         _ablation_atomic_json(out/"completed.json",dict(artifacts={p.name:_ablation_digest(p) for p in files}))
         print(out/"allatom_report.md")
@@ -411,7 +454,7 @@ def _recovery_benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
         code_sha256={n:_ablation_digest(repo_path(n)) for n in
             ("batch_benchmark_hard_set.py","subgraph_to_qubo.py","qaoa_interface_sampler.py",
              "model_egnn_pruning.py",*SHARED_HELPER_MODULES)},openmm=openmm.__version__)
-    rows=[];failures=0
+    rows=[];failures=0;failure_records=[]
     with FileLock(str(out/".lock"),timeout=0):
         record=out/"run_manifest.json"
         if record.exists() and json.loads(record.read_text())!=provenance:
@@ -426,6 +469,11 @@ def _recovery_benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
             rotamer_probability_floor=float(rotamer_cfg.get("probability_floor",1e-4)),
             rotamer_sigma_offsets=rotamer_cfg.get("sigma_offsets",[-1.0,0.0,1.0]),
             solvent_model=args.solvent_model)
+        _ablation_atomic_json(out/"native_preparation_audit.json",dict(
+            source=generator.input_quality,after_hydrogen_addition=generator.preparation_quality))
+        if not generator.input_quality["geometry_passed"]:
+            raise StructureQualityError("Native source has an extreme nonbonded overlap",
+                category="input_geometry",audit=generator.input_quality)
         with (out/"recovery_metrics.csv").open("w",newline="",encoding="utf-8") as handle:
             writer=None
             for idx, seed in enumerate(args.seeds):
@@ -464,7 +512,7 @@ def _recovery_benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
                     child_manifest=directory/"experiment.json"
                     _ablation_atomic_json(child_manifest,child_case)
                     experiment=directory/"experiment"
-                    _allatom_experiment_main(["--manifest",str(child_manifest),"--out-dir",str(experiment),
+                    child_status=_allatom_experiment_main(["--manifest",str(child_manifest),"--out-dir",str(experiment),
                         "--outputs",str(args.outputs),"--max-evals",str(args.max_evals),
                         "--qaoa-depth",str(args.qaoa_depth),"--sa-passes",str(args.sa_passes),
                         "--relax-iterations",str(args.relax_iterations),"--seed",str(seed),
@@ -486,6 +534,9 @@ def _recovery_benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
                         energy_drop=result["relaxation"]["discrete_energy_kcal"]-final_energy
                         rmsd_before=result["structure_before_relaxation"]["sidechain_rmsd_angstrom"]
                         row=dict(target=case.get("target",native.stem),seed=seed,optimize_seed=optimize_seed,
+                            evaluation_status=result["evaluation_status"],
+                            evaluation_failure_reasons=json.dumps(result["evaluation_failure_reasons"]),
+                            control_evaluation_status=control["evaluation_status"],
                             measurement_seed=measurement_seed,sample_seed=sample_seed,method=method,**recovery,
                             **{k:result[k] for k in ('dockq_score','fnat','irmsd','lrmsd','dockq_category','num_severe_clashes','has_severe_clash','total_opt_shots','bitstring_entropy','low_energy_fraction','dockq_definition','dockq_backbone_score')},
                             chi1_recovery_initial=initial["chi1_recovery_rate"],chi1_recovery_final=final["chi1_recovery_rate"],
@@ -503,8 +554,13 @@ def _recovery_benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
                         if writer is None:
                             writer=csv.DictWriter(handle,fieldnames=list(row),extrasaction="ignore");writer.writeheader()
                         writer.writerow(row);handle.flush();os.fsync(handle.fileno());rows.append(row)
-                except Exception:
+                    if child_status:
+                        raise StructureQualityError("Recovery outputs failed physical acceptance",
+                            category="method_output",audit=json.loads((experiment/"structure_quality_summary.json").read_text()))
+                except Exception as exc:
                     failures+=1
+                    failure_records.append(dict(seed=seed,error=str(exc),
+                        category=getattr(exc,"category","execution"),audit=getattr(exc,"audit",None)))
                     with (out/"failed_cases.log").open("a",encoding="utf-8") as f:
                         f.write(f"seed={seed}\n"+traceback.format_exc()+"\n");f.flush()
         lines=["# Retrospective side-chain perturbation-recovery", "",
@@ -516,9 +572,15 @@ def _recovery_benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
             "Perturbations are not rejected based on energy or reference similarity. Failures must be included in the denominator; energy decrease alone is not accuracy.",
             "", "| Method | Successful seeds | Mean gain vs input (A) | Mean gain vs relax-only (A) | Energy-down/RMSD-up cases |", "|---|---:|---:|---:|---:|"]
         for method in ("qaoa","sa","uniform","greedy"):
-            group=[r for r in rows if r["method"]==method]
+            group=[r for r in rows if r["method"]==method and
+                   r["evaluation_status"]=="passed" and r["control_evaluation_status"]=="passed"]
             if group:
                 lines.append(f"| {method} | {len(group)} | {np.mean([r['improvement_vs_input'] for r in group]):.6g} | {np.mean([r['improvement_vs_relax_only'] for r in group]):.6g} | {sum(r['relaxation_energy_down_rmsd_up'] for r in group)} |")
         (out/"recovery_report.md").write_text("\n".join(lines),encoding="utf-8")
+        _ablation_atomic_json(out/"recovery_quality_summary.json",dict(
+            requested_seeds=len(args.seeds),failed_seeds=failures,failures=failure_records,
+            requested_method_outputs=4*len(args.seeds),recorded_method_outputs=len(rows),
+            invalid_recorded_outputs=sum(r["evaluation_status"]!="passed" for r in rows),
+            rows_retained_including_invalid=True))
         print(out/"recovery_report.md")
     return 1 if failures else 0

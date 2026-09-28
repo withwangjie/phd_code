@@ -17,6 +17,8 @@ from nanoqc.qubo.coarse_qubo import InterfaceQUBOBuilder, _combinations
 from nanoqc.qubo.ising import qubo_to_ising, validate_qubo_ising_equivalence
 from nanoqc.qubo.qubo_types import AA_INDEX, QUBOResult, RotamerTemplate, VariableRecord
 from nanoqc.qubo.rotamer_library import _THREE_LETTER, _dunbrack_templates_for_site, _expanded_rotamer_templates, _load_rotamer_bins, _nearest_dunbrack_bin, rotamer_source_metadata
+from nanoqc.structure.physical_quality import (StructureQualityError, topology_geometry_audit,
+    relaxation_force_audit, RELAX_FORCE_TOLERANCE_KJ_MOL_NM)
 
 
 
@@ -184,6 +186,11 @@ class AllAtomInterfaceQUBOBuilder:
         opener=gzip.open if suffix.endswith(".gz") else open
         with opener(structure_path,"rt") as handle:
             parsed=(app.PDBxFile(handle) if suffix.endswith((".cif",".cif.gz")) else app.PDBFile(handle))
+        self.input_quality = topology_geometry_audit(parsed.topology,
+            np.asarray(parsed.positions.value_in_unit(unit.nanometer)))
+        if not self.input_quality["topology_passed"]:
+            raise StructureQualityError("Prepared protein contains a peptide-chain break",
+                category="input_topology", audit=self.input_quality)
         if self.solvent_model=="vacuum":
             self.forcefield=app.ForceField("amber14-all.xml")
         else:
@@ -200,10 +207,16 @@ class AllAtomInterfaceQUBOBuilder:
             random.setstate(state)
         self.topology=modeller.topology
         self.base_positions=np.asarray(modeller.positions.value_in_unit(unit.nanometer),dtype=float)
+        self.preparation_quality=topology_geometry_audit(self.topology,self.base_positions)
         self.system=self.forcefield.createSystem(
             self.topology,nonbondedMethod=app.NoCutoff,
             constraints=None,rigidWater=False,removeCMMotion=False
         )
+        self.energy_force_groups={}
+        for i, force in enumerate(self.system.getForces()):
+            if i>=32: raise ValueError("Energy audit supports at most 32 force groups")
+            force.setForceGroup(i)
+            self.energy_force_groups[f"{i}:{type(force).__name__}"]=i
         self.integrator=mm.VerletIntegrator(.001)
         self.context=_openmm_context(mm, self.system, self.integrator)
         residues={}
@@ -446,6 +459,13 @@ class AllAtomInterfaceQUBOBuilder:
                 c=self.candidates[v]
                 positions[c["indices"]]=c["positions"]
             return positions
+        self.decomposition_quality=dict(
+            anchor=topology_geometry_audit(self.topology,anchor_positions),
+            single_site_candidates=[dict(variable=v,residue_id=c["residue_id"],
+                audit=topology_geometry_audit(self.topology,assignment([v])))
+                for v,c in enumerate(self.candidates)],
+            background="other Active sites fixed at decomposition anchors; not an exhaustive pair-combination audit",
+            candidate_filtering="none; diagnostics do not alter retained states")
         baseline=self.energy(anchor_positions)
         singles=np.array([self.energy(assignment([v]))-baseline for v in range(count)])
         pairs=np.zeros((count,count))
@@ -500,6 +520,7 @@ class AllAtomInterfaceQUBOBuilder:
                 all_atom_equivalence_rms_error=rms_error,all_atom_equivalence_samples=12,
                 pair_decomposition=("exact" if exact else "pairwise_approximation"),
                 candidate_relax_iterations=self.candidate_relax_iterations,
+                physical_quality_schema=self.preparation_quality["schema"],
                 decomposition_anchor_variables=anchors,ising_equivalence_max_error=ising_error,
                 ising_roundoff_tolerance=roundoff_bound,
                 atom_count=len(self.base_positions),
@@ -647,9 +668,12 @@ class AllAtomInterfaceQUBOBuilder:
         context.setPositions(positions*self.unit.nanometer)
         initial=float(context.getState(getEnergy=True).getPotentialEnergy().value_in_unit(self.unit.kilocalories_per_mole))
         self.mm.LocalEnergyMinimizer.minimize(context,10.,iterations)
-        state=context.getState(getPositions=True,getEnergy=True)
+        state=context.getState(getPositions=True,getEnergy=True,getForces=True)
         final=np.asarray(state.getPositions(asNumpy=True).value_in_unit(self.unit.nanometer))
         augmented=float(state.getPotentialEnergy().value_in_unit(self.unit.kilocalories_per_mole))
+        force_quality=relaxation_force_audit(
+            np.asarray(state.getForces(asNumpy=True).value_in_unit(
+                self.unit.kilojoules_per_mole/self.unit.nanometer)),movable,iterations=iterations)
         del context,integrator
         if not np.allclose(final[frozen],positions[frozen],atol=1e-10,rtol=0):
             raise AssertionError('Stage 2 moved frozen atoms')
@@ -658,6 +682,8 @@ class AllAtomInterfaceQUBOBuilder:
         self.write_structure(final,destination)
         return dict(stage2_iterations=iterations,stage2_restraint_k_kj_mol_nm2=restraint_k,
             stage2_physical_energy_kcal=self.energy(final),stage2_restrained_energy_kcal=augmented,
+            stage2_force_quality=force_quality,
+            stage2_physical_quality=topology_geometry_audit(self.topology,final),
             stage2_backbone_displacement_angstrom=float(10*np.sqrt(np.mean(np.sum((final[backbone]-positions[backbone])**2,axis=1)))),
             stage2_frozen_atoms=len(frozen))
 
@@ -672,6 +698,8 @@ class AllAtomInterfaceQUBOBuilder:
         if not np.allclose(positions[frozen],self.base_positions[frozen],atol=1e-10,rtol=0):
             raise ValueError("Input changed frozen/background atoms")
         before=self.energy(positions)
+        before_components=self.energy_components()
+        before_quality=topology_geometry_audit(self.topology,positions)
         destination=Path(destination); destination.parent.mkdir(parents=True,exist_ok=True)
         self.write_structure(positions,destination.with_name(destination.stem+"_discrete.cif"))
         if minimize_iterations:
@@ -681,15 +709,32 @@ class AllAtomInterfaceQUBOBuilder:
             integrator=self.mm.VerletIntegrator(.001)
             context=_openmm_context(self.mm, system, integrator)
             context.setPositions(positions*self.unit.nanometer)
-            self.mm.LocalEnergyMinimizer.minimize(context,10.,minimize_iterations)
+            self.mm.LocalEnergyMinimizer.minimize(context,RELAX_FORCE_TOLERANCE_KJ_MOL_NM,minimize_iterations)
             positions=np.asarray(context.getState(getPositions=True).getPositions(asNumpy=True).value_in_unit(self.unit.nanometer))
             del context,integrator
         frozen=sorted(set(range(len(positions)))-self.movable)
         if not np.allclose(positions[frozen],self.base_positions[frozen],atol=1e-10,rtol=0):
             raise AssertionError("Frozen atoms moved during relaxation")
         after=self.energy(positions)
+        after_components=self.energy_components()
         if after>before+1e-4: raise ValueError("Relaxation increased potential energy")
         self.write_structure(positions,destination)
+        force_state=self.context.getState(getForces=True)
+        force_quality=relaxation_force_audit(
+            np.asarray(force_state.getForces(asNumpy=True).value_in_unit(
+                self.unit.kilojoules_per_mole/self.unit.nanometer)),
+            self.movable, iterations=minimize_iterations)
+        after_quality=topology_geometry_audit(self.topology,positions)
         return dict(discrete_energy_kcal=before,relaxed_energy_kcal=after,
             max_iterations=minimize_iterations,frozen_atoms=len(frozen),movable_atoms=len(self.movable),
+            **force_quality, physical_quality_before=before_quality,
+            physical_quality_after=after_quality,
+            discrete_energy_components_kcal=before_components,
+            relaxed_energy_components_kcal=after_components,
             note="Iteration cap is not a convergence guarantee; fixed-backbone vacuum energy is not binding affinity")
+
+    def energy_components(self) -> dict[str, float]:
+        """Force-group energies at the currently set positions; no energy clipping."""
+        return {name:float(self.context.getState(getEnergy=True,groups={group})
+            .getPotentialEnergy().value_in_unit(self.unit.kilocalories_per_mole))
+            for name,group in self.energy_force_groups.items()}

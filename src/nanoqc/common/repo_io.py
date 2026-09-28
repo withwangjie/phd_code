@@ -64,6 +64,8 @@ MODULE_LAYOUT = {
     "coarse_qubo.py": "src/nanoqc/qubo/coarse_qubo.py",
     "ising.py": "src/nanoqc/qubo/ising.py",
     "allatom_qubo.py": "src/nanoqc/qubo/allatom_qubo.py",
+    "physical_quality.py": "src/nanoqc/structure/physical_quality.py",
+    "training_energy_diagnostic.py": "src/nanoqc/experiments/training_energy_diagnostic.py",
     "qaoa_interface_sampler.py": "src/nanoqc/solvers/qaoa_interface_sampler.py",
     "qaoa_results.py": "src/nanoqc/solvers/qaoa_results.py",
     "qaoa_optimization.py": "src/nanoqc/solvers/qaoa_optimization.py",
