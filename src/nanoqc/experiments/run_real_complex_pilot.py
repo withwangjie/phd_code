@@ -500,7 +500,9 @@ def main(argv=None) -> int:
          "allatom_qubo.py",
          # batch_benchmark_hard_set.py dispatches; _recovery_benchmark_main lives in these.
          "benchmark_common.py","hard_set_evaluation.py","research_ablation.py","calibration_fit.py",
-         "benchmark_statistics.py","structure_benchmarks.py")},
+         "benchmark_statistics.py","structure_benchmarks.py",
+         # qaoa_interface_sampler.py / evaluate_complex_metrics.py re-export these.
+         "qaoa_results.py","qaoa_optimization.py","qaoa_sampling.py","complex_atoms.py","side_chain_metrics.py")},
         checkpoint_sha256=_ablation_digest(args.checkpoint) if args.pruning=='egnn' else None,
         pdb_allowlist_sha256=(
             _ablation_digest(args.pdb_allowlist_file) if args.pdb_allowlist_file else None),

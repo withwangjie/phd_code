@@ -21,4 +21,10 @@ SHARED_HELPER_MODULES = ("repo_io.py", "paired_statistics.py", "residue_tables.p
                          "calibration_fit.py",
                          "benchmark_statistics.py",
                          "structure_benchmarks.py",
+                         # qaoa_interface_sampler.py / evaluate_complex_metrics.py re-export these.
+                         "qaoa_results.py",
+                         "qaoa_optimization.py",
+                         "qaoa_sampling.py",
+                         "complex_atoms.py",
+                         "side_chain_metrics.py",
                          )

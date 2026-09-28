@@ -20,173 +20,69 @@ validation, early stopping, history, and checkpoint writes.
 from __future__ import annotations
 
 import argparse
-import csv
 import hashlib
 import json
 import math
 import os
 import random
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
-from scipy.optimize import minimize
 import torch.distributed as dist
-import torch.nn.functional as F
-from torch import Tensor
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim import AdamW
-from torch_geometric.data import Data, Dataset
-from torch_geometric.loader import DataLoader
+from torch_geometric.data import Data
 from torch.utils.data.distributed import DistributedSampler
-from tqdm.auto import tqdm
 
 from nanoqc.model.model_egnn_pruning import EGNNInterfaceScorer
 from nanoqc.common.repo_io import sha256_file as _file_sha256
-from nanoqc.data.sequence_identity import nw_identity, length_coverage, partner_orientations, partner_roles_anchored
+from nanoqc.data.sequence_identity import partner_orientations
+
+# Definitions now live in focused modules; re-exported so every existing
+# `from nanoqc.model.train_egnn_pruning import ...` keeps working.
+from nanoqc.model.egnn_metrics import (  # noqa: E402,F401
+    BinaryMetrics,
+    _geometry_baseline_arrays,
+    fit_geometry_logistic_baseline,
+    count_training_labels,
+    roc_auc_score_binary,
+    pr_auc_score_binary,
+    classification_metrics,
+    best_f1_threshold,
+)
+from nanoqc.model.egnn_graph_data import (  # noqa: E402,F401
+    InterfaceGraphDataset,
+    graph_protocol,
+    preload_graphs,
+    interface_labels,
+    seed_everything,
+    seed_loader_worker,
+    _make_loader,
+)
+from nanoqc.model.egnn_training_loop import (  # noqa: E402,F401
+    train_one_epoch,
+    validate,
+    _initialize_distributed,
+    _broadcast_metrics,
+    _atomic_torch_save,
+    _write_history,
+    verify_checkpoint,
+)
+from nanoqc.model.egnn_split_records import (  # noqa: E402,F401
+    _sequence_identity,
+    _side_identity,
+    _split_records,
+    _family_structure_assignment_digest,
+    _paths_digest,
+)
 
 
 SEED = 4050350448
-
-
-@dataclass(frozen=True)
-class BinaryMetrics:
-    """Validation metrics at one epoch and one decision threshold."""
-
-    loss: float
-    roc_auc: float
-    pr_auc: float
-    threshold: float
-    precision: float
-    recall: float
-    f1: float
-    default_precision: float
-    default_recall: float
-    default_f1: float
-    positives: int
-    negatives: int
-
-
-class InterfaceGraphDataset(Dataset):
-    """RAM-resident graph dataset with labels prepared during preload."""
-
-    def __init__(self, data_list: Sequence[Data]) -> None:
-        super().__init__(root=None)
-        self.data_list = list(data_list)
-
-    def len(self) -> int:
-        return len(self.data_list)
-
-    def get(self, index: int) -> Data:
-        return self.data_list[index]
-
-
-def graph_protocol(data: Data) -> Dict[str, Any]:
-    """Return the versioned scientific graph protocol encoded in one PyG graph."""
-
-    required = (
-        "graph_version", "edge_policy", "label_policy",
-        "intra_chain_ca_cutoff_angstrom", "cross_partner_knn_k",
-        "interface_label_cutoff_angstrom", "interface_sensitivity_cutoffs_angstrom",
-        "min_interface_residues",
-    )
-    missing = [name for name in required if not hasattr(data, name)]
-    if missing:
-        raise ValueError(f"Graph lacks protocol metadata {missing}; rebuild with dataset version >=1.8")
-    protocol = {
-        "graph_version": str(data.graph_version),
-        "edge_policy": str(data.edge_policy),
-        "label_policy": str(data.label_policy),
-        "intra_chain_ca_cutoff_angstrom": float(data.intra_chain_ca_cutoff_angstrom),
-        "cross_partner_knn_k": int(data.cross_partner_knn_k),
-        "interface_label_cutoff_angstrom": float(data.interface_label_cutoff_angstrom),
-        "interface_sensitivity_cutoffs_angstrom": [
-            float(v) for v in data.interface_sensitivity_cutoffs_angstrom
-        ],
-        "min_interface_residues": int(data.min_interface_residues),
-    }
-    if protocol["edge_policy"] != "intra_chain_ca_radius_plus_cross_partner_knn":
-        raise ValueError("Unexpected graph edge policy; rebuild with current dataset builder")
-    if protocol["label_policy"] != "cross_partner_heavy_atom_cutoff":
-        raise ValueError("Unexpected graph label policy; rebuild with current dataset builder")
-    if (protocol["intra_chain_ca_cutoff_angstrom"] <= 0
-            or protocol["cross_partner_knn_k"] <= 0
-            or protocol["interface_label_cutoff_angstrom"] <= 0
-            or protocol["min_interface_residues"] <= 0):
-        raise ValueError(f"Invalid graph protocol values: {protocol}")
-    return protocol
-
-
-def preload_graphs(paths: Sequence[Path], *, show_progress: bool) -> List[Data]:
-    """Load every graph once, require one protocol, and attach labels."""
-
-    iterator: Iterable[Path] = paths
-    if show_progress:
-        iterator = tqdm(paths, desc="Preloading graphs into RAM", unit="graph", dynamic_ncols=True)
-    data_list = [
-        torch.load(path, map_location="cpu", weights_only=False)
-        for path in iterator
-    ]
-    expected_protocol: Optional[Dict[str, Any]] = None
-    for data in data_list:
-        protocol = graph_protocol(data)
-        if expected_protocol is None:
-            expected_protocol = protocol
-        elif protocol != expected_protocol:
-            raise ValueError(
-                f"Mixed graph protocols in one training run: {expected_protocol} vs {protocol}"
-            )
-        data.y = interface_labels(data)
-    return data_list
-
-
-def interface_labels(data: Data) -> Tensor:
-    """Return independently constructed heavy-atom interface labels.
-
-    The exact heavy-atom cutoff is read from graph protocol metadata. Labels
-    are never reconstructed from CA graph edges.
-    """
-
-    if not hasattr(data, "x") or not hasattr(data, "edge_index"):
-        raise ValueError("Graph must contain x and edge_index")
-    if data.x.ndim != 2 or data.x.size(1) != 21:
-        raise ValueError(f"Expected x=[N,21], got {tuple(data.x.shape)}")
-    if not hasattr(data, "interface_label"):
-        raise ValueError(
-            "Graph is missing interface_label; rebuild graphs with "
-            "build_final_pyg_dataset.py version >= 1.8"
-        )
-    labels = data.interface_label.detach().cpu().to(torch.float32)
-    if labels.shape != (data.num_nodes,):
-        raise ValueError(
-            f"interface_label must have shape [N], got {tuple(labels.shape)}"
-        )
-    if not torch.all((labels == 0) | (labels == 1)):
-        raise ValueError("interface_label must contain only binary 0/1 values")
-    graph_protocol(data)
-    return labels
-
-def seed_everything(seed: int) -> None:
-    """Seed Python, NumPy, and PyTorch for reproducible CPU training."""
-
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
-
-
-def seed_loader_worker(worker_id: int) -> None:
-    """Give every DataLoader process a deterministic independent RNG stream."""
-
-    del worker_id
-    worker_seed = torch.initial_seed() % (2**32)
-    random.seed(worker_seed)
-    np.random.seed(worker_seed)
 
 
 VHH_IDENTITY_THRESHOLD = 0.80
@@ -195,67 +91,12 @@ ANTIGEN_IDENTITY_THRESHOLD = 0.30
 ANTIGEN_MIN_LENGTH_COVERAGE = 0.70
 
 
-def _sequence_identity(a: str, b: str, *, min_length_coverage: float = 0.0) -> float:
-    """Symmetric global identity over alignment length with an explicit length gate."""
-
-    a, b = str(a or ""), str(b or "")
-    if not a or not b:
-        return 0.0
-    coverage = length_coverage(a, b)
-    if coverage < min_length_coverage:
-        return 0.0
-    if a == b:
-        return 1.0
-    return nw_identity(a, b, saturation_message="alignment score saturation while building the split")
-
-
-def _side_identity(
-    left: Sequence[str],
-    right: Sequence[str],
-    *,
-    min_length_coverage: float = 0.0,
-) -> float:
-    """Maximum global identity across two partner-side sequence sets."""
-
-    return max(
-        (
-            _sequence_identity(a, b, min_length_coverage=min_length_coverage)
-            for a in left for b in right if a and b
-        ),
-        default=0.0,
-    )
-
-
 SPLIT_FOLDS = 5
 VALIDATION_FOLD = 0
 # A component holding more than one fold's share of the pool cannot be held
 # out without becoming most of that fold; it always trains (A11). The floor
 # keeps small pools on the plain hash.
 PIN_MIN_COMPONENT = 50
-
-
-def _split_records(paths: Sequence[Path]) -> List[Tuple]:
-    """Per-graph isolation fields, loaded once and shared by every consumer."""
-    records = []
-    for path in paths:
-        data = torch.load(path, map_location="cpu", weights_only=False)
-        vhh = tuple(sorted(set(str(s) for s in getattr(data, "vhh_sequences", []) if str(s))))
-        antigen = tuple(sorted(set(str(s) for s in getattr(data, "antigen_sequences", []) if str(s))))
-        if not vhh or not antigen:
-            raise ValueError(
-                f"{path.name} lacks full-chain vhh_sequences/antigen_sequences; "
-                "rebuild graphs with build_final_pyg_dataset.py >= 1.2"
-            )
-        cdr3 = str(getattr(data, "cdr3_seq", "") or "")
-        family_cluster = str(getattr(data, "family_structure_cluster", "") or "")
-        if not family_cluster:
-            raise ValueError(
-                f"{path.name} lacks family_structure_cluster; rebuild formal graphs with "
-                "build_final_pyg_dataset.py graph version >=1.8"
-            )
-        anchored = partner_roles_anchored(getattr(data, "subset_source", ""))
-        records.append((path, vhh, antigen, cdr3, family_cluster, anchored))
-    return records
 
 
 def _components_from_records(records: Sequence[Tuple]) -> List[List[Path]]:
@@ -397,375 +238,6 @@ def split_paths(paths: Sequence[Path], seed: int) -> Tuple[List[Path], List[Path
         )
     return train_paths, validation_paths
 
-def _family_structure_assignment_digest(paths: Sequence[Path]) -> str:
-    """Hash graph-name/PDB/family assignments that govern component splitting."""
-    digest=hashlib.sha256()
-    for path in sorted(paths,key=lambda p:p.name.lower()):
-        data=torch.load(path,map_location="cpu",weights_only=False)
-        family=str(getattr(data,"family_structure_cluster","") or "")
-        pdb=str(getattr(data,"pdb_id","") or "").lower()
-        if not family or not pdb:
-            raise ValueError(f"{path.name} lacks PDB/family cluster metadata")
-        digest.update(f"{path.name}\t{pdb}\t{family}\n".encode("utf-8"))
-    return digest.hexdigest()
-
-
-def _paths_digest(paths: Sequence[Path]) -> str:
-    digest = hashlib.sha256()
-    for path in paths:
-        digest.update(path.name.encode("utf-8"))
-        digest.update(b"\n")
-    return digest.hexdigest()
-
-
-
-def _geometry_baseline_arrays(
-    data_list: Sequence[Data], *, contact_cutoff: float, proximity_scale: float
-) -> tuple[np.ndarray,np.ndarray,list[str]]:
-    """Residue-type + partner geometry features; never reads heavy-atom labels as inputs."""
-    rows=[]; labels=[]
-    names=[*(f"aa_{aa}" for aa in "ACDEFGHIKLMNPQRSTVWY"),
-           "partner_group","nearest_partner_ca","contact_count","antigen_proximity"]
-    for data in data_list:
-        pos=data.pos.detach().cpu()
-        group=data.x[:,-1].detach().cpu()
-        onehot=data.x[:,:20].detach().cpu().numpy().astype(np.float64)
-        nearest=np.empty(data.num_nodes,dtype=np.float64)
-        contacts=np.empty(data.num_nodes,dtype=np.float64)
-        for value in (0.0,1.0):
-            source=torch.where(group==value)[0]
-            partner=torch.where(group!=value)[0]
-            if not len(source) or not len(partner):
-                raise ValueError("Geometry baseline requires both partner groups")
-            distances=torch.cdist(pos[source],pos[partner])
-            nearest[source.numpy()]=distances.min(1).values.numpy()
-            contacts[source.numpy()]=(distances<float(contact_cutoff)).sum(1).numpy()
-        proximity=np.exp(-nearest/float(proximity_scale))
-        rows.append(np.column_stack([onehot,group.numpy(),nearest,contacts,proximity]))
-        labels.append(data.y.detach().cpu().numpy().astype(np.float64))
-    return np.concatenate(rows),np.concatenate(labels),names
-
-
-def fit_geometry_logistic_baseline(
-    train_data: Sequence[Data], validation_data: Sequence[Data], *,
-    contact_cutoff: float = 8.0, proximity_scale: float = 6.0, l2: float = 1e-3
-) -> dict[str,Any]:
-    """Train-only weighted logistic baseline for geometry-shortcut auditing."""
-    x_train,y_train,names=_geometry_baseline_arrays(
-        train_data,contact_cutoff=contact_cutoff,proximity_scale=proximity_scale)
-    x_val,y_val,_=_geometry_baseline_arrays(
-        validation_data,contact_cutoff=contact_cutoff,proximity_scale=proximity_scale)
-    mean=x_train.mean(0);std=x_train.std(0)
-    std[std<1e-8]=1.0
-    xt=(x_train-mean)/std;xv=(x_val-mean)/std
-    positives=max(float(y_train.sum()),1.0);negatives=max(float(len(y_train)-y_train.sum()),1.0)
-    sample_weight=np.where(y_train>0.5,negatives/positives,1.0)
-    def objective(theta):
-        bias=float(theta[0]);weights=theta[1:]
-        z=bias+xt@weights
-        loss=np.sum(sample_weight*(np.logaddexp(0.0,z)-y_train*z))/sample_weight.sum()
-        loss+=0.5*l2*float(weights@weights)
-        p=1.0/(1.0+np.exp(-np.clip(z,-50,50)))
-        residual=sample_weight*(p-y_train)/sample_weight.sum()
-        grad=np.concatenate([[residual.sum()],xt.T@residual+l2*weights])
-        return float(loss),grad
-    fit=minimize(objective,np.zeros(xt.shape[1]+1),jac=True,method="L-BFGS-B",
-                 options={"maxiter":500,"ftol":1e-12})
-    if not fit.success or not np.isfinite(fit.x).all():
-        raise RuntimeError(f"Geometry logistic baseline fit failed: {fit.message}")
-    scores=1.0/(1.0+np.exp(-np.clip(fit.x[0]+xv@fit.x[1:],-50,50)))
-    threshold,precision,recall,f1=best_f1_threshold(y_val.astype(np.int8),scores)
-    return dict(
-        model="weighted logistic regression",
-        features=names,contact_ca_cutoff_angstrom=float(contact_cutoff),
-        antigen_proximity_scale_angstrom=float(proximity_scale),l2=float(l2),
-        train_nodes=int(len(y_train)),validation_nodes=int(len(y_val)),
-        validation_roc_auc=roc_auc_score_binary(y_val.astype(np.int8),scores),
-        validation_pr_auc=pr_auc_score_binary(y_val.astype(np.int8),scores),
-        validation_best_f1=float(f1),validation_best_threshold=float(threshold),
-        validation_precision=float(precision),validation_recall=float(recall),
-        coefficients={name:float(value) for name,value in zip(["intercept",*names],fit.x)},
-        standardization_mean=mean.tolist(),standardization_std=std.tolist(),
-        optimizer_success=bool(fit.success),optimizer_message=str(fit.message),
-        scope="fit on EGNN training split only; evaluated on the same homology-isolated validation split",
-    )
-
-
-def count_training_labels(data_list: Sequence[Data]) -> Tuple[int, int]:
-    """Count RAM-resident positive and negative nodes for BCE pos_weight."""
-
-    positives = 0
-    total = 0
-    for data in data_list:
-        labels = data.y
-        positives += int(labels.sum().item())
-        total += int(labels.numel())
-    negatives = total - positives
-    if positives <= 0 or negatives <= 0:
-        raise RuntimeError(
-            f"Training labels require both classes, got positive={positives}, negative={negatives}"
-        )
-    return positives, negatives
-
-
-def roc_auc_score_binary(labels: np.ndarray, scores: np.ndarray) -> float:
-    """Compute ROC-AUC with average ranks for tied predictions."""
-
-    labels = labels.astype(np.int8, copy=False)
-    positives = int(labels.sum())
-    negatives = int(len(labels) - positives)
-    if positives == 0 or negatives == 0:
-        return math.nan
-    order = np.argsort(scores, kind="mergesort")
-    sorted_scores = scores[order]
-    ranks = np.empty(len(scores), dtype=np.float64)
-    start = 0
-    while start < len(scores):
-        end = start + 1
-        while end < len(scores) and sorted_scores[end] == sorted_scores[start]:
-            end += 1
-        ranks[order[start:end]] = 0.5 * (start + 1 + end)
-        start = end
-    positive_rank_sum = float(ranks[labels == 1].sum())
-    return (
-        positive_rank_sum - positives * (positives + 1) / 2.0
-    ) / (positives * negatives)
-
-
-def pr_auc_score_binary(labels: np.ndarray, scores: np.ndarray) -> float:
-    """Compute step-integrated PR-AUC (average precision)."""
-
-    labels = labels.astype(np.int8, copy=False)
-    positives = int(labels.sum())
-    if positives == 0:
-        return math.nan
-    order = np.argsort(-scores, kind="mergesort")
-    ranked = labels[order]
-    true_positives = np.cumsum(ranked)
-    precision = true_positives / np.arange(1, len(ranked) + 1)
-    return float(precision[ranked == 1].sum() / positives)
-
-
-def classification_metrics(
-    labels: np.ndarray,
-    scores: np.ndarray,
-    threshold: float,
-) -> Tuple[float, float, float]:
-    """Return precision, recall, and F1 at a probability threshold."""
-
-    predicted = scores >= threshold
-    positive = labels == 1
-    tp = int(np.sum(predicted & positive))
-    fp = int(np.sum(predicted & ~positive))
-    fn = int(np.sum(~predicted & positive))
-    precision = tp / (tp + fp) if tp + fp else 0.0
-    recall = tp / (tp + fn) if tp + fn else 0.0
-    f1 = 2.0 * precision * recall / (precision + recall) if precision + recall else 0.0
-    return precision, recall, f1
-
-
-def best_f1_threshold(labels: np.ndarray, scores: np.ndarray) -> Tuple[float, float, float, float]:
-    """Find the validation threshold maximizing F1 without quadratic scans."""
-
-    labels = labels.astype(np.int8, copy=False)
-    order = np.argsort(-scores, kind="mergesort")
-    ranked_labels = labels[order]
-    ranked_scores = scores[order]
-    tp = np.cumsum(ranked_labels)
-    fp = np.cumsum(1 - ranked_labels)
-    positives = int(labels.sum())
-    fn = positives - tp
-    precision = tp / np.maximum(tp + fp, 1)
-    recall = tp / max(positives, 1)
-    f1 = 2.0 * precision * recall / np.maximum(precision + recall, 1e-15)
-    # Only evaluate boundaries that change the predicted set.
-    boundary = np.r_[ranked_scores[:-1] != ranked_scores[1:], True]
-    candidate_indices = np.flatnonzero(boundary)
-    best_index = int(candidate_indices[np.argmax(f1[candidate_indices])])
-    return (
-        float(ranked_scores[best_index]),
-        float(precision[best_index]),
-        float(recall[best_index]),
-        float(f1[best_index]),
-    )
-
-
-def _make_loader(
-    data_list: Sequence[Data],
-    *,
-    batch_size: int,
-    shuffle: bool,
-    seed: int,
-    num_workers: int,
-    pin_memory: bool,
-    sampler: Optional[DistributedSampler] = None,
-) -> DataLoader:
-    generator = torch.Generator().manual_seed(seed)
-    options: Dict[str, Any] = {
-        "dataset": InterfaceGraphDataset(data_list),
-        "batch_size": batch_size,
-        "shuffle": shuffle if sampler is None else False,
-        "sampler": sampler,
-        "num_workers": num_workers,
-        "pin_memory": pin_memory,
-        "persistent_workers": num_workers > 0,
-        "generator": generator,
-        "worker_init_fn": seed_loader_worker,
-    }
-    if num_workers > 0:
-        options["prefetch_factor"] = 2
-    return DataLoader(
-        **options,
-    )
-
-
-def train_one_epoch(
-    model: torch.nn.Module,
-    loader: DataLoader,
-    optimizer: AdamW,
-    scaler: torch.cuda.amp.GradScaler,
-    *,
-    device: torch.device,
-    pos_weight: Tensor,
-    gradient_clip: float,
-    epoch: int,
-    amp_enabled: bool,
-    pin_memory: bool,
-    is_main_process: bool,
-) -> float:
-    """Train over every graph once and return node-weighted BCE loss."""
-
-    model.train()
-    weighted_loss_sum = 0.0
-    node_count = 0
-    progress = tqdm(
-        loader,
-        desc=f"Epoch {epoch:03d} train",
-        unit="batch",
-        dynamic_ncols=True,
-        disable=not is_main_process,
-    )
-    for batch in progress:
-        batch = batch.to(device, non_blocking=pin_memory)
-        optimizer.zero_grad(set_to_none=True)
-        with torch.cuda.amp.autocast(enabled=amp_enabled, dtype=torch.float16):
-            logits = model(
-                batch.x, batch.pos, batch.edge_index, return_logits=True
-            )
-            loss = F.binary_cross_entropy_with_logits(
-                logits,
-                batch.y,
-                pos_weight=pos_weight,
-                reduction="mean",
-            )
-        if not torch.isfinite(loss):
-            raise FloatingPointError(f"Non-finite training loss at epoch {epoch}")
-        scaler.scale(loss).backward()
-        scaler.unscale_(optimizer)
-        torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip)
-        scaler.step(optimizer)
-        scaler.update()
-        nodes = int(batch.num_nodes)
-        weighted_loss_sum += float(loss.detach()) * nodes
-        node_count += nodes
-        if is_main_process:
-            progress.set_postfix(loss=f"{weighted_loss_sum / node_count:.4f}")
-    totals = torch.tensor(
-        [weighted_loss_sum, float(node_count)], dtype=torch.float64, device=device
-    )
-    if dist.is_initialized():
-        dist.all_reduce(totals, op=dist.ReduceOp.SUM)
-    return float(totals[0].item() / max(totals[1].item(), 1.0))
-
-
-@torch.no_grad()
-def validate(
-    model: torch.nn.Module,
-    loader: DataLoader,
-    *,
-    device: torch.device,
-    pos_weight: Tensor,
-    epoch: int,
-    amp_enabled: bool,
-    pin_memory: bool,
-) -> BinaryMetrics:
-    """Evaluate BCE, ROC-AUC, PR-AUC, and thresholded classification metrics."""
-
-    model.eval()
-    loss_sum = 0.0
-    node_count = 0
-    labels_parts: List[np.ndarray] = []
-    score_parts: List[np.ndarray] = []
-    progress = tqdm(loader, desc=f"Epoch {epoch:03d} valid", unit="batch", dynamic_ncols=True)
-    for batch in progress:
-        batch = batch.to(device, non_blocking=pin_memory)
-        with torch.cuda.amp.autocast(enabled=amp_enabled, dtype=torch.float16):
-            logits = model(
-                batch.x, batch.pos, batch.edge_index, return_logits=True
-            )
-            batch_loss = F.binary_cross_entropy_with_logits(
-                logits,
-                batch.y,
-                pos_weight=pos_weight,
-                reduction="sum",
-            )
-        loss_sum += float(batch_loss)
-        node_count += int(batch.num_nodes)
-        labels_parts.append(batch.y.detach().cpu().numpy().astype(np.int8, copy=False))
-        score_parts.append(torch.sigmoid(logits).detach().cpu().numpy())
-    labels = np.concatenate(labels_parts)
-    scores = np.concatenate(score_parts)
-    threshold, precision, recall, f1 = best_f1_threshold(labels, scores)
-    default_precision, default_recall, default_f1 = classification_metrics(
-        labels, scores, 0.5
-    )
-    return BinaryMetrics(
-        loss=loss_sum / max(node_count, 1),
-        roc_auc=roc_auc_score_binary(labels, scores),
-        pr_auc=pr_auc_score_binary(labels, scores),
-        threshold=threshold,
-        precision=precision,
-        recall=recall,
-        f1=f1,
-        default_precision=default_precision,
-        default_recall=default_recall,
-        default_f1=default_f1,
-        positives=int(labels.sum()),
-        negatives=int(len(labels) - labels.sum()),
-    )
-
-
-def _atomic_torch_save(payload: Mapping[str, Any], path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    torch.save(dict(payload), temporary)
-    os.replace(temporary, path)
-
-
-def _write_history(rows: Sequence[Mapping[str, Any]], path: Path) -> None:
-    fields = (
-        "epoch",
-        "train_loss",
-        "val_loss",
-        "roc_auc",
-        "pr_auc",
-        "best_f1_threshold",
-        "precision",
-        "recall",
-        "f1",
-        "default_precision",
-        "default_recall",
-        "default_f1",
-        "epoch_seconds",
-        "is_best",
-    )
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    with temporary.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fields)
-        writer.writeheader()
-        writer.writerows(rows)
-    os.replace(temporary, path)
-
 
 def _checkpoint_payload(
     *,
@@ -834,22 +306,6 @@ def _checkpoint_payload(
             "cuda": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else [],
         },
     }
-
-
-def verify_checkpoint(path: Path, device: torch.device) -> Mapping[str, Any]:
-    """Reload the best file and strictly validate its model state."""
-
-    if not path.is_file() or path.stat().st_size <= 0:
-        raise RuntimeError(f"Checkpoint was not created correctly: {path}")
-    payload = torch.load(path, map_location="cpu", weights_only=False)
-    required = {"model_config", "model_state_dict", "epoch", "validation_metrics"}
-    missing = required.difference(payload)
-    if missing:
-        raise RuntimeError(f"Checkpoint missing fields: {sorted(missing)}")
-    candidate = EGNNInterfaceScorer(**payload["model_config"])
-    candidate.load_state_dict(payload["model_state_dict"], strict=True)
-    candidate.to(device).eval()
-    return payload
 
 
 def restore_training_state(
@@ -1120,48 +576,6 @@ def _parser() -> argparse.ArgumentParser:
              "independently-derived train-stream seed here rather than reusing the bare master seed.",
     )
     return parser
-
-
-def _initialize_distributed(device_argument: str) -> Tuple[int, int, int, torch.device]:
-    """Initialize torchrun DDP and bind each rank to one local CUDA device."""
-
-    world_size = int(os.environ.get("WORLD_SIZE", "1"))
-    rank = int(os.environ.get("RANK", "0"))
-    local_rank = int(os.environ.get("LOCAL_RANK", "0"))
-    cuda_requested = device_argument == "auto" or device_argument.startswith("cuda")
-    use_cuda = cuda_requested and torch.cuda.is_available()
-    if device_argument.startswith("cuda") and not torch.cuda.is_available():
-        raise RuntimeError("CUDA was requested but is unavailable")
-    if use_cuda:
-        if local_rank >= torch.cuda.device_count():
-            raise RuntimeError(
-                f"LOCAL_RANK={local_rank} exceeds {torch.cuda.device_count()} CUDA devices"
-            )
-        torch.cuda.set_device(local_rank)
-        device = torch.device("cuda", local_rank)
-    else:
-        device = torch.device("cpu" if device_argument == "auto" else device_argument)
-    if world_size > 1:
-        dist.init_process_group(backend="nccl" if device.type == "cuda" else "gloo")
-    return rank, local_rank, world_size, device
-
-
-def _broadcast_metrics(
-    metrics: Optional[BinaryMetrics], *, rank: int, device: torch.device
-) -> BinaryMetrics:
-    """Broadcast rank-0 validation metrics to every training rank."""
-
-    if not dist.is_initialized():
-        if metrics is None:
-            raise RuntimeError("Validation metrics are missing")
-        return metrics
-    payload: List[Optional[Dict[str, Any]]] = [
-        asdict(metrics) if rank == 0 and metrics is not None else None
-    ]
-    dist.broadcast_object_list(payload, src=0)
-    if payload[0] is None:
-        raise RuntimeError("Rank 0 did not broadcast validation metrics")
-    return BinaryMetrics(**payload[0])
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:

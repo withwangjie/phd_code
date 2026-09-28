@@ -545,7 +545,7 @@ def test_all_restarts_failed_handling() -> None:
         p=2, simulation_mode="subspace", seed=42,
     )
 
-    with patch("nanoqc.solvers.qaoa_interface_sampler.minimize", side_effect=RuntimeError("stubbed restart failure")):
+    with patch("nanoqc.solvers.qaoa_optimization.minimize", side_effect=RuntimeError("stubbed restart failure")):
         result = sampler.optimize_robust(max_evals=25, restarts=4, eval_shots=50)
 
     assert result.optimizer_success is False

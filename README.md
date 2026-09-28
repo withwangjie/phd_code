@@ -389,7 +389,9 @@ src/nanoqc/
                 quantum_exploration), stages_structure.py (structure_experiment, external_validation),
                 stages_reporting.py (statistics, final_report), stage_contracts.py (result contracts),
                 resolve_server_config.py
-  data/         audit_all_datasets.py, build_final_pyg_dataset.py (audited graphs + split),
+  data/         audit_all_datasets.py (structure audit CLI), audit_structures.py (assembly/structure reading),
+                build_final_pyg_dataset.py (audited graphs + split),
+                complex_extraction.py (atom extraction, antigen partner-chain selection),
                 build_foldseek_pairs.py (antigen-chain-only pair table),
                 build_independence_cluster_map.py, carve_holdout_clusters.py (antigen-fold holdout),
                 audit_external_vhh_independence.py, sequence_identity.py, safe_graph_load.py,
@@ -397,14 +399,19 @@ src/nanoqc/
                 select_external_vhh_candidates.py, build_external_vhh_graphs.py,
                 prepare_external_vhh.py (external VHH set)
   model/        model_egnn_pruning.py (interface scoring, Active-site selection, checkpoint loading),
-                train_egnn_pruning.py (leakage-controlled training),
+                train_egnn_pruning.py (leakage-controlled split, checkpoints, training CLI),
+                egnn_graph_data.py (dataset, labels, loaders), egnn_split_records.py (split records,
+                digests), egnn_metrics.py (AUC/F1 metrics, geometry baseline), egnn_training_loop.py
+                (epoch, validation, DDP, checkpoint files),
                 egnn_seed_sensitivity.py (development-only seed variance)
   qubo/         subgraph_to_qubo.py (entry point, re-exports, self-test CLI),
                 coarse_qubo.py (InterfaceQUBOBuilder), allatom_qubo.py (AllAtomInterfaceQUBOBuilder),
                 rotamer_library.py (PyRosetta dun10 / legacy library), qubo_types.py (config, states,
                 QUBOResult), atomistic_structure.py (parsing, chi angles, evaluation), ising.py
   quantum/      instance.py (quantum instance contract), resource_estimation.py (logical resources)
-  solvers/      qaoa_interface_sampler.py (XY-mixer QAOA)
+  solvers/      qaoa_interface_sampler.py (XY-mixer QAOA: circuit, sampler class, CLI),
+                qaoa_optimization.py (optimizer mixin), qaoa_sampling.py (enumeration, sampling,
+                simulated annealing mixin), qaoa_results.py (result records, CVaR)
   experiments/  batch_benchmark_hard_set.py (benchmark CLI: dispatches to one module per mode),
                 hard_set_evaluation.py (default mode), research_ablation.py (--research-ablation),
                 calibration_fit.py (ridge calibration fit), benchmark_statistics.py (--paired-statistics),
@@ -412,10 +419,14 @@ src/nanoqc/
                 fit_qaoa_transfer_parameters.py (train-split QAOA angle transfer),
                 run_real_complex_pilot.py (all-atom retrospective recovery, queue-freeze eligibility),
                 generate_energy_calibration_dataset.py, run_external_structure_baselines.py (FASPR / Phenix)
-  structure/    evaluate_complex_metrics.py, structural_quality.py, residue_tables.py
+  structure/    evaluate_complex_metrics.py (complex-metrics CLI), complex_atoms.py (reading, Kabsch,
+                contacts, Fnat), side_chain_metrics.py (Active side-chain RMSD, clashes, DockQ),
+                structural_quality.py, residue_tables.py
   inference/    paired_statistics.py (incl. serial gatekeeping), analyze_quantum_scaling.py,
                 analyze_quantum_exploration.py, analyze_structure_recovery.py (RQ5)
-  reporting/    generate_final_research_report.py, generate_figure1_pymol_script.py
+  reporting/    generate_final_research_report.py (report CLI, data/cost/limits sections),
+                report_common.py (ReportContext, readers), report_sections_quantum.py,
+                report_sections_structure.py, generate_figure1_pymol_script.py
   common/       repo_io.py (hashing, layout), seed_streams.py, prediction_contract.py
 tests/     regression suite run by formal_preflight.sh (`python -m pytest tests`)
 ```
@@ -427,12 +438,17 @@ manifests keep fingerprinting modules under their bare file names
 `nanoqc.common.repo_io.MODULE_LAYOUT`; every module under `src/nanoqc/` must be
 registered there, which `tests/test_refactor_equivalence.py` enforces.
 
-The three former multi-thousand-line files (`run_full_experiment.py`,
-`subgraph_to_qubo.py`, `batch_benchmark_hard_set.py`) are now entry points over
-focused modules. Each still re-exports every name it used to define, so existing
-imports keep working, and every split-out module is in the code fingerprints
-(`ORCHESTRATED_SCRIPTS`, the benchmark's `SHARED_HELPER_MODULES`), which tests
-check against the actual imports.
+No source file exceeds 1000 lines. The former large files
+(`run_full_experiment.py`, `subgraph_to_qubo.py`, `batch_benchmark_hard_set.py`,
+`qaoa_interface_sampler.py`, `train_egnn_pruning.py`, `evaluate_complex_metrics.py`,
+`generate_final_research_report.py`, `build_final_pyg_dataset.py`,
+`audit_all_datasets.py`) are now entry points over focused modules. Each still
+re-exports every name it used to define, so existing imports keep working, and
+every split-out module is in the code fingerprints (`ORCHESTRATED_SCRIPTS`, the
+benchmark's `SHARED_HELPER_MODULES`), which tests check against the actual
+imports. Functions that read a threshold the command line rebinds at start-up
+(`global` in `main`) stay in their entry module, so a moved function never reads
+a stale copy.
 One-time recovery helpers live in `scripts/` precisely so they stay outside
 that formal module layout.
 
@@ -552,9 +568,9 @@ resume.
 - `scripts/amend_failed_calibration.py` — calibration protocol repair, keeping
   the verified audit, queue freeze and FP32 checkpoint (A21, A22).
 
-Both scripts belong to runs launched **before** the module split (the
-orchestrator, QUBO and benchmark modules were split into focused files; see
-Repository layout). The split adds new file names to the code fingerprint, so
+Both scripts belong to runs launched **before** the module splits (every
+source file over 1000 lines was split into focused files; see Repository
+layout). The split adds new file names to the code fingerprint, so
 `amend_failed_calibration.py` refuses a pre-split run as an unexpected source
 change, and neither script is a route for continuing such a run on the current
 code. A23-A27 already require a new formal run; start one fresh
