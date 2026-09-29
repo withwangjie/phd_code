@@ -309,6 +309,7 @@ def section_cost(ctx: ReportContext) -> List[str]:
                          "measure. Circuit state preparation and transpilation are not included.")
             lines.append("")
     for label, directory in (("dev queue", ctx.run_dir / "dev_queue"), ("validation queue", ctx.run_dir / "validation_queue")):
+        if label=="dev queue" and not bool(((ctx.frozen_config.get("queue_freeze",{}) or {}).get("dev_queue",{}) or {}).get("enabled",True)):continue
         rows = _load_recovery_rows(directory)
         if not rows:
             continue
@@ -354,6 +355,7 @@ def section_failures_and_incomplete(ctx: ReportContext) -> List[str]:
         if not qc_summary.get("closed"):
             any_incomplete = True
     for label, directory in (("dev_queue", ctx.run_dir / "dev_queue"), ("validation_queue", ctx.run_dir / "validation_queue")):
+        if label=="dev_queue" and not bool(((ctx.frozen_config.get("queue_freeze",{}) or {}).get("dev_queue",{}) or {}).get("enabled",True)):continue
         summary = _read_json(directory / "run_summary.json")
         if summary:
             lines.append(f"- `{label}`: qualifying_pool={summary.get('qualifying_pool_size')} "

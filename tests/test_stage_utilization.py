@@ -9,7 +9,10 @@ from nanoqc.common.stage_utilization import main, summarize
 
 def test_cpu_monitor_attributes_the_stage_process_tree(tmp_path):
     path = tmp_path / "logs" / "busy.cpu.csv"
-    burn = "import time\nend=time.time()+2.5\nwhile time.time()<end: pass\n"
+    # The first per-process reading primes its CPU counter. Windows process
+    # discovery/load-average initialization can delay the next sample, so keep
+    # the child alive long enough for a second measurement of the same process.
+    burn = "import time\nend=time.time()+5.5\nwhile time.time()<end: pass\n"
     with CPUStageMonitor(path, enabled=True, interval=1) as monitor:
         child = subprocess.Popen([sys.executable, "-c", burn])
         monitor.watch(child.pid)

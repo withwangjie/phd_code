@@ -407,25 +407,30 @@ class StageContractsMixin:
                 return False,f"qc_benchmark case artifact count mismatch: files={case_count}, summary={summary.get('cases_completed_total')}"
             return True,"qc_benchmark metrics/report/cases and closure verified"
         if stage=="structure_experiment":
+            dev_enabled=bool(((self.config.get("queue_freeze",{}) or {}).get("dev_queue",{}) or {}).get("enabled",True))
             dev_root=self.run_dir/"dev_queue"
             val_root=self.run_dir/"validation_queue"
             dev=dev_root/"run_summary.json"
             validation=val_root/"run_summary.json"
-            ok,detail=require([
-                dev_root/"run_manifest.json",dev_root/"seed_streams.json",
-                dev_root/"eligibility.json",dev_root/"selected_targets.json",
-                dev,dev_root/"real_complex_metrics.csv",dev_root/"real_complex_report.md",
+            required=[
                 val_root/"run_manifest.json",val_root/"seed_streams.json",
                 val_root/"eligibility.json",val_root/"selected_targets.json",
                 val_root/"run_summary.json",val_root/"real_complex_metrics.csv",
                 val_root/"real_complex_report.md",
-            ])
+            ]
+            if dev_enabled:
+                required += [dev_root/"run_manifest.json",dev_root/"seed_streams.json",
+                    dev_root/"eligibility.json",dev_root/"selected_targets.json",
+                    dev,dev_root/"real_complex_metrics.csv",dev_root/"real_complex_report.md"]
+            ok,detail=require(required)
             if not ok:return ok,detail
-            dev_summary,error=read_json(dev)
-            if error:return False,error
+            dev_summary={}
+            if dev_enabled:
+                dev_summary,error=read_json(dev)
+                if error:return False,error
             val_summary,error=read_json(validation)
             if error:return False,error
-            if not dev_summary.get("closed"):
+            if dev_enabled and not dev_summary.get("closed"):
                 return False,"dev_queue run_summary.json is not closed"
             if not val_summary.get("closed") or val_summary.get("frozen_set_accounting_ok") is not True:
                 return False,"validation execution is not closed against frozen denominator"
@@ -434,10 +439,9 @@ class StageContractsMixin:
             expected_seeds={str(int(v)) for v in self.config.get("structure_experiment",{}).get(
                 "seeds",[42,43,44,45,46])}
             expected_methods={"qaoa","sa","uniform","greedy"}
-            for root,summary,label in (
-                (dev_root,dev_summary,"dev_queue"),
-                (val_root,val_summary,"validation_queue"),
-            ):
+            queues=[(val_root,val_summary,"validation_queue")]
+            if dev_enabled:queues.insert(0,(dev_root,dev_summary,"dev_queue"))
+            for root,summary,label in queues:
                 for pdb in summary.get("structure_experiment_completed_target_ids",[]) or []:
                     target=(root/str(pdb)/"results"/str(pdb)) if label=="dev_queue" else (root/"results"/str(pdb))
                     metrics_path=target/"recovery_metrics.csv"
@@ -460,7 +464,7 @@ class StageContractsMixin:
                             f"missing={missing[:10]}, extra={extra[:10]}")
             for solvent in [
                 str(v) for v in self.config.get("structure_experiment",{}).get("solvent_sensitivity",[])
-                if str(v)!=str(self.config.get("structure_experiment",{}).get("solvent_model","vacuum"))
+                if dev_enabled and str(v)!=str(self.config.get("structure_experiment",{}).get("solvent_model","vacuum"))
             ]:
                 solvent_root=self.run_dir/f"dev_queue_solvent_{solvent}"
                 ok,detail=require([

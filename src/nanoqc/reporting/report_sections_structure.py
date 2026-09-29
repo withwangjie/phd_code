@@ -118,11 +118,13 @@ def section_structural_benefit(ctx: ReportContext) -> List[str]:
         )
         lines.append("")
 
-    dev_rows = _load_recovery_rows(ctx.run_dir / "dev_queue")
+    dev_enabled=bool(((ctx.frozen_config.get("queue_freeze",{}) or {}).get("dev_queue",{}) or {}).get("enabled",True))
     validation_rows = _load_recovery_rows(ctx.run_dir / "validation_queue")
-
-    for label, rows in (("4.1 Historical development queue (4S10/8YVO/9GCN; NOT a confirmatory test)", dev_rows),
-                         ("4.2 Frozen, blind validation queue (requirement #6)", validation_rows)):
+    queues=[("4.2 Frozen, blind validation queue (requirement #6)",validation_rows)]
+    if dev_enabled:
+        queues.insert(0,("4.1 Historical development queue (NOT a confirmatory test)",
+                         _load_recovery_rows(ctx.run_dir/"dev_queue")))
+    for label, rows in queues:
         lines.append(f"### {label}")
         lines.append("")
         if not rows:
@@ -151,6 +153,7 @@ def section_structural_benefit(ctx: ReportContext) -> List[str]:
 
     # Failure denominators, preserved explicitly rather than dropped.
     for label, directory in (("dev queue", ctx.run_dir / "dev_queue"), ("validation queue", ctx.run_dir / "validation_queue")):
+        if label=="dev queue" and not dev_enabled:continue
         failures_log = directory / "failures.log"
         if failures_log.is_file():
             failed = [line for line in _read_text(failures_log).splitlines() if line and not line.startswith(" ")]
@@ -232,10 +235,13 @@ def section_external_and_robustness(ctx: ReportContext) -> List[str]:
         lines.append("")
 
     # Development-only solvent sensitivity.
-    sensitivity_dirs=sorted(ctx.run_dir.glob("dev_queue_solvent_*"))
+    dev_enabled=bool(((ctx.frozen_config.get("queue_freeze",{}) or {}).get("dev_queue",{}) or {}).get("enabled",True))
+    sensitivity_dirs=sorted(ctx.run_dir.glob("dev_queue_solvent_*")) if dev_enabled else []
     lines.append("### 7.3 Development-only solvent-model sensitivity")
     lines.append("")
-    if sensitivity_dirs:
+    if not dev_enabled:
+        lines.append("Development target experiments and their solvent-model sensitivity are disabled by protocol.")
+    elif sensitivity_dirs:
         lines.append("| Solvent model | Rows | Mean final RMSD | Mean improvement vs input |")
         lines.append("|---|---:|---:|---:|")
         for directory in sensitivity_dirs:

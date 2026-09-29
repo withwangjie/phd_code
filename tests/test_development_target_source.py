@@ -42,8 +42,9 @@ def test_orchestrator_uses_available_training_targets_and_audits_missing_ids(tmp
     repo=Path(__file__).resolve().parents[1]
     config=yaml.safe_load((repo/"configs/full_experiment_config.yaml").read_text(encoding="utf-8"))
     # Exercise old frozen configs as well: only the historical exclusion field existed.
-    config["queue_freeze"]["dev_queue"].pop("target_pdb_ids")
-    config["queue_freeze"]["dev_queue"].pop("candidate_split")
+    config["queue_freeze"]["dev_queue"].pop("target_pdb_ids",None)
+    config["queue_freeze"]["dev_queue"].pop("candidate_split",None)
+    config["queue_freeze"]["dev_queue"].pop("enabled",None)
     config["paths"]["data_root"]=str(tmp_path/"data")
     config["paths"]["repo_root"]=str(repo)
     dataset=tmp_path/"dataset";dataset.mkdir()
