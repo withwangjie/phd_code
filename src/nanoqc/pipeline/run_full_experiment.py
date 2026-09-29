@@ -69,6 +69,7 @@ import subprocess
 import sys
 import traceback
 from nanoqc.common.gpu_runtime import GPUStageMonitor
+from nanoqc.common.cpu_runtime import CPUStageMonitor
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
@@ -273,7 +274,9 @@ class Orchestrator(
         timeout=timeout_seconds if timeout_seconds>0 else None
         with log_path.open("a", encoding="utf-8") as log_handle, GPUStageMonitor(
                 log_path.with_suffix(".gpu.csv"),enabled=hardware.get("gpu_monitor_enabled",False),
-                interval=hardware.get("gpu_monitor_interval_seconds",10)):
+                interval=hardware.get("gpu_monitor_interval_seconds",10)), CPUStageMonitor(
+                log_path.with_suffix(".cpu.csv"),enabled=hardware.get("cpu_monitor_enabled",False),
+                interval=hardware.get("cpu_monitor_interval_seconds",10)) as cpu_monitor:
             log_handle.write(f"\n=== {started} :: {' '.join(argv)} ===\n")
             log_handle.flush()
             use_process_group=os.name=="posix"
@@ -282,6 +285,7 @@ class Orchestrator(
                 stdout=log_handle,stderr=subprocess.STDOUT,
                 start_new_session=use_process_group,
             )
+            cpu_monitor.watch(process.pid)
             try:
                 return process.wait(timeout=timeout),log_path
             except subprocess.TimeoutExpired:

@@ -7,7 +7,7 @@ paths may be overridden here. DDP ranks affect rank seeds and sampler partitions
 so the resolved value is a result-affecting runtime parameter.
 """
 from __future__ import annotations
-import argparse, json, os, shutil
+import argparse, json, math, os, shutil
 from pathlib import Path
 from typing import Any
 import yaml
@@ -26,6 +26,24 @@ def _cpu_count() -> int:
         return int(psutil.cpu_count(logical=False) or psutil.cpu_count(logical=True) or os.cpu_count() or 1)
     except Exception:
         return int(os.cpu_count() or 1)
+
+def _logical_cpu_count() -> int:
+    """Logical CPUs this process may run on: CPU affinity, then any cgroup v2 quota.
+
+    Utilization reported by top/htop/psutil is a fraction of these logical CPUs,
+    so a utilization target is expressed against this count.
+    """
+    try:
+        count=len(os.sched_getaffinity(0))
+    except (AttributeError,OSError):
+        count=int(os.cpu_count() or 1)
+    try:
+        quota,period=Path("/sys/fs/cgroup/cpu.max").read_text(encoding="utf-8").split()[:2]
+        if quota!="max":
+            count=min(count,max(1,math.ceil(int(quota)/int(period))))
+    except (OSError,ValueError):
+        pass
+    return max(1,count)
 
 def _ram_gb() -> float:
     try:
@@ -138,15 +156,40 @@ def _choose_ddp_ranks(gpus: int, target_global_batch: int, max_gpus: int) -> int
 def resolve(scientific: dict[str,Any], server: dict[str,Any]) -> tuple[dict[str,Any],dict[str,Any]]:
     out=json.loads(json.dumps(scientific))
     res=server.get("resources") or {}
-    cpu=_cpu_count(); ram=_ram_gb(); gpus=_gpu_count()
+    physical=_cpu_count(); ram=_ram_gb(); gpus=_gpu_count()
+    basis=str(res.get("cpu_count_basis","physical"))
+    if basis not in ("physical","logical"):
+        raise SystemExit("cpu_count_basis must be 'physical' or 'logical'")
+    cpu=_logical_cpu_count() if basis=="logical" else physical
     reserve=max(0,int(res.get("cpu_reserve_cores",2)))
     usable=max(1,cpu-reserve)
-    max_workers=max(1,int(res.get("max_workers",16)))
-    min_workers=int(res.get("min_workers",1))
-    if not 1<=min_workers<=max_workers:
-        raise SystemExit("CPU worker range requires 1 <= min_workers <= max_workers")
     threads=max(1,int(res.get("cpu_threads_per_process",2)))
+    target_utilization=res.get("target_cpu_utilization")
+    if target_utilization is not None:
+        target_utilization=float(target_utilization)
+        if not 0<target_utilization<=1:
+            raise SystemExit("target_cpu_utilization must be in (0, 1]")
+    min_workers=int(res.get("min_workers",1))
+    if str(res.get("max_workers",16))=="auto":
+        # Size independent CPU pools to the utilization target of the counted CPUs.
+        if target_utilization is None:
+            raise SystemExit("max_workers: auto requires target_cpu_utilization")
+        max_workers=max(1,int(target_utilization*cpu)//threads)
+        if min_workers<1:
+            raise SystemExit("CPU worker range requires 1 <= min_workers")
+    else:
+        max_workers=max(1,int(res.get("max_workers",16)))
+        if not 1<=min_workers<=max_workers:
+            raise SystemExit("CPU worker range requires 1 <= min_workers <= max_workers")
     workers=max(1,min(max_workers,max(1,usable//threads)))
+    worker_ram_gb=res.get("worker_ram_gb")
+    ram_limited=False
+    if worker_ram_gb is not None and ram>0:
+        # Never size a pool past what RAM holds above the preflight free-RAM floor.
+        headroom=ram-float(res.get("min_available_ram_gb",16))
+        ram_workers=max(1,int(headroom//float(worker_ram_gb)))
+        ram_limited=ram_workers<workers
+        workers=min(workers,ram_workers)
     graph_workers=max(1,min(workers,max(1,usable//2),
         int(res.get("max_graph_workers",workers))))
     loader_workers=max(1,min(int(res.get("max_egnn_loader_workers",8)),usable))
@@ -209,6 +252,9 @@ def resolve(scientific: dict[str,Any], server: dict[str,Any]) -> tuple[dict[str,
     hw["gpu_monitor_enabled"]=bool(res.get("gpu_monitor_enabled",False))
     hw["gpu_monitor_interval_seconds"]=float(res.get("gpu_monitor_interval_seconds",10))
     if hw["gpu_monitor_interval_seconds"]<1:raise SystemExit("GPU monitor interval must be >=1 second")
+    hw["cpu_monitor_enabled"]=bool(res.get("cpu_monitor_enabled",False))
+    hw["cpu_monitor_interval_seconds"]=float(res.get("cpu_monitor_interval_seconds",10))
+    if hw["cpu_monitor_interval_seconds"]<1:raise SystemExit("CPU monitor interval must be >=1 second")
     hw["external_audit_workers"]=max(1,min(workers,
         int(res.get("max_external_audit_workers",4))))
     hw["foldseek_prepare_workers"]=max(1,min(workers,
@@ -253,7 +299,12 @@ def resolve(scientific: dict[str,Any], server: dict[str,Any]) -> tuple[dict[str,
         "run_root":run_root,
         "external_vhh_source_dir":out.get("external_validation",{}).get(
             "external_vhh",{}).get("source_structure_dir"),
-        "cpu_physical_cores":cpu,
+        "cpu_physical_cores":physical,
+        "cpu_count_basis":basis,
+        "cpu_counted":cpu,
+        "target_cpu_utilization":target_utilization,
+        # Share of the counted CPUs kept busy when an independent CPU pool is full.
+        "cpu_pool_utilization":round(workers*threads/cpu,4),
         "ram_gb":ram,
         "cuda_gpus":gpus,
         "ddp_ranks":ranks,
@@ -266,7 +317,9 @@ def resolve(scientific: dict[str,Any], server: dict[str,Any]) -> tuple[dict[str,
         "cpu_max_workers":max_workers,
         "cpu_min_workers_target_met":workers>=min_workers,
         "cpu_worker_limit_reason":(
-            "available cores / threads per process" if workers<min_workers else None),
+            ("RAM per worker" if ram_limited else "available cores / threads per process / utilization target")
+            if workers<min_workers else None),
+        "worker_ram_gb":None if worker_ram_gb is None else float(worker_ram_gb),
         "graph_build_workers":graph_workers,
         "qc_workers":workers,
         "egnn_loader_workers":loader_workers,

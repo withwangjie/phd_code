@@ -169,6 +169,7 @@ ORCHESTRATED_SCRIPTS: List[str] = [
     "config_validation.py",
     "run_records.py",
     "gpu_runtime.py",
+    "cpu_runtime.py",
     "stages_data.py",
     "stages_training.py",
     "stages_quantum.py",

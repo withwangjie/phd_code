@@ -55,6 +55,45 @@ wall time and preparation/physical failures. The parent
 complexes per hour, stage wall time, failure counts and memory, not utilization
 percentage alone.
 
+## CPU pool sizing and the 80 % target (A34)
+
+Independent CPU pools (data audit, QC benchmark and the QC cases that
+sensitivity, exploration and external validation split among themselves) are
+sized to `target_cpu_utilization: 0.80` of the **logical** CPUs the process may
+use, i.e. the unit top/htop report: 80 logical CPUs give 64 one-thread workers
+whether they are 80 physical cores or 40 cores with two hardware threads. The
+count honors CPU affinity and a cgroup v2 quota, keeps `cpu_reserve_cores` free
+and stops at `worker_ram_gb` per worker above the free-RAM floor. Check the
+resolved values in `.runtime/server_resolution.json`: `cpu_count_basis`,
+`cpu_counted`, `cpu_physical_cores`, `qc_workers` and `cpu_pool_utilization`.
+
+Expected CPU share by phase when the pools are full:
+
+| Phase | Expected CPU share | Why |
+|---|---|---|
+| Data audit, QC benchmark, sensitivity/exploration QC cases | about 80 % | pool of 0.8 x logical CPUs; fewer tasks than workers lowers it |
+| Graph construction | low | thread pool under the Python GIL |
+| EGNN training | low CPU; GPU bound by the frozen global batch of 4 | batch size is a protocol setting |
+| OpenMM preparation / calibration / structural targets | about 10 % CPU; GPU is the bottleneck | 8 processes, double precision on T4 |
+| Sequential admission, statistics, reporting | low | short and ordered by design |
+
+## Measuring utilization per stage
+
+With `cpu_monitor_enabled` and `gpu_monitor_enabled`, every orchestrated
+subprocess writes `logs/<stage>.cpu.csv` (host CPU %, the stage process tree's
+CPU % of all logical CPUs, process count, load, RAM) next to
+`logs/<stage>.gpu.csv`. Summarize a running or finished run with:
+
+```bash
+python -m nanoqc.common.stage_utilization <run_dir> --target 80
+```
+
+It prints each stage's sampled time, mean stage and host CPU %, peak stage
+RSS and each GPU's mean utilization and peak memory, marking stages whose CPU
+share and every GPU stay below the target. Raise GPU per-device workers only
+after this table shows GPU headroom and peak memory well under 15 GiB, and
+record the change as a protocol amendment.
+
 ## Optional MPS
 
 Several processes on a device do not guarantee simultaneous CUDA kernels.

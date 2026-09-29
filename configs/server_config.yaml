@@ -37,10 +37,18 @@ resources:
   cpu_reserve_cores: 8
   # 80-core/256-GB host: independent CPU jobs use one BLAS/OpenMP thread.
   # Graph construction has its own cap because dense geometry uses more RAM.
-  # Target range for independent data-audit/QC jobs; available cores and tasks
-  # may reduce actual concurrency. Memory-heavy stages retain separate caps.
+  # Count the logical CPUs this process may use (affinity and cgroup quota):
+  # top/htop utilization is a share of logical CPUs, whereas physical-core
+  # counting halves the pool on a hyper-threaded host (A34).
+  cpu_count_basis: "logical"
+  # Independent data-audit/QC pools are sized to this share of the counted
+  # CPUs (80 logical CPUs -> 64 workers), still bounded by cpu_reserve_cores
+  # and by RAM (worker_ram_gb per worker above min_available_ram_gb). Tasks
+  # may be fewer than workers. Memory-heavy stages retain separate caps.
+  target_cpu_utilization: 0.80
   min_workers: 48
-  max_workers: 64
+  max_workers: "auto"
+  worker_ram_gb: 1.5
   max_graph_workers: 16
   max_external_audit_workers: 12
   max_foldseek_prepare_workers: 12
@@ -62,6 +70,10 @@ resources:
   calibration_workers_per_gpu: 4
   gpu_monitor_enabled: true
   gpu_monitor_interval_seconds: 10
+  # Stage CPU telemetry (logs/<stage>.cpu.csv); summarize a run with
+  # python -m nanoqc.common.stage_utilization <run_dir>.
+  cpu_monitor_enabled: true
+  cpu_monitor_interval_seconds: 10
 
   # Preflight operational resource gates (not scientific parameters).
   min_free_disk_gb: 50

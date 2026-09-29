@@ -53,6 +53,13 @@ else
     echo "Orchestrator process: no lock file present (not currently running via deploy_launch.sh/run_full_experiment.sh)"
 fi
 
+if ls "${RUN_DIR}"/logs/*.cpu.csv "${RUN_DIR}"/logs/*.gpu.csv >/dev/null 2>&1; then
+    echo ""
+    echo "--- per-stage CPU/GPU utilization (target 80%) ---"
+    PYTHONPATH="${REPO_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}" \
+        python -m nanoqc.common.stage_utilization "$RUN_DIR" --target 80 || true
+fi
+
 echo ""
 echo "Resume this run with:"
 echo "  cd '${REPO_ROOT}' && ./scripts/run_full_experiment.sh --resume '$(basename "$RUN_DIR")'"

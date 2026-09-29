@@ -482,11 +482,13 @@ export QP_PHENIX_CLASHSCORE=/path/to/phenix.clashscore
 ./scripts/deploy_launch.sh
 ```
 
-In auto mode the resolver chooses DDP ranks from available GPUs while preserving the configured target global batch size, derives CPU worker counts from available physical cores, selects the OpenMM platform from available hardware, and records every resolved value in the run configuration/provenance. Scientific thresholds, QAOA protocol values, data-split rules, endpoints, and statistical choices are never hardware-auto-tuned.
+In auto mode the resolver chooses DDP ranks from available GPUs while preserving the configured target global batch size, derives CPU worker counts from the logical CPUs the process may use (80 % of them for independent CPU pools, A34), selects the OpenMM platform from available hardware, and records every resolved value in the run configuration/provenance. Scientific thresholds, QAOA protocol values, data-split rules, endpoints, and statistical choices are never hardware-auto-tuned.
 
 On the two-T4 server, EGNN training uses two DDP ranks. After sequential queue selection, independent structural targets run in separate spawned processes on CUDA devices 0 and 1. Training-only Amber diagnostic complexes are sharded across those devices and merged in frozen manifest order; their per-complex random streams are independent of worker scheduling. Data audit, Foldseek, grouped regression/statistics, and the formal legal-subspace QAOA simulator remain CPU tasks. This execution and calibration sampling change requires a **new formal run**, not resume of an older frozen directory (A26).
 
 The CPU stages also use bounded parallelism: data audit, Foldseek antigen-input preparation and external VHH sequence checks use spawned processes; the Foldseek search uses its own threads; the solver benchmark uses a process pool. Sensitivity cases, exploratory QAOA depths and paired-statistics budget modes run in parallel while each depth's training fit, parameter transfer and hard-set evaluation stay ordered. Development structural targets can occupy both T4s; frozen validation target selection remains sequential (A27).
+
+Every orchestrated stage records CPU and GPU samples in `logs/<stage>.cpu.csv` and `logs/<stage>.gpu.csv`. `python -m nanoqc.common.stage_utilization <run_dir>` (also printed by `scripts/check_status.sh`) lists each stage's mean CPU and GPU utilization against the 80 % target; see `docs/PIPELINE_GPU_UTILIZATION.md` for which stages are expected to reach it (A34).
 
 ## One-click formal experiment
 
