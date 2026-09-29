@@ -741,7 +741,7 @@ def main():
         attempts={index:[] for index in order} if args.no_cap else None
         if args.no_cap:
             pending={index:0 for index in order if clusters[index]['candidates']}
-            with graph_build_parallel.pool(args.workers,str(args.data_root)) as executor:
+            with graph_build_parallel.pool(args.workers,annotations=True) as executor:
                 while pending:
                     submitted=[]
                     for index in [i for i in order if i in pending]:
@@ -856,7 +856,7 @@ def main():
             if cluster_map is None or pdb_key not in cluster_map:
                 raise ValueError(f'Formal training graph requires family/structure cluster for {pdb_key}')
         # Spawned processes (not threads) so graph construction is not serialized by the GIL (A35).
-        with graph_build_parallel.pool(args.workers,str(args.data_root)) as executor:
+        with graph_build_parallel.pool(args.workers,annotations=True) as executor:
             futures=[executor.submit(graph_build_parallel.save_graph_task,(row,'train',output),
                                      dict(family_structure_cluster=cluster_map[str(row['pdb_id']).lower()]))
                      for row in train]

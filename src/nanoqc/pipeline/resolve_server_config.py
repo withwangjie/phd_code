@@ -268,10 +268,12 @@ def resolve(scientific: dict[str,Any], server: dict[str,Any]) -> tuple[dict[str,
     hw["cpu_monitor_enabled"]=bool(res.get("cpu_monitor_enabled",False))
     hw["cpu_monitor_interval_seconds"]=float(res.get("cpu_monitor_interval_seconds",10))
     if hw["cpu_monitor_interval_seconds"]<1:raise SystemExit("CPU monitor interval must be >=1 second")
-    hw["external_audit_workers"]=max(1,min(workers,
-        int(res.get("max_external_audit_workers",4))))
-    hw["foldseek_prepare_workers"]=max(1,min(workers,
-        int(res.get("max_foldseek_prepare_workers",4))))
+    # "auto" follows the independent CPU pool; a number keeps its own cap (A36).
+    def _cpu_pool_limit(key: str, default: int) -> int:
+        value=res.get(key,default)
+        return workers if str(value)=="auto" else max(1,min(workers,int(value)))
+    hw["external_audit_workers"]=_cpu_pool_limit("max_external_audit_workers",4)
+    hw["foldseek_prepare_workers"]=_cpu_pool_limit("max_foldseek_prepare_workers",4)
     hw["exploration_depth_workers"]=max(1,min(
         int(res.get("max_exploration_depth_workers",1)),workers))
     hw["sensitivity_case_workers"]=max(1,min(

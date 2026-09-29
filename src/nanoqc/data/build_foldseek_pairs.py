@@ -405,10 +405,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         prepared=map(_prepare_antigen_worker,preparation_tasks)
         prepared=list(prepared)
     else:
+        # The parent already loaded the annotations; re-reading them per worker
+        # would walk the whole data root once per process (A36).
         with concurrent.futures.ProcessPoolExecutor(
                 max_workers=min(args.prepare_workers,len(preparation_tasks)),
-                mp_context=mp.get_context("spawn"),initializer=audit.load_annotations,
-                initargs=(args.data_root.resolve(),)) as pool:
+                mp_context=mp.get_context("spawn"),initializer=audit.install_annotations,
+                initargs=(audit.annotation_snapshot(),)) as pool:
             prepared=list(pool.map(_prepare_antigen_worker,preparation_tasks))
     for pdb,record,is_self_only,chain_count in prepared:
         if is_self_only:

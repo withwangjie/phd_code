@@ -759,18 +759,33 @@ def annotation_snapshot():
     return tuple(globals()[name] for name in ANNOTATION_TABLES)
 
 
+def install_annotations(annotations):
+    """Install an :func:`annotation_snapshot` in this process (A36).
+
+    Any worker pool whose tasks read the annotation tables uses this as its
+    initializer instead of ``load_annotations``, which would walk the whole data
+    root and re-parse every summary file once per process.
+    """
+    for name, table in zip(ANNOTATION_TABLES, annotations):
+        target = globals()[name]
+        if target is table:
+            continue  # already installed; clearing first would empty the source
+        # Copy before clearing: a snapshot taken in this same process can alias
+        # a nested container of the target.
+        source = list(table) if isinstance(target, list) else dict(table)
+        target.clear()
+        if isinstance(target, list):
+            target.extend(source)
+        else:
+            target.update(source)
+
+
 def _initialize_audit_process(annotations, thresholds):
     """Install the parent's immutable annotation and threshold snapshot."""
     global INTERFACE_CONTACT_CUTOFF_ANGSTROM, MAX_RESOLUTION_ANGSTROM
     global MIN_INTERRESIDUE_HEAVY_DISTANCE_ANGSTROM, MIN_INTERFACE_OCCUPANCY
     global ALLOW_INTERFACE_ALTLOC, REQUIRE_RESOLUTION, REQUIRE_COMPLETE_INTERFACE_SIDECHAINS
-    for name, table in zip(ANNOTATION_TABLES, annotations):
-        target = globals()[name]
-        target.clear()
-        if isinstance(target, list):
-            target.extend(table)
-        else:
-            target.update(table)
+    install_annotations(annotations)
     (INTERFACE_CONTACT_CUTOFF_ANGSTROM, MAX_RESOLUTION_ANGSTROM,
      MIN_INTERRESIDUE_HEAVY_DISTANCE_ANGSTROM, MIN_INTERFACE_OCCUPANCY,
      ALLOW_INTERFACE_ALTLOC, REQUIRE_RESOLUTION,

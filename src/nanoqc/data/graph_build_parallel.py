@@ -28,7 +28,7 @@ HOMOLOGY_FIELDS = ("vhh_sequences", "antigen_sequences", "cdr3_seq", "subset_sou
 _REFERENCE: List[SimpleNamespace] = []
 
 
-def _setup(settings: Dict[str, Any], data_root: Optional[str], reference: tuple) -> None:
+def _setup(settings: Dict[str, Any], annotations: Optional[tuple], reference: tuple) -> None:
     for name in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
         os.environ[name] = "1"
     torch.set_num_threads(1)
@@ -36,18 +36,25 @@ def _setup(settings: Dict[str, Any], data_root: Optional[str], reference: tuple)
     from nanoqc.data import build_final_pyg_dataset as build
     for name, value in settings.items():
         setattr(build, name, value)
-    if data_root is not None:
-        audit.load_annotations(data_root)
+    if annotations is not None:
+        audit.install_annotations(annotations)
     _REFERENCE[:] = list(reference)
 
 
-def pool(workers: int, data_root: Optional[str] = None,
+def pool(workers: int, annotations: bool = False,
          reference: Sequence[SimpleNamespace] = ()) -> concurrent.futures.ProcessPoolExecutor:
+    """A spawned pool; ``annotations`` hands workers the parent's audit tables (A36).
+
+    The parent has already loaded them, so the snapshot is passed rather than
+    re-read: ``load_annotations`` walks the entire data root per process.
+    """
+    from nanoqc.data import audit_all_datasets as audit
     from nanoqc.data import build_final_pyg_dataset as build
     settings = {name: getattr(build, name) for name in SETTINGS}
+    snapshot = audit.annotation_snapshot() if annotations else None
     return concurrent.futures.ProcessPoolExecutor(
         max_workers=max(1, int(workers)), mp_context=mp.get_context("spawn"),
-        initializer=_setup, initargs=(settings, data_root, tuple(reference)))
+        initializer=_setup, initargs=(settings, snapshot, tuple(reference)))
 
 
 def sequences(graph: Any) -> SimpleNamespace:

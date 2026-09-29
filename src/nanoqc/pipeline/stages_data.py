@@ -615,22 +615,25 @@ class DataStagesMixin:
             query_col=int(clustering_cfg.get("query_column",0))
             target_col=int(clustering_cfg.get("target_column",1))
             covered_ids=set()
-            for raw_line in pair_path.read_text(encoding="utf-8-sig").splitlines():
-                line=raw_line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                fields=line.split("\t")
-                if len(fields)<=max(query_col,target_col):
-                    continue
-                for idx in (query_col,target_col):
-                    token=Path(fields[idx].strip()).name
-                    lower=token.lower()
-                    for suffix in (".cif.gz",".pdb.gz",".cif",".pdb",".mmcif"):
-                        if lower.endswith(suffix):
-                            token=token[:-len(suffix)]
-                            break
-                    if token:
-                        covered_ids.add(token[:4].lower() if len(token)>=4 else token.lower())
+            # Streamed: this table has millions of rows, and reading it whole
+            # held the entire file plus a list of its lines in memory (A36).
+            with pair_path.open(encoding="utf-8-sig") as pair_handle:
+                for raw_line in pair_handle:
+                    line=raw_line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    fields=line.split("\t")
+                    if len(fields)<=max(query_col,target_col):
+                        continue
+                    for idx in (query_col,target_col):
+                        token=Path(fields[idx].strip()).name
+                        lower=token.lower()
+                        for suffix in (".cif.gz",".pdb.gz",".cif",".pdb",".mmcif"):
+                            if lower.endswith(suffix):
+                                token=token[:-len(suffix)]
+                                break
+                        if token:
+                            covered_ids.add(token[:4].lower() if len(token)>=4 else token.lower())
             missing_pair_coverage=sorted(universe_ids-covered_ids)
             if missing_pair_coverage:
                 return StageResult(

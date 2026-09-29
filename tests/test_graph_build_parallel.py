@@ -49,3 +49,20 @@ def test_save_graph_task_returns_the_unchanged_result_and_a_peak_rss(monkeypatch
     record, error, peak = parallel.save_graph_task(("row", "train", "out"), {"family_structure_cluster": "c1"})
     assert record == {"args": ("row", "train", "out"), "kwargs": {"family_structure_cluster": "c1"}}
     assert error is None and isinstance(peak, int)
+
+
+def test_graph_workers_install_the_snapshot_instead_of_walking_the_data_root(monkeypatch):
+    """Graph workers get the parent's audit tables, like the audit pool (A36)."""
+    import nanoqc.data.audit_all_datasets as audit
+
+    walked = []
+    monkeypatch.setattr(audit, "load_annotations", lambda root: walked.append(root))
+    audit.RESOLUTION_BY_PDB["1ABC"] = (2.0, "test")
+    try:
+        settings = {name: getattr(build, name) for name in parallel.SETTINGS}
+        parallel._setup(settings, audit.annotation_snapshot(), ())
+        assert audit.RESOLUTION_BY_PDB["1ABC"] == (2.0, "test")
+        parallel._setup(settings, None, ())
+    finally:
+        audit.RESOLUTION_BY_PDB.pop("1ABC", None)
+    assert walked == [], "workers must not walk the data root"

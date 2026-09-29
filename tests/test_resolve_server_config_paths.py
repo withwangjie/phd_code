@@ -41,7 +41,8 @@ def test_80_core_server_cpu_budget_and_graph_cap(tmp_path, monkeypatch):
     assert config["hardware"]["calibration_workers_per_gpu"]==4
     assert config["hardware"]["gpu_monitor_enabled"] is True
     assert report["structural_workers_per_gpu"]==4
-    assert report["external_audit_workers"]==12
+    assert report["external_audit_workers"]==64  # follows the CPU pool (A36)
+    assert report["foldseek_prepare_workers"]==64
     assert report["egnn_replicate_workers"]==2
     server["resources"]["cpu_threads_per_process"]=4
     config,report=resolver.resolve({},server)
@@ -115,3 +116,11 @@ def test_graph_workers_follow_ram_and_reject_auto_without_an_estimate(tmp_path, 
     assert config["queue_freeze"]["graph_build"]["workers"]==8
     with pytest.raises(SystemExit,match="requires graph_worker_ram_gb"):
         _resolve_on(tmp_path,monkeypatch,physical=80,logical=80,graph_worker_ram_gb=None)
+
+
+def test_cpu_pool_followers_accept_an_explicit_cap(tmp_path, monkeypatch):
+    config,report=_resolve_on(tmp_path,monkeypatch,physical=80,logical=80,
+                              max_foldseek_prepare_workers=6,max_external_audit_workers=6)
+    assert report["foldseek_prepare_workers"]==6
+    assert report["external_audit_workers"]==6
+    assert config["hardware"]["foldseek_prepare_workers"]==6

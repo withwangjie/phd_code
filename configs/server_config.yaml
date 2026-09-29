@@ -54,8 +54,11 @@ resources:
   # dense-geometry edge budget. 256 GB - 32 GB floor / 5 GB gives 44 workers.
   max_graph_workers: "auto"
   graph_worker_ram_gb: 5.0
-  max_external_audit_workers: 12
-  max_foldseek_prepare_workers: 12
+  # Both are CPU structure parsing with one structure in memory at a time, and
+  # their workers no longer re-read the annotation tables (A36), so they follow
+  # the general pool instead of a fixed 12.
+  max_external_audit_workers: "auto"
+  max_foldseek_prepare_workers: "auto"
   max_exploration_depth_workers: 2
   max_sensitivity_case_workers: 3
   max_statistics_mode_workers: 2
