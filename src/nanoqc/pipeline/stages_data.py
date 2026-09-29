@@ -873,6 +873,11 @@ class DataStagesMixin:
         ]
         if cluster_map_path is not None and cluster_map_path.is_file():
             vq_argv += ["--cluster-map", str(cluster_map_path)]
+        hardware=self.config.get("hardware",{})
+        vq_argv += ["--preparation-workers",str(hardware.get("structural_prepare_workers",1)),
+                    "--workers-per-gpu",str(hardware.get("structural_prepare_workers_per_gpu",1)),
+                    "--gpu-devices",*[str(d) for d in hardware.get("structural_gpu_devices",
+                                                                      [hardware.get("openmm_device","0")])]]
         returncode, vq_log = self._run_subprocess("queue_freeze_validation_queue", vq_argv)
         vq_expected = [validation_dir / name for name in ("eligibility.json", "selected_targets.json")]
         vq_ok, vq_detail = self._artifacts_present(vq_expected)

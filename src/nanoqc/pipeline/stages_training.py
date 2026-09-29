@@ -226,7 +226,10 @@ class TrainingStagesMixin:
         ]
         calibration_devices=[str(device) for device in self.config.get("hardware",{}).get(
             "structural_gpu_devices",[self.config.get("hardware",{}).get("openmm_device","0")])]
-        argv += ["--workers",str(len(calibration_devices)),"--gpu-devices",*calibration_devices]
+        hardware=self.config.get("hardware",{})
+        argv += ["--workers",str(hardware.get("calibration_workers",len(calibration_devices))),
+                 "--workers-per-gpu",str(hardware.get("calibration_workers_per_gpu",1)),
+                 "--gpu-devices",*calibration_devices]
         cluster_path=self.frozen_cluster_map_path()
         if cluster_path is not None:
             if not cluster_path.is_file():

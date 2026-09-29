@@ -28,6 +28,7 @@ CONFIGS_DIR = "configs"
 # so manifests stay comparable in structure; the file itself is found here.
 MODULE_LAYOUT = {
     "repo_io.py": "src/nanoqc/common/repo_io.py",
+    "gpu_runtime.py": "src/nanoqc/common/gpu_runtime.py",
     "seed_streams.py": "src/nanoqc/common/seed_streams.py",
     "prediction_contract.py": "src/nanoqc/common/prediction_contract.py",
     "residue_tables.py": "src/nanoqc/structure/residue_tables.py",

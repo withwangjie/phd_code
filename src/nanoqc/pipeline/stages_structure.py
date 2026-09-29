@@ -127,7 +127,9 @@ class StructureStagesMixin:
                     "structural_gpu_devices",[self.config.get("hardware",{}).get("openmm_device","0")])]
                 hardware=self.config.get("hardware",{})
                 argv += ["--target-workers",str(hardware.get("structural_target_workers",len(gpu_devices))),
-                         "--workers-per-gpu",str(hardware.get("structural_workers_per_gpu",1)),
+                         "--preparation-workers",str(hardware.get("structural_prepare_workers",1)),
+                         "--workers-per-gpu",str(max(hardware.get("structural_workers_per_gpu",1),
+                                                     hardware.get("structural_prepare_workers_per_gpu",1))),
                          "--gpu-devices",*gpu_devices]
             if label == "dev_queue":
                 # Historical dev targets are run individually. Each subprocess

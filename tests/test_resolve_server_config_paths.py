@@ -31,6 +31,10 @@ def test_80_core_server_cpu_budget_and_graph_cap(tmp_path, monkeypatch):
     assert config["hardware"]["structural_gpu_devices"]==["0","1"]
     assert config["hardware"]["structural_workers_per_gpu"]==4
     assert config["hardware"]["structural_target_workers"]==8
+    assert config["hardware"]["structural_prepare_workers"]==8
+    assert config["hardware"]["calibration_workers"]==8
+    assert config["hardware"]["calibration_workers_per_gpu"]==4
+    assert config["hardware"]["gpu_monitor_enabled"] is True
     assert report["structural_workers_per_gpu"]==4
     assert report["external_audit_workers"]==12
     server["resources"]["cpu_threads_per_process"]=4

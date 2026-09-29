@@ -68,6 +68,7 @@ import signal
 import subprocess
 import sys
 import traceback
+from nanoqc.common.gpu_runtime import GPUStageMonitor
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
@@ -270,7 +271,9 @@ class Orchestrator(
             full_env.update(env)
         timeout_seconds=float(self.config.get("control",{}).get("stage_timeout_seconds",0) or 0)
         timeout=timeout_seconds if timeout_seconds>0 else None
-        with log_path.open("a", encoding="utf-8") as log_handle:
+        with log_path.open("a", encoding="utf-8") as log_handle, GPUStageMonitor(
+                log_path.with_suffix(".gpu.csv"),enabled=hardware.get("gpu_monitor_enabled",False),
+                interval=hardware.get("gpu_monitor_interval_seconds",10)):
             log_handle.write(f"\n=== {started} :: {' '.join(argv)} ===\n")
             log_handle.flush()
             use_process_group=os.name=="posix"

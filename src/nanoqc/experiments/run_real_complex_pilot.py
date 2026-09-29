@@ -17,6 +17,7 @@ import random
 import multiprocessing as mp
 from pathlib import Path
 import traceback
+import time
 
 import gemmi
 import numpy as np
@@ -64,6 +65,101 @@ def _submit_structural_jobs(jobs: list, devices: list[str], stack) -> list:
     return [(pdb,destination,argv,pools[index % len(pools)].submit(
         _run_recovery_on_device,argv,devices[index % len(pools)]))
         for index,(pdb,destination,argv) in enumerate(jobs)]
+
+
+def _check_prepared_sites(config: dict, args, native: Path) -> None:
+    """Same chemistry checks for serial and parallel preparation."""
+    def check_sites(ids,scores):
+        check=AllAtomInterfaceQUBOBuilder(native,ids,site_scores=scores,
+            rotamer_mode=args.rotamer_mode,rotamer_library_path=args.rotamer_library,
+            rotamer_probability_floor=args.rotamer_probability_floor,
+            rotamer_sigma_offsets=args.rotamer_sigma_offsets,solvent_model=args.solvent_model)
+        del check
+    if args.eligibility_only:
+        compatible=[];failures=[]
+        for rid in config.get("eligible_residues",[]):
+            try:
+                check_sites([rid],[0.0]);compatible.append(rid)
+            except Exception as exc:
+                failures.append(dict(residue_id=rid,error=f"{type(exc).__name__}: {exc}"))
+        if len(compatible)<args.sites:
+            raise ValueError(f"Only {len(compatible)} independently Dunbrack/Amber-compatible VHH sites; need {args.sites}")
+        config.update(eligibility_compatible_residues=compatible,eligibility_site_failures=failures,
+                      active_residues=[],active_site_scores=[])
+    else:
+        check_sites(config["active_residues"],config.get("active_site_scores"))
+
+
+def _preparation_error(exc: Exception) -> dict:
+    return dict(message=str(exc),error_type=type(exc).__name__,
+                category=getattr(exc,"category","eligibility_or_execution"),audit=getattr(exc,"audit",None))
+
+
+def _raise_preparation_error(record: dict | None) -> None:
+    if record:
+        raise StructureQualityError(record["message"],category=record["category"],audit=record["audit"])
+
+
+def _prepare_candidate_on_device(row: dict, args, work: Path, homology: dict,
+                                 frozen_pool: set | None, device: str) -> dict:
+    """Compute independent preparation only; admission stays ordered in the parent."""
+    from nanoqc.common.repo_io import sha256_file, atomic_write_json_fsync
+    from nanoqc.data.audit_all_datasets import materialize_graph_complex
+    os.environ["QP_OPENMM_DEVICE"]=device
+    started=time.time();work.mkdir(parents=True,exist_ok=True)
+    result=dict(config=None,raw=None,prepare_error=None,physical_error=None)
+    try:
+        path=_manifest_graph_path(args.dataset,row.get("path"))
+        if sha256_file(path)!=row["sha256"]:raise ValueError("Test graph hash mismatch")
+        graph=load_graph(path)
+        raw=extract_source(graph.source_id,args.data_root,work/"raw.pdb")
+        raw=materialize_graph_complex(raw,graph,work/"graph_complex.cif")
+        config=prepare(graph,raw,work/"native.cif",args.sites,pruning=args.pruning,
+            seed=args.seeds[0],checkpoint=args.checkpoint,
+            antigen_guidance_weight=args.antigen_guidance_weight,
+            antigen_proximity_scale=args.antigen_proximity_scale,contact_ca_cutoff=args.contact_ca_cutoff,
+            homology_isolation=homology,eligibility_only=args.eligibility_only,
+            rotamer_mode=args.rotamer_mode,allowed_residues=frozen_pool)
+        result.update(config=config,raw=str(raw))
+    except Exception as exc:
+        result["prepare_error"]=_preparation_error(exc)
+    if result["prepare_error"] is None:
+        try:
+            config["preparation_changes"].extend(complete_terminal_oxygen(work/"native.cif"))
+            _check_prepared_sites(config,args,work/"native.cif")
+        except Exception as exc:
+            result["physical_error"]=_preparation_error(exc)
+    atomic_write_json_fsync(work/"preparation_execution.json",dict(
+        pid=os.getpid(),device=device,elapsed_seconds=time.time()-started,
+        prepare_error=result["prepare_error"],physical_error=result["physical_error"],
+        admission="undecided; only parent eligibility decisions admit targets"))
+    return result
+
+
+def _prefetch_preparations(candidates, args, out, homology, metadata, devices, stack,
+                          excluded_pdb, train_pdb, cluster_map, train_clusters):
+    """Deduplicate first, submit in frozen order, and never decide independence here."""
+    if len(devices)<2:return {}
+    for variable in ("OMP_NUM_THREADS","MKL_NUM_THREADS","OPENBLAS_NUM_THREADS"):
+        os.environ[variable]="1"
+    pools=[stack.enter_context(concurrent.futures.ProcessPoolExecutor(
+        max_workers=1,mp_context=mp.get_context("spawn"),
+        initializer=_initialize_recovery_worker,initargs=(device,))) for device in devices]
+    futures={};seen=set()
+    for row in candidates:
+        pdb=row["pdb_id"].lower()
+        if pdb in seen:continue
+        seen.add(pdb)
+        if (pdb in excluded_pdb or pdb in train_pdb or
+                (cluster_map is not None and (pdb not in cluster_map or cluster_map[pdb] in train_clusters))):
+            continue
+        pool_index=len(futures)%len(pools)
+        frozen_pool=(set(metadata.get(pdb,{}).get("eligibility_compatible_residues",[]))
+                     if args.pdb_allowlist_file and not args.prepare_only else None)
+        futures[pdb]=pools[pool_index].submit(_prepare_candidate_on_device,row,args,
+            out/"prepared"/pdb,homology,frozen_pool,devices[pool_index])
+    for future in futures.values():stack.callback(future.cancel)
+    return futures
 
 
 def _manifest_graph_path(root: Path, relative: object) -> Path:
@@ -344,6 +440,8 @@ def main(argv=None) -> int:
         help="Independent structural targets to evaluate concurrently after sequential eligibility.")
     parser.add_argument("--workers-per-gpu", type=int, default=1,
         help="Maximum structural processes per CUDA device; sharing requires opting in.")
+    parser.add_argument("--preparation-workers",type=int,default=1,
+        help="Independent candidate preparation workers; admission remains sequential.")
     parser.add_argument("--gpu-devices", nargs="+", default=["0"],
         help="Distinct OpenMM CUDA device indices; workers are assigned round-robin.")
     parser.add_argument("--vhh-identity-threshold", type=float, default=0.80)
@@ -423,6 +521,7 @@ def main(argv=None) -> int:
         parser.error("Require 1..10 sites, positive qaoa-depth, and a nonnegative target count (0 = unlimited)")
     try:
         worker_devices=_structural_worker_devices(args.target_workers,args.gpu_devices,args.workers_per_gpu)
+        preparation_devices=_structural_worker_devices(args.preparation_workers,args.gpu_devices,args.workers_per_gpu)
     except ValueError as exc:
         parser.error(str(exc))
     if args.eligibility_only and not args.prepare_only:
@@ -554,7 +653,7 @@ def main(argv=None) -> int:
         pdb_allowlist_sha256=(
             _ablation_digest(args.pdb_allowlist_file) if args.pdb_allowlist_file else None),
         resolved_target_filter=requested_pdb)
-    with FileLock(str(out/".lock"),timeout=0):
+    with FileLock(str(out/".lock"),timeout=0), contextlib.ExitStack() as preparation_stack:
         stamp=out/"run_manifest.json"
         if stamp.exists() and json.loads(stamp.read_text()) != provenance:
             raise ValueError("Protocol changed; use a new output directory")
@@ -593,6 +692,13 @@ def main(argv=None) -> int:
                 raise ValueError(f"Cluster map missing training PDBs, e.g. {missing[:10]}")
             train_clusters={cluster_map[p] for p in train_pdb}
         selected=[]; decisions=[]; selected_vhh=[]; selected_antigen=[]; selected_cdr=[]; selected_clusters=set(); seen=set()
+        preparation_futures=_prefetch_preparations(candidates,args,out,homology,
+            frozen_target_metadata,preparation_devices,preparation_stack,
+            excluded_pdb,train_pdb,cluster_map,train_clusters)
+        _ablation_atomic_json(out/"preparation_execution.json",dict(
+            requested_workers=args.preparation_workers,worker_gpu_assignment=preparation_devices,
+            submitted_targets=list(preparation_futures),selection_order="original frozen candidate order",
+            scientific_device="EGNN ranking remains on CPU; Amber checks use declared OpenMM platform"))
         for pdb in frozen_identity_missing:
             decisions.append(dict(
                 pdb_id=pdb,status="excluded",
@@ -630,22 +736,14 @@ def main(argv=None) -> int:
                 path=_manifest_graph_path(args.dataset, row.get("path"))
                 if _ablation_digest(path)!=row["sha256"]: raise ValueError("Test graph hash mismatch")
                 graph=load_graph(path)
-                raw=extract_source(graph.source_id,args.data_root,work/"raw.pdb")
-                from nanoqc.data.audit_all_datasets import materialize_graph_complex
-                raw=materialize_graph_complex(raw,graph,work/"graph_complex.cif")
                 frozen_pool=(
                     set(frozen_target_metadata.get(pdb,{}).get("eligibility_compatible_residues",[]))
                     if args.pdb_allowlist_file and not args.prepare_only else None
                 )
-                config=prepare(graph,raw,work/"native.cif",args.sites,pruning=args.pruning,
-                    seed=args.seeds[0],checkpoint=args.checkpoint,
-                    antigen_guidance_weight=args.antigen_guidance_weight,
-                    antigen_proximity_scale=args.antigen_proximity_scale,
-                    contact_ca_cutoff=args.contact_ca_cutoff,
-                    homology_isolation=homology,
-                    eligibility_only=args.eligibility_only,
-                    rotamer_mode=args.rotamer_mode,
-                    allowed_residues=frozen_pool)
+                prepared=(preparation_futures[pdb].result() if pdb in preparation_futures else
+                    _prepare_candidate_on_device(row,args,work,homology,frozen_pool,args.gpu_devices[0]))
+                _raise_preparation_error(prepared["prepare_error"])
+                config=prepared["config"];raw=Path(prepared["raw"])
                 chain_identity_audit=[]
                 max_vhh_full_chain_identity=0.0
                 max_antigen_full_chain_identity=0.0
@@ -693,49 +791,7 @@ def main(argv=None) -> int:
                         f"Antigen full-chain identity {max_antigen_full_chain_identity:.3f} >= {args.antigen_identity_threshold:.2f} "
                         f"with minimum length coverage {args.antigen_min_length_coverage:.2f}"
                     )
-                config["preparation_changes"].extend(complete_terminal_oxygen(work/"native.cif"))
-                if args.eligibility_only:
-                    # Prove existence of K compatible sites without ranking them.
-                    compatible=[]
-                    compatibility_failures=[]
-                    for rid in config.get("eligible_residues",[]):
-                        try:
-                            check=AllAtomInterfaceQUBOBuilder(
-                                work/"native.cif",[rid],site_scores=[0.0],
-                                rotamer_mode=args.rotamer_mode,
-                                rotamer_library_path=args.rotamer_library,
-                                rotamer_probability_floor=args.rotamer_probability_floor,
-                                rotamer_sigma_offsets=args.rotamer_sigma_offsets,
-                                solvent_model=args.solvent_model,
-                            )
-                            del check
-                            compatible.append(rid)
-                        except Exception as site_exc:
-                            compatibility_failures.append(dict(
-                                residue_id=rid,
-                                error=f"{type(site_exc).__name__}: {site_exc}",
-                            ))
-                    if len(compatible) < args.sites:
-                        raise ValueError(
-                            f"Only {len(compatible)} independently Dunbrack/Amber-compatible VHH sites; "
-                            f"need {args.sites}"
-                        )
-                    config["eligibility_compatible_residues"]=compatible
-                    config["eligibility_site_failures"]=compatibility_failures
-                    config["active_residues"]=[]
-                    config["active_site_scores"]=[]
-                else:
-                    # Formal run: verify the actually selected Active set.
-                    check=AllAtomInterfaceQUBOBuilder(
-                        work/"native.cif",config["active_residues"],
-                        site_scores=config.get("active_site_scores"),
-                        rotamer_mode=args.rotamer_mode,
-                        rotamer_library_path=args.rotamer_library,
-                        rotamer_probability_floor=args.rotamer_probability_floor,
-                        rotamer_sigma_offsets=args.rotamer_sigma_offsets,
-                        solvent_model=args.solvent_model,
-                    )
-                    del check
+                _raise_preparation_error(prepared["physical_error"])
                 config.update(target=pdb,native_structure=str(work/"native.cif"),
                     candidate_relax_iterations=args.candidate_relax_iterations,
                     protocol="validation_control",graph_sha256=row["sha256"],
@@ -787,6 +843,9 @@ def main(argv=None) -> int:
                     chain_identity_audit=chain_identity_audit,max_cdr_h3_loop_identity=max_cdr_h3_loop_identity))
             _ablation_atomic_json(out/"eligibility.json",decisions)
         _ablation_atomic_json(out/"selected_targets.json",selected)
+        # Finish/cancel preparation before starting recovery: the two phases
+        # share the same GPU concurrency budget and must not overlap pools.
+        preparation_stack.close()
         if not selected:
             raise ValueError('No eligible targets; inspect eligibility.json')
         # Final independent-set audit: selection-time pools cover sequence and

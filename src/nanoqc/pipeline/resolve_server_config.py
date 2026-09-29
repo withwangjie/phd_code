@@ -201,6 +201,14 @@ def resolve(scientific: dict[str,Any], server: dict[str,Any]) -> tuple[dict[str,
         raise SystemExit("structural_workers_per_gpu must be positive")
     hw["structural_workers_per_gpu"]=per_device if hw["openmm_platform"]=="CUDA" else 1
     hw["structural_target_workers"]=len(hw["structural_gpu_devices"])*hw["structural_workers_per_gpu"]
+    for kind in ("structural_prepare","calibration"):
+        per_device=int(res.get(kind+"_workers_per_gpu",1))
+        if per_device<1:raise SystemExit(kind+"_workers_per_gpu must be positive")
+        hw[kind+"_workers_per_gpu"]=per_device if hw["openmm_platform"]=="CUDA" else 1
+        hw[kind+"_workers"]=len(hw["structural_gpu_devices"])*hw[kind+"_workers_per_gpu"]
+    hw["gpu_monitor_enabled"]=bool(res.get("gpu_monitor_enabled",False))
+    hw["gpu_monitor_interval_seconds"]=float(res.get("gpu_monitor_interval_seconds",10))
+    if hw["gpu_monitor_interval_seconds"]<1:raise SystemExit("GPU monitor interval must be >=1 second")
     hw["external_audit_workers"]=max(1,min(workers,
         int(res.get("max_external_audit_workers",4))))
     hw["foldseek_prepare_workers"]=max(1,min(workers,
@@ -269,6 +277,8 @@ def resolve(scientific: dict[str,Any], server: dict[str,Any]) -> tuple[dict[str,
         "structural_gpu_devices":hw["structural_gpu_devices"],
         "structural_target_workers":hw["structural_target_workers"],
         "structural_workers_per_gpu":hw["structural_workers_per_gpu"],
+        "structural_prepare_workers":hw["structural_prepare_workers"],
+        "calibration_workers":hw["calibration_workers"],
         "external_audit_workers":hw["external_audit_workers"],
         "foldseek_prepare_workers":hw["foldseek_prepare_workers"],
         "exploration_depth_workers":hw["exploration_depth_workers"],
