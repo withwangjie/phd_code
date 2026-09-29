@@ -224,6 +224,10 @@ queue_freeze:
     # Historical engineering-pilot targets. Permanently barred from ever
     # re-entering the validation queue below, regardless of future reruns.
     excluded_pdb: ["4s10", "8yvo", "9gcn"]
+    # Development recovery uses observed training complexes, independently of
+    # the permanent validation exclusion list. Missing requested IDs are audited.
+    target_pdb_ids: ["4s10", "9gcn"]
+    candidate_split: "train"
     role_label: "dev"
     # Formal structural-experiment protocol for the dev/regression queue,
     # explicit rather than left to a hardcoded default (requirement #3);

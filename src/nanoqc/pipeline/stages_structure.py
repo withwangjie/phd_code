@@ -88,8 +88,26 @@ class StructureStagesMixin:
                           "--parameter-scale", str(qprimary.get("parameter_scale","max_coefficient"))]
             return flags
 
+        dev_cfg=qf_cfg["dev_queue"]
+        requested_dev=[str(pdb).lower() for pdb in dev_cfg.get("target_pdb_ids",dev_cfg.get("excluded_pdb",[]))]
+        if len(requested_dev)!=len(set(requested_dev)):
+            raise ValueError("Development structural target IDs must be unique")
+        dev_split=dev_cfg.get("candidate_split","train")
+        with (dataset_dir/"graph_manifest.csv").open(encoding="utf-8-sig",newline="") as handle:
+            available_dev={row["pdb_id"].lower() for row in csv.DictReader(handle) if row["split"]==dev_split}
+        planned_dev=[pdb for pdb in requested_dev if pdb in available_dev]
+        unavailable_dev=[pdb for pdb in requested_dev if pdb not in available_dev]
+        dev_dir.mkdir(parents=True,exist_ok=True)
+        atomic_write_json(dev_dir/"target_availability.json",dict(
+            requested_target_ids=requested_dev,available_target_ids=planned_dev,
+            unavailable_target_ids=unavailable_dev,candidate_split=dev_split,
+            graph_manifest_sha256=sha256_of(dataset_dir/"graph_manifest.csv"),
+            historical_validation_exclusions=dev_cfg.get("excluded_pdb",[])))
+        if not planned_dev:
+            return StageResult("structure_experiment","failed",started,utc_timestamp(),None,
+                f"No development targets present in split {dev_split}; inspect {dev_dir/'target_availability.json'}")
         runs = [
-            ("dev_queue", dev_dir, qf_cfg["dev_queue"], list(qf_cfg["dev_queue"].get("excluded_pdb", []))),
+            ("dev_queue", dev_dir, dev_cfg, planned_dev),
             ("validation_queue", validation_dir, qf_cfg["validation_queue"], None),
         ]
         failures = []
@@ -132,6 +150,7 @@ class StructureStagesMixin:
                                                      hardware.get("structural_prepare_workers_per_gpu",1))),
                          "--gpu-devices",*gpu_devices]
             if label == "dev_queue":
+                argv += ["--candidate-split",str(dev_split)]
                 # Historical dev targets are run individually. Each subprocess
                 # therefore has an exact denominator of one target.
                 # Historical dev targets are each run individually against
@@ -217,6 +236,9 @@ class StructureStagesMixin:
                     "queue_role":"dev",
                     "master_seed":self.config["master_seed"],
                     "planned_target_ids":sorted(planned),
+                    "requested_target_ids":requested_dev,
+                    "unavailable_target_ids":unavailable_dev,
+                    "candidate_split":dev_split,
                     "child_run_manifest_sha256":child_manifest_sha256,
                     "checkpoint_sha256":sha256_of(checkpoint_dir/"best_egnn_pruning.pt"),
                     "protocol":"historical development/regression queue; never confirmatory validation",
@@ -239,11 +261,16 @@ class StructureStagesMixin:
                     "",
                     f"Completed target IDs: {sorted(dev_completed)}",
                     f"Failed target IDs: {sorted(dev_failed)}",
+                    f"Requested targets unavailable in input split: {unavailable_dev}",
+                    f"Candidate split: {dev_split}; training recovery is developmental, not independent validation.",
                 ]
                 (out_dir/"real_complex_report.md").write_text("\n".join(report)+"\n",encoding="utf-8")
                 atomic_write_json(out_dir/"run_summary.json",dict(
                     queue_role="dev",
                     planned_target_ids=sorted(planned),
+                    requested_target_ids=requested_dev,
+                    unavailable_target_ids=unavailable_dev,
+                    candidate_split=dev_split,
                     selected_targets=len(dev_selected),
                     structure_experiment_completed_targets=len(dev_completed),
                     structure_experiment_completed_target_ids=sorted(dev_completed),

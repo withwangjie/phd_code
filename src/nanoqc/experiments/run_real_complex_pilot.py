@@ -92,6 +92,16 @@ def _check_prepared_sites(config: dict, args, native: Path) -> None:
         check_sites(config["active_residues"],config.get("active_site_scores"))
 
 
+def _pilot_populations(rows: list[dict], candidate_split: str, queue_role: str):
+    """Training recovery is explicitly developmental, never an independent test."""
+    if candidate_split == "train" and queue_role != "dev":
+        raise ValueError("Training candidates are permitted only for the development queue")
+    training = [] if candidate_split == "train" else [r for r in rows if r["split"] == "train"]
+    candidates = sorted([r for r in rows if r["split"] == candidate_split],
+                        key=lambda r: (int(r["nodes"]), r["pdb_id"], r["path"]))
+    return training, candidates
+
+
 def _preparation_error(exc: Exception) -> dict:
     return dict(message=str(exc),error_type=type(exc).__name__,
                 device=getattr(exc,"device",""),stage_hint=getattr(exc,"stage_hint",""),
@@ -544,7 +554,12 @@ def main(argv=None) -> int:
     parser.add_argument("--queue-role",choices=("dev","validation"),default="dev",
         help="Purely descriptive tag recorded in provenance/eligibility.json/the report, so a validation-queue "
              "output directory can never be silently confused with a development pilot's.")
+    parser.add_argument("--candidate-split",choices=("train","test_snac_hard"),default="test_snac_hard",
+        help="Training candidates are development-only recovery controls, not independent validation.")
     args = parser.parse_args(argv)
+    if args.candidate_split == "train" and (args.queue_role != "dev" or
+                                           not (args.pdb_id or args.pdb_allowlist_file)):
+        parser.error("Training development recovery requires queue-role dev and explicit target IDs")
     if not 1 <= args.sites <= 10 or args.targets < 0 or args.qaoa_depth <= 0:
         parser.error("Require 1..10 sites, positive qaoa-depth, and a nonnegative target count (0 = unlimited)")
     try:
@@ -570,8 +585,7 @@ def main(argv=None) -> int:
     out = args.out_dir.resolve(); out.mkdir(parents=True, exist_ok=True)
     manifest = args.dataset / "graph_manifest.csv"
     rows = list(csv.DictReader(manifest.open(encoding="utf-8-sig")))
-    training = [r for r in rows if r["split"] == "train"]
-    candidates = sorted([r for r in rows if r["split"] == "test_snac_hard"], key=lambda r: (int(r["nodes"]),r["pdb_id"],r["path"]))
+    training, candidates = _pilot_populations(rows,args.candidate_split,args.queue_role)
     frozen_target_metadata={}
     frozen_target_ids=set()
     frozen_identity_missing=[]
@@ -747,9 +761,10 @@ def main(argv=None) -> int:
                 continue
             work=out/"prepared"/pdb;work.mkdir(parents=True,exist_ok=True)
             chain_identity_audit=[];max_cdr_h3_loop_identity=None
-            independence_status=("sequence_and_family_structure_isolated" if cluster_map is not None
+            independence_status=("development_training_only" if args.candidate_split == "train" else
+                                 "sequence_and_family_structure_isolated" if cluster_map is not None
                                  else "sequence_isolated_family_structure_unconfirmed")
-            development_exposed=pdb in dev_exposed_pdb
+            development_exposed=args.candidate_split == "train" or pdb in dev_exposed_pdb
             try:
                 if pdb in train_pdb: raise ValueError("Training PDB overlap")
                 family_cluster=None
@@ -843,7 +858,9 @@ def main(argv=None) -> int:
                     ),
                     independence_status=independence_status,
                     independence=(
-                        f"{independence_status}: PDB-disjoint and below layered homology thresholds "
+                        ("Training-set developmental recovery; expected training overlap; no independent validation claim. "
+                         if args.candidate_split == "train" else "PDB-disjoint and below layered homology thresholds. ") +
+                        f"{independence_status}: "
                         f"VHH full-chain<{args.vhh_identity_threshold:.2f}, CDR-H3 loop<{args.cdr_h3_identity_threshold:.2f}, "
                         f"antigen full-chain<{args.antigen_identity_threshold:.2f} with coverage>={args.antigen_min_length_coverage:.2f}; "
                         f"observed max VHH full-chain={max_vhh_full_chain_identity:.4f}, CDR-H3 loop={max_cdr_h3_loop_identity:.4f}, "
