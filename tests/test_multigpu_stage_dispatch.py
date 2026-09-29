@@ -105,15 +105,39 @@ def test_structural_sharing_requires_valid_explicit_limit(workers,devices,cap):
     with pytest.raises(ValueError):pilot._structural_worker_devices(workers,devices,cap)
 
 
-def test_audit_spawned_processes_preserve_discovery_order(tmp_path):
+def _audit_probe(index):
+    """Report what a spawned audit worker sees, for the snapshot test."""
+    from nanoqc.data import audit_all_datasets as worker_audit
+    return dict(index=index,
+                resolution=list(worker_audit.RESOLUTION_BY_PDB.get("1ABC", ())),
+                sabdab=list(worker_audit.SABDAB_ANNOTATIONS.get("1ABC", [])),
+                sources=list(worker_audit.RESOLUTION_SOURCE_FILES),
+                cutoff=worker_audit.INTERFACE_CONTACT_CUTOFF_ANGSTROM)
+
+
+def test_audit_workers_get_the_parents_annotation_snapshot_and_keep_order(tmp_path):
+    """Workers install the parent's tables instead of re-reading the data root (A36)."""
     thresholds=(4.5,3.0,1.0,.9,False,True,True)
-    tasks=[({"id":str(i)},{"id":str(i),"valid":True}) for i in range(4)]
-    with concurrent.futures.ProcessPoolExecutor(
-            max_workers=2,mp_context=mp.get_context("spawn"),
-            initializer=audit._initialize_audit_process,
-            initargs=(str(tmp_path),thresholds)) as pool:
-        rows=list(pool.map(audit._audit_or_cached,tasks))
-    assert [row["id"] for row in rows]==["0","1","2","3"]
+    audit.RESOLUTION_BY_PDB["1ABC"]=(2.0,"test")
+    audit.SABDAB_ANNOTATIONS["1ABC"].append({"pdb":"1abc"})
+    audit.RESOLUTION_SOURCE_FILES.append({"path":"x.tsv","kind":"test"})
+    try:
+        snapshot=audit.annotation_snapshot()
+        with concurrent.futures.ProcessPoolExecutor(
+                max_workers=2,mp_context=mp.get_context("spawn"),
+                initializer=audit._initialize_audit_process,
+                initargs=(snapshot,thresholds)) as pool:
+            rows=list(pool.map(_audit_probe,range(4)))
+    finally:
+        audit.RESOLUTION_BY_PDB.pop("1ABC",None)
+        audit.SABDAB_ANNOTATIONS.pop("1ABC",None)
+        audit.RESOLUTION_SOURCE_FILES.clear()
+    assert [row["index"] for row in rows]==[0,1,2,3]
+    for row in rows:
+        assert row["resolution"]==[2.0,"test"]
+        assert row["sabdab"]==[{"pdb":"1abc"}]
+        assert row["sources"]==[{"path":"x.tsv","kind":"test"}]
+        assert row["cutoff"]==4.5
 
 
 def test_foldseek_preparation_spawned_processes_preserve_universe_order(tmp_path):

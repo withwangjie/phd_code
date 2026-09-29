@@ -650,33 +650,27 @@ def audit(task):
         out.update(valid=False, error=f'{type(exc).__name__}: {exc}')
         return out
 
-def db55_pairs(tasks):
+def db55_pairs(tasks, pool=None):
+    """Pair rows in discovery order; ``pool`` computes the contacts concurrently (A36)."""
     bypath = {t['path']: t for t in tasks if t['subset']=='test_db55'}
     results = []
+    pending = []
     for path, task in bypath.items():
         if not path.endswith('_r_b.pdb'):
             continue
         partner = path[:-8] + '_l_b.pdb'
         out = dict(id=pathlib.Path(path).name[:4], receptor=path, ligand=partner, valid=False, error='missing bound ligand')
-        if partner in bypath:
-            try:
-                a, _, _, _ = chain_data(read_structure(task)[0][0])
-                b, _, _, _ = chain_data(read_structure(bypath[partner])[0][0])
-                if not a or not b:
-                    raise ValueError('empty receptor/ligand')
-                # Union per residue over all receptor-ligand chain pairs.
-                ac = dict(xyz=np.concatenate([c['xyz'] for c in a]), owners=np.concatenate([c['owners']+sum(len(x['sequence']) for x in a[:i]) for i,c in enumerate(a)]))
-                bc = dict(xyz=np.concatenate([c['xyz'] for c in b]), owners=np.concatenate([c['owners']+sum(len(x['sequence']) for x in b[:i]) for i,c in enumerate(b)]))
-                ac['tree'], bc['tree'] = cKDTree(ac['xyz']), cKDTree(bc['xyz'])
-                # DB5.5/CAPRI auxiliary semantics remain the benchmark's
-                # conventional 5 A atom-contact definition, independent of
-                # the VHH primary 4.5 A interface label.
-                left_ids,right_ids=contact_residue_ids(ac,bc,cutoff=5.0)
-                nr,nl=len(left_ids),len(right_ids)
-                out.update(valid=True,error='', receptor_contacts=nr,ligand_contacts=nl,contact_residues=nr+nl,interface_status='weak' if nr+nl<15 else 'pass')
-            except Exception as exc:
-                out['error']=str(exc)
         results.append(out)
+        if partner in bypath:
+            pending.append((out, (task, bypath[partner])))
+    contacts = (list(pool.map(_db55_pair_contacts, [pair for _, pair in pending]))
+                if pool is not None and pending
+                else [_db55_pair_contacts(pair) for _, pair in pending])
+    for (out, _pair), (nr, nl, error) in zip(pending, contacts):
+        if error:
+            out['error']=error
+            continue
+        out.update(valid=True,error='', receptor_contacts=nr,ligand_contacts=nl,contact_residues=nr+nl,interface_status='weak' if nr+nl<15 else 'pass')
     return results
 
 def pct(n,d,digits=1):
@@ -749,21 +743,67 @@ def report(root, rows, ignored, archives, pairs, elapsed, destination):
     lines += ['', '## 可复现性与限制','', '- 逐文件结果：`data_audit_details.csv`、`data_audit_details.jsonl`；DB5.5配对：`data_audit_db55_pairs.json`；范围清单：`data_audit_inventory.json`。', '- 本次不去重、不划分训练集/测试集、不判断跨库泄漏、不生成生物学装配、不做能量松弛；目录名train/test仅为用户指定用途映射。', '- 原子缺失和小界面阈值属于初筛，不等同实验结构质量、亲和力或生物学真实性。单链/无合适抗原链为界面不适用，不标成伪复合物。', '- 解析实现参考：[Gemmi 官方接口](https://project-gemmi.github.io/python-api/gemmi.html)；SNAC链命名、TCR标识、IMGT分区依据本地README和CSV标注。']
     destination.write_text('\n'.join(lines)+'\n',encoding='utf-8')
 
-def _initialize_audit_process(root, thresholds):
-    """Recreate the parent's immutable annotation and threshold snapshot."""
+# The annotation tables every worker needs, in the order annotation_snapshot
+# and _initialize_audit_process pass them.
+ANNOTATION_TABLES = ('ANNOTATIONS', 'PDB_ANNOTATIONS', 'CHAIN_ANNOTATIONS',
+                     'SABDAB_ANNOTATIONS', 'RESOLUTION_BY_PDB', 'RESOLUTION_SOURCE_FILES')
+
+
+def annotation_snapshot():
+    """The parent's loaded annotation tables, to hand to workers (A36).
+
+    Re-reading them per worker meant one recursive walk of the data root and one
+    parse of every summary file per process. Passing the loaded tables gives
+    every worker the same snapshot by construction.
+    """
+    return tuple(globals()[name] for name in ANNOTATION_TABLES)
+
+
+def _initialize_audit_process(annotations, thresholds):
+    """Install the parent's immutable annotation and threshold snapshot."""
     global INTERFACE_CONTACT_CUTOFF_ANGSTROM, MAX_RESOLUTION_ANGSTROM
     global MIN_INTERRESIDUE_HEAVY_DISTANCE_ANGSTROM, MIN_INTERFACE_OCCUPANCY
     global ALLOW_INTERFACE_ALTLOC, REQUIRE_RESOLUTION, REQUIRE_COMPLETE_INTERFACE_SIDECHAINS
-    load_annotations(pathlib.Path(root))
+    for name, table in zip(ANNOTATION_TABLES, annotations):
+        target = globals()[name]
+        target.clear()
+        if isinstance(target, list):
+            target.extend(table)
+        else:
+            target.update(table)
     (INTERFACE_CONTACT_CUTOFF_ANGSTROM, MAX_RESOLUTION_ANGSTROM,
      MIN_INTERRESIDUE_HEAVY_DISTANCE_ANGSTROM, MIN_INTERFACE_OCCUPANCY,
      ALLOW_INTERFACE_ALTLOC, REQUIRE_RESOLUTION,
      REQUIRE_COMPLETE_INTERFACE_SIDECHAINS) = thresholds
 
 
-def _audit_or_cached(item):
-    task, cached_record = item
-    return cached_record if cached_record is not None else audit(task)
+def _db55_pair_contacts(pair):
+    """``(receptor_contacts, ligand_contacts, error)`` for one DB5.5 pair.
+
+    Failures are returned, not raised, so one bad pair cannot discard the other
+    pairs' results when this runs in a worker pool (A36); the recorded error text
+    is the same one the serial code stored.
+    """
+    try:
+        return (*_db55_contact_counts(pair), '')
+    except Exception as exc:
+        return None, None, str(exc)
+
+
+def _db55_contact_counts(pair):
+    task, partner_task = pair
+    a, _, _, _ = chain_data(read_structure(task)[0][0])
+    b, _, _, _ = chain_data(read_structure(partner_task)[0][0])
+    if not a or not b:
+        raise ValueError('empty receptor/ligand')
+    # Union per residue over all receptor-ligand chain pairs.
+    ac = dict(xyz=np.concatenate([c['xyz'] for c in a]), owners=np.concatenate([c['owners']+sum(len(x['sequence']) for x in a[:i]) for i,c in enumerate(a)]))
+    bc = dict(xyz=np.concatenate([c['xyz'] for c in b]), owners=np.concatenate([c['owners']+sum(len(x['sequence']) for x in b[:i]) for i,c in enumerate(b)]))
+    ac['tree'], bc['tree'] = cKDTree(ac['xyz']), cKDTree(bc['xyz'])
+    # DB5.5/CAPRI auxiliary semantics remain the benchmark's conventional 5 A
+    # atom-contact definition, independent of the VHH primary 4.5 A label.
+    left_ids, right_ids = contact_residue_ids(ac, bc, cutoff=5.0)
+    return len(left_ids), len(right_ids)
 
 
 def main():
@@ -800,14 +840,20 @@ def main():
                 MIN_INTERRESIDUE_HEAVY_DISTANCE_ANGSTROM,MIN_INTERFACE_OCCUPANCY,
                 ALLOW_INTERFACE_ALTLOC,REQUIRE_RESOLUTION,REQUIRE_COMPLETE_INTERFACE_SIDECHAINS)
     if args.workers < 1: parser.error('--workers must be positive')
+    # Cached rows are merged here, not sent to a worker and back, and the
+    # DB5.5 pair contacts reuse this pool instead of running serially (A36).
+    fresh=[task for task in tasks if task['id'] not in cached]
     with concurrent.futures.ProcessPoolExecutor(
-            max_workers=args.workers,mp_context=mp.get_context('spawn'),
-            initializer=_initialize_audit_process,initargs=(str(root),thresholds)) as pool, \
+            max_workers=min(args.workers,max(1,len(fresh)+1)),mp_context=mp.get_context('spawn'),
+            initializer=_initialize_audit_process,
+            initargs=(annotation_snapshot(),thresholds)) as pool, \
             (args.out/'data_audit_details.jsonl').open('w',encoding='utf-8') as handle:
-        for r in pool.map(_audit_or_cached,((task,cached.get(task['id'])) for task in tasks)):
+        audited=iter(pool.map(audit,fresh))
+        for task in tasks:
+            r=cached.get(task['id']) or next(audited)
             rows.append(r);handle.write(json.dumps(r,ensure_ascii=False)+'\n')
             if len(rows)%250==0:handle.flush();print(f'{len(rows)}/{len(tasks)} audited, {time.time()-start:.0f}s',flush=True)
-    pairs=db55_pairs(tasks)
+        pairs=db55_pairs(tasks,pool)
     fields=['subset','id','pdb_id','valid','error','chains','residues','missing_residues','interface_status','max_contact_residues','weak_pairs','vhh_status','vhh_reason','vhh_chain','cdr_annotation_method','cdr3_lengths','sabdab_antigen_chains','other_antibody_chains','source_structure_sha256','models_first_only','legacy_pdb_tail','resolution_angstrom','resolution_source','structure_quality_status','structure_quality_reasons','interface_missing_sidechain_residues','interface_altloc_residues','interface_min_occupancy','interface_mean_bfactor','interresidue_heavy_overlap_count','interresidue_heavy_min_distance_angstrom','interresidue_heavy_closest_pair']
     with (args.out/'data_audit_details.csv').open('w',encoding='utf-8-sig',newline='') as handle:
         writer=csv.DictWriter(handle,fieldnames=fields,extrasaction='ignore');writer.writeheader();writer.writerows(rows)

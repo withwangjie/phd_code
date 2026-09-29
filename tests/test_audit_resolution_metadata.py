@@ -1,6 +1,8 @@
 """Entry resolution from curation metadata; pipeline staging is never audited."""
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from nanoqc.data import audit_all_datasets as audit
@@ -172,3 +174,46 @@ def test_the_core_table_rows_follow_their_header_before_the_resolution_sources(t
         ["train_rcsb", "sabdab_vhh", "snac_db", "test_db55"]
     assert sources > header + 5
     assert "`entry_resolution.tsv`" in "\n".join(lines[sources:])
+
+
+def test_reused_rows_skip_the_worker_pool_and_keep_discovery_order(tmp_path, monkeypatch):
+    """--reuse-non-nano rows are merged in the parent, not round-tripped (A36)."""
+    import json
+    import sys
+    from nanoqc.data import audit_all_datasets as audit_module
+
+    data = tmp_path / "data"; out = tmp_path / "out"
+    (data / "db5.5").mkdir(parents=True); out.mkdir()
+    tasks = [dict(subset="test_db55", id=f"id{i}", path=str(data / "db5.5" / f"f{i}.pdb"),
+                  member="", ) for i in range(4)]
+    for task in tasks:
+        Path(task["path"]).write_text("ATOM\n", encoding="utf-8")
+    # Two rows are reusable from a previous details file, two must be audited.
+    previous = out / "data_audit_details.jsonl"
+    previous.write_text("".join(json.dumps(
+        dict(id=task["id"], subset="test_db55", path=task["path"], valid=True, reused=True)) + "\n"
+        for task in tasks[1:3]), encoding="utf-8")
+
+    audited = []
+
+    def fake_audit(task):
+        audited.append(task["id"])
+        return dict(id=task["id"], subset="test_db55", path=task["path"], valid=True, reused=False)
+
+    monkeypatch.setattr(audit_module, "audit", fake_audit)
+    monkeypatch.setattr(audit_module, "discover", lambda root: (tasks, [], []))
+    monkeypatch.setattr(audit_module, "load_annotations", lambda root: None)
+    monkeypatch.setattr(audit_module, "db55_pairs", lambda tasks, pool=None: [])
+    monkeypatch.setattr(audit_module, "report", lambda *a, **k: None)
+    # A thread pool keeps `audit` monkeypatched; spawned workers would not see it.
+    monkeypatch.setattr(audit_module.concurrent.futures, "ProcessPoolExecutor",
+                        lambda **kwargs: audit_module.concurrent.futures.ThreadPoolExecutor(
+                            max_workers=kwargs.get("max_workers", 1)))
+    monkeypatch.setattr(sys, "argv", ["audit_all_datasets", "--data", str(data), "--out", str(out),
+                                      "--workers", "4", "--reuse-non-nano"])
+    audit_module.main()
+
+    rows = [json.loads(line) for line in previous.read_text(encoding="utf-8").splitlines()]
+    assert [row["id"] for row in rows] == ["id0", "id1", "id2", "id3"], "discovery order changed"
+    assert [row["reused"] for row in rows] == [False, True, True, False]
+    assert audited == ["id0", "id3"], "cached rows must not reach a worker"
