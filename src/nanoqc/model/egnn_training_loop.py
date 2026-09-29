@@ -7,6 +7,7 @@ isolation thresholds that ``main`` rebinds from the command line.
 from __future__ import annotations
 
 import csv
+import math
 import os
 from dataclasses import asdict
 from pathlib import Path
@@ -63,7 +64,13 @@ def train_one_epoch(
                 pos_weight=pos_weight,
                 reduction="mean",
             )
-        if not torch.isfinite(loss):
+        # One device synchronization per step: reading the scalar once serves both
+        # the A20 non-finite guard and the loss accounting, which previously
+        # synchronized twice (torch.isfinite, then float(loss)). Converting a
+        # float32 nan/inf to a Python float preserves it, so the guard is
+        # unchanged, and the accumulated value is bit-for-bit the same (A37).
+        loss_value = float(loss.detach())
+        if not math.isfinite(loss_value):
             raise FloatingPointError(f"Non-finite training loss at epoch {epoch}")
         scaler.scale(loss).backward()
         scaler.unscale_(optimizer)
@@ -71,7 +78,7 @@ def train_one_epoch(
         scaler.step(optimizer)
         scaler.update()
         nodes = int(batch.num_nodes)
-        weighted_loss_sum += float(loss.detach()) * nodes
+        weighted_loss_sum += loss_value * nodes
         node_count += nodes
         if is_main_process:
             progress.set_postfix(loss=f"{weighted_loss_sum / node_count:.4f}")

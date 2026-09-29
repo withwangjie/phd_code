@@ -7,7 +7,7 @@
 | Data audit / sequence independence | CPU process pools; annotations loaded once and shared (A36) | CPU parsing and alignment |
 | Graph construction and homology screens | Spawned processes, RAM-bounded count (A35) | CPU geometry and alignment |
 | Queue-freeze candidate preparation | 8 spawned workers, 4 per GPU | OpenMM compatibility energies |
-| EGNN training (formal) | 2 DDP ranks, FP32; global batch 4 | Both GPUs, occupancy bounded by the frozen batch |
+| EGNN training (formal) | 2 DDP ranks, FP32; global batch 4; one sync and no graph re-reads per epoch (A37) | Both GPUs, occupancy bounded by the frozen batch |
 | EGNN seed replicates (development only) | Replicates run together, each its own DDP job (A35) | Both GPUs |
 | Formal Amber diagnostic / energy calibration | 8 processes, 4 per GPU | OpenMM energies |
 | Full training dual-energy diagnosis | 8 processes, 4 per GPU | OpenMM energies and relaxation |

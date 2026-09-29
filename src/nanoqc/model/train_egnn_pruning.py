@@ -239,6 +239,28 @@ def split_paths(paths: Sequence[Path], seed: int) -> Tuple[List[Path], List[Path
     return train_paths, validation_paths
 
 
+def run_split_identity(
+    train_paths: Sequence[Path], validation_paths: Sequence[Path]
+) -> Dict[str, Any]:
+    """Split digests and graph protocol, which are fixed for a whole run (A37).
+
+    Recomputing these inside every epoch's checkpoint payload re-read every
+    training and validation graph from disk each epoch, although the file set and
+    its frozen family/structure assignment cannot change during a run (a resume
+    compares these same digests). Computing them once also surfaces missing
+    PDB/family metadata before the first epoch instead of after it.
+    """
+    return {
+        "train_names_sha256": _paths_digest(train_paths),
+        "validation_names_sha256": _paths_digest(validation_paths),
+        "family_structure_assignment_sha256": _family_structure_assignment_digest(
+            [*train_paths, *validation_paths]
+        ),
+        "graph_protocol": graph_protocol(
+            torch.load(train_paths[0], map_location="cpu", weights_only=False)),
+    }
+
+
 def _checkpoint_payload(
     *,
     model: EGNNInterfaceScorer,
@@ -257,7 +279,10 @@ def _checkpoint_payload(
     epochs_without_improvement: int,
     train_positives: int,
     train_negatives: int,
+    split_identity: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
+    identity = dict(split_identity) if split_identity is not None else run_split_identity(
+        train_paths, validation_paths)
     return {
         "format_version": 2,
         "model_class": "EGNNInterfaceScorer",
@@ -281,13 +306,11 @@ def _checkpoint_payload(
             "training_seed": SEED,
             "train_count": len(train_paths),
             "validation_count": len(validation_paths),
-            "train_names_sha256": _paths_digest(train_paths),
-            "validation_names_sha256": _paths_digest(validation_paths),
-            "family_structure_assignment_sha256": _family_structure_assignment_digest(
-                [*train_paths,*validation_paths]
-            ),
+            "train_names_sha256": identity["train_names_sha256"],
+            "validation_names_sha256": identity["validation_names_sha256"],
+            "family_structure_assignment_sha256": identity["family_structure_assignment_sha256"],
         },
-        "graph_protocol": graph_protocol(torch.load(train_paths[0], map_location="cpu", weights_only=False)),
+        "graph_protocol": identity["graph_protocol"],
         "label_definition": "inter-partner heavy-atom cutoff label stored independently during graph construction",
         "history": list(history),
         "early_stopping": {
@@ -816,6 +839,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         else None
     )
     training_start = time.perf_counter()
+    # Fixed for the whole run: computed once instead of re-reading every graph
+    # from disk in each epoch's checkpoint payload (A37).
+    split_identity = run_split_identity(train_paths, validation_paths) if is_main_process else None
 
     for epoch in range(start_epoch, args.max_epochs + 1):
         epoch_start = time.perf_counter()
@@ -890,6 +916,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 epochs_without_improvement=epochs_without_improvement,
                 train_positives=train_positives,
                 train_negatives=train_negatives,
+                split_identity=split_identity,
             )
             _atomic_torch_save(payload, last_path)
             if improved:
