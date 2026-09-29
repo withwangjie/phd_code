@@ -4,7 +4,8 @@ import pytest
 
 openmm = pytest.importorskip("openmm")
 from openmm import app, unit
-from nanoqc.structure.physical_quality import topology_geometry_audit, relaxation_force_audit
+from nanoqc.structure.physical_quality import (StructureQualityError, topology_geometry_audit,
+                                              relaxation_force_audit)
 from nanoqc.experiments.structure_benchmarks import _structure_quality_assessment
 from nanoqc.qubo.allatom_qubo import AllAtomInterfaceQUBOBuilder
 from nanoqc.inference.analyze_structure_recovery import grouped_primary, rq5_energy_structure
@@ -96,3 +97,39 @@ def test_real_openmm_relaxation_preserves_frozen_coordinates_and_reports_forces(
     assert (tmp_path/"relaxed_discrete.cif").exists()
     assert _structure_quality_assessment(result)["evaluation_status"]=="passed"
     del builder.context,builder.integrator
+
+
+def test_device_resource_errors_never_become_scientific_exclusions():
+    """A GPU memory limit is a scheduling artifact, not a property of a complex (A35)."""
+    from nanoqc.common.device_errors import (DeviceResourceError, as_resource_error,
+                                             is_resource_error)
+    from nanoqc.experiments import run_real_complex_pilot as pilot
+
+    resource = [RuntimeError("CUDA error: out of memory"),
+                Exception("Error launching kernel: cudaErrorMemoryAllocation"),
+                MemoryError(),
+                Exception("All CUDA-capable devices are busy or unavailable")]
+    scientific = [ValueError("Raw/graph protein residue identities differ"),
+                  ValueError("Only 4 independently Dunbrack/Amber-compatible VHH sites; need 6"),
+                  Exception("missing backbone on reread: H:31")]
+    assert all(is_resource_error(exc) for exc in resource)
+    assert not any(is_resource_error(exc) for exc in scientific)
+    # A wrapped cause is still recognized through the exception chain.
+    try:
+        try:
+            raise RuntimeError("out of memory")
+        except RuntimeError as cause:
+            raise ValueError("preparation failed") from cause
+    except ValueError as chained:
+        assert is_resource_error(chained)
+
+    wrapped = as_resource_error(resource[0], device="1")
+    record = pilot._preparation_error(wrapped)
+    assert record["category"] == DeviceResourceError.category
+    with pytest.raises(DeviceResourceError):
+        pilot._raise_preparation_error(record)
+    # A genuine scientific exclusion still raises the structure-quality error.
+    quality = pilot._preparation_error(
+        StructureQualityError("bad geometry", category="input_heavy_atoms", audit={}))
+    with pytest.raises(StructureQualityError):
+        pilot._raise_preparation_error(quality)

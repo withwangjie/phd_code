@@ -30,6 +30,7 @@ from nanoqc.common.seed_streams import derive_streams, derive_child_seed, save_s
 from nanoqc.data.sequence_identity import nw_identity, length_coverage, partner_roles_anchored
 from nanoqc.data.safe_graph_load import load_graph
 from nanoqc.structure.physical_quality import StructureQualityError, topology_geometry_audit
+from nanoqc.common.device_errors import DeviceResourceError, as_resource_error, is_resource_error
 
 
 def _run_recovery_on_device(argv: list[str], device: str) -> int:
@@ -95,7 +96,14 @@ def _preparation_error(exc: Exception) -> dict:
                 category=getattr(exc,"category","eligibility_or_execution"),audit=getattr(exc,"audit",None))
 
 
+def _raise_device_resource_error(record: dict | None) -> None:
+    """A device limit aborts the stage; it never excludes a complex (A35)."""
+    if record and record.get("category")==DeviceResourceError.category:
+        raise DeviceResourceError(record["message"])
+
+
 def _raise_preparation_error(record: dict | None) -> None:
+    _raise_device_resource_error(record)
     if record:
         raise StructureQualityError(record["message"],category=record["category"],audit=record["audit"])
 
@@ -122,13 +130,15 @@ def _prepare_candidate_on_device(row: dict, args, work: Path, homology: dict,
             rotamer_mode=args.rotamer_mode,allowed_residues=frozen_pool)
         result.update(config=config,raw=str(raw))
     except Exception as exc:
-        result["prepare_error"]=_preparation_error(exc)
+        result["prepare_error"]=_preparation_error(
+            as_resource_error(exc,device=device) if is_resource_error(exc) else exc)
     if result["prepare_error"] is None:
         try:
             config["preparation_changes"].extend(complete_terminal_oxygen(work/"native.cif"))
             _check_prepared_sites(config,args,work/"native.cif")
         except Exception as exc:
-            result["physical_error"]=_preparation_error(exc)
+            result["physical_error"]=_preparation_error(
+                as_resource_error(exc,device=device) if is_resource_error(exc) else exc)
     atomic_write_json_fsync(work/"preparation_execution.json",dict(
         pid=os.getpid(),device=device,elapsed_seconds=time.time()-started,
         prepare_error=result["prepare_error"],physical_error=result["physical_error"],
@@ -914,7 +924,11 @@ def main(argv=None) -> int:
                         with metrics_path.open(encoding="utf-8") as metrics_handle:
                             results.extend(csv.DictReader(metrics_handle))
                         if status: failed.append(pdb)
-                    except Exception:
+                    except Exception as exc:
+                        # A device resource limit is not this target's failure (A35).
+                        if is_resource_error(exc):
+                            raise as_resource_error(exc,device=args.gpu_devices[0],
+                                                    stage_hint="structural target recovery") from exc
                         failed.append(pdb)
                         with (out/"failures.log").open("a",encoding="utf-8") as f:
                             f.write(pdb+"\n"+traceback.format_exc())

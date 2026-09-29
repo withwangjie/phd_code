@@ -167,7 +167,7 @@ QAOA's own ground-state amplification and its finite-range scaling slope
 - Smoke checks and legacy explicit `chi1_angles` overrides are engineering or
   ablation paths and are not the formal main protocol.
 - Every protocol change after the original freeze is listed, with its reason
-  and inspection status, in `docs/PROTOCOL_AMENDMENTS.md` (currently A1-A27).
+  and inspection status, in `docs/PROTOCOL_AMENDMENTS.md` (currently A1-A35).
 
 ## Scientific configuration
 
@@ -392,6 +392,7 @@ src/nanoqc/
   data/         audit_all_datasets.py (structure audit CLI), audit_structures.py (assembly/structure reading),
                 build_final_pyg_dataset.py (audited graphs + split),
                 complex_extraction.py (atom extraction, antigen partner-chain selection),
+                graph_build_parallel.py (spawned graph/homology workers),
                 build_foldseek_pairs.py (antigen-chain-only pair table),
                 build_independence_cluster_map.py, carve_holdout_clusters.py (antigen-fold holdout),
                 audit_external_vhh_independence.py, sequence_identity.py, safe_graph_load.py,
@@ -427,7 +428,9 @@ src/nanoqc/
   reporting/    generate_final_research_report.py (report CLI, data/cost/limits sections),
                 report_common.py (ReportContext, readers), report_sections_quantum.py,
                 report_sections_structure.py, generate_figure1_pymol_script.py
-  common/       repo_io.py (hashing, layout), seed_streams.py, prediction_contract.py
+  common/       repo_io.py (hashing, layout), seed_streams.py, prediction_contract.py,
+                gpu_runtime.py / cpu_runtime.py (stage telemetry), stage_utilization.py (utilization summary),
+                device_errors.py (device limits are never scientific exclusions)
 tests/     regression suite run by formal_preflight.sh (`python -m pytest tests`)
 ```
 
@@ -489,6 +492,8 @@ On the two-T4 server, EGNN training uses two DDP ranks. After sequential queue s
 The CPU stages also use bounded parallelism: data audit, Foldseek antigen-input preparation and external VHH sequence checks use spawned processes; the Foldseek search uses its own threads; the solver benchmark uses a process pool. Sensitivity cases, exploratory QAOA depths and paired-statistics budget modes run in parallel while each depth's training fit, parameter transfer and hard-set evaluation stay ordered. Development structural targets can occupy both T4s; frozen validation target selection remains sequential (A27).
 
 Every orchestrated stage records CPU and GPU samples in `logs/<stage>.cpu.csv` and `logs/<stage>.gpu.csv`. `python -m nanoqc.common.stage_utilization <run_dir>` (also printed by `scripts/check_status.sh`) lists each stage's mean CPU and GPU utilization against the 80 % target; see `docs/PIPELINE_GPU_UTILIZATION.md` for which stages are expected to reach it (A34).
+
+Graph construction, its homology screens and the development-only EGNN seed replicates run as independent processes rather than one after another, and candidate preparation uses eight workers per GPU. A CUDA out-of-memory or unavailable-device error aborts its stage instead of excluding a complex, so raising concurrency cannot move a scheduling artifact into the study's denominator (A35).
 
 ## One-click formal experiment
 

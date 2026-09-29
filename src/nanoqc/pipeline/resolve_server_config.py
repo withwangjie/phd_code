@@ -190,8 +190,21 @@ def resolve(scientific: dict[str,Any], server: dict[str,Any]) -> tuple[dict[str,
         ram_workers=max(1,int(headroom//float(worker_ram_gb)))
         ram_limited=ram_workers<workers
         workers=min(workers,ram_workers)
-    graph_workers=max(1,min(workers,max(1,usable//2),
-        int(res.get("max_graph_workers",workers))))
+    # Graph building runs in spawned processes (A35), each with its own
+    # GRAPH_MEMORY_BUDGET_BYTES edge-allocation budget, so RAM bounds it.
+    graph_ram_gb=res.get("graph_worker_ram_gb")
+    graph_cap=res.get("max_graph_workers",workers)
+    if str(graph_cap)=="auto":
+        if graph_ram_gb is None:
+            raise SystemExit("max_graph_workers: auto requires graph_worker_ram_gb")
+        graph_cap=workers
+    graph_workers=max(1,min(workers,int(graph_cap)))
+    graph_ram_limited=False
+    if graph_ram_gb is not None and ram>0:
+        headroom=ram-float(res.get("min_available_ram_gb",16))
+        graph_ram_workers=max(1,int(headroom//float(graph_ram_gb)))
+        graph_ram_limited=graph_ram_workers<graph_workers
+        graph_workers=min(graph_workers,graph_ram_workers)
     loader_workers=max(1,min(int(res.get("max_egnn_loader_workers",8)),usable))
 
     target_global=max(1,int(res.get("target_global_batch_size",4)))
@@ -265,6 +278,9 @@ def resolve(scientific: dict[str,Any], server: dict[str,Any]) -> tuple[dict[str,
         int(res.get("max_sensitivity_case_workers",1)),workers))
     hw["statistics_mode_workers"]=max(1,min(
         int(res.get("max_statistics_mode_workers",1)),workers))
+    # Development-only seed replicates share the GPUs; each is a full DDP job,
+    # so the bound is per-GPU memory, not core count (A35).
+    hw["egnn_replicate_workers"]=max(1,int(res.get("max_egnn_replicate_workers",1)))
 
     structural=out.setdefault("external_validation",{}).setdefault("structural_baselines",{})
     faspr=_resolve_tool(
@@ -321,6 +337,8 @@ def resolve(scientific: dict[str,Any], server: dict[str,Any]) -> tuple[dict[str,
             if workers<min_workers else None),
         "worker_ram_gb":None if worker_ram_gb is None else float(worker_ram_gb),
         "graph_build_workers":graph_workers,
+        "graph_worker_ram_gb":None if graph_ram_gb is None else float(graph_ram_gb),
+        "graph_build_workers_ram_limited":graph_ram_limited,
         "qc_workers":workers,
         "egnn_loader_workers":loader_workers,
         "cpu_threads_per_process":hw["cpu_threads_per_process"],
@@ -337,6 +355,7 @@ def resolve(scientific: dict[str,Any], server: dict[str,Any]) -> tuple[dict[str,
         "exploration_depth_workers":hw["exploration_depth_workers"],
         "sensitivity_case_workers":hw["sensitivity_case_workers"],
         "statistics_mode_workers":hw["statistics_mode_workers"],
+        "egnn_replicate_workers":hw["egnn_replicate_workers"],
         "faspr_executable":structural.get("faspr_executable"),
         "foldseek_executable":foldseek,
         "phenix_clashscore_executable":structural.get("phenix_clashscore_executable"),

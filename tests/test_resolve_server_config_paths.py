@@ -28,18 +28,21 @@ def test_80_core_server_cpu_budget_and_graph_cap(tmp_path, monkeypatch):
     assert report["cpu_min_workers_target_met"] is True
     assert report["cpu_pool_utilization"]==0.8
     assert config["hardware"]["cpu_monitor_enabled"] is True
-    assert config["queue_freeze"]["graph_build"]["workers"]==16
+    assert config["queue_freeze"]["graph_build"]["workers"]==44  # RAM-bounded, not 16 threads (A35)
+    assert report["graph_build_workers_ram_limited"] is True
     assert config["egnn_train"]["nproc_per_node"]==2
     assert config["hardware"]["cpu_threads_per_process"]==1
     assert config["hardware"]["structural_gpu_devices"]==["0","1"]
     assert config["hardware"]["structural_workers_per_gpu"]==4
     assert config["hardware"]["structural_target_workers"]==8
-    assert config["hardware"]["structural_prepare_workers"]==8
+    assert config["hardware"]["structural_prepare_workers"]==16  # 8 per device (A35)
+    assert config["hardware"]["structural_prepare_workers_per_gpu"]==8
     assert config["hardware"]["calibration_workers"]==8
     assert config["hardware"]["calibration_workers_per_gpu"]==4
     assert config["hardware"]["gpu_monitor_enabled"] is True
     assert report["structural_workers_per_gpu"]==4
     assert report["external_audit_workers"]==12
+    assert report["egnn_replicate_workers"]==2
     server["resources"]["cpu_threads_per_process"]=4
     config,report=resolver.resolve({},server)
     assert config["qc_benchmark"]["workers"]==16
@@ -100,3 +103,15 @@ def test_auto_pool_requires_a_valid_target(tmp_path, monkeypatch):
         _resolve_on(tmp_path,monkeypatch,physical=80,logical=80,target_cpu_utilization=1.5)
     with pytest.raises(SystemExit,match="cpu_count_basis"):
         _resolve_on(tmp_path,monkeypatch,physical=80,logical=80,cpu_count_basis="sockets")
+
+
+def test_graph_workers_follow_ram_and_reject_auto_without_an_estimate(tmp_path, monkeypatch):
+    import pytest
+    config,report=_resolve_on(tmp_path,monkeypatch,physical=80,logical=80,ram=512.)
+    # (512 GB - 32 GB floor) / 5 GB exceeds the 64-worker pool, so the pool bounds it.
+    assert config["queue_freeze"]["graph_build"]["workers"]==64
+    assert report["graph_build_workers_ram_limited"] is False
+    config,_=_resolve_on(tmp_path,monkeypatch,physical=80,logical=80,max_graph_workers=8)
+    assert config["queue_freeze"]["graph_build"]["workers"]==8
+    with pytest.raises(SystemExit,match="requires graph_worker_ram_gb"):
+        _resolve_on(tmp_path,monkeypatch,physical=80,logical=80,graph_worker_ram_gb=None)

@@ -49,12 +49,20 @@ resources:
   min_workers: 48
   max_workers: "auto"
   worker_ram_gb: 1.5
-  max_graph_workers: 16
+  # Graph building now runs in spawned processes (A35): sized like the other
+  # pools but with its own per-worker RAM estimate, since each worker holds a
+  # dense-geometry edge budget. 256 GB - 32 GB floor / 5 GB gives 44 workers.
+  max_graph_workers: "auto"
+  graph_worker_ram_gb: 5.0
   max_external_audit_workers: 12
   max_foldseek_prepare_workers: 12
   max_exploration_depth_workers: 2
   max_sensitivity_case_workers: 3
   max_statistics_mode_workers: 2
+  # Development-only EGNN seed replicates (egnn_train.seed_replicates) run
+  # together on the two T4s; each is an independent DDP job with its own seed,
+  # checkpoint directory and rendezvous. The formal checkpoint is unaffected.
+  max_egnn_replicate_workers: 2
   cpu_threads_per_process: 1
   max_egnn_loader_workers: 4
   openmm_cpu_threads: 8
@@ -65,8 +73,14 @@ resources:
   openmm_device: "0"
   openmm_precision: "double"
   max_openmm_gpus: 2
+  # Frozen target recovery and calibration keep 4 per device (A32/A33): both
+  # hold an OpenMM context for the whole target. Candidate preparation is mixed
+  # CPU/GPU work (parsing, Rosetta rotamers, EGNN ranking, Reference-platform
+  # hydrogens), so it runs 8 per device to use the idle cores (A35). A device
+  # memory limit now aborts the stage instead of excluding a complex, so raising
+  # this can never bias the denominator; lower it if a run reports one.
   structural_workers_per_gpu: 4
-  structural_prepare_workers_per_gpu: 4
+  structural_prepare_workers_per_gpu: 8
   calibration_workers_per_gpu: 4
   gpu_monitor_enabled: true
   gpu_monitor_interval_seconds: 10

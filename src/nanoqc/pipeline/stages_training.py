@@ -7,6 +7,7 @@ import csv
 import json
 import math
 from pathlib import Path
+from types import SimpleNamespace
 from typing import List, Optional
 
 from nanoqc.common.seed_streams import derive_streams, derive_child_seed
@@ -32,6 +33,42 @@ class TrainingStagesMixin:
     # ================================================================
     # Stage 4: EGNN training
     # ================================================================
+    def _run_egnn_seed_replicates(self, argv: List[str], checkpoint_dir: Path,
+                                  replicates: int, seed_for_index) -> "SimpleNamespace":
+        """Run the development-only seed replicates, sharing the GPUs (A35).
+
+        Each replicate is an independent DDP job with its own derived seed,
+        checkpoint directory and torchrun rendezvous, so they run together
+        instead of leaving the GPUs idle between them. Results are collected in
+        replicate order and every failure is reported, not only the first.
+        """
+        jobs = []
+        for index in range(1, replicates + 1):
+            replicate_dir = checkpoint_dir / "seed_replicates" / f"r{index}"
+            replicate_argv = list(argv)
+            replicate_argv[replicate_argv.index("--seed") + 1] = str(seed_for_index(index))
+            replicate_argv[replicate_argv.index("--checkpoint-dir") + 1] = str(replicate_dir)
+            if "--resume" in replicate_argv:
+                replicate_argv.remove("--resume")
+            if (replicate_dir / "last_egnn_pruning.pt").is_file():
+                replicate_argv += ["--resume"]
+            jobs.append((index, replicate_dir, replicate_argv))
+        workers = max(1, min(len(jobs) or 1, int(
+            self.config.get("hardware", {}).get("egnn_replicate_workers", 1))))
+        checkpoints: List[Path] = []; failures: List[str] = []; argvs = []; logs = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+            started = [(index, replicate_dir, replicate_argv, pool.submit(
+                self._run_subprocess, f"egnn_train_seed_replicate_{index}", replicate_argv))
+                for index, replicate_dir, replicate_argv in jobs]
+            for index, replicate_dir, replicate_argv, future in started:
+                returncode, replicate_log = future.result()
+                argvs.append(replicate_argv); logs.append(str(replicate_log))
+                if returncode != 0 or not (replicate_dir / "best_egnn_pruning.pt").is_file():
+                    failures.append(f"seed replicate {index} failed (see {replicate_log})")
+                else:
+                    checkpoints.append(replicate_dir / "best_egnn_pruning.pt")
+        return SimpleNamespace(checkpoints=checkpoints, failures=failures, argvs=argvs, logs=logs)
+
     def stage_egnn_train(self) -> StageResult:
         started = utc_timestamp()
         cfg = self.config["egnn_train"]
@@ -87,25 +124,14 @@ class TrainingStagesMixin:
             # Development-only seed sensitivity (Bouthillier et al. 2021;
             # PROTOCOL_AMENDMENTS.md A6): same split, different training
             # seeds. The primary checkpoint above stays the only formal model.
-            replicate_checkpoints = []
-            for index in range(1, replicates + 1):
-                replicate_dir = checkpoint_dir / "seed_replicates" / f"r{index}"
-                seed_position = argv.index("--seed") + 1
-                replicate_argv = list(argv)
-                replicate_argv[seed_position] = str(
-                    derive_child_seed(streams["train"], "egnn_seed_replicate", str(index)))
-                replicate_argv[replicate_argv.index("--checkpoint-dir") + 1] = str(replicate_dir)
-                if "--resume" in replicate_argv:
-                    replicate_argv.remove("--resume")
-                if (replicate_dir / "last_egnn_pruning.pt").is_file():
-                    replicate_argv += ["--resume"]
-                rc, replicate_log = self._run_subprocess(f"egnn_train_seed_replicate_{index}", replicate_argv)
-                argvs.append(replicate_argv); logs.append(str(replicate_log))
-                if rc != 0 or not (replicate_dir / "best_egnn_pruning.pt").is_file():
-                    status = "failed"
-                    detail += f"; seed replicate {index} failed (see {replicate_log})"
-                    break
-                replicate_checkpoints.append(replicate_dir / "best_egnn_pruning.pt")
+            replicates_result = self._run_egnn_seed_replicates(
+                argv, checkpoint_dir, replicates,
+                lambda index: derive_child_seed(streams["train"], "egnn_seed_replicate", str(index)))
+            replicate_checkpoints = replicates_result.checkpoints
+            argvs.extend(replicates_result.argvs); logs.extend(replicates_result.logs)
+            if replicates_result.failures:
+                status = "failed"
+                detail += "; " + "; ".join(replicates_result.failures)
             if status == "completed":
                 sensitivity_dir = checkpoint_dir / "seed_sensitivity"
                 qc = self.config.get("qc_benchmark", {}) or {}

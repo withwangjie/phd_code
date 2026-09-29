@@ -6,7 +6,6 @@ Dependencies: see requirements.txt.
 from __future__ import annotations
 import argparse
 import collections
-import concurrent.futures
 import csv
 import functools
 import hashlib
@@ -29,6 +28,7 @@ import torch_geometric
 from scipy.spatial import cKDTree
 from torch_geometric.data import Data, Batch
 import nanoqc.data.audit_all_datasets as audit
+from nanoqc.data import graph_build_parallel
 from nanoqc.common.repo_io import sha256_file as sha256, REPO_ROOT
 from nanoqc.data.sequence_identity import nw_identity, length_coverage, partner_orientations, partner_roles_anchored
 
@@ -735,7 +735,29 @@ def main():
         summary.update(long_eligible=len(long),unique_long_cdr=len({cdr(r) for r in long}),clusters=len(clusters))
         print(f'Hard pool: {len(long)} structures / {len(clusters)} CDR-H3 loop identity clusters',flush=True)
         chosen=[];used_ids=set()
-        for index in order:
+        # Without a cap every cluster is scanned, so clusters build in parallel:
+        # candidate k is submitted only after candidates 0..k-1 of that cluster
+        # failed, and results are replayed in cluster order (A35).
+        attempts={index:[] for index in order} if args.no_cap else None
+        if args.no_cap:
+            pending={index:0 for index in order if clusters[index]['candidates']}
+            with graph_build_parallel.pool(args.workers,str(args.data_root)) as executor:
+                while pending:
+                    submitted=[]
+                    for index in [i for i in order if i in pending]:
+                        cl=clusters[index];row=cl['candidates'][pending[index]]
+                        pdb_key=str(row['pdb_id']).lower()
+                        if cluster_map is None or pdb_key not in cluster_map:
+                            raise ValueError(f'Formal hard-test graph requires family/structure cluster for {pdb_key}')
+                        submitted.append((index,row,executor.submit(graph_build_parallel.save_graph_task,
+                            (row,'test_snac_hard',output),
+                            dict(cluster_id=cl['cluster_id'],family_structure_cluster=cluster_map[pdb_key]))))
+                    for index,row,future in submitted:
+                        record,error,worker_peak=future.result();PEAK_RSS=max(PEAK_RSS,worker_peak)
+                        attempts[index].append((row,record,error))
+                        if record or pending[index]+1>=len(clusters[index]['candidates']):del pending[index]
+                        else:pending[index]+=1
+        for index in (order if not args.no_cap else []):
             cl=clusters[index]
             for row in cl['candidates']:
                 pdb_key=str(row['pdb_id']).lower()
@@ -749,6 +771,11 @@ def main():
                 if record:
                     manifest.append(record);chosen.append(row);used_ids.add(row['id']);break
             if not args.no_cap and len(chosen)>=args.target_hard:break
+        for index in (order if args.no_cap else []):
+            for row,record,error in attempts[index]:
+                if error:failures.append(error)
+                if record:
+                    manifest.append(record);chosen.append(row);used_ids.add(row['id'])
         if args.no_cap:
             if not chosen:raise ValueError('No valid independent challenge graphs found in the qualifying pool (--no-cap)')
         elif len(chosen)!=args.target_hard:raise ValueError(f'Only {len(chosen)} valid independent challenge graphs; requested {args.target_hard}')
@@ -756,10 +783,16 @@ def main():
         # Final graph-level hard-set de-redundancy under the SAME layered
         # VHH/CDR-H3/antigen protocol later used for train/test isolation.
         hard_records=[r for r in manifest if r['split']=='test_snac_hard']
-        kept_hard_records=[]; kept_hard_graphs=[]; removed_hard_ids=set(); kept_hard_clusters=set()
+        kept_hard_records=[]; kept_hard_indices=[]; removed_hard_ids=set(); kept_hard_clusters=set()
         hard_pair_max=dict(vhh_full_chain_identity=0.0,cdr_h3_loop_identity=0.0,antigen_full_chain_identity=0.0)
-        for record in hard_records:
-            graph=torch.load(output/record['path'],map_location='cpu',weights_only=False)
+        # All pairwise details (row i: hard[i] against each earlier hard[j]) are
+        # computed in parallel; the greedy scan below reads the same pairs in
+        # the same order as before (A35).
+        hard_sequences=[graph_build_parallel.sequences(torch.load(output/r['path'],map_location='cpu',weights_only=False))
+                        for r in hard_records]
+        with graph_build_parallel.pool(args.workers,reference=hard_sequences) as executor:
+            hard_table=list(executor.map(graph_build_parallel.reference_row,range(len(hard_sequences)),chunksize=4))
+        for hard_index,record in enumerate(hard_records):
             violation=None
             pdb_key=str(record['pdb_id']).lower()
             family_cluster=None
@@ -772,15 +805,16 @@ def main():
                         violates_vhh=False,violates_cdr_h3=False,violates_antigen=False,
                         vhh_full_chain_identity=0.0,cdr_h3_loop_identity=0.0,antigen_full_chain_identity=0.0))
             if violation is None:
-                for other_record,other_graph in zip(kept_hard_records,kept_hard_graphs):
-                    homologous,detail=layered_graph_homologous(graph,other_graph)
+                for other_record,other_index in zip(kept_hard_records,kept_hard_indices):
+                    detail=hard_table[hard_index][other_index]
+                    homologous=bool(detail['violates_vhh'] or detail['violates_cdr_h3'] or detail['violates_antigen'])
                     for key in hard_pair_max:
                         hard_pair_max[key]=max(hard_pair_max[key],float(detail[key]))
                     if homologous:
                         violation=(other_record,detail)
                         break
             if violation is None:
-                kept_hard_records.append(record);kept_hard_graphs.append(graph)
+                kept_hard_records.append(record);kept_hard_indices.append(hard_index)
                 if family_cluster is not None:
                     kept_hard_clusters.add(family_cluster)
             else:
@@ -817,21 +851,23 @@ def main():
             if reasons:exclusions.append(exclusion(r,reasons))
             else:train.append(r);known_train_cdr[r['id']]=sorted(seqs)
         print(f'Building {len(train)} train graphs; hard test {len(chosen)}',flush=True)
-        def worker(row):
+        for row in train:
             pdb_key=str(row['pdb_id']).lower()
             if cluster_map is None or pdb_key not in cluster_map:
                 raise ValueError(f'Formal training graph requires family/structure cluster for {pdb_key}')
-            return save_graph(
-                row,'train',output,
-                family_structure_cluster=cluster_map[pdb_key]
-            )
-        with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as executor:
-            for i,(record,error) in enumerate(executor.map(worker,train),1):
+        # Spawned processes (not threads) so graph construction is not serialized by the GIL (A35).
+        with graph_build_parallel.pool(args.workers,str(args.data_root)) as executor:
+            futures=[executor.submit(graph_build_parallel.save_graph_task,(row,'train',output),
+                                     dict(family_structure_cluster=cluster_map[str(row['pdb_id']).lower()]))
+                     for row in train]
+            for i,future in enumerate(futures,1):
+                record,error,worker_peak=future.result();PEAK_RSS=max(PEAK_RSS,worker_peak)
                 if record:manifest.append(record)
                 if error:failures.append(error)
                 if i%200==0:print(f'Train {i}/{len(train)}, elapsed {time.time()-start:.0f}s',flush=True)
         hard_records=[r for r in manifest if r['split']=='test_snac_hard']
-        hard_graphs=[torch.load(output/r['path'],map_location='cpu',weights_only=False) for r in hard_records]
+        hard_sequences=[graph_build_parallel.sequences(torch.load(output/r['path'],map_location='cpu',weights_only=False))
+                        for r in hard_records]
         hard_clusters=set()
         if cluster_map is not None:
             for record in hard_records:
@@ -842,8 +878,12 @@ def main():
         train_records=[r for r in manifest if r['split']=='train']
         retained_train=[]; removed_train=set()
         cross_max=dict(vhh_full_chain_identity=0.0,cdr_h3_loop_identity=0.0,antigen_full_chain_identity=0.0)
-        for record in train_records:
-            graph=torch.load(output/record['path'],map_location='cpu',weights_only=False)
+        # Each training graph against every hard graph, in parallel, details in hard order (A35).
+        train_sequences=[graph_build_parallel.sequences(torch.load(output/r['path'],map_location='cpu',weights_only=False))
+                         for r in train_records]
+        with graph_build_parallel.pool(args.workers,reference=hard_sequences) as executor:
+            train_details=list(executor.map(graph_build_parallel.homology_row,train_sequences,chunksize=4))
+        for record,details in zip(train_records,train_details):
             violation_details=[]
             pdb_key=str(record['pdb_id']).lower()
             if cluster_map is not None:
@@ -853,8 +893,8 @@ def main():
                     violation_details.append(('family_cluster',dict(
                         violates_vhh=False,violates_cdr_h3=False,violates_antigen=False,
                         vhh_full_chain_identity=0.0,cdr_h3_loop_identity=0.0,antigen_full_chain_identity=0.0)))
-            for hard_record,hard_graph in zip(hard_records,hard_graphs):
-                homologous,detail=layered_graph_homologous(graph,hard_graph)
+            for hard_record,detail in zip(hard_records,details):
+                homologous=bool(detail['violates_vhh'] or detail['violates_cdr_h3'] or detail['violates_antigen'])
                 for key in cross_max:
                     cross_max[key]=max(cross_max[key],float(detail[key]))
                 if homologous:

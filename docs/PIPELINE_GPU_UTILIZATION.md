@@ -4,12 +4,14 @@
 
 | Phase | Execution | GPU use |
 |---|---|---|
-| Data audit / sequence independence / graph construction | CPU pools, separate memory-heavy caps | CPU parsing and alignment |
+| Data audit / sequence independence | CPU process pools | CPU parsing and alignment |
+| Graph construction and homology screens | Spawned processes, RAM-bounded count (A35) | CPU geometry and alignment |
 | Queue-freeze candidate preparation | 8 spawned workers, 4 per GPU | OpenMM compatibility energies |
-| EGNN training | 2 DDP ranks, FP32; global batch 4 | Both GPUs |
+| EGNN training (formal) | 2 DDP ranks, FP32; global batch 4 | Both GPUs, occupancy bounded by the frozen batch |
+| EGNN seed replicates (development only) | Replicates run together, each its own DDP job (A35) | Both GPUs |
 | Formal Amber diagnostic / energy calibration | 8 processes, 4 per GPU | OpenMM energies |
 | Full training dual-energy diagnosis | 8 processes, 4 per GPU | OpenMM energies and relaxation |
-| Structural candidate preparation | 8 spawned workers, 4 per GPU | OpenMM compatibility energies |
+| Structural candidate preparation | 16 spawned workers, 8 per GPU (A35) | OpenMM compatibility energies |
 | Structural target evaluation | Up to 8 spawned workers, 4 per GPU | OpenMM energies and relaxation |
 | QAOA feasible-subspace / SA / coarse sensitivity / external coarse validation | CPU simulation pools | CPU by design |
 | Statistics / reporting / FASPR / Phenix | CPU tools and pools | CPU by design |
@@ -72,10 +74,17 @@ Expected CPU share by phase when the pools are full:
 | Phase | Expected CPU share | Why |
 |---|---|---|
 | Data audit, QC benchmark, sensitivity/exploration QC cases | about 80 % | pool of 0.8 x logical CPUs; fewer tasks than workers lowers it |
-| Graph construction | low | thread pool under the Python GIL |
+| Graph construction and homology screens | about 80 % while work remains | spawned processes, RAM-bounded count (A35) |
 | EGNN training | low CPU; GPU bound by the frozen global batch of 4 | batch size is a protocol setting |
 | OpenMM preparation / calibration / structural targets | about 10 % CPU; GPU is the bottleneck | 8 processes, double precision on T4 |
 | Sequential admission, statistics, reporting | low | short and ordered by design |
+
+A CUDA out-of-memory or unavailable-device error aborts its stage with
+`DeviceResourceError` instead of excluding a complex or failing a target, so a
+per-GPU worker count that is set too high shows up as a stopped run, never as a
+changed denominator (A35). If a run reports one, lower
+`structural_prepare_workers_per_gpu` (or the recovery/calibration equivalents)
+and start a new run.
 
 ## Measuring utilization per stage
 

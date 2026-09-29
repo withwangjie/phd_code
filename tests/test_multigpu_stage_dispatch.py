@@ -124,3 +124,45 @@ def test_foldseek_preparation_spawned_processes_preserve_universe_order(tmp_path
         rows=list(pool.map(foldseek_pairs._prepare_antigen_worker,tasks))
     assert [row[0] for row in rows]==["1abc","2def","3ghi"]
     assert all(row[2] and row[3]==0 for row in rows)
+
+
+def test_egnn_seed_replicates_run_together_and_report_every_failure(tmp_path):
+    """Development-only replicates share the GPUs; order and seeds stay frozen (A35)."""
+    import threading
+    import time
+    from nanoqc.pipeline.stages_training import TrainingStagesMixin
+
+    concurrent_peak = {"value": 0, "now": 0}
+    lock = threading.Lock()
+    calls = []
+
+    def fake_subprocess(_self, stage, argv):
+        with lock:
+            concurrent_peak["now"] += 1
+            concurrent_peak["value"] = max(concurrent_peak["value"], concurrent_peak["now"])
+        calls.append((stage, argv[argv.index("--seed") + 1], argv[argv.index("--checkpoint-dir") + 1]))
+        time.sleep(0.2)
+        with lock:
+            concurrent_peak["now"] -= 1
+        index = int(stage.rsplit("_", 1)[1])
+        if index != 2:  # replicate 2 leaves no checkpoint -> a failure to report
+            best = Path(argv[argv.index("--checkpoint-dir") + 1]) / "best_egnn_pruning.pt"
+            best.parent.mkdir(parents=True, exist_ok=True)
+            best.write_bytes(b"")
+        return 0, tmp_path / f"{stage}.log"
+
+    class Harness(TrainingStagesMixin):
+        # _run_subprocess lives on the Orchestrator core, not on the mixin.
+        config = {"hardware": {"egnn_replicate_workers": 3}}
+        _run_subprocess = fake_subprocess
+
+    checkpoint_dir = tmp_path / "checkpoints"
+    argv = ["python", "--seed", "11", "--checkpoint-dir", str(checkpoint_dir)]
+    result = Harness()._run_egnn_seed_replicates(
+        argv, checkpoint_dir, 3, lambda index: 1000 + index)
+    assert concurrent_peak["value"] == 3, "replicates did not overlap"
+    assert [seed for _, seed, _ in calls] == ["1001", "1002", "1003"] or sorted(
+        seed for _, seed, _ in calls) == ["1001", "1002", "1003"]
+    assert result.checkpoints == [checkpoint_dir / "seed_replicates" / f"r{i}" / "best_egnn_pruning.pt"
+                                  for i in (1, 3)]
+    assert len(result.failures) == 1 and "replicate 2" in result.failures[0]
