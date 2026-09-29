@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, List
 
 from nanoqc.common.seed_streams import derive_streams
-from nanoqc.common.repo_io import sha256_file as sha256_of, repo_path, module_name
+from nanoqc.common.repo_io import sha256_file as sha256_of, repo_path, module_name, iter_jsonl
 from nanoqc.pipeline.orchestrator_common import (
     ORCHESTRATED_SCRIPTS,
     StageResult,
@@ -136,8 +136,7 @@ class DataStagesMixin:
             return False,"dataset graph manifest or audit ledger is missing"
         try:
             manifest=json.loads(manifest_path.read_text(encoding="utf-8"))
-            audit_rows=[json.loads(line) for line in audit_jsonl.read_text(encoding="utf-8").splitlines()
-                        if line.strip()]
+            audit_rows=list(iter_jsonl(audit_jsonl))
         except (OSError,json.JSONDecodeError) as exc:
             return False,f"unreadable holdout provenance input: {type(exc).__name__}: {exc}"
         if not isinstance(manifest,list):
@@ -547,14 +546,8 @@ class DataStagesMixin:
         audit_jsonl=self.run_dir/"audit"/"data_audit_details.jsonl"
         if audit_jsonl.is_file() and not universe_path.is_file():
             from nanoqc.data.audit_all_datasets import formal_clustering_pdb_ids
-            audit_rows=[]
-            for line in audit_jsonl.read_text(encoding="utf-8").splitlines():
-                if not line.strip():
-                    continue
-                try:
-                    audit_rows.append(json.loads(line))
-                except json.JSONDecodeError:
-                    continue
+            # A truncated ledger line is skipped, as before.
+            audit_rows=list(iter_jsonl(audit_jsonl,skip_undecodable=True))
             # Match the graph-builder's source precedence and row-level QC
             # before clustering: excluded structures must not bridge otherwise
             # independent antigen-fold components.

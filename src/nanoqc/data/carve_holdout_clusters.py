@@ -39,7 +39,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Optional, Sequence
 
-from nanoqc.common.repo_io import sha256_file as sha256
+from nanoqc.common.repo_io import sha256_file as sha256, iter_jsonl
 from nanoqc.model import train_egnn_pruning as training
 
 HOLDOUT_SPLIT = "holdout"
@@ -49,10 +49,7 @@ STRUCTURE_SUFFIXES = (".cif.gz", ".pdb.gz", ".mmcif", ".cif", ".pdb")
 def source_files_by_id(audit_jsonl: Path) -> dict[str, dict]:
     """Audited valid sources keyed by the exact graph source_id."""
     chosen: dict[str, dict] = {}
-    for line in audit_jsonl.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        row = json.loads(line)
+    for row in iter_jsonl(audit_jsonl):
         if not row.get("valid", True):
             continue
         source_id = str(row.get("id", "")).strip()

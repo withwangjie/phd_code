@@ -124,7 +124,7 @@ def audit_sources(audit_jsonl: Path, *, formal_only: bool = False,
     IDs whose every file failed the audit's parse map to an empty list.
     """
     sources: dict[str, list[dict]] = defaultdict(list)
-    for line in audit_jsonl.read_text(encoding="utf-8").splitlines():
+    for line in _iter_lines(audit_jsonl):
         if not line.strip():
             continue
         row = json.loads(line)
@@ -224,6 +224,13 @@ def antigen_structure(pdb: str, sources: Iterable[dict], sabdab_antibody_chains:
     return out, dict(chains=chains, unreadable=unreadable)
 
 
+def _iter_lines(path: Path):
+    """Stream a text file's lines; these ledgers hold one row per structure (A38)."""
+    with Path(path).open(encoding="utf-8") as handle:
+        for line in handle:
+            yield line
+
+
 def symmetric_pdb_scores(raw: Path) -> tuple[dict[tuple[str, str], float], set[str]]:
     """PDB-pair scores from chain-level Foldseek rows, and every PDB with any hit.
 
@@ -232,12 +239,15 @@ def symmetric_pdb_scores(raw: Path) -> tuple[dict[tuple[str, str], float], set[s
     E-value). A PDB pair keeps the maximum over its chain pairs, in both orders.
     """
     directed: dict[tuple[str, str], float] = {}
-    for line in Path(raw).read_text(encoding="utf-8").splitlines():
-        fields = line.split("\t")
-        if len(fields) < 3 or not line.strip():
-            continue
-        key = (fields[0].strip(), fields[1].strip())
-        directed[key] = max(float(fields[2]), directed.get(key, 0.0))
+    # Streamed: this raw table has millions of chain-level rows, and reading it
+    # whole held the entire file plus a list of its lines in memory (A38).
+    with Path(raw).open(encoding="utf-8") as handle:
+        for line in handle:
+            fields = line.split("\t")
+            if len(fields) < 3 or not line.strip():
+                continue
+            key = (fields[0].strip(), fields[1].strip())
+            directed[key] = max(float(fields[2]), directed.get(key, 0.0))
     best: dict[tuple[str, str], float] = {}
     seen: set[str] = set()
     for (query, target), score in directed.items():
@@ -361,7 +371,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         raise SystemExit("Foldseek universe is empty")
     audit.load_annotations(args.data_root.resolve())
     audit_jsonl = args.audit_dir / "data_audit_details.jsonl"
-    ledger_rows = [json.loads(line) for line in audit_jsonl.read_text(encoding="utf-8").splitlines()
+    ledger_rows = [json.loads(line) for line in _iter_lines(audit_jsonl)
                    if line.strip()]
     preferred_source = audit.formal_source_by_pdb(ledger_rows)
     sources = audit_sources(

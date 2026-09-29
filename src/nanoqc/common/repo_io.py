@@ -125,6 +125,25 @@ def module_name(name: str) -> str:
     return MODULE_LAYOUT[name][len("src/"):-len(".py")].replace("/", ".")
 
 
+def iter_jsonl(path: PathLike, *, skip_undecodable: bool = False):
+    """Stream the JSON objects of a JSON-lines file, skipping blank lines (A38).
+
+    The data-audit ledger holds one object per audited structure, so reading it
+    with ``read_text().splitlines()`` held the whole file plus a list of all its
+    lines in memory. With ``skip_undecodable`` a malformed line is ignored, which
+    is what the readers that tolerate a truncated ledger did themselves.
+    """
+    with Path(path).open(encoding="utf-8") as handle:
+        for line in handle:
+            if not line.strip():
+                continue
+            try:
+                yield json.loads(line)
+            except json.JSONDecodeError:
+                if not skip_undecodable:
+                    raise
+
+
 def sha256_file(path: PathLike) -> str:
     """Hex SHA-256 of a file's bytes, streamed (never loads the file whole)."""
     digest = hashlib.sha256()

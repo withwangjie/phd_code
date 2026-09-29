@@ -12,6 +12,7 @@ import ast
 import functools
 import hashlib
 import itertools
+import json
 import math
 import random
 from pathlib import Path
@@ -574,3 +575,37 @@ def test_benchmark_fingerprint_covers_the_split_benchmark_and_qubo_modules():
         same_package.discard("run_real_complex_pilot.py")
         assert same_package, entry
         assert same_package <= set(SHARED_HELPER_MODULES), sorted(same_package - set(SHARED_HELPER_MODULES))
+
+
+def test_iter_jsonl_matches_the_read_text_splitlines_readers(tmp_path):
+    """Streaming the audit ledger yields exactly the rows the old readers built (A38)."""
+    from nanoqc.common.repo_io import iter_jsonl
+
+    path = tmp_path / "data_audit_details.jsonl"
+    rows = [dict(id="a", valid=True), dict(id="b", valid=False), dict(id="c", valid=True)]
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows[:2])
+                    + "\n"                      # blank line, skipped by both
+                    + json.dumps(rows[2]) + "\n", encoding="utf-8")
+    reference = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()
+                 if line.strip()]
+    assert list(iter_jsonl(path)) == reference == rows
+
+    # A truncated final line: tolerated only when the caller asked for that.
+    path.write_text(json.dumps(rows[0]) + "\n" + '{"id": "trunc"', encoding="utf-8")
+    assert list(iter_jsonl(path, skip_undecodable=True)) == [rows[0]]
+    with pytest.raises(json.JSONDecodeError):
+        list(iter_jsonl(path))
+
+
+def test_large_tables_are_streamed_not_read_whole():
+    """The multi-million-row Foldseek and pair tables must not be read into memory (A38)."""
+    foldseek = (REPO / "src/nanoqc/data/build_foldseek_pairs.py").read_text(encoding="utf-8")
+    scores = foldseek[foldseek.index("def symmetric_pdb_scores"):foldseek.index("def resolve_foldseek")]
+    assert "read_text" not in scores
+    stages = (REPO / "src/nanoqc/pipeline/stages_data.py").read_text(encoding="utf-8")
+    assert "pair_path.read_text" not in stages
+    for module in ("src/nanoqc/pipeline/stages_data.py", "src/nanoqc/data/carve_holdout_clusters.py",
+                   "src/nanoqc/data/prepare_external_vhh.py", "src/nanoqc/data/build_foldseek_pairs.py",
+                   "src/nanoqc/data/audit_all_datasets.py"):
+        source = (REPO / module).read_text(encoding="utf-8")
+        assert "audit_jsonl.read_text" not in source, module

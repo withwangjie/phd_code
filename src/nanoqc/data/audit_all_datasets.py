@@ -20,7 +20,7 @@ import zipfile
 import gemmi
 import numpy as np
 from scipy.spatial import cKDTree
-from nanoqc.common.repo_io import REPO_ROOT, sha256_file
+from nanoqc.common.repo_io import REPO_ROOT, sha256_file, iter_jsonl
 
 # Definitions now live in focused modules; re-exported so every existing
 # `from nanoqc.data.audit_all_datasets import ...` keeps working.
@@ -844,9 +844,7 @@ def main():
     previous=args.out/'data_audit_details.jsonl'
     if args.reuse_non_nano and previous.exists():
         stamp=previous.stat().st_mtime
-        for line in previous.read_text(encoding='utf-8').splitlines():
-            try:r=json.loads(line)
-            except json.JSONDecodeError:continue
+        for r in iter_jsonl(previous,skip_undecodable=True):
             if r['valid'] and r['subset'] not in ('sabdab_vhh','snac_db') and not r['subset'].startswith('extra_snac_') and pathlib.Path(r['path']).exists() and pathlib.Path(r['path']).stat().st_mtime<=stamp:
                 cached[r['id']]=r
         print(f'Reusing {len(cached)} valid non-nano geometry records; rechecking all nano annotations and failures',flush=True)

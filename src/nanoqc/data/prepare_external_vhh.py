@@ -47,7 +47,7 @@ from typing import Optional, Sequence
 
 import yaml
 
-from nanoqc.common.repo_io import REPO_ROOT, sha256_file as sha256
+from nanoqc.common.repo_io import REPO_ROOT, sha256_file as sha256, iter_jsonl
 from nanoqc.pipeline.resolve_server_config import _load as _load_server_config, _resolve_data_root
 
 PDB_ID = re.compile(r"[a-z0-9]{4}")
@@ -153,14 +153,7 @@ def settings(config: dict, prep_dir: Optional[Path]) -> dict:
 def study_pdb_ids(audit_jsonl: Path, min_interface_residues: int = 15) -> list[str]:
     """Same source precedence/QC universe as queue_freeze."""
     from nanoqc.data.audit_all_datasets import formal_clustering_pdb_ids
-    rows = []
-    for line in audit_jsonl.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        try:
-            rows.append(json.loads(line))
-        except json.JSONDecodeError:
-            continue
+    rows = list(iter_jsonl(audit_jsonl, skip_undecodable=True))
     return formal_clustering_pdb_ids(rows, min_interface_residues)
 
 
