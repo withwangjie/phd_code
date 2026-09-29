@@ -19,6 +19,7 @@ from scipy.stats import spearmanr
 from nanoqc.common.repo_io import atomic_write_json_fsync, sha256_file, repo_path, MODULE_LAYOUT
 from nanoqc.common.seed_streams import derive_streams, derive_child_seed
 from nanoqc.structure.physical_quality import topology_geometry_audit
+from nanoqc.common.device_errors import is_resource_error, raise_if_resource_error
 
 
 DIAGNOSTIC_FIELDS = (
@@ -38,6 +39,7 @@ def diagnostic_assignment(builder, angles: dict, destination: Path, iterations: 
     result.update(diagnostic_mode="raw_relaxed_training_only_v1",assignment_status="failed",
                   assignment_error=None,diagnostic_artifact=str(destination.with_suffix(".json")))
     audit={}
+    resource_error=None
     try:
         positions=builder.positions_for_chi_assignment(angles)
         result["raw_positions_sha256"]=hashlib.sha256(
@@ -65,9 +67,15 @@ def diagnostic_assignment(builder, angles: dict, destination: Path, iterations: 
         result["assignment_status"]="evaluated"
     except Exception as exc:
         result["assignment_error"]=f"{type(exc).__name__}: {exc}"
+        if is_resource_error(exc):
+            resource_error=exc
     atomic_write_json_fsync(destination.with_suffix(".json"),dict(
         result=result,chi_assignment=angles,audit=audit,
         policy="no energy/clash rejection, no alternate anchor, no fitted coefficients"))
+    if resource_error is not None:
+        raise_if_resource_error(resource_error, device=os.environ.get("QP_OPENMM_DEVICE",""),
+            stage_hint="training energy assignment",
+            record_path=destination.with_name(destination.stem+"_resource_failure.json"))
     return result
 
 

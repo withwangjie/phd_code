@@ -21,6 +21,7 @@ import gemmi
 import numpy as np
 from scipy.spatial import cKDTree
 from nanoqc.common.repo_io import REPO_ROOT, sha256_file, iter_jsonl
+from nanoqc.common.device_errors import raise_if_resource_error
 
 # Definitions now live in focused modules; re-exported so every existing
 # `from nanoqc.data.audit_all_datasets import ...` keeps working.
@@ -647,6 +648,7 @@ def audit(task):
             )
         return out
     except Exception as exc:
+        raise_if_resource_error(exc, stage_hint="data audit")
         out.update(valid=False, error=f'{type(exc).__name__}: {exc}')
         return out
 
@@ -802,6 +804,7 @@ def _db55_pair_contacts(pair):
     try:
         return (*_db55_contact_counts(pair), '')
     except Exception as exc:
+        raise_if_resource_error(exc, stage_hint="DB5.5 contacts")
         return None, None, str(exc)
 
 

@@ -26,6 +26,7 @@ decided here: ``audit_external_vhh_independence.py`` certifies it inside
 every formal run.
 """
 from __future__ import annotations
+from nanoqc.common.device_errors import raise_if_resource_error
 
 import argparse
 import json
@@ -326,6 +327,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                               num_interface_residues=int(graph.num_interface_residues),
                               source_structure=str(source.resolve()), source_structure_sha256=sha256(source)))
         except Exception as exc:  # recorded, never silently dropped
+            raise_if_resource_error(exc, stage_hint="external graph building",
+                                    record_path=args.out_dir/"device_resource_failure.json")
             failures.append(dict(pdb_id=pdb, reason=type(exc).__name__, detail=str(exc)))
     manifest = dict(schema="external_vhh_graphs_v1", graph_version=builder.VERSION, subset=SUBSET,
                     candidates_sha256=sha256(args.candidates), graphs=built, failures=failures,

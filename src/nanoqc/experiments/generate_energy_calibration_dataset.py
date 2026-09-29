@@ -38,6 +38,7 @@ from nanoqc.qubo.subgraph_to_qubo import (
 from nanoqc.common.repo_io import sha256_file as sha256
 from nanoqc.common.seed_streams import DEFAULT_MASTER_SEED
 from nanoqc.data.safe_graph_load import load_graph
+from nanoqc.common.device_errors import raise_if_resource_error
 
 
 def _manifest_graph_path(root: Path, relative: object) -> Path:
@@ -186,7 +187,10 @@ def _run_parallel_shards(args: argparse.Namespace) -> int:
         if any(codes):
             detail="; ".join(f"shard {i} exit={code}: {jobs[i][4].read_text(encoding='utf-8')[-2000:]}"
                 for i,code in enumerate(codes) if code)
-            raise RuntimeError("Calibration shard failed: "+detail)
+            error=RuntimeError("Calibration shard failed: "+detail)
+            raise_if_resource_error(error, stage_hint="calibration shards",
+                                    record_path=args.out_csv.parent/"device_resource_failure.json")
+            raise error
         chunks=[];provenances=[];fieldnames=None
         for _,_,csv_path,prov_path,_ in jobs:
             with csv_path.open(newline="",encoding="utf-8") as handle:
@@ -541,6 +545,9 @@ def main() -> int:
                         written+=1
                     del atomistic
             except Exception as exc:
+                raise_if_resource_error(exc, device=os.environ.get("QP_OPENMM_DEVICE",""),
+                    stage_hint="calibration complex",
+                    record_path=args.out_csv.parent/"device_resource_failure.json")
                 record=dict(pdb_id=pdb,source_id=row.get("source_id"),
                             training_row_index=training_row_index,
                             error=f"{type(exc).__name__}: {exc}")

@@ -15,6 +15,7 @@ three native threads each. ``lightning.gpu`` caps concurrency to
 # description=__doc__); keep it identical to what the benchmark always printed.
 
 from __future__ import annotations
+from nanoqc.common.device_errors import raise_if_resource_error
 
 import argparse
 import csv
@@ -345,6 +346,7 @@ def evaluate_single_target(
         row["total_seconds"] = time.perf_counter() - target_start
         return row
     except Exception as error:
+        raise_if_resource_error(error, stage_hint="QC target")
         raise TargetEvaluationError(stage, error) from error
 
 
@@ -384,8 +386,10 @@ def _evaluate_worker(graph_path_text: str) -> Dict[str, Any]:
             raise RuntimeError("Worker was not initialized")
         return evaluate_single_target(graph_path, _WORKER_SCORER, _WORKER_ARGS)
     except TargetEvaluationError as error:
+        raise_if_resource_error(error, stage_hint="QC worker")
         return _failure_row(graph_path, error, time.perf_counter() - started)
     except Exception as error:
+        raise_if_resource_error(error, stage_hint="QC worker")
         wrapped = TargetEvaluationError("worker_wrapper", error)
         return _failure_row(graph_path, wrapped, time.perf_counter() - started)
     finally:
@@ -896,6 +900,8 @@ def _run(args: argparse.Namespace) -> int:
                 try:
                     row = future.result()
                 except Exception as error:
+                    raise_if_resource_error(error, stage_hint="QC process pool",
+                                            record_path=args.out_dir/"device_resource_failure.json")
                     wrapped = TargetEvaluationError("process_pool", error)
                     row = _failure_row(graph_path, wrapped, 0.0)
                 rows.append(row)

@@ -269,8 +269,10 @@ class TrainingStagesMixin:
             argv += ["--max-complexes", str(max_complexes)]
         returncode, log_path = self._run_subprocess("energy_calibration_dataset", argv)
         if returncode != 0 or not training_csv.is_file() or not provenance.is_file():
-            return diagnostic_failure(f"Calibration dataset generation failed; see {log_path}",
-                                      argv, log_path, returncode)
+            # An interrupted computation is not a completed scientific diagnostic.
+            return StageResult("energy_calibration", "failed", started, utc_timestamp(),
+                returncode, f"Calibration dataset generation incomplete; see {log_path}",
+                argv, str(log_path), False)
 
         generation=json.loads(provenance.read_text(encoding="utf-8"))
         limits=cal_cfg.get("acceptance", {}) or {}

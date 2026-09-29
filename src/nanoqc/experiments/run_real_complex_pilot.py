@@ -30,7 +30,7 @@ from nanoqc.common.seed_streams import derive_streams, derive_child_seed, save_s
 from nanoqc.data.sequence_identity import nw_identity, length_coverage, partner_roles_anchored
 from nanoqc.data.safe_graph_load import load_graph
 from nanoqc.structure.physical_quality import StructureQualityError, topology_geometry_audit
-from nanoqc.common.device_errors import DeviceResourceError, as_resource_error, is_resource_error
+from nanoqc.common.device_errors import DeviceResourceError, as_resource_error, is_resource_error, raise_if_resource_error
 
 
 def _run_recovery_on_device(argv: list[str], device: str) -> int:
@@ -82,6 +82,7 @@ def _check_prepared_sites(config: dict, args, native: Path) -> None:
             try:
                 check_sites([rid],[0.0]);compatible.append(rid)
             except Exception as exc:
+                raise_if_resource_error(exc, stage_hint="site compatibility")
                 failures.append(dict(residue_id=rid,error=f"{type(exc).__name__}: {exc}"))
         if len(compatible)<args.sites:
             raise ValueError(f"Only {len(compatible)} independently Dunbrack/Amber-compatible VHH sites; need {args.sites}")
@@ -93,19 +94,36 @@ def _check_prepared_sites(config: dict, args, native: Path) -> None:
 
 def _preparation_error(exc: Exception) -> dict:
     return dict(message=str(exc),error_type=type(exc).__name__,
+                device=getattr(exc,"device",""),stage_hint=getattr(exc,"stage_hint",""),
                 category=getattr(exc,"category","eligibility_or_execution"),audit=getattr(exc,"audit",None))
 
 
 def _raise_device_resource_error(record: dict | None) -> None:
     """A device limit aborts the stage; it never excludes a complex (A35)."""
     if record and record.get("category")==DeviceResourceError.category:
-        raise DeviceResourceError(record["message"])
+        raise DeviceResourceError(record["message"],device=record.get("device",""),
+                                  stage_hint=record.get("stage_hint",""))
 
 
 def _raise_preparation_error(record: dict | None) -> None:
     _raise_device_resource_error(record)
     if record:
         raise StructureQualityError(record["message"],category=record["category"],audit=record["audit"])
+
+
+def _verify_preparation_resources(futures: dict, out: Path) -> None:
+    """Check completed speculative work too, even when a target was not admitted."""
+    for future in futures.values():
+        if future.cancelled():
+            continue
+        try:
+            prepared=future.result()
+            for key in ("prepare_error", "physical_error"):
+                _raise_device_resource_error(prepared.get(key))
+        except Exception as exc:
+            raise_if_resource_error(exc, stage_hint="prefetched structure preparation",
+                                    record_path=out/"device_resource_failure.json")
+            raise
 
 
 def _prepare_candidate_on_device(row: dict, args, work: Path, homology: dict,
@@ -653,7 +671,7 @@ def main(argv=None) -> int:
          # subgraph_to_qubo.py re-exports these; the QUBO builders themselves live here.
          "atomistic_structure.py","qubo_types.py","rotamer_library.py","coarse_qubo.py","ising.py",
          "allatom_qubo.py",
-         "physical_quality.py",
+         "physical_quality.py","device_errors.py",
          # batch_benchmark_hard_set.py dispatches; _recovery_benchmark_main lives in these.
          "benchmark_common.py","hard_set_evaluation.py","research_ablation.py","calibration_fit.py",
          "benchmark_statistics.py","structure_benchmarks.py",
@@ -846,16 +864,19 @@ def main(argv=None) -> int:
                     max_cdr_h3_loop_identity=max_cdr_h3_loop_identity,homology_isolation=homology,
                     chain_identity_audit=chain_identity_audit))
             except Exception as exc:
+                raise_if_resource_error(exc, stage_hint="structural eligibility",
+                                        record_path=out/"device_resource_failure.json")
                 decisions.append(dict(pdb_id=pdb,status="excluded",reason=str(exc),
                     failure_category=getattr(exc,"category","eligibility_or_execution"),
                     physical_quality_audit=getattr(exc,"audit",None),
                     development_exposed=development_exposed,independence_status=independence_status,
                     chain_identity_audit=chain_identity_audit,max_cdr_h3_loop_identity=max_cdr_h3_loop_identity))
             _ablation_atomic_json(out/"eligibility.json",decisions)
-        _ablation_atomic_json(out/"selected_targets.json",selected)
         # Finish/cancel preparation before starting recovery: the two phases
         # share the same GPU concurrency budget and must not overlap pools.
         preparation_stack.close()
+        _verify_preparation_resources(preparation_futures,out)
+        _ablation_atomic_json(out/"selected_targets.json",selected)
         if not selected:
             raise ValueError('No eligible targets; inspect eligibility.json')
         # Final independent-set audit: selection-time pools cover sequence and
@@ -926,9 +947,8 @@ def main(argv=None) -> int:
                         if status: failed.append(pdb)
                     except Exception as exc:
                         # A device resource limit is not this target's failure (A35).
-                        if is_resource_error(exc):
-                            raise as_resource_error(exc,device=args.gpu_devices[0],
-                                                    stage_hint="structural target recovery") from exc
+                        raise_if_resource_error(exc, stage_hint="structural target recovery",
+                                                record_path=out/"device_resource_failure.json")
                         failed.append(pdb)
                         with (out/"failures.log").open("a",encoding="utf-8") as f:
                             f.write(pdb+"\n"+traceback.format_exc())

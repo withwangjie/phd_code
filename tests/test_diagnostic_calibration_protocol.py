@@ -113,6 +113,15 @@ def test_failed_amber_fit_acceptance_remains_auditable_diagnostic(tmp_path: Path
 
     original_run = harness._run_subprocess
 
+    def interrupted_generation(name, argv):
+        assert name == "energy_calibration_dataset"
+        return 1, tmp_path / "calibration" / "resource_failure.log"
+
+    harness._run_subprocess = interrupted_generation
+    result = Orchestrator.stage_energy_calibration(harness)
+    assert result.status == "failed"
+    assert not result.artifacts_ok
+
     def failed_fit(name, argv):
         if name == "energy_calibration_fit":
             return 1, tmp_path / "calibration" / "failed_fit.log"

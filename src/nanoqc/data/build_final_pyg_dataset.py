@@ -4,6 +4,7 @@ Run with the project's .venv Python. All processing is CPU-only.
 Dependencies: see requirements.txt.
 """
 from __future__ import annotations
+from nanoqc.common.device_errors import raise_if_resource_error
 import argparse
 import collections
 import csv
@@ -471,6 +472,8 @@ def save_graph(row, split, output, pair=None, cluster_id='', family_structure_cl
     except Exception as exc:
         # Only remove an incomplete file created by this call, inside the output tree.
         if 'path' in locals() and not locals().get('existing',False) and path.exists() and output.resolve() in path.resolve().parents:path.unlink()
+        raise_if_resource_error(exc, stage_hint="graph building",
+                                record_path=output/"device_resource_failure.json")
         return None,dict(split=split,source_id=row['id'],pdb_id=row.get('pdb_id',''),reason=type(exc).__name__,detail=str(exc))
 
 def exclusion(row,reasons):

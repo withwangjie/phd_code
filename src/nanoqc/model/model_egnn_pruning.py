@@ -16,6 +16,7 @@ the scalar interface-score output).
 """
 
 from __future__ import annotations
+from nanoqc.common.device_errors import raise_if_resource_error
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -775,6 +776,7 @@ def load_interface_scorer(
             homology_isolation=(None if homology is None else {str(k): float(v) for k, v in homology.items()}),
         )
     except Exception as error:  # checkpoint incompatibility must not stop the batch
+        raise_if_resource_error(error, stage_hint="EGNN checkpoint load")
         warning = (
             f"Could not load EGNN checkpoint {checkpoint_path}: "
             f"{type(error).__name__}: {_clean_error_message(error)}. "

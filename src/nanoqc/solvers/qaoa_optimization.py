@@ -4,6 +4,7 @@ The methods below are XYMixerQAOASampler's own (it inherits them from this
 mixin); they were split out of qaoa_interface_sampler.py unchanged.
 """
 from __future__ import annotations
+from nanoqc.common.device_errors import raise_if_resource_error
 
 from typing import Any, Callable, Dict, List, Optional, Sequence
 import numpy as np
@@ -388,6 +389,7 @@ class QAOAOptimizationMixin:
         try:
             evaluate(np.zeros(2 * self.p))  # Preparation is free; measurement is counted.
         except Exception as exc:
+            raise_if_resource_error(exc, stage_hint="QAOA baseline")
             raise OptimizationCollapseError(
                 "Uniform-state baseline evaluation failed; no usable optimization result"
             ) from exc
@@ -410,6 +412,7 @@ class QAOAOptimizationMixin:
                     parameter_scale=scale))
                 continue
             except Exception as exc:  # noqa: BLE001 - defensive: one bad restart must not lose the shot budget
+                raise_if_resource_error(exc, stage_hint="QAOA restart")
                 used = len(history) - before
                 records.append(dict(
                     restart=i, budget=quota, evaluations=used,

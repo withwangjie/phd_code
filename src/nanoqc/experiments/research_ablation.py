@@ -6,6 +6,7 @@ solver's cost recorded so equal output is never read as equal budget. Also
 holds time-to-solution accounting and QAOA angle transfer.
 """
 from __future__ import annotations
+from nanoqc.common.device_errors import raise_if_resource_error
 
 import argparse
 import csv
@@ -574,7 +575,8 @@ def _ablation_worker(task: tuple) -> tuple:
         config["pdb_id"] = getattr(data, "pdb_id", "")
         _ablation_run_case(data, _ABLATION_SCORER, config, args, artifact)
         return key, config, None
-    except Exception:
+    except Exception as exc:
+        raise_if_resource_error(exc, stage_hint="research ablation")
         return key, config, traceback.format_exc()
 
 

@@ -7,6 +7,7 @@ steric-quality metric in addition to the project's internal geometric clash
 diagnostic. Missing configured executables fail closed.
 """
 from __future__ import annotations
+from nanoqc.common.device_errors import raise_if_resource_error
 
 import argparse
 import csv
@@ -226,6 +227,8 @@ def main() -> int:
                         phenix_executable=args.phenix_clashscore,
                     ))
             except Exception as exc:
+                raise_if_resource_error(exc, stage_hint="external structure baseline",
+                                        record_path=args.out_dir/"device_resource_failure.json")
                 failures.append(dict(target=target,seed=seed,error=f"{type(exc).__name__}: {exc}"))
 
     if not rows:

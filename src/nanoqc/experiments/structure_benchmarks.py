@@ -19,6 +19,7 @@ from tqdm.auto import tqdm
 from nanoqc.solvers.qaoa_interface_sampler import XYMixerQAOASampler
 from nanoqc.common.repo_io import sha256_file as _ablation_digest, atomic_write_json_fsync as _ablation_atomic_json, repo_path
 from nanoqc.experiments.benchmark_common import SHARED_HELPER_MODULES
+from nanoqc.common.device_errors import raise_if_resource_error
 from nanoqc.experiments.research_ablation import _ablation_classical_counts, _ablation_summarize
 from nanoqc.structure.physical_quality import StructureQualityError
 
@@ -116,7 +117,9 @@ def _structure_evaluation_main(argv: Optional[Sequence[str]] = None) -> int:
                     if writer is None:
                         writer=csv.DictWriter(handle,fieldnames=list(row),extrasaction="ignore"); writer.writeheader()
                     writer.writerow(row); handle.flush(); os.fsync(handle.fileno()); rows.append(row)
-                except Exception:
+                except Exception as exc:
+                    raise_if_resource_error(exc, stage_hint="structure evaluation",
+                                            record_path=out/"device_resource_failure.json")
                     failures+=1
                     with (out/"failed_cases.log").open("a",encoding="utf-8") as log:
                         log.write(json.dumps(dict(case_index=index,case=case))+"\n"+traceback.format_exc()+"\n")
@@ -238,6 +241,8 @@ def _allatom_experiment_main(argv: Optional[Sequence[str]] = None) -> int:
         try:
             qubo=builder.build()
         except Exception as exc:
+            raise_if_resource_error(exc, stage_hint="allatom QUBO build",
+                                    record_path=out/"device_resource_failure.json")
             _ablation_atomic_json(out/"allatom_build_failure.json",dict(
                 error=str(exc),category="candidate_or_model_construction",
                 preparation=builder.preparation_quality,
@@ -558,6 +563,8 @@ def _recovery_benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
                         raise StructureQualityError("Recovery outputs failed physical acceptance",
                             category="method_output",audit=json.loads((experiment/"structure_quality_summary.json").read_text()))
                 except Exception as exc:
+                    raise_if_resource_error(exc, stage_hint="recovery seed",
+                                            record_path=out/"device_resource_failure.json")
                     failures+=1
                     failure_records.append(dict(seed=seed,error=str(exc),
                         category=getattr(exc,"category","execution"),audit=getattr(exc,"audit",None)))

@@ -40,6 +40,7 @@ the build fail unless ``--allow-missing-hits`` is given. Sequence-level
 isolation still applies to all PDBs.
 """
 from __future__ import annotations
+from nanoqc.common.device_errors import raise_if_resource_error
 import concurrent.futures
 import multiprocessing as mp
 
@@ -175,6 +176,7 @@ def antigen_structure(pdb: str, sources: Iterable[dict], sabdab_antibody_chains:
         try:
             structure, _ = audit._read_raw_structure(dict(source))
         except Exception as exc:
+            raise_if_resource_error(exc, stage_hint="Foldseek structure preparation")
             unreadable.append(dict(source=source.get("id") or source["path"], error=f"{type(exc).__name__}: {exc}"))
             continue
         antigen_annotated = (annotated_antigen_chains(source)
