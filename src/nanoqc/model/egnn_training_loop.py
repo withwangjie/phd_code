@@ -29,7 +29,7 @@ def train_one_epoch(
     model: torch.nn.Module,
     loader: DataLoader,
     optimizer: AdamW,
-    scaler: torch.cuda.amp.GradScaler,
+    scaler: torch.amp.GradScaler,
     *,
     device: torch.device,
     pos_weight: Tensor,
@@ -54,7 +54,7 @@ def train_one_epoch(
     for batch in progress:
         batch = batch.to(device, non_blocking=pin_memory)
         optimizer.zero_grad(set_to_none=True)
-        with torch.cuda.amp.autocast(enabled=amp_enabled, dtype=torch.float16):
+        with torch.amp.autocast("cuda", enabled=amp_enabled, dtype=torch.float16):
             logits = model(
                 batch.x, batch.pos, batch.edge_index, return_logits=True
             )
@@ -111,7 +111,7 @@ def validate(
     progress = tqdm(loader, desc=f"Epoch {epoch:03d} valid", unit="batch", dynamic_ncols=True)
     for batch in progress:
         batch = batch.to(device, non_blocking=pin_memory)
-        with torch.cuda.amp.autocast(enabled=amp_enabled, dtype=torch.float16):
+        with torch.amp.autocast("cuda", enabled=amp_enabled, dtype=torch.float16):
             logits = model(
                 batch.x, batch.pos, batch.edge_index, return_logits=True
             )

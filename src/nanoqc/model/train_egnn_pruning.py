@@ -265,7 +265,7 @@ def _checkpoint_payload(
     *,
     model: EGNNInterfaceScorer,
     optimizer: AdamW,
-    scaler: torch.cuda.amp.GradScaler,
+    scaler: torch.amp.GradScaler,
     epoch: int,
     metrics: BinaryMetrics,
     train_loss: float,
@@ -336,7 +336,7 @@ def restore_training_state(
     *,
     model: EGNNInterfaceScorer,
     optimizer: AdamW,
-    scaler: torch.cuda.amp.GradScaler,
+    scaler: torch.amp.GradScaler,
     model_config: Mapping[str, Any],
     train_paths: Sequence[Path],
     validation_paths: Sequence[Path],
@@ -758,7 +758,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         weight_decay=args.weight_decay,
     )
     amp_enabled = bool(args.amp and device.type == "cuda")
-    scaler = torch.cuda.amp.GradScaler(enabled=amp_enabled)
+    scaler = torch.amp.GradScaler("cuda", enabled=amp_enabled)
     effective_pin_memory = bool(args.pin_memory and device.type == "cuda")
     if is_main_process:
         print(
