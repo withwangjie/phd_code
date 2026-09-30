@@ -25,6 +25,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "$REPO_ROOT"
 export PYTHONPATH="${REPO_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}"
+# shellcheck source=scripts/third_party_warning_policy.sh
+source "${SCRIPT_DIR}/third_party_warning_policy.sh"
 SERVER_CONFIG_FILE="${QP_SERVER_CONFIG:-${REPO_ROOT}/configs/server_config.yaml}"
 if [[ "$SERVER_CONFIG_FILE" != /* ]]; then
     SERVER_CONFIG_FILE="${REPO_ROOT}/${SERVER_CONFIG_FILE}"

@@ -12,6 +12,8 @@
 set -eo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# shellcheck source=scripts/third_party_warning_policy.sh
+source "${SCRIPT_DIR}/third_party_warning_policy.sh"
 SERVER_REPORT="${REPO_ROOT}/.runtime/server_resolution.json"
 if [ -n "${QP_RUN_ROOT:-}" ]; then
     RUN_ROOT="$QP_RUN_ROOT"

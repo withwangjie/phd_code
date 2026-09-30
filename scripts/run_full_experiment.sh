@@ -32,6 +32,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "$REPO_ROOT"
 export PYTHONPATH="${REPO_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}"
+# shellcheck source=scripts/third_party_warning_policy.sh
+source "${SCRIPT_DIR}/third_party_warning_policy.sh"
 
 # One-time, audited protocol amendment for a failed FP16 EGNN stage. The
 # switch is launcher-owned and must not reach the Python stage parser.

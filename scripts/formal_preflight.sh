@@ -8,6 +8,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "$REPO_ROOT"
 export PYTHONPATH="${REPO_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}"
+# shellcheck source=scripts/third_party_warning_policy.sh
+source "${SCRIPT_DIR}/third_party_warning_policy.sh"
 CONFIG_FILE="${QP_RESOLVED_CONFIG:-${REPO_ROOT}/configs/full_experiment_config.yaml}"
 SERVER_REPORT="${QP_SERVER_REPORT:-}"
 SERVER_CONFIG_FILE="${QP_SERVER_CONFIG:-${REPO_ROOT}/configs/server_config.yaml}"
@@ -111,6 +113,7 @@ log "Running syntax checks for formal entrypoints..."
 bash -n "$SCRIPT_DIR/run_full_experiment.sh"
 bash -n "$SCRIPT_DIR/deploy_launch.sh"
 bash -n "$SCRIPT_DIR/check_status.sh"
+bash -n "$SCRIPT_DIR/third_party_warning_policy.sh"
 python -m compileall -q src/nanoqc tests
 
 log "Running formal regression suite..."
