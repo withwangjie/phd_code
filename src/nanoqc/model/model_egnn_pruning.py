@@ -508,23 +508,52 @@ def _random_radius_graph(num_nodes: int, cutoff: float = 2.5) -> Data:
 
 # Fixed-budget experimental controls; adaptive production API remains available.
 import numpy as np
+from itertools import combinations
 AA = "ACDEFGHIKLMNPQRSTVWY"
 
 def _ablation_cdr_indices(data: Any) -> list[int]:
-    """Map annotated CDR sequence exactly; never assume numbering ranges."""
+    """Map the annotated CDR-H3 to observed VHH residues, including small gaps.
+
+    An unresolved internal stretch can be absent from a crystal structure even
+    when the full IMGT CDR sequence is known.  A partial mapping is accepted
+    only when at most two internal residues are missing, the observed sequence
+    is unique, and the conserved C/W flanks anchor it to the VHH loop.
+    """
     seq = getattr(data, "cdr3_seq", "")
     if not seq:
         raise ValueError("CDR-priority ablation requires annotated cdr3_seq.")
-    matches = []
+    chains = []
     for chain in torch.unique(data.node_chain_id).tolist():
         ids = torch.where((data.node_chain_id == chain) & (data.x[:, -1] == 0))[0].tolist()
+        if not ids:
+            continue
         sequence = "".join(AA[int(data.x[i, :20].argmax())] for i in ids)
-        for start in range(len(sequence)):
-            if sequence.startswith(seq, start):
-                matches.append(ids[start:start+len(seq)])
-    if len(matches) != 1:
+        chains.append((ids, sequence))
+    exact = [tuple(ids[start:start+len(seq)]) for ids, sequence in chains
+             for start in range(len(sequence)) if sequence.startswith(seq, start)]
+    if len(exact) == 1:
+        return list(exact[0])
+    if exact:
         raise ValueError("CDR sequence is absent/ambiguous in observed residues.")
-    return matches[0]
+    if len(seq) < 10:
+        raise ValueError("CDR sequence is absent/ambiguous in observed residues.")
+    for missing_count in (1, 2):
+        if (len(seq)-missing_count)/len(seq) < 0.8:
+            continue
+        matches = set()
+        for missing in combinations(range(2, len(seq)-2), missing_count):
+            observed = "".join(aa for i, aa in enumerate(seq) if i not in missing)
+            for ids, sequence in chains:
+                for start in range(1, len(sequence)-len(observed)):
+                    end = start+len(observed)
+                    if (sequence[start:end] == observed and
+                            sequence[start-1] == "C" and sequence[end] == "W"):
+                        matches.add(tuple(ids[start:end]))
+        if len(matches) == 1:
+            return list(next(iter(matches)))
+        if matches:
+            break
+    raise ValueError("CDR sequence is absent/ambiguous in observed residues.")
 
 
 def select_ablation_active(data: Any, method: str, k: int, seed: int,
