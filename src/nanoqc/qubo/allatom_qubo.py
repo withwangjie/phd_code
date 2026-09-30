@@ -18,7 +18,77 @@ from nanoqc.qubo.ising import qubo_to_ising, validate_qubo_ising_equivalence
 from nanoqc.qubo.qubo_types import AA_INDEX, QUBOResult, RotamerTemplate, VariableRecord
 from nanoqc.qubo.rotamer_library import _THREE_LETTER, _dunbrack_templates_for_site, _expanded_rotamer_templates, _load_rotamer_bins, _nearest_dunbrack_bin, rotamer_source_metadata
 from nanoqc.structure.physical_quality import (StructureQualityError, topology_geometry_audit,
-    relaxation_force_audit, RELAX_FORCE_TOLERANCE_KJ_MOL_NM)
+    relaxation_force_audit, RELAX_FORCE_TOLERANCE_KJ_MOL_NM,
+    EXTREME_NONBONDED_FLOOR_ANGSTROM)
+
+
+def _minimize_movable_positions(context: Any, positions: np.ndarray,
+                                movable: set[int], max_iterations: int,
+                                unit: Any) -> tuple[np.ndarray, dict[str, Any]]:
+    """Minimize the exact OpenMM potential over movable coordinates only.
+
+    OpenMM's LocalEnergyMinimizer can stop with substantial residual force when
+    most particles have zero mass to enforce a fixed backbone.  Explicitly
+    optimizing only the declared movable coordinates leaves the frozen atoms
+    bitwise fixed and permits an independent force-based acceptance audit.
+    """
+    from scipy.optimize import minimize
+
+    if max_iterations <= 0 or not movable:
+        raise ValueError("Movable minimization needs a positive cap and atom set")
+    start = np.asarray(positions, dtype=np.float64)
+    if start.ndim != 2 or start.shape[1] != 3 or not np.isfinite(start).all():
+        raise ValueError("Movable minimization requires finite [atoms,3] positions")
+    indices = np.asarray(sorted(movable), dtype=np.int64)
+    if indices[0] < 0 or indices[-1] >= len(start):
+        raise ValueError("Movable atom index outside topology")
+
+    def objective(flat: np.ndarray) -> tuple[float, np.ndarray]:
+        current = start.copy()
+        current[indices] = flat.reshape(-1, 3)
+        context.setPositions(current * unit.nanometer)
+        state = context.getState(getEnergy=True, getForces=True)
+        energy = float(state.getPotentialEnergy().value_in_unit(unit.kilojoules_per_mole))
+        forces = np.asarray(state.getForces(asNumpy=True).value_in_unit(
+            unit.kilojoules_per_mole / unit.nanometer), dtype=np.float64)
+        gradient = -forces[indices].ravel()
+        if not math.isfinite(energy) or not np.isfinite(gradient).all():
+            raise FloatingPointError("Nonfinite energy or force during movable minimization")
+        return energy, gradient
+
+    result = minimize(objective, start[indices].ravel(), jac=True,
+                      method="L-BFGS-B", options={"maxiter": max_iterations,
+                                                    "ftol": 1e-15, "gtol": 1e-3})
+    final = start.copy()
+    final[indices] = result.x.reshape(-1, 3)
+    if not np.isfinite(final).all():
+        raise FloatingPointError("Nonfinite coordinates after movable minimization")
+    context.setPositions(final * unit.nanometer)
+    return final, dict(minimizer="scipy_lbfgsb_exact_movable",
+                       minimizer_iterations=int(result.nit),
+                       minimizer_evaluations=int(result.nfev),
+                       minimizer_stop_reason=str(result.message),
+                       minimizer_reported_success=bool(result.success))
+
+
+def _internal_candidate_overlaps(positions: np.ndarray, atoms: Mapping[str, int],
+                                 bonds: Mapping[int, set[int]]) -> list[dict[str, Any]]:
+    """Find topology-excluded near coincidences within one rotamer residue."""
+    names = {index: name for name, index in atoms.items()}
+    indices = sorted(names)
+    overlaps = []
+    for offset, left in enumerate(indices):
+        excluded = set(bonds[left])
+        for neighbor in bonds[left]:
+            excluded.update(bonds[neighbor])
+        for right in indices[offset + 1:]:
+            if right in excluded:
+                continue
+            distance = float(10 * np.linalg.norm(positions[left] - positions[right]))
+            if distance < EXTREME_NONBONDED_FLOOR_ANGSTROM:
+                overlaps.append(dict(distance_angstrom=distance,
+                                     atoms=[names[left], names[right]]))
+    return overlaps
 
 
 
@@ -232,8 +302,10 @@ class AllAtomInterfaceQUBOBuilder:
         raw_candidates_by_site: dict[int, list[int]] = {}
         residue_one_letter: dict[int, str] = {}
         raw_pool_sizes: dict[int, int] = {}
+        site_atoms: dict[int, dict[str, int]] = {}
         for site,rid in enumerate(ids):
             residue=residues[rid]; atoms={a.name:a.index for a in residue.atoms()}
+            site_atoms[site] = atoms
             one_letter=gemmi.find_tabulated_residue(residue.name).one_letter_code
             residue_one_letter[site]=one_letter
             ca,cb=atoms["CA"],atoms["CB"]
@@ -287,15 +359,28 @@ class AllAtomInterfaceQUBOBuilder:
                 integrator = mm.VerletIntegrator(.001)
                 context = _openmm_context(mm, system, integrator)
                 for variable in group:
-                    context.setPositions(self.positions_for_variables([variable])*unit.nanometer)
-                    mm.LocalEnergyMinimizer.minimize(context, 10., candidate_relax_iterations)
-                    positions = np.asarray(context.getState(getPositions=True).getPositions(asNumpy=True).value_in_unit(unit.nanometer))
+                    positions, minimization = _minimize_movable_positions(
+                        context, self.positions_for_variables([variable]), moving,
+                        candidate_relax_iterations, unit)
                     fixed = sorted(set(range(len(positions)))-moving)
                     if not np.allclose(positions[fixed], self.base_positions[fixed], atol=1e-10, rtol=0):
                         raise AssertionError("Candidate preparation moved fixed atoms")
                     candidate = self.candidates[variable]
                     candidate["positions"] = positions[candidate["indices"]].copy()
+                    candidate["minimization"] = minimization
                 del context, integrator
+
+        self.candidate_quality_exclusions=[]
+        for site,variables in raw_candidates_by_site.items():
+            for variable in variables:
+                overlap=_internal_candidate_overlaps(
+                    self.positions_for_variables([variable]),site_atoms[site],bonds)
+                if overlap:
+                    self.candidate_quality_exclusions.append(dict(
+                        site=site,residue_id=ids[site],raw_variable=variable,
+                        chi_degrees=self.candidates[variable]["chi_degrees"],
+                        overlaps=overlap))
+                    self.candidates[variable]["invalid_internal_geometry"]=True
 
         # Adaptive retention after optional raw-candidate relaxation.
         if self.chi1_angles_override is None:
@@ -309,8 +394,18 @@ class AllAtomInterfaceQUBOBuilder:
             )
             retained_old_indices=[]; retained_groups={}
             for site,count in enumerate(counts):
+                valid=[variable for variable in raw_candidates_by_site[site]
+                       if not self.candidates[variable].get("invalid_internal_geometry",False)]
+                if len(valid)<count:
+                    raise StructureQualityError(
+                        f"Only {len(valid)} internally valid rotamers at {ids[site]}; need {count}",
+                        category="candidate_geometry",
+                        audit=dict(site=site,residue_id=ids[site],needed=count,
+                                   generated=len(raw_candidates_by_site[site]),
+                                   excluded=[item for item in self.candidate_quality_exclusions
+                                             if item["site"]==site]))
                 ranked=sorted(
-                    raw_candidates_by_site[site],
+                    valid,
                     key=lambda variable: (
                         self.energy(self.positions_for_variables([variable])),
                         abs(float(self.candidates[variable]["angle"])),
@@ -330,6 +425,11 @@ class AllAtomInterfaceQUBOBuilder:
             self.raw_rotamer_pool_sizes=[raw_pool_sizes[i] for i in range(len(ids))]
             self.retained_rotamers_per_site=[len(self.site_to_variables[i]) for i in range(len(ids))]
         else:
+            if self.candidate_quality_exclusions:
+                raise StructureQualityError(
+                    "Legacy fixed-angle candidates contain internal atomic overlaps",
+                    category="candidate_geometry",
+                    audit=dict(excluded=self.candidate_quality_exclusions))
             self.site_to_variables={}
             cursor=0
             for site in range(len(ids)):
@@ -465,7 +565,8 @@ class AllAtomInterfaceQUBOBuilder:
                 audit=topology_geometry_audit(self.topology,assignment([v])))
                 for v,c in enumerate(self.candidates)],
             background="other Active sites fixed at decomposition anchors; not an exhaustive pair-combination audit",
-            candidate_filtering="none; diagnostics do not alter retained states")
+            candidate_filtering=dict(policy="exclude sub-0.4-A topology-excluded intramolecular overlaps before retention",
+                                     exclusions=self.candidate_quality_exclusions))
         baseline=self.energy(anchor_positions)
         singles=np.array([self.energy(assignment([v]))-baseline for v in range(count)])
         pairs=np.zeros((count,count))
@@ -529,9 +630,11 @@ class AllAtomInterfaceQUBOBuilder:
                 solvent=("vacuum; NoCutoff" if self.solvent_model=="vacuum" else "implicit GBN2; NoCutoff"),
                 solvent_model=self.solvent_model,
                 raw_rotamer_pool_sizes=self.raw_rotamer_pool_sizes,
+                candidate_quality_exclusions=self.candidate_quality_exclusions,
                 rotamers_per_site=self.retained_rotamers_per_site,
                 site_scores=self.site_scores.tolist(),
                 candidate_chi_degrees=[list(candidate.get("chi_degrees",(candidate["angle"],))) for candidate in self.candidates],
+                candidate_minimization=[candidate.get("minimization") for candidate in self.candidates],
                 rotamer_state_policy=(f"{self.rotamer_mode} full side-chain rotamer states (chi1..chiN) -> 3--6 retained under <=30 variables" if self.rotamer_mode in ("dunbrack2010","pyrosetta_dun10") and self.chi1_angles_override is None else "explicit legacy chi1 angle override"),
                 **rotamer_source_metadata(self.rotamer_mode, self.rotamer_library_path),
                 candidate_scope=("Dunbrack full side-chain chi state; Amber14 single-candidate prescreen, no affinity claim"
@@ -708,10 +811,13 @@ class AllAtomInterfaceQUBOBuilder:
                 if i not in self.movable: system.setParticleMass(i,0)
             integrator=self.mm.VerletIntegrator(.001)
             context=_openmm_context(self.mm, system, integrator)
-            context.setPositions(positions*self.unit.nanometer)
-            self.mm.LocalEnergyMinimizer.minimize(context,RELAX_FORCE_TOLERANCE_KJ_MOL_NM,minimize_iterations)
-            positions=np.asarray(context.getState(getPositions=True).getPositions(asNumpy=True).value_in_unit(self.unit.nanometer))
+            positions,minimization=_minimize_movable_positions(
+                context,positions,self.movable,minimize_iterations,self.unit)
             del context,integrator
+        else:
+            minimization=dict(minimizer="skipped",minimizer_iterations=0,
+                              minimizer_evaluations=0,minimizer_stop_reason="iteration cap zero",
+                              minimizer_reported_success=False)
         frozen=sorted(set(range(len(positions)))-self.movable)
         if not np.allclose(positions[frozen],self.base_positions[frozen],atol=1e-10,rtol=0):
             raise AssertionError("Frozen atoms moved during relaxation")
@@ -727,6 +833,7 @@ class AllAtomInterfaceQUBOBuilder:
         after_quality=topology_geometry_audit(self.topology,positions)
         return dict(discrete_energy_kcal=before,relaxed_energy_kcal=after,
             max_iterations=minimize_iterations,frozen_atoms=len(frozen),movable_atoms=len(self.movable),
+            **minimization,
             **force_quality, physical_quality_before=before_quality,
             physical_quality_after=after_quality,
             discrete_energy_components_kcal=before_components,

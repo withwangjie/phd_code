@@ -477,7 +477,9 @@ structure_experiment:
   # (target pdb, each seed here) -- see requirement #2 -- so these values
   # are never reused directly as the QAOA search or final-sampling seed.
   seeds: [42, 43, 44, 45, 46]
-  relax_iterations: 200
+  # Hard caps for exact movable-coordinate L-BFGS-B; measured forces decide
+  # acceptance, and the solver may stop before these caps.
+  relax_iterations: 1000
   candidate_relax_iterations: 100
   antigen_guidance_weight: 0.25
   antigen_proximity_scale_angstrom: 6.0
