@@ -35,6 +35,15 @@ def _validate_scientific_config(config: Dict[str, Any]) -> None:
 
     qf = config.get("queue_freeze", {}) or {}
     graph = qf.get("graph_build", {}) or {}
+    # A20: the formal EGNN trains in FP32. FP16 autocast overflowed on
+    # coordinate and squared-distance terms (non-finite loss on T4), so the key
+    # must be present and exactly false; a missing key is not accepted because
+    # the stage would otherwise fall back to a default.
+    egnn = config.get("egnn_train", {}) or {}
+    if "amp" not in egnn or egnn["amp"] is not False:
+        raise ValueError(
+            "egnn_train.amp must be explicitly false: formal EGNN training is FP32 "
+            f"(PROTOCOL_AMENDMENTS.md A20); got {egnn.get('amp', '<missing>')!r}")
     qc = config.get("qc_benchmark", {}) or {}
     structure = config.get("structure_experiment", {}) or {}
     qproto = quantum_protocol(config)

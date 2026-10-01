@@ -571,8 +571,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--amp",
         action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Enable CUDA float16 autocast and GradScaler (default: enabled).",
+        default=False,
+        help="Enable CUDA float16 autocast and GradScaler (default: disabled; the formal "
+             "protocol trains in FP32, PROTOCOL_AMENDMENTS.md A20).",
     )
     parser.add_argument(
         "--resume",

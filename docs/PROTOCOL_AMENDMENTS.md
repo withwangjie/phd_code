@@ -622,6 +622,7 @@ they were logged later.
 - **Why:** FP16 can overflow on coordinate and squared-distance computations. Reusing the failed FP16 checkpoint would mix training precision regimes. The completed upstream outputs are retained only after their recorded content hashes and dependency chain pass verification.
 - **Affected results:** EGNN checkpoint and all stages after `queue_freeze`. Data audit and queue freeze remain the original frozen outputs. The resulting run is explicitly marked as an amended protocol lineage, not an unmodified resume.
 - **Results inspected before this amendment:** the reported training failure and missing EGNN artifacts; no downstream performance or structural result was available.
+- **Enforcement (2026-10-01):** configuration validation now rejects any formal configuration whose `egnn_train.amp` is not explicitly `false`, before any stage runs; a missing key is rejected too. Previously FP32 depended only on the config value: the stage fell back to FP16 when the key was absent and the trainer's own default was FP16. Both fallbacks are now FP32. The protocol itself is unchanged.
 
 
 ## A21. Calibration eligibility and rare real χ1-well samples

@@ -103,7 +103,8 @@ class TrainingStagesMixin:
             "--threads", str(cfg.get("threads", 16)),
             "--num-workers", str(cfg.get("num_workers", 8)),
             "--seed", str(streams["train"]),
-            "--amp" if cfg.get("amp", True) else "--no-amp",
+            # A20: FP32 unless amp is explicitly true (config validation requires false).
+            "--amp" if cfg.get("amp", False) is True else "--no-amp",
             "--pin-memory" if cfg.get("pin_memory", True) else "--no-pin-memory",
         ]
         ranks = int(cfg.get("nproc_per_node", 1))

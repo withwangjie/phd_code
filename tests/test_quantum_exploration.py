@@ -161,3 +161,27 @@ def test_transfer_parameter_file_is_validated(tmp_path: Path):
         path.write_text(json.dumps(broken))
         with pytest.raises(ValueError):
             bbh.load_transfer_parameters(path)
+
+
+def test_egnn_fp32_is_required_by_config_validation():
+    """A20: formal EGNN training is FP32; amp must be explicitly false."""
+    import inspect
+    from nanoqc.model import train_egnn_pruning
+    from nanoqc.pipeline import stages_training
+
+    config = yaml.safe_load((REPO / "configs" / "full_experiment_config.yaml").read_text(encoding="utf-8"))
+    assert config["egnn_train"]["amp"] is False
+    full._validate_scientific_config(copy.deepcopy(config))
+    for bad in (True, "false", 0, None):
+        broken = copy.deepcopy(config)
+        broken["egnn_train"]["amp"] = bad
+        with pytest.raises(ValueError, match="egnn_train.amp must be explicitly false"):
+            full._validate_scientific_config(broken)
+    missing = copy.deepcopy(config)
+    del missing["egnn_train"]["amp"]
+    with pytest.raises(ValueError, match="<missing>"):
+        full._validate_scientific_config(missing)
+    # Neither the stage nor the standalone trainer falls back to FP16.
+    assert 'cfg.get("amp", False) is True' in inspect.getsource(stages_training.TrainingStagesMixin)
+    assert train_egnn_pruning._parser().parse_args(
+        ["--data-dir", "x", "--checkpoint-dir", "y"]).amp is False
