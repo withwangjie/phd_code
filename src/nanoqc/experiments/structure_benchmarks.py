@@ -22,7 +22,14 @@ from nanoqc.experiments.benchmark_common import SHARED_HELPER_MODULES
 from nanoqc.common.device_errors import raise_if_resource_error
 from nanoqc.common.seed_streams import derive_child_seed
 from nanoqc.experiments.research_ablation import _ablation_classical_counts, _ablation_summarize
-from nanoqc.structure.physical_quality import StructureQualityError, generated_input_geometry_audit
+from nanoqc.common.device_errors import raise_if_resource_error
+from nanoqc.common.seed_streams import derive_child_seed
+from nanoqc.experiments.research_ablation import _ablation_classical_counts, _ablation_summarize
+from nanoqc.structure.physical_quality import (
+    DEFAULT_MAX_PERTURBATION_ATTEMPTS,
+    StructureQualityError,
+    generated_input_geometry_audit,
+)
 
 
 def _qualified_perturbation(generator, seed: int, mode: str, minimum: float,
@@ -45,6 +52,7 @@ def _qualified_perturbation(generator, seed: int, mode: str, minimum: float,
     raise StructureQualityError(
         f"No geometry-qualified generated input in {max_attempts} fixed attempts",
         category="generated_input_geometry", audit=dict(seed=seed, attempts=attempts))
+
 
 
 def _structure_quality_assessment(relaxation: dict) -> dict:
@@ -449,8 +457,15 @@ def _recovery_benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--solvent-model",choices=("vacuum","gbn2"),default="vacuum")
     parser.add_argument("--min-perturb-degrees",type=float,default=40.)
     parser.add_argument("--max-perturb-degrees",type=float,default=120.)
-    parser.add_argument("--perturbation-max-attempts",type=int,default=32,
+    parser.add_argument("--perturbation-max-attempts", "--max-perturbation-attempts",
+        dest="perturbation_max_attempts", type=int,
+        default=DEFAULT_MAX_PERTURBATION_ATTEMPTS,
         help="Fixed upper bound for geometry-only generated-input draws per seed")
+    # A44: generated inputs meet the A24 inter-residue heavy-atom floor (the
+    # orchestrator passes data_audit.min_interresidue_heavy_distance_angstrom)
+    # and the all-atom near-coincidence floor; invalid draws are redrawn.
+    parser.add_argument("--min-input-heavy-distance", type=float, default=1.0)
+
     parser.add_argument("--outputs",type=int,default=1000)
     parser.add_argument("--max-evals",type=int,default=90)
     parser.add_argument("--qaoa-depth",type=int,default=2)
@@ -472,8 +487,13 @@ def _recovery_benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
         parser.error("--measurement-seeds must match --seeds length")
     if not 0<args.min_perturb_degrees<=args.max_perturb_degrees<=180:
         parser.error("Invalid perturbation angle range")
+    if not 0 < args.min_perturb_degrees <= args.max_perturb_degrees <= 180:
+        parser.error("Invalid perturbation angle range")
     if args.perturbation_max_attempts < 1:
         parser.error("--perturbation-max-attempts must be positive")
+    if not 0 < args.min_input_heavy_distance <= 1.0:
+        parser.error("Require 0 < --min-input-heavy-distance <= 1.0")
+
     if min(args.outputs,args.max_evals,args.sa_passes,args.qaoa_depth)<=0 or args.relax_iterations<0:
         parser.error("Invalid solver budgets")
     manifest=args.manifest.resolve();case=json.loads(manifest.read_text())
@@ -524,26 +544,38 @@ def _recovery_benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
                             raise ValueError("Generated-input geometry ledger changed or missing")
                     else:
                         try:
-                            positions,angles,attempts=_qualified_perturbation(
-                                generator,seed,args.perturbation_mode,
-                                args.min_perturb_degrees,args.max_perturb_degrees,
+                            positions, angles, attempts = _qualified_perturbation(
+                                generator, seed, args.perturbation_mode,
+                                args.min_perturb_degrees, args.max_perturb_degrees,
                                 args.perturbation_max_attempts)
                         except StructureQualityError as exc:
-                            _ablation_atomic_json(attempts_path,exc.audit)
+                            _ablation_atomic_json(attempts_path, exc.audit)
                             raise
-                        _ablation_atomic_json(attempts_path,dict(
-                            seed=seed,selected_attempt=attempts[-1]["attempt"],
-                            max_attempts=args.perturbation_max_attempts,attempts=attempts))
-                        perturb_protocol=(
-                            f"retrospective {args.perturbation_mode} recovery; first deterministic "
-                            "perturbation satisfying the existing A24/A28 absolute-distance floors; "
+                        _ablation_atomic_json(attempts_path, dict(
+                            seed=seed,
+                            selected_attempt=attempts[-1]["attempt"],
+                            max_attempts=args.perturbation_max_attempts,
+                            attempts=attempts,
+                            min_input_heavy_distance_angstrom=args.min_input_heavy_distance))
+                        perturb_protocol = (
+                            "retrospective "
+                            + ("multi-chi" if args.perturbation_mode == "multi_chi" else "chi1-only")
+                            + " recovery; first deterministic perturbation satisfying the existing "
+                            "A24/A28 absolute-distance floors and the all-atom near-coincidence floor; "
                             "no energy/reference/solver-based selection")
-                        generator.write_structure(positions,perturbed)
-                        _ablation_atomic_json(metadata,dict(
-                            seed=seed,angles=angles,structure_sha256=_ablation_digest(perturbed),
+                        generator.write_structure(positions, perturbed)
+                        _ablation_atomic_json(metadata, dict(
+                            seed=seed, angles=angles, structure_sha256=_ablation_digest(perturbed),
                             attempts_sha256=_ablation_digest(attempts_path),
                             selected_attempt=attempts[-1]["attempt"],
-                            perturbation_mode=args.perturbation_mode,protocol=perturb_protocol))
+                            perturbation_mode=args.perturbation_mode,
+                            protocol=perturb_protocol,
+                            input_validity=dict(
+                                min_interresidue_heavy_distance_angstrom=args.min_input_heavy_distance,
+                                attempts=attempts,
+                            ),
+                        ))
+
                     child_case=dict(input_structure=str(perturbed),reference_structure=str(native),
                         cdr3_residues=case.get('cdr3_residues',[]),pruning=case.get('pruning'),
                         candidate_relax_iterations=int(case.get("candidate_relax_iterations",0)),

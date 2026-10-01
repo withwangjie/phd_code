@@ -186,3 +186,115 @@ def relaxation_force_audit(forces_kj_mol_nm: np.ndarray, movable: set[int], *,
                 movable_force_rms_kj_mol_nm=rms, movable_force_max_kj_mol_nm=maximum,
                 force_tolerance_kj_mol_nm=RELAX_FORCE_TOLERANCE_KJ_MOL_NM,
                 convergence_definition="RMS of force components on movable atoms; frozen forces excluded")
+
+
+# ---------------------------------------------------------------------------
+# Generated recovery inputs (A44)
+# ---------------------------------------------------------------------------
+# Perturbing every chi of every Active residue by a random signed angle can
+# drive side chains into one another. Such an input is physically impossible,
+# so the relax-only control started from it cannot converge, while solver
+# methods (which rebuild Active side chains from the screened rotamer library)
+# never inherit it. A generated input must therefore meet the same validity
+# criteria the protocol already applies elsewhere: the A24 inter-residue
+# heavy-atom floor that deposited inputs pass, and the all-atom near-coincidence
+# floor that outputs and candidates pass. Neither looks at the reference
+# structure or ranks by energy.
+DEFAULT_MAX_PERTURBATION_ATTEMPTS = 1000
+
+
+def interresidue_heavy_floor_audit(topology, positions_nm: np.ndarray,
+                                   floor_angstrom: float) -> dict:
+    """Heavy-atom pairs on distinct residues closer than ``floor_angstrom``.
+
+    Same definition as the A24 data-audit screen
+    (``audit_all_datasets.interresidue_heavy_overlap``): protein heavy atoms,
+    pairs owned by different (chain, residue), no bonded exclusion, absolute
+    distance.
+    """
+    floor = float(floor_angstrom)
+    if not np.isfinite(floor) or not 0 < floor <= 1.0:
+        raise ValueError("inter-residue heavy-atom floor must be in (0, 1.0] A")
+    atoms = list(topology.atoms())
+    xyz = np.asarray(positions_nm, dtype=float) * 10.0
+    if xyz.shape != (len(atoms), 3) or not np.isfinite(xyz).all():
+        raise ValueError("Generated input positions are malformed or nonfinite")
+    heavy = [i for i, atom in enumerate(atoms)
+             if atom.element is not None and atom.element.symbol != "H"]
+    owners = {i: (atoms[i].residue.chain.index, atoms[i].residue.index) for i in heavy}
+    labels = {i: f"{atoms[i].residue.chain.id}:{atoms[i].residue.id}:"
+                 f"{atoms[i].residue.name}:{atoms[i].name}" for i in heavy}
+    count = 0
+    nearest = None
+    closest = None
+    if len(heavy) >= 2:
+        coordinates = xyz[heavy]
+        for a, b in cKDTree(coordinates).query_pairs(floor, output_type="ndarray"):
+            i, j = heavy[int(a)], heavy[int(b)]
+            if owners[i] == owners[j]:
+                continue
+            distance = float(np.linalg.norm(xyz[i] - xyz[j]))
+            if distance >= floor:
+                continue
+            count += 1
+            if nearest is None or distance < nearest:
+                nearest, closest = distance, [labels[i], labels[j]]
+    return dict(floor_angstrom=floor, count=count,
+                minimum_distance_angstrom=nearest, closest_pair=closest,
+                definition="A24 protein heavy atoms on distinct residues; absolute distance")
+
+
+def generated_input_validity(topology, positions_nm: np.ndarray, *,
+                             heavy_floor_angstrom: float) -> dict:
+    """Whether a generated recovery input is physically possible (A44)."""
+    geometry = topology_geometry_audit(topology, positions_nm)
+    heavy = interresidue_heavy_floor_audit(topology, positions_nm, heavy_floor_angstrom)
+    reasons = []
+    if not geometry["topology_passed"]:
+        reasons.append("peptide_topology")
+    if not geometry["geometry_passed"]:
+        reasons.append("extreme_nonbonded_overlap")
+    if heavy["count"]:
+        reasons.append("interresidue_heavy_atom_floor")
+    return dict(valid=not reasons, reasons=reasons,
+                extreme_nonbonded_pair_count=geometry["extreme_nonbonded_pair_count"],
+                closest_nonbonded_pair=geometry["closest_nonbonded_pair"],
+                interresidue_heavy=heavy)
+
+
+def sample_valid_input(draw, validity, seed: int, *,
+                       max_attempts: int = DEFAULT_MAX_PERTURBATION_ATTEMPTS):
+    """Rejection-sample ``draw(rng)`` until ``validity(positions)['valid']`` (A44).
+
+    One generator seeded with ``seed`` serves every attempt, so attempt 0
+    consumes exactly the draws a single unconditioned perturbation consumed:
+    a seed whose first draw is valid keeps its former input bit for bit. The
+    accepted input is therefore a draw from the original perturbation
+    distribution conditioned on physical validity. Every rejected attempt is
+    returned for the record. Raises :class:`StructureQualityError` (category
+    ``generated_input``) if no attempt is valid.
+    """
+    if int(max_attempts) < 1:
+        raise ValueError("max_attempts must be positive")
+    rng = np.random.default_rng(seed)
+    rejected = []
+    for attempt in range(int(max_attempts)):
+        positions, records = draw(rng)
+        check = validity(positions)
+        if check["valid"]:
+            return positions, records, dict(
+                policy="original perturbation distribution conditioned on physical validity; "
+                       "no reference-, energy- or outcome-based criterion",
+                seed=int(seed), accepted_attempt=attempt, attempts=attempt + 1,
+                max_attempts=int(max_attempts), accepted_validity=check,
+                rejected_attempts=rejected)
+        rejected.append(dict(attempt=attempt, reasons=check["reasons"],
+                             closest_nonbonded_pair=check["closest_nonbonded_pair"],
+                             interresidue_heavy_minimum_angstrom=
+                             check["interresidue_heavy"]["minimum_distance_angstrom"],
+                             interresidue_heavy_closest_pair=check["interresidue_heavy"]["closest_pair"]))
+    raise StructureQualityError(
+        f"No physically valid perturbed input in {max_attempts} draws from seed {seed}",
+        category="generated_input",
+        audit=dict(seed=int(seed), max_attempts=int(max_attempts), rejected_attempts=rejected[-20:],
+                   rejected_count=len(rejected)))

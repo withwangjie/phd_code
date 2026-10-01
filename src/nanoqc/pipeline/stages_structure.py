@@ -56,6 +56,9 @@ class StructureStagesMixin:
                 "--solvent-model", str(cfg.get("solvent_model", "vacuum")),
                 "--min-perturb-degrees", str(cfg.get("min_perturb_degrees", 40.0)),
                 "--max-perturb-degrees", str(cfg.get("max_perturb_degrees", 120.0)),
+                # A44: the same floor deposited inputs pass in data_audit (A24).
+                "--min-input-heavy-distance", str((self.config.get("data_audit", {}) or {}).get(
+                    "min_interresidue_heavy_distance_angstrom", 1.0)),
                 "--relax-iterations", str(cfg.get("relax_iterations", 200)),
                 "--candidate-relax-iterations", str(cfg.get("candidate_relax_iterations", 100)),
                 "--antigen-guidance-weight", str(cfg.get("antigen_guidance_weight", 0.25)),
@@ -397,6 +400,8 @@ class StructureStagesMixin:
                     "--perturbation-max-attempts",str(cfg.get("perturbation_max_attempts",32)),
                     "--min-perturb-degrees",str(cfg.get("min_perturb_degrees",40.0)),
                     "--max-perturb-degrees",str(cfg.get("max_perturb_degrees",120.0)),
+                    "--min-input-heavy-distance",str((self.config.get("data_audit",{}) or {}).get(
+                        "min_interresidue_heavy_distance_angstrom",1.0)),
                     "--outputs",str(qprimary.get("output_shots",1000)),
                     "--max-evals",str(qprimary.get("max_evals",90)),
                     "--sa-passes",str(cfg.get("sa_passes",100)),
