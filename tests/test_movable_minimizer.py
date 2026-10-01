@@ -2,6 +2,7 @@
 
 import numpy as np
 import openmm as mm
+from types import SimpleNamespace
 from openmm import unit
 
 from nanoqc.qubo.allatom_qubo import (
@@ -105,3 +106,87 @@ def test_minimizer_does_not_jump_into_an_unscreened_coulomb_singularity() -> Non
         assert abs(final[1, 0] - well_x) > 0.4, "collapsed into the singular well"
         assert abs(final[1, 0]) < 0.01, "should stop at the tethered physical minimum"
         assert record["minimizer_force_verified_success"]
+
+
+class _SaturatingState:
+    def __init__(self, state, limit):
+        self.state, self.limit = state, limit
+
+    def getPotentialEnergy(self):
+        return self.state.getPotentialEnergy()
+
+    def getForces(self, asNumpy=True):
+        forces = self.state.getForces(asNumpy=True)
+        # Fixed-point accumulation with 32 fractional bits: sums past 2**31
+        # wrap around in two's complement.
+        exact = forces.value_in_unit(unit.kilojoules_per_mole / unit.nanometer)
+        values = np.mod(exact + self.limit, 2 * self.limit) - self.limit
+        return values * (unit.kilojoules_per_mole / unit.nanometer)
+
+
+class _SaturatingPlatformContext:
+    """Stands in for a GPU context whose fixed-point force accumulator saturates."""
+
+    def __init__(self, context, limit):
+        self.context, self.limit = context, limit
+
+    def setPositions(self, positions):
+        self.context.setPositions(positions)
+
+    def getState(self, **kwargs):
+        return _SaturatingState(self.context.getState(**kwargs), self.limit)
+
+    def getSystem(self):
+        return self.context.getSystem()
+
+    def getPlatform(self):
+        return SimpleNamespace(getName=lambda: "CUDA")
+
+
+def _lennard_jones_pair(separation_nm: float):
+    """A frozen and a movable atom with only a Lennard-Jones interaction."""
+    system = mm.System()
+    system.addParticle(0.0)
+    system.addParticle(12.0)
+    force = mm.NonbondedForce()
+    force.setNonbondedMethod(mm.NonbondedForce.NoCutoff)
+    for _ in range(2):
+        force.addParticle(0.0, 0.3, 0.5)
+    system.addForce(force)
+    real = mm.Context(system, mm.VerletIntegrator(0.001), mm.Platform.getPlatformByName("Reference"))
+    start = np.array([[0.0, 0.0, 0.0], [separation_nm, 0.0, 0.0]])
+    return real, start
+
+
+def test_overlap_forces_are_recomputed_on_the_reference_platform() -> None:
+    """A46: a GPU fixed-point accumulator wraps above 2**31 kJ/mol/nm."""
+    from nanoqc.qubo import allatom_qubo
+    limit = allatom_qubo.FIXED_POINT_FORCE_LIMIT_KJ_MOL_NM
+    real, start = _lennard_jones_pair(0.05)        # force about 1e12 kJ/mol/nm
+    final, record = _minimize_movable_positions(
+        _SaturatingPlatformContext(real, limit), start, {1}, 1000, unit)
+    assert record["minimizer_reference_platform_evaluations"] > 0
+    assert record["minimizer_force_verified_success"]
+    assert 0.3 < final[1, 0] < 0.4      # near the Lennard-Jones minimum at 0.337 nm
+    assert np.array_equal(final[0], start[0])
+
+
+def test_wrapped_forces_break_the_minimizer_without_the_reference_check(monkeypatch) -> None:
+    from nanoqc.qubo import allatom_qubo
+    monkeypatch.setattr(allatom_qubo._ExactForces, "needs_reference", lambda self, positions: False)
+    real, start = _lennard_jones_pair(0.05)
+    _, record = _minimize_movable_positions(
+        _SaturatingPlatformContext(real, allatom_qubo.FIXED_POINT_FORCE_LIMIT_KJ_MOL_NM),
+        start, {1}, 1000, unit)
+    assert not record["minimizer_force_verified_success"]
+
+
+def test_well_separated_atoms_keep_the_gpu_result() -> None:
+    from nanoqc.qubo import allatom_qubo
+    real, start = _lennard_jones_pair(0.6)
+    exact = allatom_qubo._ExactForces(
+        _SaturatingPlatformContext(real, allatom_qubo.FIXED_POINT_FORCE_LIMIT_KJ_MOL_NM), {1})
+    # sigma 0.3 nm, epsilon 0.5 kJ/mol: 48*0.5*0.3**12/(2**31/64) to the 1/13.
+    assert abs(exact.safe_distance_nm - (48 * 0.5 * 0.3 ** 12 / (2 ** 31 / 64)) ** (1 / 13)) < 1e-12
+    assert not exact.needs_reference(start)
+    assert exact.needs_reference(np.array([[0.0, 0.0, 0.0], [0.9 * exact.safe_distance_nm, 0, 0]]))

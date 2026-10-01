@@ -78,6 +78,19 @@ def _run_seed(seed_dir: str, out_dir: str) -> dict:
         rotamer_probability_floor=float(rotamer.get("probability_floor", 1e-4)),
         rotamer_sigma_offsets=rotamer.get("sigma_offsets", [-1.0, 0.0, 1.0]),
         solvent_model=arguments.get("solvent_model", "vacuum"))
+    # Direct check of GPU fixed-point force saturation (A46) on the input.
+    import openmm as mm
+    from openmm import unit
+    reference = mm.Context(builder.system, mm.VerletIntegrator(0.001),
+                           mm.Platform.getPlatformByName("Reference"))
+    movable = sorted(builder.movable)
+    platform_forces = {}
+    for name, context in (("platform", builder.context), ("reference", reference)):
+        context.setPositions(builder.base_positions * unit.nanometer)
+        forces = context.getState(getForces=True).getForces(asNumpy=True).value_in_unit(
+            unit.kilojoules_per_mole / unit.nanometer)
+        platform_forces[name] = float(abs(forces[movable]).max())
+    del reference
     path = out / "relax_only.cif"
     relax = builder.relax_positions(builder.base_positions, path,
                                     minimize_iterations=int(arguments["relax_iterations"]))
@@ -97,6 +110,8 @@ def _run_seed(seed_dir: str, out_dir: str) -> dict:
                   stop_reason=relax.get("minimizer_stop_reason"),
                   iterations=relax.get("minimizer_iterations"),
                   minimizer=relax.get("minimizer"), device=_DEVICE,
+                  reference_evaluations=relax.get("minimizer_reference_platform_evaluations"),
+                  input_max_force_component=platform_forces,
                   seconds=round(time.time() - started, 1))
     (out / "relax_only_result.json").write_text(json.dumps(dict(relaxation=relax, **quality),
                                                            indent=2, default=str))
@@ -199,7 +214,10 @@ def main(argv=None) -> int:
                           f"{new['status']} rms={new['force_rms']:.3g} "
                           f"closest {before.get('distance_angstrom', float('nan')):.2f}->"
                           f"{pair.get('distance_angstrom', float('nan')):.2f}A "
-                          f"iters={new['iterations']} {new['seconds']}s gpu{new['device']}")
+                          f"iters={new['iterations']} ref_evals={new['reference_evaluations']} "
+                          f"input max|F| gpu={new['input_max_force_component']['platform']:.3g} "
+                          f"ref={new['input_max_force_component']['reference']:.3g} "
+                          f"{new['seconds']}s gpu{new['device']}")
                 print(f"[{finished}/{len(todo)}] {row['seed']:<16} {row['outcome']:<14} {detail} | "
                       f"elapsed {_fmt(elapsed)} eta {_fmt(eta)}", flush=True)
 

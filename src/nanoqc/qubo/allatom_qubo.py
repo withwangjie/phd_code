@@ -36,6 +36,87 @@ MINIMIZER_MAX_ATOM_STEP_NM = 0.03
 MINIMIZER_HISTORY = 10
 _ARMIJO = 1e-4
 _MAX_BACKTRACKS = 40
+# OpenMM's GPU platforms accumulate forces in 64-bit fixed point with 32
+# fractional bits, so a force component above 2**31 kJ/mol/nm saturates or
+# wraps around, and the returned gradient no longer matches the energy; a
+# wrapped value can even look small. A carbon 0.5 A from a hydrogen exceeds
+# the limit. Whether that can happen is decided from geometry, not from the
+# GPU's own (possibly wrapped) output: if any interacting pair with a movable
+# atom is closer than the distance at which the strongest Lennard-Jones pair
+# of the System reaches 1/64 of the limit, energy and forces are recomputed on
+# the double-precision Reference platform from the same System. Otherwise the
+# GPU result is used unchanged.
+FIXED_POINT_FORCE_LIMIT_KJ_MOL_NM = 2.0 ** 31
+_PAIR_FORCE_BUDGET = FIXED_POINT_FORCE_LIMIT_KJ_MOL_NM / 64
+
+
+class _ExactForces:
+    """Energy and forces at given positions, exact even under severe overlaps."""
+
+    def __init__(self, context: Any, movable: set[int]) -> None:
+        import openmm as mm
+        from scipy.spatial import cKDTree
+        self._mm, self._tree = mm, cKDTree
+        self.context = context
+        self.movable = np.asarray(sorted(movable), dtype=np.int64)
+        self.reference = None
+        self.reference_evaluations = 0
+        self.guarded = context.getPlatform().getName() not in ("Reference", "CPU")
+        self.safe_distance_nm = None
+        self.excluded: set[tuple[int, int]] = set()
+        if not self.guarded:
+            return
+        nonbonded = [f for f in context.getSystem().getForces() if isinstance(f, mm.NonbondedForce)]
+        if len(nonbonded) != 1:
+            self.safe_distance_nm = float("inf")   # unknown pair potential: always exact
+            return
+        force = nonbonded[0]
+        nm, kj = mm.unit.nanometer, mm.unit.kilojoule_per_mole
+        # Strength of the r^-12 wall, epsilon*sigma^12, maximized over the
+        # pairs that interact: Lorentz-Berthelot combinations of the particle
+        # types, and the explicit parameters of every nonzero exception.
+        types = {(force.getParticleParameters(i)[1].value_in_unit(nm),
+                  force.getParticleParameters(i)[2].value_in_unit(kj))
+                 for i in range(force.getNumParticles())}
+        strength = max((math.sqrt(e1 * e2) * ((s1 + s2) / 2) ** 12
+                        for s1, e1 in types for s2, e2 in types), default=0.0)
+        for index in range(force.getNumExceptions()):
+            i, j, charge, s, e = force.getExceptionParameters(index)
+            epsilon = e.value_in_unit(kj)
+            if charge.value_in_unit(mm.unit.elementary_charge ** 2) == 0.0 and epsilon == 0.0:
+                self.excluded.add((min(i, j), max(i, j)))
+            else:
+                strength = max(strength, epsilon * s.value_in_unit(nm) ** 12)
+        # |F_LJ(r)| <= 48 epsilon sigma^12 / r^13 for every interacting pair.
+        self.safe_distance_nm = float((48.0 * strength / _PAIR_FORCE_BUDGET) ** (1 / 13))
+
+    def needs_reference(self, positions_nm: np.ndarray) -> bool:
+        if not self.guarded:
+            return False
+        if not np.isfinite(self.safe_distance_nm):
+            return True
+        tree = self._tree(positions_nm)
+        for i, neighbours in zip(self.movable, tree.query_ball_point(
+                positions_nm[self.movable], self.safe_distance_nm)):
+            for j in neighbours:
+                if j != i and (min(i, j), max(i, j)) not in self.excluded:
+                    return True
+        return False
+
+    def __call__(self, positions_nm: np.ndarray, unit: Any) -> tuple[float, np.ndarray]:
+        target = self.context
+        if self.needs_reference(positions_nm):
+            if self.reference is None:
+                mm = self._mm
+                self.reference = mm.Context(self.context.getSystem(), mm.VerletIntegrator(0.001),
+                                            mm.Platform.getPlatformByName("Reference"))
+            target = self.reference
+            self.reference_evaluations += 1
+        target.setPositions(positions_nm * unit.nanometer)
+        state = target.getState(getEnergy=True, getForces=True)
+        return (float(state.getPotentialEnergy().value_in_unit(unit.kilojoules_per_mole)),
+                np.asarray(state.getForces(asNumpy=True).value_in_unit(
+                    unit.kilojoules_per_mole / unit.nanometer), dtype=np.float64))
 
 
 def _capped_lbfgs(objective, x0: np.ndarray, *, max_iterations: int, max_atom_step: float,
@@ -127,14 +208,12 @@ def _minimize_movable_positions(context: Any, positions: np.ndarray,
     if indices[0] < 0 or indices[-1] >= len(start):
         raise ValueError("Movable atom index outside topology")
 
+    exact = _ExactForces(context, movable)
+
     def objective(flat: np.ndarray) -> tuple[float, np.ndarray]:
         current = start.copy()
         current[indices] = flat.reshape(-1, 3)
-        context.setPositions(current * unit.nanometer)
-        state = context.getState(getEnergy=True, getForces=True)
-        energy = float(state.getPotentialEnergy().value_in_unit(unit.kilojoules_per_mole))
-        forces = np.asarray(state.getForces(asNumpy=True).value_in_unit(
-            unit.kilojoules_per_mole / unit.nanometer), dtype=np.float64)
+        energy, forces = exact(current, unit)
         gradient = -forces[indices].ravel()
         if not math.isfinite(energy) or not np.isfinite(gradient).all():
             raise FloatingPointError("Nonfinite energy or force during movable minimization")
@@ -161,7 +240,9 @@ def _minimize_movable_positions(context: Any, positions: np.ndarray,
                        minimizer_stop_reason=result["stop"],
                        minimizer_reported_success=converged,
                        minimizer_force_verified_success=converged,
-                       minimizer_restart_count=result["history_resets"])
+                       minimizer_restart_count=result["history_resets"],
+                       minimizer_reference_platform_evaluations=exact.reference_evaluations,
+                       minimizer_reference_distance_nm=exact.safe_distance_nm)
 
 
 def _internal_candidate_overlaps(positions: np.ndarray, atoms: Mapping[str, int],
@@ -881,11 +962,11 @@ class AllAtomInterfaceQUBOBuilder:
         after_components=self.energy_components()
         if after>before+1e-4: raise ValueError("Relaxation increased potential energy")
         self.write_structure(positions,destination)
-        force_state=self.context.getState(getForces=True)
-        force_quality=relaxation_force_audit(
-            np.asarray(force_state.getForces(asNumpy=True).value_in_unit(
-                self.unit.kilojoules_per_mole/self.unit.nanometer)),
-            self.movable, iterations=minimize_iterations)
+        audit_forces=_ExactForces(self.context,self.movable)
+        _,final_forces=audit_forces(positions,self.unit)
+        force_quality=relaxation_force_audit(final_forces,self.movable,iterations=minimize_iterations)
+        force_quality["force_audit_platform"]=("Reference" if audit_forces.reference_evaluations
+                                               else self.context.getPlatform().getName())
         after_quality=topology_geometry_audit(self.topology,positions)
         return dict(discrete_energy_kcal=before,relaxed_energy_kcal=after,
             max_iterations=minimize_iterations,frozen_atoms=len(frozen),movable_atoms=len(self.movable),
