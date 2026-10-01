@@ -22,6 +22,18 @@ from nanoqc.structure.physical_quality import (StructureQualityError, topology_g
     EXTREME_NONBONDED_FLOOR_ANGSTROM)
 
 
+# A46: per-coordinate trust region for each L-BFGS-B stage, recentred after the
+# stage. Amber14 polar hydrogens (type HO: Tyr HH, Ser HG, Thr HG1) have zero
+# Lennard-Jones repulsion, so their Coulomb attraction to an oppositely charged
+# atom is unbounded as the distance goes to zero. An unbounded first L-BFGS-B
+# step (unit length, 1 nm, along the steepest descent) can land an atom in that
+# singular basin, and the line search accepts it because the energy falls.
+# Bounding each stage keeps every step inside the basin it started in; the
+# total distance an atom may travel is still limited only by the iteration cap.
+MINIMIZER_TRUST_RADIUS_NM = 0.03
+MINIMIZER_STAGE_ITERATIONS = 50
+
+
 def _minimize_movable_positions(context: Any, positions: np.ndarray,
                                 movable: set[int], max_iterations: int,
                                 unit: Any) -> tuple[np.ndarray, dict[str, Any]]:
@@ -67,8 +79,9 @@ def _minimize_movable_positions(context: Any, positions: np.ndarray,
     force_verified_success = False
     solver_reported_success = False
     while iterations < max_iterations:
-        allowance = min(200, max_iterations - iterations)
-        result = minimize(objective, flat, jac=True, method="L-BFGS-B",
+        allowance = min(MINIMIZER_STAGE_ITERATIONS, max_iterations - iterations)
+        bounds = list(zip(flat - MINIMIZER_TRUST_RADIUS_NM, flat + MINIMIZER_TRUST_RADIUS_NM))
+        result = minimize(objective, flat, jac=True, method="L-BFGS-B", bounds=bounds,
                           options={"maxiter": allowance, "maxls": 50,
                                    "ftol": 0.0, "gtol": 1e-3})
         next_flat = np.asarray(result.x, dtype=np.float64)
@@ -80,8 +93,14 @@ def _minimize_movable_positions(context: Any, positions: np.ndarray,
         _, gradient = objective(next_flat)
         evaluations += 1
         force_rms = float(np.sqrt(np.mean(gradient ** 2)))
+        # A stage cut short by its trust region is not a converged stage: stop
+        # only once L-BFGS-B has converged inside the box, so the result is as
+        # fully relaxed as an unbounded run that did not jump.
+        lower, upper = (np.asarray(side, dtype=np.float64) for side in zip(*bounds))
+        on_boundary = bool(np.any(np.isclose(next_flat, lower, rtol=0.0, atol=1e-9)
+                                  | np.isclose(next_flat, upper, rtol=0.0, atol=1e-9)))
         flat = next_flat
-        if force_rms <= RELAX_FORCE_TOLERANCE_KJ_MOL_NM:
+        if force_rms <= RELAX_FORCE_TOLERANCE_KJ_MOL_NM and not on_boundary:
             force_verified_success = True
             break
         # An optimizer can terminate with zero iterations when its line search
@@ -93,7 +112,9 @@ def _minimize_movable_positions(context: Any, positions: np.ndarray,
     if not np.isfinite(final).all():
         raise FloatingPointError("Nonfinite coordinates after movable minimization")
     context.setPositions(final * unit.nanometer)
-    return final, dict(minimizer="scipy_lbfgsb_exact_movable",
+    return final, dict(minimizer="scipy_lbfgsb_exact_movable_trust_region",
+                       minimizer_trust_radius_nm=MINIMIZER_TRUST_RADIUS_NM,
+                       minimizer_stage_iterations=MINIMIZER_STAGE_ITERATIONS,
                        minimizer_iterations=iterations,
                        minimizer_evaluations=evaluations,
                        minimizer_stop_reason="; ".join(stops),
