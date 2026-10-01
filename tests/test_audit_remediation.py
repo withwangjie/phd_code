@@ -227,7 +227,7 @@ def _minimal_scientific_config() -> Dict[str, Any]:
             },
             "validation_queue": {"sites": 6},
         },
-        "egnn_train": {},
+        "egnn_train": {"amp": False},  # A20: formal EGNN training is FP32
         "qc_benchmark": {
             "active_sites": [6],
             "antigen_guidance_weight": 0.25,
