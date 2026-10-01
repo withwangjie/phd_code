@@ -120,8 +120,7 @@ def test_recovery_seed_fault_aborts_without_failed_seed_summary(tmp_path,monkeyp
         input_quality={"geometry_passed":True}
         preparation_quality={}
         def __init__(self,*a,**k):pass
-        # A44: recovery inputs are drawn through perturb_valid_input.
-        def perturb_valid_input(self,*a,**k):raise RuntimeError("CUDA out of memory")
+        def perturb_sidechain_chis(self,*a):raise RuntimeError("CUDA out of memory")
     from nanoqc.qubo import subgraph_to_qubo
     monkeypatch.setattr(subgraph_to_qubo,"AllAtomInterfaceQUBOBuilder",Builder)
     out=tmp_path/"recovery"

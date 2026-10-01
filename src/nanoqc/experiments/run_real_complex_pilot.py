@@ -493,7 +493,7 @@ def main(argv=None) -> int:
     parser.add_argument("--min-perturb-degrees",type=float,default=40.0)
     parser.add_argument("--max-perturb-degrees",type=float,default=120.0)
     parser.add_argument("--min-input-heavy-distance",type=float,default=1.0,
-        help="A44: generated recovery inputs must meet this A24 inter-residue heavy-atom floor")
+        help="A45: generated recovery inputs must meet this A24 inter-residue heavy-atom floor")
     parser.add_argument("--outputs", type=int, default=1000)
     parser.add_argument("--max-evals", type=int, default=90)
     parser.add_argument("--qaoa-depth", type=int, default=2)

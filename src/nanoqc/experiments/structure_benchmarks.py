@@ -22,9 +22,6 @@ from nanoqc.experiments.benchmark_common import SHARED_HELPER_MODULES
 from nanoqc.common.device_errors import raise_if_resource_error
 from nanoqc.common.seed_streams import derive_child_seed
 from nanoqc.experiments.research_ablation import _ablation_classical_counts, _ablation_summarize
-from nanoqc.common.device_errors import raise_if_resource_error
-from nanoqc.common.seed_streams import derive_child_seed
-from nanoqc.experiments.research_ablation import _ablation_classical_counts, _ablation_summarize
 from nanoqc.structure.physical_quality import (
     DEFAULT_MAX_PERTURBATION_ATTEMPTS,
     StructureQualityError,
@@ -33,7 +30,7 @@ from nanoqc.structure.physical_quality import (
 
 
 def _qualified_perturbation(generator, seed: int, mode: str, minimum: float,
-                            maximum: float, max_attempts: int):
+                            maximum: float, max_attempts: int, *, heavy_floor_angstrom: float):
     """Take the first geometry-valid draw without inspecting energy or reference."""
     if max_attempts < 1 or mode not in ("multi_chi", "chi1"):
         raise ValueError("Invalid generated-input perturbation protocol")
@@ -45,7 +42,8 @@ def _qualified_perturbation(generator, seed: int, mode: str, minimum: float,
             positions, angles = generator.perturb_sidechain_chis(draw_seed, minimum, maximum)
         else:
             positions, angles = generator.perturb_chi1(draw_seed, minimum, maximum)
-        quality = generated_input_geometry_audit(generator.topology, positions)
+        quality = generated_input_geometry_audit(
+            generator.topology, positions, heavy_floor_angstrom=heavy_floor_angstrom)
         attempts.append(dict(attempt=index, draw_seed=draw_seed, angles=angles, quality=quality))
         if quality["accepted"]:
             return positions, angles, attempts
@@ -461,9 +459,8 @@ def _recovery_benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
         dest="perturbation_max_attempts", type=int,
         default=DEFAULT_MAX_PERTURBATION_ATTEMPTS,
         help="Fixed upper bound for geometry-only generated-input draws per seed")
-    # A44: generated inputs meet the A24 inter-residue heavy-atom floor (the
-    # orchestrator passes data_audit.min_interresidue_heavy_distance_angstrom)
-    # and the all-atom near-coincidence floor; invalid draws are redrawn.
+    # A45: the configured A24 data-audit floor (the orchestrator passes
+    # data_audit.min_interresidue_heavy_distance_angstrom) applied to generated inputs.
     parser.add_argument("--min-input-heavy-distance", type=float, default=1.0)
 
     parser.add_argument("--outputs",type=int,default=1000)
@@ -547,7 +544,8 @@ def _recovery_benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
                             positions, angles, attempts = _qualified_perturbation(
                                 generator, seed, args.perturbation_mode,
                                 args.min_perturb_degrees, args.max_perturb_degrees,
-                                args.perturbation_max_attempts)
+                                args.perturbation_max_attempts,
+                                heavy_floor_angstrom=args.min_input_heavy_distance)
                         except StructureQualityError as exc:
                             _ablation_atomic_json(attempts_path, exc.audit)
                             raise

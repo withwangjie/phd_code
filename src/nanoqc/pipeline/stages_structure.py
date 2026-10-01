@@ -56,7 +56,7 @@ class StructureStagesMixin:
                 "--solvent-model", str(cfg.get("solvent_model", "vacuum")),
                 "--min-perturb-degrees", str(cfg.get("min_perturb_degrees", 40.0)),
                 "--max-perturb-degrees", str(cfg.get("max_perturb_degrees", 120.0)),
-                # A44: the same floor deposited inputs pass in data_audit (A24).
+                # A45: the same floor deposited inputs pass in data_audit (A24).
                 "--min-input-heavy-distance", str((self.config.get("data_audit", {}) or {}).get(
                     "min_interresidue_heavy_distance_angstrom", 1.0)),
                 "--relax-iterations", str(cfg.get("relax_iterations", 200)),
