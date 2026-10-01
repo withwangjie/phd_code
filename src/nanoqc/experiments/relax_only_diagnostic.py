@@ -90,6 +90,10 @@ def _run_seed(seed_dir: str, out_dir: str) -> dict:
                   force_rms=quality["movable_force_rms_kj_mol_nm"],
                   force_max=quality["movable_force_max_kj_mol_nm"],
                   closest_pair=geometry.get("closest_nonbonded_pair"),
+                  # Input after hydrogen addition: tells an overlap the input
+                  # carried apart from one the relaxation created.
+                  closest_pair_before=relax["physical_quality_before"].get("closest_nonbonded_pair"),
+                  overlaps_before=relax["physical_quality_before"].get("extreme_nonbonded_pair_count"),
                   stop_reason=relax.get("minimizer_stop_reason"),
                   iterations=relax.get("minimizer_iterations"),
                   minimizer=relax.get("minimizer"), device=_DEVICE,
@@ -190,9 +194,11 @@ def main(argv=None) -> int:
                 elapsed = time.time() - started
                 eta = elapsed / finished * (len(todo) - finished)
                 pair = (new.get("closest_pair") or {})
+                before = (new.get("closest_pair_before") or {})
                 detail = (new["error"] if "error" in new else
                           f"{new['status']} rms={new['force_rms']:.3g} "
-                          f"closest={pair.get('distance_angstrom', float('nan')):.2f}A "
+                          f"closest {before.get('distance_angstrom', float('nan')):.2f}->"
+                          f"{pair.get('distance_angstrom', float('nan')):.2f}A "
                           f"iters={new['iterations']} {new['seconds']}s gpu{new['device']}")
                 print(f"[{finished}/{len(todo)}] {row['seed']:<16} {row['outcome']:<14} {detail} | "
                       f"elapsed {_fmt(elapsed)} eta {_fmt(eta)}", flush=True)
@@ -205,8 +211,9 @@ def main(argv=None) -> int:
     for row in rows:
         if row["outcome"] in ("still_failing", "regressed", "error"):
             new = row["new"]
-            print(f"  {row['outcome']:<14} {row['seed']:<16} "
-                  f"{new.get('error') or new['reasons']} closest={new.get('closest_pair')}")
+            print(f"  {row['outcome']:<14} {row['seed']:<16} {new.get('error') or new['reasons']}\n"
+                  f"      input closest={new.get('closest_pair_before')}\n"
+                  f"      final closest={new.get('closest_pair')}")
     (out / "summary.json").write_text(json.dumps(dict(counts=counts, rows=rows), indent=2, default=str))
     print(f"Ledger: {ledger}")
     return 1 if any(r["outcome"] in ("still_failing", "regressed", "error") for r in rows) else 0

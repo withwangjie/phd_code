@@ -22,16 +22,90 @@ from nanoqc.structure.physical_quality import (StructureQualityError, topology_g
     EXTREME_NONBONDED_FLOOR_ANGSTROM)
 
 
-# A46: per-coordinate trust region for each L-BFGS-B stage, recentred after the
-# stage. Amber14 polar hydrogens (type HO: Tyr HH, Ser HG, Thr HG1) have zero
-# Lennard-Jones repulsion, so their Coulomb attraction to an oppositely charged
-# atom is unbounded as the distance goes to zero. An unbounded first L-BFGS-B
-# step (unit length, 1 nm, along the steepest descent) can land an atom in that
-# singular basin, and the line search accepts it because the energy falls.
-# Bounding each stage keeps every step inside the basin it started in; the
-# total distance an atom may travel is still limited only by the iteration cap.
-MINIMIZER_TRUST_RADIUS_NM = 0.03
-MINIMIZER_STAGE_ITERATIONS = 50
+# A46: L-BFGS with a per-atom step cap. Amber14 polar hydrogens (type HO: Tyr
+# HH, Ser HG, Thr HG1) have zero Lennard-Jones repulsion, so their Coulomb
+# attraction to an oppositely charged atom is unbounded as the distance goes
+# to zero. From a physical geometry that singularity lies behind a valence
+# (angle/bond) barrier, so a local descent does not reach it, but SciPy's
+# L-BFGS-B starts with a 1 nm step along the steepest descent and its line
+# search accepts any step that lowers the energy, so it can jump over the
+# barrier. Capping every iteration's displacement of each atom keeps each
+# step local; the quasi-Newton history is kept across iterations, so the total
+# distance an atom may travel is limited only by the iteration cap.
+MINIMIZER_MAX_ATOM_STEP_NM = 0.03
+MINIMIZER_HISTORY = 10
+_ARMIJO = 1e-4
+_MAX_BACKTRACKS = 40
+
+
+def _capped_lbfgs(objective, x0: np.ndarray, *, max_iterations: int, max_atom_step: float,
+                  force_tolerance: float, history: int = MINIMIZER_HISTORY,
+                  callback=None) -> dict[str, Any]:
+    """Minimize ``objective`` (energy, gradient) over flattened [atoms, 3] coordinates.
+
+    Every accepted iteration moves each atom by at most ``max_atom_step``.
+    Convergence is the exact force criterion only (gradient RMS at most
+    ``force_tolerance``); there is no relative-energy stop. A backtracking
+    failure with quasi-Newton history retries once along the steepest descent
+    before stopping.
+    """
+    x = np.asarray(x0, dtype=np.float64).copy()
+    energy, gradient = objective(x)
+    evaluations, iterations, resets = 1, 0, 0
+    pairs: list[tuple[np.ndarray, np.ndarray, float]] = []
+    stop = None
+    while True:
+        if float(np.sqrt(np.mean(gradient ** 2))) <= force_tolerance:
+            stop = "force_tolerance"
+            break
+        if iterations >= max_iterations:
+            stop = "iteration_cap"
+            break
+        direction = -gradient.copy()
+        if pairs:
+            alphas = []
+            for s, y, rho in reversed(pairs):
+                alpha = rho * float(s @ direction)
+                alphas.append(alpha)
+                direction -= alpha * y
+            s, y, _ = pairs[-1]
+            direction *= float(s @ y) / float(y @ y)
+            for (s, y, rho), alpha in zip(pairs, reversed(alphas)):
+                direction += (alpha - rho * float(y @ direction)) * s
+            if float(direction @ gradient) >= 0.0:
+                pairs.clear()
+                resets += 1
+                direction = -gradient.copy()
+        step = float(np.linalg.norm(direction.reshape(-1, 3), axis=1).max())
+        if not pairs or step > max_atom_step:
+            direction *= max_atom_step / step
+        slope = float(direction @ gradient)
+        scale = 1.0
+        for _ in range(_MAX_BACKTRACKS):
+            trial = x + scale * direction
+            trial_energy, trial_gradient = objective(trial)
+            evaluations += 1
+            if trial_energy <= energy + _ARMIJO * scale * slope:
+                break
+            scale *= 0.5
+        else:
+            if pairs:
+                pairs.clear()
+                resets += 1
+                continue
+            stop = "line_search_failed"
+            break
+        s, y = trial - x, trial_gradient - gradient
+        curvature = float(s @ y)
+        if curvature > 1e-12 * float(np.linalg.norm(s) * np.linalg.norm(y)):
+            pairs.append((s, y, 1.0 / curvature))
+            del pairs[:-history]
+        x, energy, gradient = trial, trial_energy, trial_gradient
+        iterations += 1
+        if callback is not None:
+            callback(x, s)
+    return dict(x=x, energy=energy, gradient=gradient, iterations=iterations,
+                evaluations=evaluations, stop=stop, history_resets=resets)
 
 
 def _minimize_movable_positions(context: Any, positions: np.ndarray,
@@ -44,8 +118,6 @@ def _minimize_movable_positions(context: Any, positions: np.ndarray,
     optimizing only the declared movable coordinates leaves the frozen atoms
     bitwise fixed and permits an independent force-based acceptance audit.
     """
-    from scipy.optimize import minimize
-
     if max_iterations <= 0 or not movable:
         raise ValueError("Movable minimization needs a positive cap and atom set")
     start = np.asarray(positions, dtype=np.float64)
@@ -70,57 +142,26 @@ def _minimize_movable_positions(context: Any, positions: np.ndarray,
 
     # Relative objective convergence is unsafe for a severely clashing
     # structure: an enormous potential can change by less than its relative
-    # tolerance while the remaining forces are still enormous.  Restarting
-    # the quasi-Newton history in bounded stages also gives difficult poses
-    # another chance without exceeding the declared iteration budget.
-    flat = start[indices].ravel().copy()
-    iterations = evaluations = 0
-    stops = []
-    force_verified_success = False
-    solver_reported_success = False
-    while iterations < max_iterations:
-        allowance = min(MINIMIZER_STAGE_ITERATIONS, max_iterations - iterations)
-        bounds = list(zip(flat - MINIMIZER_TRUST_RADIUS_NM, flat + MINIMIZER_TRUST_RADIUS_NM))
-        result = minimize(objective, flat, jac=True, method="L-BFGS-B", bounds=bounds,
-                          options={"maxiter": allowance, "maxls": 50,
-                                   "ftol": 0.0, "gtol": 1e-3})
-        next_flat = np.asarray(result.x, dtype=np.float64)
-        moved = not np.array_equal(next_flat, flat)
-        iterations += int(result.nit)
-        evaluations += int(result.nfev)
-        stops.append(str(result.message))
-        solver_reported_success = bool(result.success)
-        _, gradient = objective(next_flat)
-        evaluations += 1
-        force_rms = float(np.sqrt(np.mean(gradient ** 2)))
-        # A stage cut short by its trust region is not a converged stage: stop
-        # only once L-BFGS-B has converged inside the box, so the result is as
-        # fully relaxed as an unbounded run that did not jump.
-        lower, upper = (np.asarray(side, dtype=np.float64) for side in zip(*bounds))
-        on_boundary = bool(np.any(np.isclose(next_flat, lower, rtol=0.0, atol=1e-9)
-                                  | np.isclose(next_flat, upper, rtol=0.0, atol=1e-9)))
-        flat = next_flat
-        if force_rms <= RELAX_FORCE_TOLERANCE_KJ_MOL_NM and not on_boundary:
-            force_verified_success = True
-            break
-        # An optimizer can terminate with zero iterations when its line search
-        # cannot make progress.  Do not loop indefinitely or call that success.
-        if result.nit == 0 or not moved:
-            break
+    # tolerance while the remaining forces are still enormous, so only the
+    # force criterion ends the minimization early.
+    result = _capped_lbfgs(objective, start[indices].ravel(), max_iterations=max_iterations,
+                           max_atom_step=MINIMIZER_MAX_ATOM_STEP_NM,
+                           force_tolerance=RELAX_FORCE_TOLERANCE_KJ_MOL_NM)
     final = start.copy()
-    final[indices] = flat.reshape(-1, 3)
+    final[indices] = result["x"].reshape(-1, 3)
     if not np.isfinite(final).all():
         raise FloatingPointError("Nonfinite coordinates after movable minimization")
     context.setPositions(final * unit.nanometer)
-    return final, dict(minimizer="scipy_lbfgsb_exact_movable_trust_region",
-                       minimizer_trust_radius_nm=MINIMIZER_TRUST_RADIUS_NM,
-                       minimizer_stage_iterations=MINIMIZER_STAGE_ITERATIONS,
-                       minimizer_iterations=iterations,
-                       minimizer_evaluations=evaluations,
-                       minimizer_stop_reason="; ".join(stops),
-                       minimizer_reported_success=solver_reported_success,
-                       minimizer_force_verified_success=force_verified_success,
-                       minimizer_restart_count=max(0, len(stops)-1))
+    converged = result["stop"] == "force_tolerance"
+    return final, dict(minimizer="lbfgs_exact_movable_capped_atom_step",
+                       minimizer_max_atom_step_nm=MINIMIZER_MAX_ATOM_STEP_NM,
+                       minimizer_history=MINIMIZER_HISTORY,
+                       minimizer_iterations=result["iterations"],
+                       minimizer_evaluations=result["evaluations"],
+                       minimizer_stop_reason=result["stop"],
+                       minimizer_reported_success=converged,
+                       minimizer_force_verified_success=converged,
+                       minimizer_restart_count=result["history_resets"])
 
 
 def _internal_candidate_overlaps(positions: np.ndarray, atoms: Mapping[str, int],
