@@ -19,7 +19,8 @@ from nanoqc.qubo.qubo_types import AA_INDEX, QUBOResult, RotamerTemplate, Variab
 from nanoqc.qubo.rotamer_library import _THREE_LETTER, _dunbrack_templates_for_site, _expanded_rotamer_templates, _load_rotamer_bins, _nearest_dunbrack_bin, rotamer_source_metadata
 from nanoqc.structure.physical_quality import (StructureQualityError, topology_geometry_audit,
     relaxation_force_audit, RELAX_FORCE_TOLERANCE_KJ_MOL_NM,
-    EXTREME_NONBONDED_FLOOR_ANGSTROM)
+    EXTREME_NONBONDED_FLOOR_ANGSTROM, DEFAULT_MAX_PERTURBATION_ATTEMPTS,
+    generated_input_validity, sample_valid_input)
 
 
 def _minimize_movable_positions(context: Any, positions: np.ndarray,
@@ -669,7 +670,11 @@ class AllAtomInterfaceQUBOBuilder:
         """Perturb every defined side-chain chi angle without reference-based rejection."""
         if not 0 < min_degrees <= max_degrees <= 180:
             raise ValueError("Require 0 < min_degrees <= max_degrees <= 180")
-        rng=np.random.default_rng(seed)
+        return self._draw_sidechain_chis(np.random.default_rng(seed), seed, min_degrees, max_degrees)
+
+    def _draw_sidechain_chis(self, rng: np.random.Generator, seed: int, min_degrees: float,
+                             max_degrees: float) -> tuple[np.ndarray, list[dict[str, Any]]]:
+        """One multi-chi draw from ``rng`` (consumption identical to the former body)."""
         positions=self.base_positions.copy()
         residue_lookup={}
         bond_graph={i:set() for i in range(self.topology.getNumAtoms())}
@@ -710,6 +715,27 @@ class AllAtomInterfaceQUBOBuilder:
             ))
         return positions,records
 
+    def perturb_valid_input(self, mode: str, seed: int, min_degrees: float, max_degrees: float, *,
+                            heavy_floor_angstrom: float,
+                            max_attempts: int = DEFAULT_MAX_PERTURBATION_ATTEMPTS):
+        """A perturbed recovery input that is physically possible (A44).
+
+        Draws come from the unchanged perturbation (``multi_chi`` or ``chi1``)
+        and are rejected only when the input violates the protocol's existing
+        validity floors; see :func:`physical_quality.sample_valid_input`.
+        Returns ``(positions, angle_records, validity_audit)``.
+        """
+        if not 0 < min_degrees <= max_degrees <= 180:
+            raise ValueError("Require 0 < min_degrees <= max_degrees <= 180")
+        draws = {"multi_chi": self._draw_sidechain_chis, "chi1": self._draw_chi1}
+        if mode not in draws:
+            raise ValueError("perturbation mode must be multi_chi or chi1")
+        return sample_valid_input(
+            lambda rng: draws[mode](rng, seed, min_degrees, max_degrees),
+            lambda positions: generated_input_validity(
+                self.topology, positions, heavy_floor_angstrom=heavy_floor_angstrom),
+            seed, max_attempts=max_attempts)
+
     def perturb_chi1(self, seed: int, min_degrees: float = 40.,
                      max_degrees: float = 120.) -> tuple[np.ndarray, list[dict[str, Any]]]:
         """Deterministic signed chi1 perturbations; no energy/reference-based rejection.
@@ -719,7 +745,12 @@ class AllAtomInterfaceQUBOBuilder:
         """
         if not 0 < min_degrees <= max_degrees <= 180:
             raise ValueError("Require 0 < min_degrees <= max_degrees <= 180")
-        rng=np.random.default_rng(seed);positions=self.base_positions.copy();record=[]
+        return self._draw_chi1(np.random.default_rng(seed), seed, min_degrees, max_degrees)
+
+    def _draw_chi1(self, rng: np.random.Generator, seed: int, min_degrees: float,
+                   max_degrees: float) -> tuple[np.ndarray, list[dict[str, Any]]]:
+        """One chi1 draw from ``rng`` (consumption identical to the former body)."""
+        positions=self.base_positions.copy();record=[]
         residues={}
         for residue in self.topology.residues():
             residues[f"{residue.chain.id}:{residue.id}{residue.insertionCode.strip()}"]=residue

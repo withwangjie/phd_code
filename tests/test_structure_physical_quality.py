@@ -133,3 +133,90 @@ def test_device_resource_errors_never_become_scientific_exclusions():
         StructureQualityError("bad geometry", category="input_heavy_atoms", audit={}))
     with pytest.raises(StructureQualityError):
         pilot._raise_preparation_error(quality)
+
+
+def _two_residue_topology(separation_angstrom, *, same_residue=False, hydrogen=False):
+    """Two backbone-free fragments whose probe atoms sit ``separation`` apart."""
+    from openmm.app import Topology, element
+    top = Topology(); chain = top.addChain("A")
+    first = top.addResidue("ALA", chain, id="1")
+    second = first if same_residue else top.addResidue("ALA", chain, id="2")
+    probe = element.hydrogen if hydrogen else element.carbon
+    # OpenMM requires each residue's atoms to be added contiguously.
+    top.addAtom("CB", element.carbon, first)
+    top.addAtom("CA", element.carbon, first)
+    top.addAtom("HB1" if hydrogen else "CG", probe, second)
+    xyz = np.array([[0.0, 0.0, 0.0], [-3.0, 0.0, 0.0], [separation_angstrom, 0.0, 0.0]]) / 10.0
+    return top, xyz
+
+
+def test_generated_input_heavy_floor_matches_the_a24_definition():
+    """Distinct-residue heavy pairs below the floor; same residue and hydrogens ignored (A44)."""
+    from nanoqc.structure.physical_quality import interresidue_heavy_floor_audit
+    top, xyz = _two_residue_topology(0.8)
+    audit = interresidue_heavy_floor_audit(top, xyz, 1.0)
+    assert audit["count"] == 1 and abs(audit["minimum_distance_angstrom"] - 0.8) < 1e-9
+    assert audit["closest_pair"] == ["A:1:ALA:CB", "A:2:ALA:CG"]
+    assert interresidue_heavy_floor_audit(*_two_residue_topology(1.2), 1.0)["count"] == 0
+    assert interresidue_heavy_floor_audit(*_two_residue_topology(0.8, same_residue=True), 1.0)["count"] == 0
+    assert interresidue_heavy_floor_audit(*_two_residue_topology(0.8, hydrogen=True), 1.0)["count"] == 0
+    with pytest.raises(ValueError, match="floor"):
+        interresidue_heavy_floor_audit(top, xyz, 1.5)
+
+
+def test_rejection_sampling_keeps_valid_first_draws_and_records_every_rejection():
+    """Attempt 0 is the former unconditioned draw; rejections come from the same stream (A44)."""
+    from nanoqc.structure.physical_quality import sample_valid_input
+
+    def draw(rng):
+        value = float(rng.uniform())
+        return np.array([value]), [dict(value=value)]
+
+    def validity_above(threshold):
+        def check(positions):
+            ok = float(positions[0]) > threshold
+            return dict(valid=ok, reasons=[] if ok else ["interresidue_heavy_atom_floor"],
+                        closest_nonbonded_pair=None,
+                        interresidue_heavy=dict(minimum_distance_angstrom=None, closest_pair=None))
+        return check
+
+    # Always valid: identical to one draw from a fresh generator with that seed.
+    positions, records, audit = sample_valid_input(draw, validity_above(-1.0), 7)
+    assert positions[0] == np.random.default_rng(7).uniform()
+    assert audit["accepted_attempt"] == 0 and audit["rejected_attempts"] == []
+
+    # Conditioned: the accepted value is the first draw of the same stream above 0.9.
+    stream = np.random.default_rng(7)
+    expected_index = next(i for i in range(10_000) if stream.uniform() > 0.9)
+    positions, records, audit = sample_valid_input(draw, validity_above(0.9), 7)
+    assert audit["accepted_attempt"] == expected_index
+    assert len(audit["rejected_attempts"]) == expected_index
+    assert positions[0] > 0.9 and records == [dict(value=float(positions[0]))]
+    # Deterministic for a seed.
+    again = sample_valid_input(draw, validity_above(0.9), 7)
+    assert again[0][0] == positions[0] and again[2]["accepted_attempt"] == expected_index
+
+
+def test_no_valid_draw_is_a_recorded_failure_not_a_silent_skip():
+    from nanoqc.structure.physical_quality import sample_valid_input
+    never = lambda positions: dict(valid=False, reasons=["extreme_nonbonded_overlap"],
+                                   closest_nonbonded_pair=None,
+                                   interresidue_heavy=dict(minimum_distance_angstrom=None,
+                                                           closest_pair=None))
+    with pytest.raises(StructureQualityError) as caught:
+        sample_valid_input(lambda rng: (np.zeros(1), []), never, 3, max_attempts=5)
+    assert caught.value.category == "generated_input"
+    assert caught.value.audit["rejected_count"] == 5
+
+
+def test_recovery_benchmark_uses_the_validated_perturbation():
+    """The shared recovery input is drawn through perturb_valid_input with the A24 floor (A44)."""
+    import inspect
+    from nanoqc.experiments import structure_benchmarks
+    from nanoqc.pipeline import stages_structure
+    source = inspect.getsource(structure_benchmarks._recovery_benchmark_main)
+    assert "generator.perturb_valid_input(" in source
+    assert "generator.perturb_sidechain_chis(" not in source
+    assert "input_validity=input_validity" in source
+    orchestrator = inspect.getsource(stages_structure)
+    assert orchestrator.count('"min_interresidue_heavy_distance_angstrom"') == 2

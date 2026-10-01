@@ -21,7 +21,7 @@ from nanoqc.common.repo_io import sha256_file as _ablation_digest, atomic_write_
 from nanoqc.experiments.benchmark_common import SHARED_HELPER_MODULES
 from nanoqc.common.device_errors import raise_if_resource_error
 from nanoqc.experiments.research_ablation import _ablation_classical_counts, _ablation_summarize
-from nanoqc.structure.physical_quality import StructureQualityError
+from nanoqc.structure.physical_quality import StructureQualityError, DEFAULT_MAX_PERTURBATION_ATTEMPTS
 
 
 def _structure_quality_assessment(relaxation: dict) -> dict:
@@ -426,6 +426,12 @@ def _recovery_benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--solvent-model",choices=("vacuum","gbn2"),default="vacuum")
     parser.add_argument("--min-perturb-degrees",type=float,default=40.)
     parser.add_argument("--max-perturb-degrees",type=float,default=120.)
+    # A44: generated inputs meet the A24 inter-residue heavy-atom floor (the
+    # orchestrator passes data_audit.min_interresidue_heavy_distance_angstrom)
+    # and the all-atom near-coincidence floor; invalid draws are redrawn.
+    parser.add_argument("--min-input-heavy-distance",type=float,default=1.0)
+    parser.add_argument("--max-perturbation-attempts",type=int,
+                        default=DEFAULT_MAX_PERTURBATION_ATTEMPTS)
     parser.add_argument("--outputs",type=int,default=1000)
     parser.add_argument("--max-evals",type=int,default=90)
     parser.add_argument("--qaoa-depth",type=int,default=2)
@@ -447,6 +453,8 @@ def _recovery_benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
         parser.error("--measurement-seeds must match --seeds length")
     if not 0<args.min_perturb_degrees<=args.max_perturb_degrees<=180:
         parser.error("Invalid perturbation angle range")
+    if not 0<args.min_input_heavy_distance<=1.0 or args.max_perturbation_attempts<1:
+        parser.error("Require 0 < --min-input-heavy-distance <= 1.0 and --max-perturbation-attempts >= 1")
     if min(args.outputs,args.max_evals,args.sa_passes,args.qaoa_depth)<=0 or args.relax_iterations<0:
         parser.error("Invalid solver budgets")
     manifest=args.manifest.resolve();case=json.loads(manifest.read_text())
@@ -493,18 +501,25 @@ def _recovery_benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
                         if not perturbed.exists() or _ablation_digest(perturbed)!=saved["structure_sha256"]:
                             raise ValueError("Perturbed input changed or missing")
                     else:
-                        if args.perturbation_mode=="multi_chi":
-                            positions,angles=generator.perturb_sidechain_chis(
-                                seed,args.min_perturb_degrees,args.max_perturb_degrees)
-                            perturb_protocol="retrospective multi-chi recovery; all defined side-chain chis perturbed; no clash/energy/reference-based rejection"
-                        else:
-                            positions,angles=generator.perturb_chi1(
-                                seed,args.min_perturb_degrees,args.max_perturb_degrees)
-                            perturb_protocol="retrospective chi1-only recovery ablation; no clash/energy/reference-based rejection"
+                        # A44: the shared input must be physically possible. Draws
+                        # that violate the protocol's existing validity floors are
+                        # redrawn from the same seed stream; the first draw is the
+                        # former input, and every rejection is recorded.
+                        positions,angles,input_validity=generator.perturb_valid_input(
+                            args.perturbation_mode,seed,args.min_perturb_degrees,args.max_perturb_degrees,
+                            heavy_floor_angstrom=args.min_input_heavy_distance,
+                            max_attempts=args.max_perturbation_attempts)
+                        perturb_protocol=(
+                            ("retrospective multi-chi recovery; all defined side-chain chis perturbed"
+                             if args.perturbation_mode=="multi_chi" else
+                             "retrospective chi1-only recovery ablation")
+                            +"; draws conditioned on physical validity (A24 inter-residue heavy-atom floor, "
+                             "all-atom near-coincidence floor); no energy/reference/outcome-based rejection")
                         generator.write_structure(positions,perturbed)
                         _ablation_atomic_json(metadata,dict(
                             seed=seed,angles=angles,structure_sha256=_ablation_digest(perturbed),
-                            perturbation_mode=args.perturbation_mode,protocol=perturb_protocol))
+                            perturbation_mode=args.perturbation_mode,protocol=perturb_protocol,
+                            input_validity=input_validity))
                     child_case=dict(input_structure=str(perturbed),reference_structure=str(native),
                         cdr3_residues=case.get('cdr3_residues',[]),pruning=case.get('pruning'),
                         candidate_relax_iterations=int(case.get("candidate_relax_iterations",0)),

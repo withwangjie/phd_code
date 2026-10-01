@@ -491,6 +491,8 @@ def main(argv=None) -> int:
     parser.add_argument("--solvent-model",choices=("vacuum","gbn2"),default="vacuum")
     parser.add_argument("--min-perturb-degrees",type=float,default=40.0)
     parser.add_argument("--max-perturb-degrees",type=float,default=120.0)
+    parser.add_argument("--min-input-heavy-distance",type=float,default=1.0,
+        help="A44: generated recovery inputs must meet this A24 inter-residue heavy-atom floor")
     parser.add_argument("--outputs", type=int, default=1000)
     parser.add_argument("--max-evals", type=int, default=90)
     parser.add_argument("--qaoa-depth", type=int, default=2)
@@ -928,6 +930,7 @@ def main(argv=None) -> int:
                         "--perturbation-mode",args.perturbation_mode,
                         "--min-perturb-degrees",str(args.min_perturb_degrees),
                         "--max-perturb-degrees",str(args.max_perturb_degrees),
+                        "--min-input-heavy-distance",str(args.min_input_heavy_distance),
                         "--seeds",*[str(s) for s in args.seeds],
                         "--optimize-seeds",*[str(s) for s in optimize_seeds],
                         "--measurement-seeds",*[str(s) for s in measurement_seeds],
