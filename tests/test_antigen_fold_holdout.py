@@ -367,10 +367,8 @@ def test_a_component_at_the_pin_boundary_fails_the_carve(tmp_path, monkeypatch):
         _carve(dataset, audit, tmp_path / "holdout.json", fold=fold, min_clusters=1)
 
 
-def test_several_folds_are_held_out_together_by_rule_not_by_search():
-    """A13: the lowest non-validation folds, never the fullest one."""
-    assert carve.holdout_folds(5, 1, 0) == [1]
-    assert carve.holdout_folds(5, 2, 0) == [1, 2]
+def test_fold_lists_are_parsed_in_a_fixed_order():
+    """A13: the configured holdout folds are used as given, in sorted order."""
     assert carve.parse_folds("2,1") == [1, 2]
 
 

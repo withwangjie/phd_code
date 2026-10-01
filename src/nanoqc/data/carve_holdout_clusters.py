@@ -133,19 +133,6 @@ def parse_folds(value: str) -> list[int]:
     return folds
 
 
-def holdout_folds(folds: int, count: int, validation_fold: int) -> list[int]:
-    """The ``count`` lowest fold indices that are not the internal validation fold.
-
-    A rule, never a search: with too few independent components in one fold,
-    the holdout takes the next fold up, not the fold that happens to hold most
-    of them (PROTOCOL_AMENDMENTS.md A13).
-    """
-    available = [f for f in range(folds) if f != validation_fold]
-    if not 1 <= count <= len(available):
-        raise ValueError(f"count must be in [1,{len(available)}]")
-    return available[:count]
-
-
 def select_components(components: Sequence[Sequence[Path]], folds: Sequence[int],
                       pool_size: Optional[int] = None) -> list[list[Path]]:
     """Components hashed to any of ``folds``; a component pinned to training (A11) never is."""

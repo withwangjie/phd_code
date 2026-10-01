@@ -21,7 +21,7 @@ from scipy.spatial import cKDTree
 from nanoqc.data.audit_all_datasets import materialize_graph_complex
 from nanoqc.data.safe_graph_load import load_graph
 from nanoqc.experiments.generate_energy_calibration_dataset import _manifest_graph_path
-from nanoqc.experiments.run_real_complex_pilot import (
+from nanoqc.experiments.real_complex_preparation import (
     complete_terminal_oxygen,
     strip_to_protein_conformer,
 )

@@ -205,6 +205,7 @@ ORCHESTRATED_SCRIPTS: List[str] = [
     "benchmark_statistics.py",
     "structure_benchmarks.py",
     "run_real_complex_pilot.py",
+    "real_complex_preparation.py",
     "run_external_structure_baselines.py",
     "audit_external_vhh_independence.py",
     "carve_holdout_clusters.py",
@@ -411,10 +412,7 @@ def subprocess_environment(hardware: Dict[str, Any], repo_root: Path,
     """The environment every orchestrated stage subprocess runs in.
 
     Thread counts, ``PYTHONPATH`` and the OpenMM platform/device/precision come
-    from the resolved ``hardware`` section. Shared with
-    ``scripts/rehearse_structure_targets.py`` so a rehearsal runs on the same
-    OpenMM platform and precision as the formal stage, not the CPU Reference
-    fallback.
+    from the resolved ``hardware`` section.
     """
     env = dict(os.environ if base is None else base)
     threads = str(hardware.get("cpu_threads_per_process", 2))

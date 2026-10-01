@@ -35,7 +35,6 @@ def _validate_scientific_config(config: Dict[str, Any]) -> None:
 
     qf = config.get("queue_freeze", {}) or {}
     graph = qf.get("graph_build", {}) or {}
-    train = config.get("egnn_train", {}) or {}
     qc = config.get("qc_benchmark", {}) or {}
     structure = config.get("structure_experiment", {}) or {}
     qproto = quantum_protocol(config)
@@ -352,7 +351,6 @@ def _validate_scientific_config(config: Dict[str, Any]) -> None:
                 f"qc_benchmark={left}, structure_experiment={right}"
             )
 
-    qc_depths=[int(qprimary["depth"])]
     qc_sites=[int(v) for v in qc.get("active_sites",[6])]
     if not qc_sites or len(qc_sites)!=len(set(qc_sites)) or any(v<4 or v>10 for v in qc_sites):
         raise ValueError("qc_benchmark.active_sites must contain unique integers in 4..10")
@@ -374,8 +372,6 @@ def _validate_scientific_config(config: Dict[str, Any]) -> None:
     primary_radius=float(stats.get("primary_radius",6.0))
     if primary_radius not in [float(v) for v in qc.get("radii",[6.0])]:
         raise ValueError("statistics.primary_radius must be present in qc_benchmark.radii")
-    primary_depth=int(qprimary["depth"])
-    primary_max_evals=int(qprimary["max_evals"])
     if int(qprimary["output_shots"]) not in [int(v) for v in qc.get("outputs",[1000])]:
         raise ValueError(
             "quantum_protocol.primary.output_shots must be present in qc_benchmark.outputs"

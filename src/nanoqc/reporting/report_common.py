@@ -1,6 +1,6 @@
 """Shared readers, formatting helpers and the ReportContext for the final report.
 
-Split out of generate_final_research_report.py, which re-exports every name here.
+Split out of generate_final_research_report.py.
 """
 from __future__ import annotations
 

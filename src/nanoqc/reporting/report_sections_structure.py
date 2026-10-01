@@ -1,12 +1,11 @@
 """Final-report sections on structural recovery, external baselines and robustness.
 
-Split out of generate_final_research_report.py, which re-exports every name here.
+Split out of generate_final_research_report.py.
 """
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, Dict, List
-from nanoqc.inference.paired_statistics import paired_effect as _paired_effect  # noqa: E402
 from nanoqc.reporting.report_common import ReportContext, _fmt, _read_csv_rows, _read_json, _read_text, stage_ok
 
 
@@ -30,27 +29,6 @@ def _load_recovery_rows(directory: Path) -> List[Dict[str, str]]:
         if nested.is_file():
             rows.extend(_read_csv_rows(nested))
     return rows
-
-
-def _target_level_paired_differences(rows: List[Dict[str, str]], metric: str, baseline: str,
-                                      master_seed: int) -> Dict[str, Any]:
-    by_target: Dict[str, Dict[str, List[float]]] = {}
-    for row in rows:
-        target = row.get("target", "")
-        method = row.get("method", "")
-        value = row.get(metric)
-        if value in (None, "", "None"):
-            continue
-        by_target.setdefault(target, {}).setdefault(method, []).append(float(value))
-    differences = []
-    for target, methods in sorted(by_target.items()):
-        if "qaoa" not in methods or baseline not in methods:
-            continue
-        differences.append(sum(methods["qaoa"]) / len(methods["qaoa"])
-                            - sum(methods[baseline]) / len(methods[baseline]))
-    if not differences:
-        return dict(n_targets=0, mean_difference=None, ci_low=None, ci_high=None, p_value=None)
-    return _paired_effect(differences, master_seed, 10000)
 
 
 def _target_level_descriptive_difference(

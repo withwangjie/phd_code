@@ -19,7 +19,6 @@ PathLike = Union[str, os.PathLike]
 # Repository layout. REPO_ROOT is the checkout root (it holds configs/, docs/,
 # scripts/, .venv and .runtime/); every module lives under src/nanoqc/.
 REPO_ROOT = Path(__file__).resolve().parents[3]
-SRC_ROOT = REPO_ROOT / "src"
 DOCS_DIR = "docs"
 CONFIGS_DIR = "configs"
 
@@ -89,6 +88,7 @@ MODULE_LAYOUT = {
     "benchmark_statistics.py": "src/nanoqc/experiments/benchmark_statistics.py",
     "structure_benchmarks.py": "src/nanoqc/experiments/structure_benchmarks.py",
     "run_real_complex_pilot.py": "src/nanoqc/experiments/run_real_complex_pilot.py",
+    "real_complex_preparation.py": "src/nanoqc/experiments/real_complex_preparation.py",
     "generate_energy_calibration_dataset.py": "src/nanoqc/experiments/generate_energy_calibration_dataset.py",
     "fit_qaoa_transfer_parameters.py": "src/nanoqc/experiments/fit_qaoa_transfer_parameters.py",
     "run_external_structure_baselines.py": "src/nanoqc/experiments/run_external_structure_baselines.py",

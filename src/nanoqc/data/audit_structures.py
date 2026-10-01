@@ -1,6 +1,6 @@
 """Structure reading for the data audit: biological assemblies, zipped members, chain atoms.
 
-Split out of audit_all_datasets.py, which re-exports every name here. Contact,
+Split out of audit_all_datasets.py. Contact,
 overlap and eligibility checks stay there because they read the cutoffs that
 ``main`` rebinds from the command line.
 """

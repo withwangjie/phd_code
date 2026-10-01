@@ -24,10 +24,9 @@ flag; each mode lives in its own module in ``nanoqc.experiments``:
     --real-complex-pilot      run_real_complex_pilot
 
 ``SHARED_HELPER_MODULES`` (benchmark_common) lists the modules every mode
-fingerprints in its provenance. Every name defined by those modules is still
-importable from here, except the per-process worker state (``_WORKER_*``,
-``_ABLATION_*``): it is set inside worker processes and a re-export would only
-be a stale snapshot.
+fingerprints in its provenance. Import a mode's functions from its own module;
+this entry point imports only what ``main`` dispatches to and what callers still
+reach through it.
 """
 from __future__ import annotations
 
@@ -38,62 +37,26 @@ from filelock import FileLock
 
 # Re-exported: historical import location of these model helpers.
 from nanoqc.model.model_egnn_pruning import (  # noqa: F401
-    ModelLoadInfo, _clean_error_message, _extract_state_dict, _normalize_state_dict_keys,
-    _graph_protocol_signature, assert_checkpoint_graph_compatible, load_interface_scorer,
+    ModelLoadInfo,
+    assert_checkpoint_graph_compatible,
 )
 from nanoqc.inference.paired_statistics import paired_effect as _paired_effect  # noqa: F401
 
-# Definitions now live in focused modules; re-exported so every existing
-# `from nanoqc.experiments.batch_benchmark_hard_set import ...` keeps working.
+# Names from the split-out modules that this module or its callers use.
 from nanoqc.experiments.benchmark_common import (  # noqa: F401
     SHARED_HELPER_MODULES,
 )
 from nanoqc.experiments.hard_set_evaluation import (  # noqa: F401
-    CSV_FILENAME,
-    REPORT_FILENAME,
-    FAILED_LOG_FILENAME,
-    OPTIMIZATION_WARNINGS_FILENAME,
-    CSV_FIELDS,
-    TargetEvaluationError,
-    _scalar,
-    _zero_small_gap,
-    _sample_diversity,
-    evaluate_single_target,
-    _worker_initializer,
-    _evaluate_worker,
-    _failure_row,
-    _write_csv_atomic,
-    _append_csv_row,
-    _append_failure_log,
-    _append_failure_row,
-    _append_optimization_warning,
-    _read_existing_csv,
-    _numeric_values,
-    _mean_sd,
-    _median_iqr,
-    _wilson_interval,
-    _percent_summary,
-    _hit_summary,
-    write_markdown_report,
     _build_parser,
-    _validate_args,
     _run,
 )
 from nanoqc.experiments.research_ablation import (  # noqa: F401
     _ablation_classical_counts,
-    QTS_TARGET_CONFIDENCE,
     queries_to_solution,
     load_transfer_parameters,
-    transfer_key,
-    _exact_ground_metrics,
     _ablation_summarize,
     _ablation_run_case,
-    _ablation_export_results,
-    _ablation_append_results,
-    _ablation_worker,
-    _ablation_dispatch,
     _ablation_main,
-    _time_budget_counts,
 )
 from nanoqc.experiments.calibration_fit import (  # noqa: F401
     fit_energy_calibration_csv,
@@ -104,7 +67,6 @@ from nanoqc.experiments.benchmark_statistics import (  # noqa: F401
 from nanoqc.experiments.structure_benchmarks import (  # noqa: F401
     _structure_evaluation_main,
     _allatom_experiment_main,
-    _recovery_comparison,
     _recovery_benchmark_main,
 )
 

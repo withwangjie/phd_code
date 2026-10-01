@@ -7,8 +7,8 @@ decomposition of PennyLane StatePrep for local W states.
 from __future__ import annotations
 
 import math
-from dataclasses import asdict, dataclass
-from typing import Any, Dict, Optional
+from dataclasses import dataclass
+from typing import Optional
 
 import numpy as np
 
@@ -45,10 +45,6 @@ class QAOAResourceEstimate:
         "local W-state StatePrep decomposition is unspecified and excluded, so no "
         "full-circuit two-qubit count is claimed"
     )
-
-    def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
-
 
 def estimate_qaoa_resources(
     instance: QuantumOptimizationInstance,

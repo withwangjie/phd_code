@@ -1,6 +1,6 @@
 """Binary interface-classification metrics and the geometry logistic baseline.
 
-Split out of train_egnn_pruning.py, which re-exports every name here.
+Split out of train_egnn_pruning.py.
 """
 from __future__ import annotations
 
@@ -188,7 +188,6 @@ def best_f1_threshold(labels: np.ndarray, scores: np.ndarray) -> Tuple[float, fl
     tp = np.cumsum(ranked_labels)
     fp = np.cumsum(1 - ranked_labels)
     positives = int(labels.sum())
-    fn = positives - tp
     precision = tp / np.maximum(tp + fp, 1)
     recall = tp / max(positives, 1)
     f1 = 2.0 * precision * recall / np.maximum(precision + recall, 1e-15)

@@ -23,16 +23,13 @@ from scipy.spatial import cKDTree
 from nanoqc.common.repo_io import REPO_ROOT, sha256_file, iter_jsonl
 from nanoqc.common.device_errors import raise_if_resource_error
 
-# Definitions now live in focused modules; re-exported so every existing
-# `from nanoqc.data.audit_all_datasets import ...` keeps working.
+# Names from the split-out modules that this module or its callers use.
 from nanoqc.data.audit_structures import (  # noqa: E402,F401
     ZIP_LOCAL,
     BACKBONE,
     SIDECHAIN_HEAVY,
-    pdb_compat,
     ASSEMBLY_SUBSETS,
     STRUCTURE_SOURCE_KEY,
-    _PREBUILT_ASSEMBLY,
     prebuilt_assembly,
     biological_assembly_structure,
     materialize_graph_complex,

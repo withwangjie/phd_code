@@ -1,6 +1,6 @@
 """Atom/residue extraction from audited complexes and antigen partner-chain selection.
 
-Split out of build_final_pyg_dataset.py, which re-exports every name here.
+Split out of build_final_pyg_dataset.py.
 Graph assembly (``make_graph``), validation and homology checks stay there
 because they read the thresholds that ``main`` rebinds from the command line.
 """

@@ -33,22 +33,17 @@ from nanoqc.data import graph_build_parallel
 from nanoqc.common.repo_io import sha256_file as sha256, REPO_ROOT
 from nanoqc.data.sequence_identity import nw_identity, length_coverage, partner_orientations, partner_roles_anchored
 
-# Definitions now live in focused modules; re-exported so every existing
-# `from nanoqc.data.build_final_pyg_dataset import ...` keeps working.
+# Names from the split-out modules that this module or its callers use.
 from nanoqc.data.complex_extraction import (  # noqa: E402,F401
     AA,
     AA_INDEX,
     ANTIGEN_CHAIN_CONTACT_ANGSTROM,
     cdr,
-    _dihedral_degrees,
     _peptide_bonded,
     build_atoms,
-    task_of,
     verify_audited_source,
-    bound_identity_overrides,
     extract,
     _ca_cb_coordinates,
-    _paratope_nodes,
     select_contacting_partner_chains,
 )
 
@@ -514,9 +509,9 @@ def layered_graph_homology(left: Data, right: Data) -> dict:
     )
 
 
-def layered_graph_homologous(left: Data, right: Data) -> tuple[bool,dict]:
-    detail=layered_graph_homology(left,right)
-    return bool(detail['violates_vhh'] or detail['violates_cdr_h3'] or detail['violates_antigen']),detail
+def homology_violated(detail: dict) -> bool:
+    """Whether a layered_graph_homology detail breaks any VHH/CDR-H3/antigen floor."""
+    return bool(detail['violates_vhh'] or detail['violates_cdr_h3'] or detail['violates_antigen'])
 
 
 def delivery_report(output,manifest,exclusions,failures,summary,complete):
@@ -810,7 +805,7 @@ def main():
             if violation is None:
                 for other_record,other_index in zip(kept_hard_records,kept_hard_indices):
                     detail=hard_table[hard_index][other_index]
-                    homologous=bool(detail['violates_vhh'] or detail['violates_cdr_h3'] or detail['violates_antigen'])
+                    homologous=homology_violated(detail)
                     for key in hard_pair_max:
                         hard_pair_max[key]=max(hard_pair_max[key],float(detail[key]))
                     if homologous:
@@ -897,7 +892,7 @@ def main():
                         violates_vhh=False,violates_cdr_h3=False,violates_antigen=False,
                         vhh_full_chain_identity=0.0,cdr_h3_loop_identity=0.0,antigen_full_chain_identity=0.0)))
             for hard_record,detail in zip(hard_records,details):
-                homologous=bool(detail['violates_vhh'] or detail['violates_cdr_h3'] or detail['violates_antigen'])
+                homologous=homology_violated(detail)
                 for key in cross_max:
                     cross_max[key]=max(cross_max[key],float(detail[key]))
                 if homologous:

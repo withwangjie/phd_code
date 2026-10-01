@@ -1,6 +1,6 @@
 """Active side-chain RMSD, severe-clash detection and DockQ.
 
-Split out of evaluate_complex_metrics.py (which re-exports every name here);
+Split out of evaluate_complex_metrics.py;
 see that module's docstring for the metric definitions.
 """
 from __future__ import annotations

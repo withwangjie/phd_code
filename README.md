@@ -377,9 +377,7 @@ docs/      METHODS_EVIDENCE.md (design-to-literature register), RESULTS_CONTRACT
            PIPELINE_WALKTHROUGH.md (stage-by-stage walkthrough of what each stage does and why)
 scripts/   deploy_launch.sh, run_full_experiment.sh, formal_preflight.sh, check_status.sh,
            repair_openmm_cuda.sh, prepare_external_vhh.sh,
-           amend_failed_egnn_fp32.py, amend_failed_calibration.py (one-time amended-lineage recovery),
            diagnose_calibration_eligibility.py, diagnose_calibration_relaxation.py (read-only),
-           rehearse_structure_targets.py (pre-launch structural rehearsal, separate output),
            discover_external_vhh.py (candidate discovery for manual curation)
 src/nanoqc/
   pipeline/     run_full_experiment.py (entry point: Orchestrator core, resume, main),
@@ -420,6 +418,7 @@ src/nanoqc/
                 structure_benchmarks.py (all-atom modes), benchmark_common.py (fingerprint list),
                 fit_qaoa_transfer_parameters.py (train-split QAOA angle transfer),
                 run_real_complex_pilot.py (all-atom retrospective recovery, queue-freeze eligibility),
+                real_complex_preparation.py (target structure preparation, shared with calibration),
                 generate_energy_calibration_dataset.py, run_external_structure_baselines.py (FASPR / Phenix)
   structure/    evaluate_complex_metrics.py (complex-metrics CLI), complex_atoms.py (reading, Kabsch,
                 contacts, Fnat), side_chain_metrics.py (Active side-chain RMSD, clashes, DockQ),
@@ -446,15 +445,14 @@ No source file exceeds 1000 lines. The former large files
 (`run_full_experiment.py`, `subgraph_to_qubo.py`, `batch_benchmark_hard_set.py`,
 `qaoa_interface_sampler.py`, `train_egnn_pruning.py`, `evaluate_complex_metrics.py`,
 `generate_final_research_report.py`, `build_final_pyg_dataset.py`,
-`audit_all_datasets.py`) are now entry points over focused modules. Each still
-re-exports every name it used to define, so existing imports keep working, and
-every split-out module is in the code fingerprints (`ORCHESTRATED_SCRIPTS`, the
-benchmark's `SHARED_HELPER_MODULES`), which tests check against the actual
-imports. Functions that read a threshold the command line rebinds at start-up
-(`global` in `main`) stay in their entry module, so a moved function never reads
-a stale copy.
-One-time recovery helpers live in `scripts/` precisely so they stay outside
-that formal module layout.
+`audit_all_datasets.py`) are now entry points over focused modules; import a
+function from the module that defines it. Every split-out module is in the code
+fingerprints (`ORCHESTRATED_SCRIPTS`, the benchmark's `SHARED_HELPER_MODULES`),
+which tests check against the actual imports. Functions that read a threshold
+the command line rebinds at start-up (`global` in `main`) stay in their entry
+module, so a moved function never reads a stale copy.
+Read-only diagnostics live in `scripts/` precisely so they stay outside that
+formal module layout.
 
 ## Literature basis
 
@@ -562,52 +560,17 @@ The formal manuscript/analysis should treat one run directory as the atomic repr
 
 ## Amended-lineage recovery
 
-A protocol repair that must reuse already verified upstream stages is applied
-by an explicit one-time command, never by editing a frozen run in place. Each
-recovery verifies the completed stage artifacts and their upstream bindings,
-refuses to run unless the intended stage actually failed and no downstream
-stage completed, archives the superseded manifest/config and outputs, records
-old and new source hashes, and reruns the repaired stage and everything after
-it. The result is marked an **amended protocol lineage**, not an unmodified
-resume.
-
-- `scripts/amend_failed_egnn_fp32.py` — FP32 continuation after FP16 EGNN
-  training failed; allows only `egnn_train.amp` to change (A20).
-- `scripts/amend_failed_calibration.py` — calibration protocol repair, keeping
-  the verified audit, queue freeze and FP32 checkpoint (A21, A22).
-
-Both scripts belong to runs launched **before** the module splits (every
-source file over 1000 lines was split into focused files; see Repository
-layout). The split adds new file names to the code fingerprint, so
-`amend_failed_calibration.py` refuses a pre-split run as an unexpected source
-change, and neither script is a route for continuing such a run on the current
-code. A23-A27 already require a new formal run; start one fresh
-(`./scripts/deploy_launch.sh`) instead of amending an old directory.
+The one-time recovery commands used for the FP16 EGNN (A20) and calibration
+(A21, A22) amended lineages applied only to runs launched before the module
+splits and have been removed. They remain in the git history (last version at
+commit `cbec29a`). Any new protocol change starts a new formal run
+(`./scripts/deploy_launch.sh`) rather than amending an old directory.
 
 Two read-only diagnostics change nothing in a run:
 `scripts/diagnose_calibration_eligibility.py` inspects calibration exclusions,
 and `scripts/diagnose_calibration_relaxation.py` compares raw against
 fixed-backbone-relaxed Amber energies from rows an earlier calibration already
 generated.
-
-### Rehearse the structural stage before a new formal run
-
-A formal run spends hours before `structure_experiment` starts. To check a
-structural repair first, rerun only that stage's validation-queue step on a
-finished run's frozen targets with the current code:
-
-```bash
-python scripts/rehearse_structure_targets.py --run /data/phd_code/runs/<run>         # its failed targets
-python scripts/rehearse_structure_targets.py --run /data/phd_code/runs/<run> --all   # every frozen target
-```
-
-It reuses the run's logged command and resolved hardware environment (same
-OpenMM platform and precision), writes to a new directory beside the run and
-never into it, and prints physical acceptance, generated-input attempts and
-failure causes, ending with whether to launch. Recovery RMSDs are written but
-not printed: those targets were already inspected during debugging and are
-historical repair assessments (A45). A rehearsal is a pre-launch check, not a
-formal result.
 
 ## Mandatory experiment-result audit
 

@@ -15,7 +15,6 @@ import concurrent.futures
 import csv
 import itertools
 import json
-import math
 import os
 import subprocess
 import sys
@@ -27,7 +26,7 @@ import torch
 
 from nanoqc.reporting.generate_figure1_pymol_script import extract_source
 from nanoqc.model.model_egnn_pruning import select_ablation_active, build_ablation_subgraph
-from nanoqc.experiments.run_real_complex_pilot import complete_terminal_oxygen, strip_to_protein_conformer
+from nanoqc.experiments.real_complex_preparation import complete_terminal_oxygen, strip_to_protein_conformer
 from nanoqc.qubo.subgraph_to_qubo import (
     AllAtomInterfaceQUBOBuilder,
     read_atomistic_structure,

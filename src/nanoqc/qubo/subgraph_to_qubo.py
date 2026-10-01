@@ -37,38 +37,24 @@ from pathlib import Path
 import numpy as np
 from nanoqc.data.safe_graph_load import load_graph
 
-# Definitions now live in focused modules; re-exported so every existing
-# `from nanoqc.qubo.subgraph_to_qubo import ...` keeps working.
+# Names from the split-out modules that this module or its callers use.
 from nanoqc.qubo.atomistic_structure import (  # noqa: E402,F401
-    _sha256_path,
     _SIDECHAIN_NAMES,
-    _CHI_ATOMS,
     _SYMMETRIC_SWAPS,
     read_atomistic_structure,
-    _RESIDUE_ID_PATTERN,
-    _to_structure_atoms,
-    _rigid_fit,
-    _torsion_angle_degrees,
     _backbone_phi_psi,
-    _chi1_angle,
     _sidechain_chi_angles,
-    _rotate_about_axis,
-    _downstream_atoms,
     _apply_sidechain_chis,
     evaluate_atomistic_prediction,
 )
 from nanoqc.qubo.qubo_types import (  # noqa: E402,F401
-    AA_ORDER,
     AA_INDEX,
-    COULOMB_KCAL_ANGSTROM,
     ForceFieldConfig,
     EnergyCalibration,
     RotamerTemplate,
     RotamerState,
     chi1_well_index,
     select_chi1_well_representatives,
-    VariableRecord,
-    QUBOResult,
 )
 from nanoqc.qubo.rotamer_library import (  # noqa: E402,F401
     _THREE_LETTER,
@@ -78,25 +64,9 @@ from nanoqc.qubo.rotamer_library import (  # noqa: E402,F401
     _load_rotamer_bins,
     rotamer_source_metadata,
     _dunbrack_templates_for_site,
-    _ROTAMER_PRIORS,
-    _SIDECHAIN_REACH,
-    _NET_CHARGE,
-    _FLEXIBILITY_RANK,
-    _SIDECHAIN_CHI_COUNT,
-    _SUBROTAMER_SCHEMES,
-    _raw_rotamer_pool_size,
-    _expanded_rotamer_templates,
 )
 from nanoqc.qubo.coarse_qubo import (  # noqa: E402,F401
-    _normalize,
-    _decode_amino_acids,
-    _atom_parameters,
-    _terminal_spec,
-    _TERMINAL_SPREAD_ANGSTROM,
-    _MAX_PSEUDO_ATOM_OFFSET,
-    _nonbonded_energy,
     InterfaceQUBOBuilder,
-    _combinations,
 )
 from nanoqc.qubo.ising import (  # noqa: E402,F401
     qubo_to_ising,
@@ -104,7 +74,6 @@ from nanoqc.qubo.ising import (  # noqa: E402,F401
 )
 from nanoqc.qubo.allatom_qubo import (  # noqa: E402,F401
     _virtual_pruned_graph,
-    _openmm_context,
     AllAtomInterfaceQUBOBuilder,
 )
 

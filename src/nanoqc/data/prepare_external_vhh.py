@@ -38,7 +38,6 @@ import argparse
 import datetime as dt
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -49,9 +48,6 @@ import yaml
 
 from nanoqc.common.repo_io import REPO_ROOT, sha256_file as sha256, iter_jsonl
 from nanoqc.pipeline.resolve_server_config import _load as _load_server_config, _resolve_data_root
-
-PDB_ID = re.compile(r"[a-z0-9]{4}")
-
 
 def load_config(path: Optional[Path]) -> dict:
     """Load preprocessing config without silently reusing stale runtime state."""

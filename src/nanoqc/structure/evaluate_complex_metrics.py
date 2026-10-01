@@ -135,22 +135,16 @@ from typing import (
 
 from nanoqc.structure.residue_tables import BACKBONE_ATOMS
 
-# Definitions now live in focused modules; re-exported so every existing
-# `from nanoqc.structure.evaluate_complex_metrics import ...` keeps working.
+# Names from the split-out modules that this module or its callers use.
 from nanoqc.structure.complex_atoms import (  # noqa: E402,F401
     PathLike,
-    ResidueAtoms,
     StructureAtoms,
     AtomCompletenessError,
-    _clean_code,
-    _residue_id,
     _frozen_vector,
     read_structure_atoms,
     kabsch_fit,
     _paired_coordinates,
     _rmsd,
-    _residue_atom_triples,
-    compute_contact_residue_pairs,
     compute_fnat,
     compute_interface_residues,
     _chain_residue_ids,
@@ -159,9 +153,7 @@ from nanoqc.structure.complex_atoms import (  # noqa: E402,F401
 from nanoqc.structure.side_chain_metrics import (  # noqa: E402,F401
     _SIDECHAIN_HEAVY_ATOMS,
     _SYMMETRIC_SWAPS,
-    _active_side_chain_error,
     compute_active_side_chain_rmsd,
-    ClashPair,
     compute_bonded_exclusions,
     find_severe_clashes,
     compute_dockq,

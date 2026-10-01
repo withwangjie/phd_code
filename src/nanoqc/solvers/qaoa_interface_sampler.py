@@ -29,19 +29,12 @@ import pennylane as qml
 from nanoqc.qubo.subgraph_to_qubo import InterfaceQUBOBuilder, _virtual_pruned_graph, qubo_to_ising
 from nanoqc.quantum.instance import QuantumOptimizationInstance
 
-# Definitions now live in focused modules; re-exported so every existing
-# `from nanoqc.solvers.qaoa_interface_sampler import ...` keeps working.
+# Names from the split-out modules that this module or its callers use.
 from nanoqc.solvers.qaoa_results import (  # noqa: E402,F401
     BitString,
-    OptimizationResult,
-    OptimizationCollapseError,
     GROUND_ENERGY_TOLERANCE,
     MAX_QAOA_DEPTH,
-    lower_tail_cvar,
     finite_shot_cvar,
-    GroundStateResult,
-    QuantumSampleResult,
-    AnnealingResult,
 )
 from nanoqc.solvers.qaoa_optimization import QAOAOptimizationMixin
 from nanoqc.solvers.qaoa_sampling import QAOASamplingMixin

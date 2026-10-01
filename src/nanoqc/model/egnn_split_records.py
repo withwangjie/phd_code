@@ -1,6 +1,6 @@
 """Per-graph sequence records, partner-side identities and assignment digests for the EGNN split.
 
-Split out of train_egnn_pruning.py, which re-exports every name here. The
+Split out of train_egnn_pruning.py. The
 component/fold assignment itself (``split_paths``) stays there because it
 reads the isolation thresholds that ``main`` rebinds from the command line.
 """

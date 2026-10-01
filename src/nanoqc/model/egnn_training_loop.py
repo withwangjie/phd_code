@@ -1,6 +1,6 @@
 """One training epoch, validation, DDP helpers and checkpoint/history file I/O.
 
-Split out of train_egnn_pruning.py, which re-exports every name here. The
+Split out of train_egnn_pruning.py. The
 split, checkpoint-payload and summary code stays there because it reads the
 isolation thresholds that ``main`` rebinds from the command line.
 """

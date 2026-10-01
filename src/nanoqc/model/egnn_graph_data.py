@@ -1,6 +1,6 @@
 """Graph dataset, interface labels, seeding and DataLoader construction for EGNN training.
 
-Split out of train_egnn_pruning.py, which re-exports every name here.
+Split out of train_egnn_pruning.py.
 """
 from __future__ import annotations
 

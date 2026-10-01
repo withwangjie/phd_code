@@ -95,8 +95,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from nanoqc.common.seed_streams import derive_streams, save_stream_map, verify_stream_map  # noqa: E402
-# repo_path and sha256_of are re-exported for the scripts/amend_failed_*.py recovery helpers.
-from nanoqc.common.repo_io import sha256_file as sha256_of, repo_path, CONFIGS_DIR  # noqa: E402,F401
+from nanoqc.common.repo_io import sha256_file as sha256_of, CONFIGS_DIR  # noqa: E402,F401
 from nanoqc.pipeline.orchestrator_common import (  # noqa: E402,F401
     MAX_QAOA_DEPTH,
     subprocess_environment,
@@ -111,16 +110,9 @@ from nanoqc.pipeline.orchestrator_common import (  # noqa: E402,F401
     atomic_write_json,
     calibration_solver_args,
     cluster_adequacy,
-    git_commit_hash,
-    package_versions,
     primary_qc_effect_name,
-    quantum_benchmark_ablation,
-    quantum_development_sensitivity,
-    quantum_primary,
-    quantum_protocol,
     resolve_path,
     rq5_inference_failures,
-    utc_run_stamp,
     utc_timestamp,
 )
 from nanoqc.pipeline.config_validation import (  # noqa: E402,F401
@@ -132,7 +124,6 @@ from nanoqc.pipeline.run_records import (  # noqa: E402,F401
     build_run_manifest,
     new_run_dir,
     resolve_resume_dir,
-    save_derived_child,
     write_run_inventory,
 )
 from nanoqc.pipeline.stages_data import DataStagesMixin  # noqa: E402

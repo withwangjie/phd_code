@@ -40,17 +40,14 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 # entrypoint cannot read directly -- see run_full_experiment.py's
 # stage_statistics comment for why).
 
-# Definitions now live in focused modules; re-exported so every existing
-# `from nanoqc.reporting.generate_final_research_report import ...` keeps working.
+# Names from the split-out modules that this module or its callers use.
 from nanoqc.reporting.report_common import (  # noqa: E402,F401
     _read_json,
     _read_csv_rows,
-    _read_text,
     _filter_qc_rows,
     _formal_statistics_payload,
     _paired_inference_multiplicity_note,
     _primary_active_sites,
-    _primary_pruning,
     _quantum_primary,
     _fmt,
     ReportContext,
@@ -66,8 +63,6 @@ from nanoqc.reporting.report_sections_quantum import (  # noqa: E402,F401
 )
 from nanoqc.reporting.report_sections_structure import (  # noqa: E402,F401
     _load_recovery_rows,
-    _target_level_paired_differences,
-    _target_level_descriptive_difference,
     section_structural_benefit,
     section_external_and_robustness,
 )

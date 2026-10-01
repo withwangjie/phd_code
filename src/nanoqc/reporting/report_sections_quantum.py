@@ -1,6 +1,6 @@
 """Final-report sections on pruning, the quantum problem, the QAOA protocol and search performance.
 
-Split out of generate_final_research_report.py, which re-exports every name here.
+Split out of generate_final_research_report.py.
 """
 from __future__ import annotations
 

@@ -36,7 +36,6 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 import gemmi
-import numpy as np
 import torch
 from scipy.spatial import cKDTree
 

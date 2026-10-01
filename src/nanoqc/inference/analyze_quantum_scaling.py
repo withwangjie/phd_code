@@ -11,7 +11,7 @@ selection and the energy landscape change with count; the slope is not an
 asymptotic complexity exponent or evidence of hardware quantum speedup.
 """
 from __future__ import annotations
-import argparse,csv,json,math
+import argparse,json,math
 from collections import defaultdict
 from pathlib import Path
 from typing import Sequence,Optional

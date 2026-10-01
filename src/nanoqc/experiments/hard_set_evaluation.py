@@ -444,22 +444,6 @@ def _append_csv_row(row: Mapping[str, Any], path: Path) -> None:
         os.fsync(handle.fileno())
 
 
-def _append_failure_log(
-    path: Path, graph_path: Path, error: TargetEvaluationError
-) -> None:
-    """Append a durable, human-readable failure record without stopping the batch."""
-
-    line = (
-        f"{datetime.now().astimezone().isoformat(timespec='seconds')}\t"
-        f"{graph_path.resolve()}\t{error.stage}\t{type(error.cause).__name__}\t"
-        f"{_clean_error_message(error.cause)}\n"
-    )
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(line)
-        handle.flush()
-        os.fsync(handle.fileno())
-
-
 def _append_failure_row(path: Path, row: Mapping[str, Any]) -> None:
     """Persist a worker-returned failure row from the sole writer process."""
 
@@ -853,7 +837,6 @@ def _run(args: argparse.Namespace) -> int:
     pending = [
         path for path in selected_graphs if str(path.resolve()) not in completed_files
     ]
-    resumed_target_seconds = sum(_numeric_values(rows, "total_seconds"))
     if args.backend == "lightning.gpu":
         args.effective_workers = min(
             args.workers, args.gpu_count * args.gpu_workers_per_device

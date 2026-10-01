@@ -643,7 +643,7 @@ def build_ablation_subgraph(data: Any, active: torch.Tensor, radius: float) -> A
 # Checkpoint loading (moved here from batch_benchmark_hard_set.py so that
 # run_real_complex_pilot.py / generate_energy_calibration_dataset.py /
 # generate_figure1_pymol_script.py no longer import the QAOA benchmark driver
-# just to load EGNN weights; batch_benchmark_hard_set re-exports every name).
+# just to load EGNN weights).
 # ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)

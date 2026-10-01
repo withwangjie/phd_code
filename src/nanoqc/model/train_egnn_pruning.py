@@ -43,25 +43,17 @@ from nanoqc.model.model_egnn_pruning import EGNNInterfaceScorer
 from nanoqc.common.repo_io import sha256_file as _file_sha256
 from nanoqc.data.sequence_identity import partner_orientations
 
-# Definitions now live in focused modules; re-exported so every existing
-# `from nanoqc.model.train_egnn_pruning import ...` keeps working.
+# Names from the split-out modules that this module or its callers use.
 from nanoqc.model.egnn_metrics import (  # noqa: E402,F401
     BinaryMetrics,
-    _geometry_baseline_arrays,
     fit_geometry_logistic_baseline,
     count_training_labels,
-    roc_auc_score_binary,
-    pr_auc_score_binary,
-    classification_metrics,
-    best_f1_threshold,
 )
 from nanoqc.model.egnn_graph_data import (  # noqa: E402,F401
     InterfaceGraphDataset,
     graph_protocol,
     preload_graphs,
-    interface_labels,
     seed_everything,
-    seed_loader_worker,
     _make_loader,
 )
 from nanoqc.model.egnn_training_loop import (  # noqa: E402,F401

@@ -931,12 +931,6 @@ class InterfaceQUBOBuilder:
             metadata=metadata,
         )
 
-    def build_matrix(self, data: Data) -> np.ndarray:
-        """Convenience wrapper returning only the upper-triangular Q matrix."""
-
-        return self.build(data).Q
-
-
 def _combinations(values: Iterable[int]) -> Iterable[Tuple[int, int]]:
     """Yield sorted unique pairs from a small variable-index collection."""
 

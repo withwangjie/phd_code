@@ -1,6 +1,6 @@
 """Result records, the CVaR objective helpers and QAOA constants.
 
-Split out of qaoa_interface_sampler.py, which re-exports every name here.
+Split out of qaoa_interface_sampler.py.
 """
 from __future__ import annotations
 
@@ -88,30 +88,6 @@ GROUND_ENERGY_TOLERANCE = 1e-9
 MAX_QAOA_DEPTH = 12
 
 
-def lower_tail_cvar(energies: np.ndarray, probabilities: np.ndarray, alpha: float) -> float:
-    """Exact lower-tail CVaR over a *known* probability distribution.
-
-    This is the analytic (infinite-shot) CVaR: it includes fractional
-    probability mass at the quantile boundary and requires the caller to
-    already know each outcome's exact probability. Use this only when the
-    full distribution is available (e.g. state-vector simulation). For a
-    finite measurement sample where every shot carries equal weight
-    ``1/eval_shots``, use :func:`finite_shot_cvar` instead -- it matches the
-    literature's usual finite-shot CVaR-VQE/QAOA aggregation (Barkoutsos
-    et al. 2020), which averages the literal lowest-energy shots rather than
-    interpolating a fractional boundary weight.
-    """
-    e, p = np.asarray(energies, dtype=float), np.asarray(probabilities, dtype=float)
-    if not 0 < alpha <= 1 or e.ndim != 1 or e.shape != p.shape or not len(e):
-        raise ValueError("Invalid CVaR dimensions or alpha")
-    if not np.isfinite(e).all() or not np.isfinite(p).all() or (p < 0).any() or not np.isclose(p.sum(), 1.):
-        raise ValueError("CVaR requires finite energies and normalized nonnegative probabilities")
-    order = np.argsort(e, kind="stable")
-    mass = p[order] / p.sum()
-    taken = np.minimum(mass, np.maximum(0., alpha - (np.cumsum(mass) - mass)))
-    return float(taken @ e[order] / alpha)
-
-
 def finite_shot_cvar(sampled_energies: Sequence[float], alpha: float) -> float:
     """Finite-shot CVaR estimator: plain mean of the lowest-energy shots.
 
@@ -119,8 +95,9 @@ def finite_shot_cvar(sampled_energies: Sequence[float], alpha: float) -> float:
     bitstring) ascending and returns the arithmetic mean of the lowest
     ``ceil(alpha * len(sampled_energies))`` of them. Every shot is an
     equally-weighted point mass drawn from the true, unknown Born
-    distribution -- unlike :func:`lower_tail_cvar`, there is no fractional
-    boundary weight to interpolate, because a single shot cannot be split.
+    distribution -- unlike the exact lower-tail CVaR of a known distribution,
+    there is no fractional boundary weight to interpolate, because a single shot
+    cannot be split.
 
     Args:
         sampled_energies: 1-D array-like of finite-shot measured energies.

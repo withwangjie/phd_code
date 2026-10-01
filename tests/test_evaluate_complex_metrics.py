@@ -218,7 +218,6 @@ class EvaluateComplexMetricsTests(unittest.TestCase):
 
     def test_invalid_arguments_rejected(self):
         ref = _make_complex()
-        pred = copy.deepcopy(ref)
         with patch("nanoqc.structure.evaluate_complex_metrics.read_structure_atoms", side_effect=lambda *a, **k: copy.deepcopy(ref)):
             with self.assertRaises(ValueError):
                 m.evaluate_complex_metrics("r", "p", receptor_chains=["A"], ligand_chains=["A"])
