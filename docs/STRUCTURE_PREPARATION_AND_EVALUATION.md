@@ -50,7 +50,11 @@ not be reclassified as exclusions of the experimental source data.
 
 All methods and the relax-only control keep the same frozen atom mask and
 iteration budget. There is no reference-guided state selection, energy clipping,
-automatic retry or silent increase of that budget.
+new random start or silent increase of that budget. The exact-potential movable
+coordinate optimizer may restart its L-BFGS-B history within that same total
+iteration cap when the measured residual force remains high (A44); every restart
+and the final force are recorded. This numerical continuation does not change
+the physical acceptance rule or guarantee that a difficult pose will pass.
 
 For each output, record discrete and relaxed force-group energies, closest
 nonbonded pair, extreme pair count and residual forces. Force groups distinguish

@@ -636,6 +636,46 @@ class Orchestrator(
         return results
 
 
+def write_incomplete_research_report(
+    run_dir: Path, results: Dict[str, StageResult]
+) -> Path:
+    """Leave a readable, explicitly non-confirmatory report after a failed run.
+
+    The formal final_report stage and its prerequisite gates remain failed.
+    Scientific failures are never converted to completed stage statuses.
+    """
+    path = run_dir / "INCOMPLETE_RESEARCH_REPORT.md"
+    header = [
+        "# Incomplete research run", "",
+        "This run did not satisfy every formal acceptance gate. Its recorded "
+        "outputs are diagnostic; no failed structural or statistical endpoint "
+        "is presented as confirmatory evidence.", "",
+    ]
+    try:
+        from nanoqc.reporting.generate_final_research_report import compile_report
+        body = compile_report(run_dir)
+    except Exception as exc:
+        # Reporting itself must not hide an earlier scientific failure.  Even
+        # if the rich renderer cannot read a partial artifact, preserve every
+        # stage status and its recorded failure reason.
+        header.extend([
+            f"Detailed report rendering failed: {type(exc).__name__}: {exc}", "",
+            "## Stage status", "",
+        ])
+        for stage in STAGE_ORDER:
+            result = results.get(stage)
+            if result is None:
+                header.append(f"- **{stage}: not started**")
+            else:
+                header.append(f"- **{stage}: {result.status}** — {result.detail}")
+        body = ""
+    content = "\n".join(header) + "\n" + body + "\n"
+    temp = path.with_suffix(path.suffix + ".tmp")
+    temp.write_text(content, encoding="utf-8")
+    temp.replace(path)
+    return path
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
                                      allow_abbrev=False)
@@ -740,6 +780,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             if adequacy.is_file():
                 print(f"Cluster adequacy: {adequacy}")
             return 0 if stopped_ok else 1
+
+        # A failed scientific gate must still leave a readable account of the
+        # full run.  This is deliberately outside the final_report stage: it
+        # cannot turn failed structural inference into formal completion.
+        if not args.only and not args.smoke_only and any(
+            result.status == "failed" for result in results.values()
+        ):
+            report_path = write_incomplete_research_report(run_dir, results)
+            print(f"Incomplete-run report: {report_path}")
 
         print("\n=== Stage summary ===")
         overall_ok = True
