@@ -56,19 +56,50 @@ def _minimize_movable_positions(context: Any, positions: np.ndarray,
             raise FloatingPointError("Nonfinite energy or force during movable minimization")
         return energy, gradient
 
-    result = minimize(objective, start[indices].ravel(), jac=True,
-                      method="L-BFGS-B", options={"maxiter": max_iterations,
-                                                    "ftol": 1e-15, "gtol": 1e-3})
+    # Relative objective convergence is unsafe for a severely clashing
+    # structure: an enormous potential can change by less than its relative
+    # tolerance while the remaining forces are still enormous.  Restarting
+    # the quasi-Newton history in bounded stages also gives difficult poses
+    # another chance without exceeding the declared iteration budget.
+    flat = start[indices].ravel().copy()
+    iterations = evaluations = 0
+    stops = []
+    force_verified_success = False
+    solver_reported_success = False
+    while iterations < max_iterations:
+        allowance = min(200, max_iterations - iterations)
+        result = minimize(objective, flat, jac=True, method="L-BFGS-B",
+                          options={"maxiter": allowance, "maxls": 50,
+                                   "ftol": 0.0, "gtol": 1e-3})
+        next_flat = np.asarray(result.x, dtype=np.float64)
+        moved = not np.array_equal(next_flat, flat)
+        iterations += int(result.nit)
+        evaluations += int(result.nfev)
+        stops.append(str(result.message))
+        solver_reported_success = bool(result.success)
+        _, gradient = objective(next_flat)
+        evaluations += 1
+        force_rms = float(np.sqrt(np.mean(gradient ** 2)))
+        flat = next_flat
+        if force_rms <= RELAX_FORCE_TOLERANCE_KJ_MOL_NM:
+            force_verified_success = True
+            break
+        # An optimizer can terminate with zero iterations when its line search
+        # cannot make progress.  Do not loop indefinitely or call that success.
+        if result.nit == 0 or not moved:
+            break
     final = start.copy()
-    final[indices] = result.x.reshape(-1, 3)
+    final[indices] = flat.reshape(-1, 3)
     if not np.isfinite(final).all():
         raise FloatingPointError("Nonfinite coordinates after movable minimization")
     context.setPositions(final * unit.nanometer)
     return final, dict(minimizer="scipy_lbfgsb_exact_movable",
-                       minimizer_iterations=int(result.nit),
-                       minimizer_evaluations=int(result.nfev),
-                       minimizer_stop_reason=str(result.message),
-                       minimizer_reported_success=bool(result.success))
+                       minimizer_iterations=iterations,
+                       minimizer_evaluations=evaluations,
+                       minimizer_stop_reason="; ".join(stops),
+                       minimizer_reported_success=solver_reported_success,
+                       minimizer_force_verified_success=force_verified_success,
+                       minimizer_restart_count=max(0, len(stops)-1))
 
 
 def _internal_candidate_overlaps(positions: np.ndarray, atoms: Mapping[str, int],
@@ -817,7 +848,9 @@ class AllAtomInterfaceQUBOBuilder:
         else:
             minimization=dict(minimizer="skipped",minimizer_iterations=0,
                               minimizer_evaluations=0,minimizer_stop_reason="iteration cap zero",
-                              minimizer_reported_success=False)
+                              minimizer_reported_success=False,
+                              minimizer_force_verified_success=False,
+                              minimizer_restart_count=0)
         frozen=sorted(set(range(len(positions)))-self.movable)
         if not np.allclose(positions[frozen],self.base_positions[frozen],atol=1e-10,rtol=0):
             raise AssertionError("Frozen atoms moved during relaxation")
