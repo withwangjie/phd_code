@@ -499,6 +499,7 @@ structure_experiment:
   # QAOA depth, budgets, objective, restarts, shots and parameter scaling are
   # inherited verbatim from quantum_protocol.primary.
   perturbation_mode: "multi_chi"
+  perturbation_max_attempts: 32
   solvent_model: "vacuum"  # frozen primary structural protocol
   solvent_sensitivity: []  # development target experiments removed
   min_perturb_degrees: 40.0

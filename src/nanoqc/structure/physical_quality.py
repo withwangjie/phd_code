@@ -15,6 +15,7 @@ from nanoqc.structure.residue_tables import PEPTIDE_BOND_MAX_C_N_ANGSTROM
 QUALITY_SCHEMA = "structure_physical_quality_v1"
 EXTREME_NONBONDED_FLOOR_ANGSTROM = 0.4
 RELAX_FORCE_TOLERANCE_KJ_MOL_NM = 10.0
+GENERATED_INPUT_HEAVY_FLOOR_ANGSTROM = 1.0
 
 
 class StructureQualityError(ValueError):
@@ -24,6 +25,44 @@ class StructureQualityError(ValueError):
         super().__init__(message)
         self.category = category
         self.audit = audit
+
+
+def generated_input_geometry_audit(topology, positions_nm: np.ndarray) -> dict:
+    """Apply the existing source-heavy and all-atom hard floors to a pose.
+
+    This is a prospective generated-input screen.  It neither evaluates the
+    reference structure nor uses Amber energy or a solver outcome.
+    """
+    physical = topology_geometry_audit(topology, positions_nm)
+    atoms = list(topology.atoms())
+    xyz = np.asarray(positions_nm, dtype=float) * 10.0
+    heavy = [atom for atom in atoms if atom.element is not None
+             and atom.element.symbol.upper() != "H"]
+    overlaps = []
+    if len(heavy) > 1:
+        coordinates = xyz[[atom.index for atom in heavy]]
+        tree = cKDTree(coordinates)
+        for left, right in sorted(tree.query_pairs(GENERATED_INPUT_HEAVY_FLOOR_ANGSTROM)):
+            a, b = heavy[left], heavy[right]
+            if a.residue.index == b.residue.index:
+                continue
+            distance = float(np.linalg.norm(coordinates[left]-coordinates[right]))
+            if distance >= GENERATED_INPUT_HEAVY_FLOOR_ANGSTROM:
+                continue
+            overlaps.append(dict(
+                distance_angstrom=distance,
+                atoms=[f"{a.residue.chain.id}:{a.residue.id}:{a.residue.name}:{a.name}",
+                       f"{b.residue.chain.id}:{b.residue.id}:{b.residue.name}:{b.name}"],
+            ))
+    return dict(
+        accepted=bool(physical["topology_passed"] and physical["geometry_passed"] and not overlaps),
+        source_heavy_floor_angstrom=GENERATED_INPUT_HEAVY_FLOOR_ANGSTROM,
+        interresidue_heavy_overlap_count=len(overlaps),
+        interresidue_heavy_overlaps=overlaps[:100],
+        interresidue_heavy_pair_list_truncated=len(overlaps)>100,
+        all_atom=physical,
+        selection_definition="first deterministic geometry-qualified perturbation; no reference, energy or solver selection",
+    )
 
 
 def assert_structural_row_acceptance(rows: list[dict]) -> None:

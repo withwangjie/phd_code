@@ -488,6 +488,7 @@ def main(argv=None) -> int:
     parser.add_argument("--antigen-min-length-coverage", type=float, default=0.70)
     parser.add_argument("--seeds", type=int, nargs="+", default=[42,43,44])
     parser.add_argument("--perturbation-mode",choices=("multi_chi","chi1"),default="multi_chi")
+    parser.add_argument("--perturbation-max-attempts",type=int,default=32)
     parser.add_argument("--solvent-model",choices=("vacuum","gbn2"),default="vacuum")
     parser.add_argument("--min-perturb-degrees",type=float,default=40.0)
     parser.add_argument("--max-perturb-degrees",type=float,default=120.0)
@@ -571,6 +572,8 @@ def main(argv=None) -> int:
         parser.error("--eligibility-only is valid only together with --prepare-only")
     if not 0.0 < args.min_perturb_degrees <= args.max_perturb_degrees <= 180.0:
         parser.error("Require 0 < min-perturb-degrees <= max-perturb-degrees <= 180")
+    if args.perturbation_max_attempts < 1:
+        parser.error("--perturbation-max-attempts must be positive")
     homology = {
         "vhh_full_chain_identity": float(args.vhh_identity_threshold),
         "cdr_h3_identity": float(args.cdr_h3_identity_threshold),
@@ -926,6 +929,7 @@ def main(argv=None) -> int:
                 job_argv=["--manifest",str(out/"prepared"/pdb/"recovery_manifest.json"),
                         "--out-dir",str(destination),"--solvent-model",args.solvent_model,
                         "--perturbation-mode",args.perturbation_mode,
+                        "--perturbation-max-attempts",str(args.perturbation_max_attempts),
                         "--min-perturb-degrees",str(args.min_perturb_degrees),
                         "--max-perturb-degrees",str(args.max_perturb_degrees),
                         "--seeds",*[str(s) for s in args.seeds],

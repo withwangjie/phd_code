@@ -20,8 +20,31 @@ from nanoqc.solvers.qaoa_interface_sampler import XYMixerQAOASampler
 from nanoqc.common.repo_io import sha256_file as _ablation_digest, atomic_write_json_fsync as _ablation_atomic_json, repo_path
 from nanoqc.experiments.benchmark_common import SHARED_HELPER_MODULES
 from nanoqc.common.device_errors import raise_if_resource_error
+from nanoqc.common.seed_streams import derive_child_seed
 from nanoqc.experiments.research_ablation import _ablation_classical_counts, _ablation_summarize
-from nanoqc.structure.physical_quality import StructureQualityError
+from nanoqc.structure.physical_quality import StructureQualityError, generated_input_geometry_audit
+
+
+def _qualified_perturbation(generator, seed: int, mode: str, minimum: float,
+                            maximum: float, max_attempts: int):
+    """Take the first geometry-valid draw without inspecting energy or reference."""
+    if max_attempts < 1 or mode not in ("multi_chi", "chi1"):
+        raise ValueError("Invalid generated-input perturbation protocol")
+    attempts = []
+    for index in range(max_attempts):
+        draw_seed = seed if index == 0 else derive_child_seed(
+            seed, "generated_input_geometry", str(index))
+        if mode == "multi_chi":
+            positions, angles = generator.perturb_sidechain_chis(draw_seed, minimum, maximum)
+        else:
+            positions, angles = generator.perturb_chi1(draw_seed, minimum, maximum)
+        quality = generated_input_geometry_audit(generator.topology, positions)
+        attempts.append(dict(attempt=index, draw_seed=draw_seed, angles=angles, quality=quality))
+        if quality["accepted"]:
+            return positions, angles, attempts
+    raise StructureQualityError(
+        f"No geometry-qualified generated input in {max_attempts} fixed attempts",
+        category="generated_input_geometry", audit=dict(seed=seed, attempts=attempts))
 
 
 def _structure_quality_assessment(relaxation: dict) -> dict:
@@ -426,6 +449,8 @@ def _recovery_benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--solvent-model",choices=("vacuum","gbn2"),default="vacuum")
     parser.add_argument("--min-perturb-degrees",type=float,default=40.)
     parser.add_argument("--max-perturb-degrees",type=float,default=120.)
+    parser.add_argument("--perturbation-max-attempts",type=int,default=32,
+        help="Fixed upper bound for geometry-only generated-input draws per seed")
     parser.add_argument("--outputs",type=int,default=1000)
     parser.add_argument("--max-evals",type=int,default=90)
     parser.add_argument("--qaoa-depth",type=int,default=2)
@@ -447,6 +472,8 @@ def _recovery_benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
         parser.error("--measurement-seeds must match --seeds length")
     if not 0<args.min_perturb_degrees<=args.max_perturb_degrees<=180:
         parser.error("Invalid perturbation angle range")
+    if args.perturbation_max_attempts < 1:
+        parser.error("--perturbation-max-attempts must be positive")
     if min(args.outputs,args.max_evals,args.sa_passes,args.qaoa_depth)<=0 or args.relax_iterations<0:
         parser.error("Invalid solver budgets")
     manifest=args.manifest.resolve();case=json.loads(manifest.read_text())
@@ -488,22 +515,34 @@ def _recovery_benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
                 try:
                     directory=out/f"seed_{seed}";directory.mkdir(exist_ok=True)
                     perturbed=directory/"perturbed_input.cif";metadata=directory/"perturbation.json"
+                    attempts_path=directory/"perturbation_attempts.json"
                     if metadata.exists():
                         saved=json.loads(metadata.read_text())
                         if not perturbed.exists() or _ablation_digest(perturbed)!=saved["structure_sha256"]:
                             raise ValueError("Perturbed input changed or missing")
+                        if not attempts_path.is_file() or _ablation_digest(attempts_path)!=saved.get("attempts_sha256"):
+                            raise ValueError("Generated-input geometry ledger changed or missing")
                     else:
-                        if args.perturbation_mode=="multi_chi":
-                            positions,angles=generator.perturb_sidechain_chis(
-                                seed,args.min_perturb_degrees,args.max_perturb_degrees)
-                            perturb_protocol="retrospective multi-chi recovery; all defined side-chain chis perturbed; no clash/energy/reference-based rejection"
-                        else:
-                            positions,angles=generator.perturb_chi1(
-                                seed,args.min_perturb_degrees,args.max_perturb_degrees)
-                            perturb_protocol="retrospective chi1-only recovery ablation; no clash/energy/reference-based rejection"
+                        try:
+                            positions,angles,attempts=_qualified_perturbation(
+                                generator,seed,args.perturbation_mode,
+                                args.min_perturb_degrees,args.max_perturb_degrees,
+                                args.perturbation_max_attempts)
+                        except StructureQualityError as exc:
+                            _ablation_atomic_json(attempts_path,exc.audit)
+                            raise
+                        _ablation_atomic_json(attempts_path,dict(
+                            seed=seed,selected_attempt=attempts[-1]["attempt"],
+                            max_attempts=args.perturbation_max_attempts,attempts=attempts))
+                        perturb_protocol=(
+                            f"retrospective {args.perturbation_mode} recovery; first deterministic "
+                            "perturbation satisfying the existing A24/A28 absolute-distance floors; "
+                            "no energy/reference/solver-based selection")
                         generator.write_structure(positions,perturbed)
                         _ablation_atomic_json(metadata,dict(
                             seed=seed,angles=angles,structure_sha256=_ablation_digest(perturbed),
+                            attempts_sha256=_ablation_digest(attempts_path),
+                            selected_attempt=attempts[-1]["attempt"],
                             perturbation_mode=args.perturbation_mode,protocol=perturb_protocol))
                     child_case=dict(input_structure=str(perturbed),reference_structure=str(native),
                         cdr3_residues=case.get('cdr3_residues',[]),pruning=case.get('pruning'),
@@ -576,7 +615,7 @@ def _recovery_benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
             "Positive RMSD gains mean improvement. All methods share the perturbed input and relaxation protocol. Relax-only isolates local minimization without discrete search.",
             ("Native backbone remains fixed; formal multi_chi mode perturbs all defined Active side-chain chis before recovery. "
              "The chi1 mode is a controlled ablation. This is neither de novo prediction nor blind docking."),
-            "Perturbations are not rejected based on energy or reference similarity. Failures must be included in the denominator; energy decrease alone is not accuracy.",
+            "Generated inputs use the first geometry-qualified perturbation within the fixed attempt cap. Rejected draws and exhausted seeds remain in the ledger; selection never uses energy, reference similarity or solver outcomes. Energy decrease alone is not accuracy.",
             "", "| Method | Successful seeds | Mean gain vs input (A) | Mean gain vs relax-only (A) | Energy-down/RMSD-up cases |", "|---|---:|---:|---:|---:|"]
         for method in ("qaoa","sa","uniform","greedy"):
             group=[r for r in rows if r["method"]==method and
