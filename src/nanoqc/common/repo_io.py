@@ -87,6 +87,7 @@ MODULE_LAYOUT = {
     "calibration_fit.py": "src/nanoqc/experiments/calibration_fit.py",
     "benchmark_statistics.py": "src/nanoqc/experiments/benchmark_statistics.py",
     "structure_benchmarks.py": "src/nanoqc/experiments/structure_benchmarks.py",
+    "relax_only_diagnostic.py": "src/nanoqc/experiments/relax_only_diagnostic.py",
     "run_real_complex_pilot.py": "src/nanoqc/experiments/run_real_complex_pilot.py",
     "real_complex_preparation.py": "src/nanoqc/experiments/real_complex_preparation.py",
     "generate_energy_calibration_dataset.py": "src/nanoqc/experiments/generate_energy_calibration_dataset.py",
