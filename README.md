@@ -379,6 +379,7 @@ scripts/   deploy_launch.sh, run_full_experiment.sh, formal_preflight.sh, check_
            repair_openmm_cuda.sh, prepare_external_vhh.sh,
            amend_failed_egnn_fp32.py, amend_failed_calibration.py (one-time amended-lineage recovery),
            diagnose_calibration_eligibility.py, diagnose_calibration_relaxation.py (read-only),
+           rehearse_structure_targets.py (pre-launch structural rehearsal, separate output),
            discover_external_vhh.py (candidate discovery for manual curation)
 src/nanoqc/
   pipeline/     run_full_experiment.py (entry point: Orchestrator core, resume, main),
@@ -588,6 +589,25 @@ Two read-only diagnostics change nothing in a run:
 and `scripts/diagnose_calibration_relaxation.py` compares raw against
 fixed-backbone-relaxed Amber energies from rows an earlier calibration already
 generated.
+
+### Rehearse the structural stage before a new formal run
+
+A formal run spends hours before `structure_experiment` starts. To check a
+structural repair first, rerun only that stage's validation-queue step on a
+finished run's frozen targets with the current code:
+
+```bash
+python scripts/rehearse_structure_targets.py --run /data/phd_code/runs/<run>         # its failed targets
+python scripts/rehearse_structure_targets.py --run /data/phd_code/runs/<run> --all   # every frozen target
+```
+
+It reuses the run's logged command and resolved hardware environment (same
+OpenMM platform and precision), writes to a new directory beside the run and
+never into it, and prints physical acceptance, generated-input attempts and
+failure causes, ending with whether to launch. Recovery RMSDs are written but
+not printed: those targets were already inspected during debugging and are
+historical repair assessments (A45). A rehearsal is a pre-launch check, not a
+formal result.
 
 ## Mandatory experiment-result audit
 

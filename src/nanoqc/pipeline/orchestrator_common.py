@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import subprocess
 import time
 from dataclasses import dataclass, field
@@ -403,3 +404,29 @@ def calibration_solver_args(calibration_cfg: Dict[str, Any], calibration_file: P
     if calibration_file.is_file() or force_required:
         argv += ["--energy-calibration-file", str(calibration_file)]
     return argv
+
+
+def subprocess_environment(hardware: Dict[str, Any], repo_root: Path,
+                           base: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    """The environment every orchestrated stage subprocess runs in.
+
+    Thread counts, ``PYTHONPATH`` and the OpenMM platform/device/precision come
+    from the resolved ``hardware`` section. Shared with
+    ``scripts/rehearse_structure_targets.py`` so a rehearsal runs on the same
+    OpenMM platform and precision as the formal stage, not the CPU Reference
+    fallback.
+    """
+    env = dict(os.environ if base is None else base)
+    threads = str(hardware.get("cpu_threads_per_process", 2))
+    for name in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+        env[name] = threads
+    env["PYTHONUNBUFFERED"] = "1"
+    # Stage entry points run as `python -m nanoqc...` from the repository root.
+    src_root = str(Path(repo_root) / "src")
+    env["PYTHONPATH"] = os.pathsep.join(
+        [src_root, *[p for p in env.get("PYTHONPATH", "").split(os.pathsep) if p and p != src_root]])
+    env["OPENMM_CPU_THREADS"] = str(hardware.get("openmm_cpu_threads", 8))
+    env["QP_OPENMM_PLATFORM"] = str(hardware.get("openmm_platform", "Reference"))
+    env["QP_OPENMM_DEVICE"] = str(hardware.get("openmm_device", "0"))
+    env["QP_OPENMM_PRECISION"] = str(hardware.get("openmm_precision", "double"))
+    return env

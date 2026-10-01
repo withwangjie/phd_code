@@ -99,6 +99,7 @@ from nanoqc.common.seed_streams import derive_streams, save_stream_map, verify_s
 from nanoqc.common.repo_io import sha256_file as sha256_of, repo_path, CONFIGS_DIR  # noqa: E402,F401
 from nanoqc.pipeline.orchestrator_common import (  # noqa: E402,F401
     MAX_QAOA_DEPTH,
+    subprocess_environment,
     ORCHESTRATED_SCRIPTS,
     PREREQUISITE_BLOCK_PREFIX,
     REPO_ROOT,
@@ -254,20 +255,8 @@ class Orchestrator(
                          env: Optional[Dict[str, str]] = None) -> tuple[int, Path]:
         log_path = self.log_dir / f"{stage}.log"
         started = utc_timestamp()
-        full_env = dict(os.environ)
         hardware = self.config.get("hardware", {})
-        threads = str(hardware.get("cpu_threads_per_process", 2))
-        for name in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
-            full_env[name] = threads
-        full_env["PYTHONUNBUFFERED"] = "1"
-        # Stage entry points run as `python -m nanoqc...` from the repository root.
-        src_root = str(Path(self.repo_root) / "src")
-        full_env["PYTHONPATH"] = os.pathsep.join(
-            [src_root, *[p for p in full_env.get("PYTHONPATH", "").split(os.pathsep) if p and p != src_root]])
-        full_env["OPENMM_CPU_THREADS"] = str(hardware.get("openmm_cpu_threads", 8))
-        full_env["QP_OPENMM_PLATFORM"] = str(hardware.get("openmm_platform", "Reference"))
-        full_env["QP_OPENMM_DEVICE"] = str(hardware.get("openmm_device", "0"))
-        full_env["QP_OPENMM_PRECISION"] = str(hardware.get("openmm_precision", "double"))
+        full_env = subprocess_environment(hardware, Path(self.repo_root))
         if env:
             full_env.update(env)
         timeout_seconds=float(self.config.get("control",{}).get("stage_timeout_seconds",0) or 0)
