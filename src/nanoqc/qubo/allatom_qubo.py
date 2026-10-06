@@ -14,7 +14,7 @@ import torch
 from torch_geometric.data import Data
 from nanoqc.qubo.atomistic_structure import _CHI_ATOMS, _SIDECHAIN_NAMES, _apply_sidechain_chis, _backbone_phi_psi, _chi1_angle, _sidechain_chi_angles, _torsion_angle_degrees, read_atomistic_structure
 from nanoqc.qubo.coarse_qubo import InterfaceQUBOBuilder, _combinations
-from nanoqc.qubo.ising import qubo_to_ising, validate_qubo_ising_equivalence
+from nanoqc.qubo.ising import ising_roundoff_tolerance, qubo_to_ising, validate_qubo_ising_equivalence
 from nanoqc.qubo.qubo_types import AA_INDEX, QUBOResult, RotamerTemplate, VariableRecord
 from nanoqc.qubo.rotamer_library import _THREE_LETTER, _dunbrack_templates_for_site, _expanded_rotamer_templates, _load_rotamer_bins, _nearest_dunbrack_bin, rotamer_source_metadata
 from nanoqc.structure.physical_quality import (StructureQualityError, topology_geometry_audit,
@@ -50,13 +50,74 @@ FIXED_POINT_FORCE_LIMIT_KJ_MOL_NM = 2.0 ** 31
 _PAIR_FORCE_BUDGET = FIXED_POINT_FORCE_LIMIT_KJ_MOL_NM / 64
 
 
+def _nonbonded_exclusions_and_wall(system: Any) -> tuple[set[tuple[int, int]], float] | None:
+    """Fully excluded pairs (1-2, 1-3) and the strongest r^-12 wall of a System.
+
+    Returns None when the System has no single NonbondedForce. The wall is
+    epsilon*sigma^12 maximized over Lorentz-Berthelot combinations of the
+    particle types and over the explicit parameters of every nonzero exception.
+    """
+    import openmm as mm
+    nonbonded = [f for f in system.getForces() if isinstance(f, mm.NonbondedForce)]
+    if len(nonbonded) != 1:
+        return None
+    force = nonbonded[0]
+    nm, kj = mm.unit.nanometer, mm.unit.kilojoule_per_mole
+    types = {(force.getParticleParameters(i)[1].value_in_unit(nm),
+              force.getParticleParameters(i)[2].value_in_unit(kj))
+             for i in range(force.getNumParticles())}
+    strength = max((math.sqrt(e1 * e2) * ((s1 + s2) / 2) ** 12
+                    for s1, e1 in types for s2, e2 in types), default=0.0)
+    excluded: set[tuple[int, int]] = set()
+    for index in range(force.getNumExceptions()):
+        i, j, charge, s, e = force.getExceptionParameters(index)
+        epsilon = e.value_in_unit(kj)
+        if charge.value_in_unit(mm.unit.elementary_charge ** 2) == 0.0 and epsilon == 0.0:
+            excluded.add((min(i, j), max(i, j)))
+        else:
+            strength = max(strength, epsilon * s.value_in_unit(nm) ** 12)
+    return excluded, strength
+
+
+class _ClosePairs:
+    """Interacting pairs with a movable atom closer than a radius.
+
+    Frozen atoms never move during a minimization, so their tree is built once;
+    each query only places the movable atoms.
+    """
+
+    def __init__(self, start_nm: np.ndarray, movable: Sequence[int],
+                 excluded: set[tuple[int, int]]) -> None:
+        from scipy.spatial import cKDTree
+        self._tree_type = cKDTree
+        self.movable = np.asarray(sorted(movable), dtype=np.int64)
+        moving = set(self.movable.tolist())
+        self.frozen = np.asarray([i for i in range(len(start_nm)) if i not in moving], dtype=np.int64)
+        self.frozen_tree = cKDTree(start_nm[self.frozen]) if len(self.frozen) else None
+        self.excluded = excluded
+
+    def __call__(self, positions_nm: np.ndarray, radius_nm: float) -> list[tuple[int, int]]:
+        pairs = set()
+        moving_xyz = positions_nm[self.movable]
+        if self.frozen_tree is not None:
+            for i, neighbours in zip(self.movable, self.frozen_tree.query_ball_point(moving_xyz, radius_nm)):
+                for k in neighbours:
+                    pair = (min(i, int(self.frozen[k])), max(i, int(self.frozen[k])))
+                    if pair not in self.excluded:
+                        pairs.add(pair)
+        for a, b in self._tree_type(moving_xyz).query_pairs(radius_nm):
+            pair = (min(self.movable[a], self.movable[b]), max(self.movable[a], self.movable[b]))
+            if pair not in self.excluded:
+                pairs.add((int(pair[0]), int(pair[1])))
+        return sorted(pairs)
+
+
 class _ExactForces:
     """Energy and forces at given positions, exact even under severe overlaps."""
 
     def __init__(self, context: Any, movable: set[int]) -> None:
         import openmm as mm
-        from scipy.spatial import cKDTree
-        self._mm, self._tree = mm, cKDTree
+        self._mm = mm
         self.context = context
         self.movable = np.asarray(sorted(movable), dtype=np.int64)
         self.reference = None
@@ -64,29 +125,14 @@ class _ExactForces:
         self.guarded = context.getPlatform().getName() not in ("Reference", "CPU")
         self.safe_distance_nm = None
         self.excluded: set[tuple[int, int]] = set()
+        self._pairs = None
         if not self.guarded:
             return
-        nonbonded = [f for f in context.getSystem().getForces() if isinstance(f, mm.NonbondedForce)]
-        if len(nonbonded) != 1:
+        found = _nonbonded_exclusions_and_wall(context.getSystem())
+        if found is None:
             self.safe_distance_nm = float("inf")   # unknown pair potential: always exact
             return
-        force = nonbonded[0]
-        nm, kj = mm.unit.nanometer, mm.unit.kilojoule_per_mole
-        # Strength of the r^-12 wall, epsilon*sigma^12, maximized over the
-        # pairs that interact: Lorentz-Berthelot combinations of the particle
-        # types, and the explicit parameters of every nonzero exception.
-        types = {(force.getParticleParameters(i)[1].value_in_unit(nm),
-                  force.getParticleParameters(i)[2].value_in_unit(kj))
-                 for i in range(force.getNumParticles())}
-        strength = max((math.sqrt(e1 * e2) * ((s1 + s2) / 2) ** 12
-                        for s1, e1 in types for s2, e2 in types), default=0.0)
-        for index in range(force.getNumExceptions()):
-            i, j, charge, s, e = force.getExceptionParameters(index)
-            epsilon = e.value_in_unit(kj)
-            if charge.value_in_unit(mm.unit.elementary_charge ** 2) == 0.0 and epsilon == 0.0:
-                self.excluded.add((min(i, j), max(i, j)))
-            else:
-                strength = max(strength, epsilon * s.value_in_unit(nm) ** 12)
+        self.excluded, strength = found
         # |F_LJ(r)| <= 48 epsilon sigma^12 / r^13 for every interacting pair.
         self.safe_distance_nm = float((48.0 * strength / _PAIR_FORCE_BUDGET) ** (1 / 13))
 
@@ -95,13 +141,10 @@ class _ExactForces:
             return False
         if not np.isfinite(self.safe_distance_nm):
             return True
-        tree = self._tree(positions_nm)
-        for i, neighbours in zip(self.movable, tree.query_ball_point(
-                positions_nm[self.movable], self.safe_distance_nm)):
-            for j in neighbours:
-                if j != i and (min(i, j), max(i, j)) not in self.excluded:
-                    return True
-        return False
+        if self._pairs is None:
+            # Frozen atoms keep these positions for the life of this object.
+            self._pairs = _ClosePairs(positions_nm, self.movable, self.excluded)
+        return bool(self._pairs(positions_nm, self.safe_distance_nm))
 
     def __call__(self, positions_nm: np.ndarray, unit: Any) -> tuple[float, np.ndarray]:
         target = self.context
@@ -121,14 +164,16 @@ class _ExactForces:
 
 def _capped_lbfgs(objective, x0: np.ndarray, *, max_iterations: int, max_atom_step: float,
                   force_tolerance: float, history: int = MINIMIZER_HISTORY,
-                  callback=None) -> dict[str, Any]:
+                  callback=None, admissible=None) -> dict[str, Any]:
     """Minimize ``objective`` (energy, gradient) over flattened [atoms, 3] coordinates.
 
     Every accepted iteration moves each atom by at most ``max_atom_step``.
     Convergence is the exact force criterion only (gradient RMS at most
     ``force_tolerance``); there is no relative-energy stop. A backtracking
     failure with quasi-Newton history retries once along the steepest descent
-    before stopping.
+    before stopping. ``admissible(trial, current)``, if given, can veto a
+    trial point; a vetoed step is backtracked like one without sufficient
+    decrease.
     """
     x = np.asarray(x0, dtype=np.float64).copy()
     energy, gradient = objective(x)
@@ -164,6 +209,9 @@ def _capped_lbfgs(objective, x0: np.ndarray, *, max_iterations: int, max_atom_st
         scale = 1.0
         for _ in range(_MAX_BACKTRACKS):
             trial = x + scale * direction
+            if admissible is not None and not admissible(trial, x):
+                scale *= 0.5
+                continue
             trial_energy, trial_gradient = objective(trial)
             evaluations += 1
             if trial_energy <= energy + _ARMIJO * scale * slope:
@@ -223,9 +271,34 @@ def _minimize_movable_positions(context: Any, positions: np.ndarray,
     # structure: an enormous potential can change by less than its relative
     # tolerance while the remaining forces are still enormous, so only the
     # force criterion ends the minimization early.
+    # Amber polar hydrogens with zero Lennard-Jones (HO) are pulled without
+    # bound onto an oppositely charged atom once they overlap it, so no step
+    # may bring an interacting pair below the absolute near-coincidence floor
+    # closer than it already is. A physical minimum never has such a pair.
+    found = _nonbonded_exclusions_and_wall(context.getSystem())
+    floor_nm = EXTREME_NONBONDED_FLOOR_ANGSTROM / 10.0
+    vetoes = [0]
+
+    close_pairs = _ClosePairs(start, indices, found[0]) if found is not None else None
+
+    def admissible(trial: np.ndarray, current: np.ndarray) -> bool:
+        if close_pairs is None:
+            return True
+        trial_xyz = start.copy()
+        trial_xyz[indices] = trial.reshape(-1, 3)
+        current_xyz = start.copy()
+        current_xyz[indices] = current.reshape(-1, 3)
+        for i, j in close_pairs(trial_xyz, floor_nm):
+            if (np.linalg.norm(trial_xyz[i] - trial_xyz[j])
+                    < np.linalg.norm(current_xyz[i] - current_xyz[j])):
+                vetoes[0] += 1
+                return False
+        return True
+
     result = _capped_lbfgs(objective, start[indices].ravel(), max_iterations=max_iterations,
                            max_atom_step=MINIMIZER_MAX_ATOM_STEP_NM,
-                           force_tolerance=RELAX_FORCE_TOLERANCE_KJ_MOL_NM)
+                           force_tolerance=RELAX_FORCE_TOLERANCE_KJ_MOL_NM,
+                           admissible=admissible)
     final = start.copy()
     final[indices] = result["x"].reshape(-1, 3)
     if not np.isfinite(final).all():
@@ -242,7 +315,98 @@ def _minimize_movable_positions(context: Any, positions: np.ndarray,
                        minimizer_force_verified_success=converged,
                        minimizer_restart_count=result["history_resets"],
                        minimizer_reference_platform_evaluations=exact.reference_evaluations,
-                       minimizer_reference_distance_nm=exact.safe_distance_nm)
+                       minimizer_reference_distance_nm=exact.safe_distance_nm,
+                       minimizer_overlap_floor_vetoes=vetoes[0])
+
+
+# A47: discrete rotamer states closer than this to a fixed atom, or to the
+# atoms of a state at another site, are geometrically impossible. Any such
+# interacting pair costs at least ~1e5 kcal/mol unrelaxed, so no admissible
+# optimum contains one, while its raw r^-12 energy (up to 1e14 kcal/mol at
+# atom-on-atom contact) would exhaust the float64 precision of the QUBO. It
+# matches the 1.0-A heavy-atom input floor (A24/A45) and is shorter than any
+# covalent X-H bond.
+DISCRETE_STATE_CONTACT_FLOOR_ANGSTROM = 1.0
+_ASSIGNMENT_SEARCH_NODE_LIMIT = 1_000_000
+
+
+def _discrete_state_admissibility(builder: Any) -> dict[str, Any]:
+    """Which candidate states and cross-site state pairs are geometrically possible."""
+    from scipy.spatial import cKDTree
+    from scipy.spatial.distance import cdist
+    candidates = builder.candidates
+    count = len(candidates)
+    atoms = list(builder.topology.atoms())
+    label = lambda i: (f"{atoms[i].residue.chain.id}:{atoms[i].residue.id}:"
+                       f"{atoms[i].residue.name}:{atoms[i].name}")
+    found = _nonbonded_exclusions_and_wall(builder.system)
+    excluded = found[0] if found is not None else set()
+    floor_nm = DISCRETE_STATE_CONTACT_FLOOR_ANGSTROM / 10.0
+    side_chain = set().union(*(set(int(i) for i in c["indices"]) for c in candidates))
+    fixed = np.array(sorted(set(range(len(builder.base_positions))) - side_chain), dtype=np.int64)
+    tree = cKDTree(builder.base_positions[fixed])
+    single_ok = np.ones(count, dtype=bool)
+    forbidden_singles = []
+    for v, candidate in enumerate(candidates):
+        closest = None
+        for atom, xyz in zip(candidate["indices"], candidate["positions"]):
+            for k in tree.query_ball_point(xyz, floor_nm):
+                other = int(fixed[k])
+                if (min(atom, other), max(atom, other)) in excluded:
+                    continue
+                distance = float(np.linalg.norm(xyz - builder.base_positions[other])) * 10.0
+                if closest is None or distance < closest[0]:
+                    closest = (distance, int(atom), other)
+        if closest is not None:
+            single_ok[v] = False
+            forbidden_singles.append(dict(variable=v, residue_id=candidate["residue_id"],
+                                          distance_angstrom=closest[0],
+                                          atoms=[label(closest[1]), label(closest[2])]))
+    pair_ok = np.ones((count, count), dtype=bool)
+    forbidden_pairs = []
+    for i in range(count):
+        for j in range(i + 1, count):
+            left, right = candidates[i], candidates[j]
+            if left["site"] == right["site"]:
+                continue
+            distances = cdist(left["positions"], right["positions"]) * 10.0
+            for a, b in zip(*np.nonzero(distances < DISCRETE_STATE_CONTACT_FLOOR_ANGSTROM)):
+                x, y = int(left["indices"][a]), int(right["indices"][b])
+                if (min(x, y), max(x, y)) not in excluded:
+                    pair_ok[i, j] = pair_ok[j, i] = False
+                    forbidden_pairs.append(dict(variables=[i, j],
+                                                distance_angstrom=float(distances[a, b]),
+                                                atoms=[label(x), label(y)]))
+                    break
+    return dict(single_ok=single_ok, pair_ok=pair_ok, audit=dict(
+        contact_floor_angstrom=DISCRETE_STATE_CONTACT_FLOOR_ANGSTROM,
+        definition=("interacting atom pairs (1-2 and 1-3 excluded), all elements, unrelaxed "
+                    "discrete states; singles against atoms outside every Active side chain"),
+        forbidden_single_count=len(forbidden_singles), forbidden_singles=forbidden_singles[:100],
+        forbidden_pair_count=len(forbidden_pairs), forbidden_pairs=forbidden_pairs[:100]))
+
+
+def _admissible_assignment(site_to_variables: Mapping[int, Sequence[int]], single_ok: np.ndarray,
+                           pair_ok: np.ndarray, *, order) -> Optional[list[int]]:
+    """One state per site with no forbidden single or pair; depth-first in ``order``."""
+    sites = list(site_to_variables)
+    nodes = [0]
+
+    def extend(chosen: list[int]) -> Optional[list[int]]:
+        if len(chosen) == len(sites):
+            return chosen
+        for v in order(site_to_variables[sites[len(chosen)]]):
+            v = int(v)
+            nodes[0] += 1
+            if nodes[0] > _ASSIGNMENT_SEARCH_NODE_LIMIT:
+                raise RuntimeError("Admissible-assignment search exceeded its node limit")
+            if single_ok[v] and all(pair_ok[v, u] for u in chosen):
+                found = extend(chosen + [v])
+                if found is not None:
+                    return found
+        return None
+
+    return extend([])
 
 
 def _internal_candidate_overlaps(positions: np.ndarray, atoms: Mapping[str, int],
@@ -685,8 +849,17 @@ class AllAtomInterfaceQUBOBuilder:
         # Use a complete candidate assignment as decomposition origin. A heavily
         # clashing perturbed input would otherwise cause catastrophic cancellation.
         count=len(self.candidates)
-        anchors=[min(group,key=lambda v:self.energy(self.positions_for_variables([v])))
-                 for group in self.site_to_variables.values()]
+        admissibility=_discrete_state_admissibility(self)
+        env_ok,pair_ok=admissibility["single_ok"],admissibility["pair_ok"]
+        rank={v:self.energy(self.positions_for_variables([v])) if env_ok[v] else math.inf
+              for v in range(count)}
+        anchors=_admissible_assignment(self.site_to_variables,env_ok,pair_ok,
+                                       order=lambda group:sorted(group,key=lambda v:rank[v]))
+        if anchors is None:
+            raise StructureQualityError(
+                "No geometry-admissible rotamer assignment: every combination places atoms "
+                f"closer than {DISCRETE_STATE_CONTACT_FLOOR_ANGSTROM} A",
+                category="candidate_geometry",audit=admissibility["audit"])
         anchor_positions=self.positions_for_variables(anchors)
         def assignment(variables):
             positions=anchor_positions.copy()
@@ -701,14 +874,34 @@ class AllAtomInterfaceQUBOBuilder:
                 for v,c in enumerate(self.candidates)],
             background="other Active sites fixed at decomposition anchors; not an exhaustive pair-combination audit",
             candidate_filtering=dict(policy="exclude sub-0.4-A topology-excluded intramolecular overlaps before retention",
-                                     exclusions=self.candidate_quality_exclusions))
+                                     exclusions=self.candidate_quality_exclusions),
+            discrete_state_admissibility=admissibility["audit"])
         baseline=self.energy(anchor_positions)
-        singles=np.array([self.energy(assignment([v]))-baseline for v in range(count)])
+        # Energies of geometrically impossible states are never evaluated: an
+        # r^-12 wall at atom-on-atom contact exceeds 1e11 kcal/mol and would
+        # consume the float64 precision of every other coefficient.
+        singles=np.zeros(count)
+        for v in range(count):
+            if env_ok[v]:
+                singles[v]=self.energy(assignment([v]))-baseline
         pairs=np.zeros((count,count))
         for i in range(count):
             for j in range(i+1,count):
-                if self.candidates[i]["site"]!=self.candidates[j]["site"]:
+                if (self.candidates[i]["site"]!=self.candidates[j]["site"]
+                        and env_ok[i] and env_ok[j] and pair_ok[i,j]):
                     pairs[i,j]=self.energy(assignment([i,j]))-baseline-singles[i]-singles[j]
+        # Every admissible assignment has relative energy within +-bound, so a
+        # forbidden state priced at 2*bound+1 is above all of them.
+        bound=float(np.abs(singles).sum()+np.abs(pairs).sum())
+        forbidden_penalty=2.0*bound+1.0
+        for v in range(count):
+            if not env_ok[v]:
+                singles[v]=forbidden_penalty
+        for i in range(count):
+            for j in range(i+1,count):
+                if (self.candidates[i]["site"]!=self.candidates[j]["site"]
+                        and env_ok[i] and env_ok[j] and not pair_ok[i,j]):
+                    pairs[i,j]=forbidden_penalty
         helper=InterfaceQUBOBuilder(min_variables=2,max_variables=30)
         penalty=helper._lambda_lower_bound(singles,pairs,self.site_to_variables)
         q=pairs.copy(); np.fill_diagonal(q,singles-penalty)
@@ -723,7 +916,8 @@ class AllAtomInterfaceQUBOBuilder:
             list(self.site_to_variables[c["site"]]).index(v),c["angle"],float(c["prior_probability"]),float(singles[v]))
             for v,c in enumerate(self.candidates))
         # Vacuum/NoCutoff Amber14 is exactly pair-decomposable over side-chain
-        # choices, so the QUBO must reproduce the full energy (1e-4 kcal/mol).
+        # choices, so the QUBO must reproduce the full energy (1e-4 kcal/mol)
+        # on every admissible assignment; forbidden states carry the penalty.
         # Implicit-solvent GBN2 is not: Born radii depend on every atom, so the
         # same inclusion-exclusion expansion is a pairwise approximation. Its
         # error is measured on the same sampled assignments and recorded, and
@@ -731,7 +925,8 @@ class AllAtomInterfaceQUBOBuilder:
         exact=self.pair_decomposition_exact
         rng=np.random.default_rng(918); max_error=0.; squared_errors=[]
         for _ in range(12):
-            selected=[int(rng.choice(g)) for g in self.site_to_variables.values()]
+            selected=_admissible_assignment(self.site_to_variables,env_ok,pair_ok,
+                                            order=lambda group:list(rng.permutation(group)))
             x=np.zeros(count); x[selected]=1
             actual=self.energy(self.positions_for_variables(selected))
             predicted=baseline+singles@x+x@pairs@x
@@ -744,7 +939,7 @@ class AllAtomInterfaceQUBOBuilder:
         rms_error=float(math.sqrt(sum(squared_errors)/len(squared_errors)))
         offset=baseline+penalty*len(self.site_to_variables)
         h,j,ising_offset=qubo_to_ising(q,offset)
-        roundoff_bound=max(1e-9,32*np.finfo(float).eps*(abs(offset)+np.abs(q).sum()+1))
+        roundoff_bound=ising_roundoff_tolerance(q,offset)
         if roundoff_bound>1e-3:
             raise FloatingPointError(f"All-atom coefficient dynamic range exceeds 0.001 kcal/mol precision budget: {roundoff_bound}")
         ising_error=validate_qubo_ising_equivalence(q,offset,h,j,ising_offset,tolerance=roundoff_bound)
@@ -758,6 +953,11 @@ class AllAtomInterfaceQUBOBuilder:
                 candidate_relax_iterations=self.candidate_relax_iterations,
                 physical_quality_schema=self.preparation_quality["schema"],
                 decomposition_anchor_variables=anchors,ising_equivalence_max_error=ising_error,
+                discrete_state_contact_floor_angstrom=DISCRETE_STATE_CONTACT_FLOOR_ANGSTROM,
+                forbidden_state_penalty_kcal=forbidden_penalty,
+                forbidden_single_states=int((~env_ok).sum()),
+                forbidden_pair_states=admissibility["audit"]["forbidden_pair_count"],
+                equivalence_scope="exact on every geometry-admissible assignment; forbidden states carry the penalty",
                 ising_roundoff_tolerance=roundoff_bound,
                 atom_count=len(self.base_positions),
                 forcefield=(["amber14-all.xml"] if self.solvent_model=="vacuum"

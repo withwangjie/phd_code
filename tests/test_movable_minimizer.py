@@ -190,3 +190,38 @@ def test_well_separated_atoms_keep_the_gpu_result() -> None:
     assert abs(exact.safe_distance_nm - (48 * 0.5 * 0.3 ** 12 / (2 ** 31 / 64)) ** (1 / 13)) < 1e-12
     assert not exact.needs_reference(start)
     assert exact.needs_reference(np.array([[0.0, 0.0, 0.0], [0.9 * exact.safe_distance_nm, 0, 0]]))
+
+
+def test_an_unscreened_hydrogen_overlap_is_never_deepened() -> None:
+    """A47: an Amber HO hydrogen (epsilon 0) that starts 0.2 A from an acceptor
+    would collapse onto it; no step may bring such a pair closer."""
+    system = mm.System()
+    system.addParticle(0.0)                        # frozen acceptor
+    system.addParticle(1.0)                        # movable polar hydrogen
+    nonbonded = mm.NonbondedForce()
+    nonbonded.setNonbondedMethod(mm.NonbondedForce.NoCutoff)
+    nonbonded.addParticle(-0.5, 0.3, 0.5)
+    nonbonded.addParticle(0.4, 1.0, 0.0)           # OpenMM's zero-epsilon convention
+    system.addForce(nonbonded)
+    tether = mm.CustomExternalForce("0.5*k*((x-0.1)^2+y^2+z^2)")
+    tether.addGlobalParameter("k", 1e5)
+    tether.addParticle(1, [])
+    system.addForce(tether)
+    context = mm.Context(system, mm.VerletIntegrator(0.001), mm.Platform.getPlatformByName("Reference"))
+    start = np.array([[0.0, 0.0, 0.0], [0.02, 0.0, 0.0]])
+    final, record = _minimize_movable_positions(context, start, {1}, 1000, unit)
+    assert np.linalg.norm(final[1] - final[0]) >= 0.02 - 1e-12
+    assert np.isfinite(final).all()
+    assert record["minimizer_overlap_floor_vetoes"] > 0
+
+
+def test_admissible_assignment_avoids_forbidden_states_and_pairs() -> None:
+    from nanoqc.qubo.allatom_qubo import _admissible_assignment
+    sites = {0: (0, 1), 1: (2, 3), 2: (4, 5)}
+    single_ok = np.array([False, True, True, True, True, True])
+    pair_ok = np.ones((6, 6), dtype=bool)
+    for a, b in ((1, 2), (3, 4)):
+        pair_ok[a, b] = pair_ok[b, a] = False
+    assert _admissible_assignment(sites, single_ok, pair_ok, order=list) == [1, 3, 5]
+    pair_ok[3, 5] = pair_ok[5, 3] = False
+    assert _admissible_assignment(sites, single_ok, pair_ok, order=list) is None

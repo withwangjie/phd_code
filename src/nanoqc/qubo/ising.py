@@ -51,6 +51,20 @@ def qubo_to_ising(
     return h, J, offset
 
 
+def ising_roundoff_tolerance(Q: np.ndarray, qubo_offset: float) -> float:
+    """Float64 rounding bound for the QUBO/Ising reconstruction of ``Q``.
+
+    Every reconstructed coefficient and energy is a short sum of the stored
+    coefficients, so its rounding error is a small multiple of machine epsilon
+    times their total magnitude. A fixed absolute tolerance would reject an
+    exact conversion of a QUBO with large coefficients; the 1e-9 floor keeps
+    the historical tolerance for ordinary ones.
+    """
+    matrix = np.asarray(Q, dtype=np.float64)
+    return max(1e-9, 32 * np.finfo(float).eps
+               * (abs(float(qubo_offset)) + float(np.abs(matrix).sum()) + 1.0))
+
+
 def validate_qubo_ising_equivalence(
     Q: np.ndarray,
     qubo_offset: float,
@@ -58,11 +72,16 @@ def validate_qubo_ising_equivalence(
     J: np.ndarray,
     ising_offset: float,
     *,
-    tolerance: float = 1e-9,
+    tolerance: float | None = None,
 ) -> float:
-    """Validate triangular storage and exact QUBO/Ising energy equality."""
+    """Validate triangular storage and exact QUBO/Ising energy equality.
+
+    ``tolerance`` defaults to :func:`ising_roundoff_tolerance` of ``Q``.
+    """
 
     matrix = np.asarray(Q, dtype=np.float64)
+    if tolerance is None:
+        tolerance = ising_roundoff_tolerance(matrix, qubo_offset)
     linear = np.asarray(h, dtype=np.float64)
     coupling = np.asarray(J, dtype=np.float64)
     if matrix.ndim != 2 or matrix.shape[0] != matrix.shape[1]:
