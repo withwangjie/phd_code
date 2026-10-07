@@ -167,7 +167,7 @@ QAOA's own ground-state amplification and its finite-range scaling slope
 - Smoke checks and legacy explicit `chi1_angles` overrides are engineering or
   ablation paths and are not the formal main protocol.
 - Every protocol change after the original freeze is listed, with its reason
-  and inspection status, in `docs/PROTOCOL_AMENDMENTS.md` (currently A1-A49).
+  and inspection status, in `docs/PROTOCOL_AMENDMENTS.md` (currently A1-A50).
 
 ## Scientific configuration
 

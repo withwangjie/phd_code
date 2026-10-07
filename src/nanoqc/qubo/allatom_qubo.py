@@ -330,6 +330,74 @@ DISCRETE_STATE_CONTACT_FLOOR_ANGSTROM = 1.0          # heavy-heavy
 DISCRETE_STATE_ALL_ATOM_FLOOR_ANGSTROM = EXTREME_NONBONDED_FLOOR_ANGSTROM   # any elements
 
 
+# A50: Amber ff14SB gives hydroxyl hydrogens (type HO: Tyr HH, Ser HG, Thr
+# HG1) no Lennard-Jones term. Their parent oxygen normally shields them, but
+# not from atoms the oxygen is 1-3 excluded from: Tyr HH and its own ring
+# carbon CE1/CE2 form a 1-4 pair with an attractive Coulomb term and no
+# repulsion, so a relaxation can slide HH onto the ring (7WKI seed 42). These
+# hydrogens get the CHARMM36 polar-hydrogen parameters (HO: epsilon 0.046
+# kcal/mol, Rmin/2 0.2245 A), and their 1-4 pairs get the force field's own
+# 1-4 Lennard-Jones scaling. At hydrogen-bond distances the added term is
+# about 0.01 kcal/mol; at 1 A from a ring carbon it is about +275 kcal/mol.
+POLAR_HYDROGEN_SIGMA_NM = 2 * 0.02245 / 2 ** (1 / 6)
+POLAR_HYDROGEN_EPSILON_KJ_MOL = 0.046 * 4.184
+
+
+def _shield_zero_lj_polar_hydrogens(system: Any, topology: Any) -> dict[str, Any]:
+    """Give zero-LJ hydroxyl hydrogens a small repulsive core (in place)."""
+    import openmm as mm
+    nonbonded = [f for f in system.getForces() if isinstance(f, mm.NonbondedForce)]
+    if len(nonbonded) != 1:
+        raise ValueError("Polar-hydrogen shielding requires exactly one NonbondedForce")
+    force = nonbonded[0]
+    nm, kj, e2 = mm.unit.nanometer, mm.unit.kilojoule_per_mole, mm.unit.elementary_charge ** 2
+    atoms = list(topology.atoms())
+    oxygen_bonded = set()
+    for a, b in topology.bonds():
+        for h, o in ((a, b), (b, a)):
+            if (h.element is not None and h.element.symbol.upper() == "H"
+                    and o.element is not None and o.element.symbol.upper() == "O"):
+                oxygen_bonded.add(h.index)
+    shielded = []
+    for index in sorted(oxygen_bonded):
+        charge, sigma, epsilon = force.getParticleParameters(index)
+        if epsilon.value_in_unit(kj) == 0.0 and charge.value_in_unit(mm.unit.elementary_charge) != 0.0:
+            force.setParticleParameters(index, charge, POLAR_HYDROGEN_SIGMA_NM * nm,
+                                        POLAR_HYDROGEN_EPSILON_KJ_MOL * kj)
+            shielded.append(index)
+    if not shielded:
+        return dict(shielded_hydrogens=0, one_four_pairs_updated=0)
+    # The force field's 1-4 Lennard-Jones scale, read from its own exceptions.
+    scales = []
+    for k in range(force.getNumExceptions()):
+        i, j, q, s, e = force.getExceptionParameters(k)
+        e_ij = e.value_in_unit(kj)
+        if e_ij > 0.0:
+            ei = force.getParticleParameters(i)[2].value_in_unit(kj)
+            ej = force.getParticleParameters(j)[2].value_in_unit(kj)
+            if ei > 0 and ej > 0 and i not in shielded and j not in shielded:
+                scales.append(e_ij / math.sqrt(ei * ej))
+    if not scales or max(scales) - min(scales) > 1e-6 * max(scales):
+        raise ValueError("Inconsistent 1-4 Lennard-Jones scaling in the force field")
+    scale = float(np.mean(scales))
+    shielded_set = set(shielded)
+    updated = 0
+    for k in range(force.getNumExceptions()):
+        i, j, q, s, e = force.getExceptionParameters(k)
+        if (i in shielded_set or j in shielded_set) and q.value_in_unit(e2) != 0.0:
+            _, si, ei = force.getParticleParameters(i)
+            _, sj, ej = force.getParticleParameters(j)
+            force.setExceptionParameters(
+                k, i, j, q, 0.5 * (si.value_in_unit(nm) + sj.value_in_unit(nm)) * nm,
+                scale * math.sqrt(ei.value_in_unit(kj) * ej.value_in_unit(kj)) * kj)
+            updated += 1
+    return dict(shielded_hydrogens=len(shielded), one_four_pairs_updated=updated,
+                one_four_lj_scale=scale, sigma_nm=POLAR_HYDROGEN_SIGMA_NM,
+                epsilon_kj_mol=POLAR_HYDROGEN_EPSILON_KJ_MOL,
+                residues=sorted({f"{atoms[i].residue.chain.id}:{atoms[i].residue.id}:"
+                                 f"{atoms[i].residue.name}" for i in shielded}))
+
+
 def _heavy_mask(topology: Any) -> np.ndarray:
     return np.asarray([atom.element is not None and atom.element.symbol.upper() != "H"
                        for atom in topology.atoms()], dtype=bool)
@@ -639,6 +707,7 @@ class AllAtomInterfaceQUBOBuilder:
             self.topology,nonbondedMethod=app.NoCutoff,
             constraints=None,rigidWater=False,removeCMMotion=False
         )
+        self.polar_hydrogen_shielding=_shield_zero_lj_polar_hydrogens(self.system,self.topology)
         self.energy_force_groups={}
         for i, force in enumerate(self.system.getForces()):
             if i>=32: raise ValueError("Energy audit supports at most 32 force groups")
@@ -1011,6 +1080,7 @@ class AllAtomInterfaceQUBOBuilder:
                 no_admissible_assignment_raw_fallback=raw_fallback,
                 ising_roundoff_tolerance=roundoff_bound,
                 atom_count=len(self.base_positions),
+                polar_hydrogen_shielding=self.polar_hydrogen_shielding,
                 forcefield=(["amber14-all.xml"] if self.solvent_model=="vacuum"
                             else ["amber14-all.xml","implicit/gbn2.xml"]),
                 solvent=("vacuum; NoCutoff" if self.solvent_model=="vacuum" else "implicit GBN2; NoCutoff"),
