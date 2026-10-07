@@ -176,12 +176,13 @@ def compute_bonded_exclusions(
     docstring -- so the exclusion set is stable across every predicted/
     intermediate structure the same complex is scanned against):
 
-    * Peptide bonds: within each chain, residues are ordered by
-      ``(seqid, icode)``; a consecutive pair whose C(i)-N(i+1) distance is
-      below ``peptide_bond_cutoff`` (a canonical peptide bond is ~1.33 A) is
-      excluded. A chain break or numbering gap simply fails the distance
-      test and is correctly NOT excluded, so a real steric clash across a
-      break still gets flagged.
+    * Peptide bonds: within each chain, every residue pair whose C(i)-N(j)
+      distance is below ``peptide_bond_cutoff`` (a canonical peptide bond is
+      ~1.33 A) is excluded. Bonds come from geometry, not from
+      ``(seqid, icode)`` order, because IMGT numbers CDR3 insertions at 112
+      in reverse (A49). A chain break simply fails the distance test and is
+      correctly NOT excluded, so a real steric clash across a break still
+      gets flagged.
     * Disulfide bonds: every pair of CYS residues (in ``residue_ids``, not
       necessarily consecutive or same-chain) whose SG-SG distance is below
       ``disulfide_cutoff`` (a canonical S-S bond is ~2.05 A) is excluded.
@@ -204,12 +205,19 @@ def compute_bonded_exclusions(
         by_chain.setdefault(atoms[rid]["chain"], []).append(rid)
     excluded: Set[frozenset] = set()
     for ids in by_chain.values():
-        ordered = sorted(ids, key=lambda r: (atoms[r]["seqid"], atoms[r]["icode"]))
-        for a, b in zip(ordered, ordered[1:]):
-            atoms_a, atoms_b = atoms[a]["atoms"], atoms[b]["atoms"]
-            if "C" in atoms_a and "N" in atoms_b:
-                if np.linalg.norm(atoms_a["C"] - atoms_b["N"]) < peptide_bond_cutoff:
-                    excluded.add(frozenset(((a, "C"), (b, "N"))))
+        # Every C-N pair within bonding distance, not only neighbours in
+        # (seqid, insertion code) order: IMGT numbers CDR3 insertions at 112
+        # in reverse, so sorted order is not chain order there.
+        carbonyl = [r for r in ids if "C" in atoms[r]["atoms"]]
+        amide = [r for r in ids if "N" in atoms[r]["atoms"]]
+        if not carbonyl or not amide:
+            continue
+        c_xyz = np.asarray([atoms[r]["atoms"]["C"] for r in carbonyl], dtype=float)
+        n_xyz = np.asarray([atoms[r]["atoms"]["N"] for r in amide], dtype=float)
+        distances = np.linalg.norm(c_xyz[:, None, :] - n_xyz[None, :, :], axis=2)
+        for i, j in zip(*np.nonzero(distances < peptide_bond_cutoff)):
+            if carbonyl[i] != amide[j]:
+                excluded.add(frozenset(((carbonyl[i], "C"), (amide[j], "N"))))
     sulfurs = [
         rid for rid in residue_ids
         if atoms[rid]["name"] == "CYS" and "SG" in atoms[rid]["atoms"]

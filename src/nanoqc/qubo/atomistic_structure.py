@@ -161,32 +161,43 @@ def _torsion_angle_degrees(p0, p1, p2, p3) -> float:
     return float(np.degrees(np.arctan2(np.dot(np.cross(b1,v),w),np.dot(v,w))))
 
 def _backbone_phi_psi(residues: Mapping[str, Mapping[str, Any]], rid: str) -> Tuple[float,float]:
-    """Backbone phi/psi for one author residue id; termini fail closed."""
+    """Backbone phi/psi for one author residue id; termini and chain breaks fail closed.
+
+    Neighbours are the residues actually peptide-bonded to ``rid`` (C-N
+    distance), not the neighbours in (seqid, insertion code) order: IMGT
+    numbers CDR3 insertions at position 112 in reverse (112B, 112A, 112), so
+    sorting insertion codes alphabetically does not give chain order.
+    """
     match=_RESIDUE_ID_PATTERN.match(rid)
     if match is None: raise ValueError(f"Cannot parse residue id {rid}")
     chain=match.group("chain")
-    ordered=[]
-    for key in residues:
-        m=_RESIDUE_ID_PATTERN.match(key)
-        if m and m.group("chain")==chain:
-            ordered.append((int(m.group("seqid")),m.group("icode") or "",key))
-    ordered.sort()
-    keys=[item[2] for item in ordered]
-    idx=keys.index(rid)
-    if idx==0 or idx==len(keys)-1:
+    current=residues[rid]
+    missing=[name for name in ("N","CA","C") if name not in current["atoms"]]
+    if missing: raise ValueError(f"Missing backbone atoms {missing} for Dunbrack lookup at {rid}")
+    same_chain=[key for key in residues
+                if key!=rid and (lambda m: m is not None and m.group("chain")==chain)(_RESIDUE_ID_PATTERN.match(key))]
+    if not same_chain:
         raise ValueError(f"Dunbrack mode requires non-terminal Active residue: {rid}")
-    prev,current,nxt=residues[keys[idx-1]],residues[rid],residues[keys[idx+1]]
-    for entry,names in ((prev,("C",)),(current,("N","CA","C")),(nxt,("N",))):
-        missing=[name for name in names if name not in entry["atoms"]]
-        if missing: raise ValueError(f"Missing backbone atoms {missing} for Dunbrack lookup at {rid}")
-    # Sequence neighbours in the file are not necessarily bonded (unresolved
-    # segments); phi/psi across a chain break are undefined, so fail closed.
-    for left,right,side in ((prev,current,"preceding"),(current,nxt,"following")):
-        gap=float(np.linalg.norm(np.asarray(left["atoms"]["C"],dtype=float)-np.asarray(right["atoms"]["N"],dtype=float)))
-        if gap>=PEPTIDE_BOND_MAX_C_N_ANGSTROM:
+    def bonded(atom_here: str, atom_there: str):
+        best=None
+        for key in same_chain:
+            atoms=residues[key]["atoms"]
+            if atom_there not in atoms: continue
+            gap=float(np.linalg.norm(np.asarray(current["atoms"][atom_here],dtype=float)
+                                     -np.asarray(atoms[atom_there],dtype=float)))
+            if best is None or gap<best[0]: best=(gap,key)
+        return best
+    neighbours={}
+    for side,here,there in (("preceding","N","C"),("following","C","N")):
+        found=bonded(here,there)
+        if found is None or found[0]>=PEPTIDE_BOND_MAX_C_N_ANGSTROM:
+            gap="none" if found is None else f"{found[0]:.2f} A"
             raise ValueError(
                 f"Dunbrack mode requires peptide-bonded neighbours at {rid}: "
-                f"{side} C-N distance {gap:.2f} A indicates a chain break")
+                f"no {side} residue within the peptide C-N bond distance (closest {gap}); "
+                "terminus or chain break")
+        neighbours[side]=residues[found[1]]
+    prev,nxt=neighbours["preceding"],neighbours["following"]
     phi=_torsion_angle_degrees(prev["atoms"]["C"],current["atoms"]["N"],current["atoms"]["CA"],current["atoms"]["C"])
     psi=_torsion_angle_degrees(current["atoms"]["N"],current["atoms"]["CA"],current["atoms"]["C"],nxt["atoms"]["N"])
     return phi,psi
