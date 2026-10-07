@@ -398,6 +398,19 @@ def _shield_zero_lj_polar_hydrogens(system: Any, topology: Any) -> dict[str, Any
                                  f"{atoms[i].residue.name}" for i in shielded}))
 
 
+def selection_is_geometry_admissible(metadata: Mapping[str, Any], bits: Sequence[int]) -> bool:
+    """Whether a one-hot bit string avoids every A47 forbidden state and pair.
+
+    For such a selection the QUBO energy equals the Amber energy (vacuum);
+    a forbidden selection carries the penalty instead and cannot be compared.
+    """
+    chosen = {i for i, bit in enumerate(bits) if int(bit)}
+    if chosen & set(int(v) for v in metadata.get("forbidden_variables", ())):
+        return False
+    return not any(int(i) in chosen and int(j) in chosen
+                   for i, j in metadata.get("forbidden_variable_pairs", ()))
+
+
 def _heavy_mask(topology: Any) -> np.ndarray:
     return np.asarray([atom.element is not None and atom.element.symbol.upper() != "H"
                        for atom in topology.atoms()], dtype=bool)
@@ -473,6 +486,10 @@ def _discrete_state_admissibility(builder: Any) -> dict[str, Any]:
         forbidden_pair_count=len(forbidden_pairs), forbidden_pairs=forbidden_pairs[:100]))
 
 
+class _SearchLimitExceeded(RuntimeError):
+    """The bounded admissible-assignment search gave up before deciding."""
+
+
 def _admissible_assignment(site_to_variables: Mapping[int, Sequence[int]], single_ok: np.ndarray,
                            pair_ok: np.ndarray, *, order) -> Optional[list[int]]:
     """One state per site with no forbidden single or pair; depth-first in ``order``."""
@@ -486,7 +503,7 @@ def _admissible_assignment(site_to_variables: Mapping[int, Sequence[int]], singl
             v = int(v)
             nodes[0] += 1
             if nodes[0] > _ASSIGNMENT_SEARCH_NODE_LIMIT:
-                raise RuntimeError("Admissible-assignment search exceeded its node limit")
+                raise _SearchLimitExceeded("Admissible-assignment search exceeded its node limit")
             if single_ok[v] and all(pair_ok[v, u] for u in chosen):
                 found = extend(chosen + [v])
                 if found is not None:
@@ -967,8 +984,11 @@ class AllAtomInterfaceQUBOBuilder:
         env_ok,pair_ok=admissibility["single_ok"],admissibility["pair_ok"]
         rank={v:self.energy(self.positions_for_variables([v])) if env_ok[v] else math.inf
               for v in range(count)}
-        anchors=_admissible_assignment(self.site_to_variables,env_ok,pair_ok,
-                                       order=lambda group:sorted(group,key=lambda v:rank[v]))
+        try:
+            anchors=_admissible_assignment(self.site_to_variables,env_ok,pair_ok,
+                                           order=lambda group:sorted(group,key=lambda v:rank[v]))
+        except _SearchLimitExceeded:
+            anchors=None          # treated as no admissible assignment: raw fallback below
         raw_fallback=anchors is None
         if raw_fallback:
             # Every combination contains an impossible contact, so there is no
@@ -1043,8 +1063,13 @@ class AllAtomInterfaceQUBOBuilder:
         exact=self.pair_decomposition_exact
         rng=np.random.default_rng(918); max_error=0.; squared_errors=[]
         for _ in range(12):
-            selected=_admissible_assignment(self.site_to_variables,env_ok,pair_ok,
-                                            order=lambda group:list(rng.permutation(group)))
+            try:
+                selected=_admissible_assignment(self.site_to_variables,env_ok,pair_ok,
+                                                order=lambda group:list(rng.permutation(group)))
+            except _SearchLimitExceeded:
+                selected=None
+            if selected is None:
+                selected=list(anchors)    # an admissible assignment known to exist
             x=np.zeros(count); x[selected]=1
             actual=self.energy(self.positions_for_variables(selected))
             predicted=baseline+singles@x+x@pairs@x
@@ -1078,6 +1103,9 @@ class AllAtomInterfaceQUBOBuilder:
                 equivalence_scope=("raw energies: no geometry-admissible assignment exists" if raw_fallback
                                    else "exact on every geometry-admissible assignment; forbidden states carry the penalty"),
                 no_admissible_assignment_raw_fallback=raw_fallback,
+                forbidden_variables=[int(v) for v in range(count) if not env_ok[v]],
+                forbidden_variable_pairs=[[int(i),int(j)] for i in range(count) for j in range(i+1,count)
+                                          if env_ok[i] and env_ok[j] and not pair_ok[i,j]],
                 ising_roundoff_tolerance=roundoff_bound,
                 atom_count=len(self.base_positions),
                 polar_hydrogen_shielding=self.polar_hydrogen_shielding,

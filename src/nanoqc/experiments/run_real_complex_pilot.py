@@ -247,7 +247,7 @@ def main(argv=None) -> int:
     parser.add_argument("--antigen-min-length-coverage", type=float, default=0.70)
     parser.add_argument("--seeds", type=int, nargs="+", default=[42,43,44])
     parser.add_argument("--perturbation-mode",choices=("multi_chi","chi1"),default="multi_chi")
-    parser.add_argument("--perturbation-max-attempts",type=int,default=32)
+    parser.add_argument("--perturbation-max-attempts",type=int,default=256)
     parser.add_argument("--solvent-model",choices=("vacuum","gbn2"),default="vacuum")
     parser.add_argument("--min-perturb-degrees",type=float,default=40.0)
     parser.add_argument("--max-perturb-degrees",type=float,default=120.0)

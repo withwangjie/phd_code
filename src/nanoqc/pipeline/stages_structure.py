@@ -52,7 +52,7 @@ class StructureStagesMixin:
                 "--max-evals", str(qprimary.get("max_evals",90)),
                 "--qaoa-depth", str(qprimary.get("depth",2)),
                 "--perturbation-mode", str(cfg.get("perturbation_mode", "multi_chi")),
-                "--perturbation-max-attempts", str(cfg.get("perturbation_max_attempts", 32)),
+                "--perturbation-max-attempts", str(cfg.get("perturbation_max_attempts", 256)),
                 "--solvent-model", str(cfg.get("solvent_model", "vacuum")),
                 "--min-perturb-degrees", str(cfg.get("min_perturb_degrees", 40.0)),
                 "--max-perturb-degrees", str(cfg.get("max_perturb_degrees", 120.0)),
@@ -397,7 +397,7 @@ class StructureStagesMixin:
                     "--manifest",str(manifest),"--out-dir",str(out),
                     "--solvent-model",solvent,
                     "--perturbation-mode",str(cfg.get("perturbation_mode","multi_chi")),
-                    "--perturbation-max-attempts",str(cfg.get("perturbation_max_attempts",32)),
+                    "--perturbation-max-attempts",str(cfg.get("perturbation_max_attempts",256)),
                     "--min-perturb-degrees",str(cfg.get("min_perturb_degrees",40.0)),
                     "--max-perturb-degrees",str(cfg.get("max_perturb_degrees",120.0)),
                     "--min-input-heavy-distance",str((self.config.get("data_audit",{}) or {}).get(

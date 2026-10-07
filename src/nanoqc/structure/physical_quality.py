@@ -198,4 +198,4 @@ def relaxation_force_audit(forces_kj_mol_nm: np.ndarray, movable: set[int], *,
 
 # A45: fixed upper bound on geometry-only generated-input draws per seed. The
 # formal value comes from structure_experiment.perturbation_max_attempts.
-DEFAULT_MAX_PERTURBATION_ATTEMPTS = 32
+DEFAULT_MAX_PERTURBATION_ATTEMPTS = 256

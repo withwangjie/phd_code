@@ -268,7 +268,7 @@ def _validate_scientific_config(config: Dict[str, Any]) -> None:
         raise ValueError("structure_experiment.solvent_sensitivity must not contain duplicates")
     if str(structure.get("perturbation_mode","multi_chi")) not in ("multi_chi","chi1"):
         raise ValueError("structure_experiment.perturbation_mode must be multi_chi or chi1")
-    attempts = structure.get("perturbation_max_attempts", 32)
+    attempts = structure.get("perturbation_max_attempts", 256)
     if isinstance(attempts, bool) or not isinstance(attempts, int) or attempts < 1:
         raise ValueError("structure_experiment.perturbation_max_attempts must be a positive integer")
     seeds=[int(v) for v in structure.get("seeds",[42,43,44,45,46])]

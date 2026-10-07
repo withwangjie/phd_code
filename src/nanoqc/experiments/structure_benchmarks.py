@@ -177,6 +177,7 @@ def _structure_evaluation_main(argv: Optional[Sequence[str]] = None) -> int:
 def _allatom_experiment_main(argv: Optional[Sequence[str]] = None) -> int:
     """One explicit all-atom case: QUBO -> matched-output solvers -> CIF -> evaluation."""
     from nanoqc.qubo.subgraph_to_qubo import AllAtomInterfaceQUBOBuilder, evaluate_atomistic_prediction
+    from nanoqc.qubo.allatom_qubo import selection_is_geometry_admissible
     import openmm
     parser=argparse.ArgumentParser(description="All-atom fixed-backbone multi-chi side-chain experiment")
     parser.add_argument("--eval-shots",type=int,choices=(200,500,1000))
@@ -366,7 +367,11 @@ def _allatom_experiment_main(argv: Optional[Sequence[str]] = None) -> int:
                     low_energy_fraction=sum(c for b,c in counts.items() if energies[b]<=truth.energy+2.)/args.outputs)
                 expected=energies[selected]+qubo.metadata["physical_constant_offset"]
                 qubo_energy_discrepancy=float(relaxation["discrete_energy_kcal"]-expected)
-                if qubo.metadata.get("pair_decomposition","exact")=="exact":
+                # A47: a selection containing a geometry-forbidden state carries
+                # the forbidden penalty, not its Amber energy, so only admissible
+                # selections are held to exact QUBO/Amber equality.
+                admissible_selection=selection_is_geometry_admissible(qubo.metadata,selected)
+                if qubo.metadata.get("pair_decomposition","exact")=="exact" and admissible_selection:
                     if not np.isclose(expected,relaxation["discrete_energy_kcal"],atol=1e-4,rtol=1e-9):
                         raise AssertionError("Selected structure and QUBO energy disagree")
                 elif not math.isfinite(qubo_energy_discrepancy):
@@ -375,6 +380,7 @@ def _allatom_experiment_main(argv: Optional[Sequence[str]] = None) -> int:
                 # energy of the selected structure is recorded, never hidden.
                 relaxation=dict(relaxation,qubo_energy_kcal=float(expected),
                     qubo_energy_discrepancy_kcal=qubo_energy_discrepancy,
+                    selected_state_geometry_admissible=admissible_selection,
                     pair_decomposition=qubo.metadata.get("pair_decomposition","exact"))
                 before=evaluate(prediction.with_name(prediction.stem+"_discrete.cif")) if reference else None
                 after=evaluate(prediction) if reference else None

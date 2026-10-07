@@ -233,3 +233,25 @@ def test_impossible_contact_uses_the_a45_floors() -> None:
     assert not _impossible_contact(0.7, heavy_pair=False)    # a hydrogen contact relaxation removes
     assert _impossible_contact(0.9, heavy_pair=True)         # heavy atoms under 1.0 A
     assert not _impossible_contact(1.05, heavy_pair=True)
+
+
+def test_selection_admissibility_reads_the_forbidden_lists() -> None:
+    from nanoqc.qubo.allatom_qubo import selection_is_geometry_admissible
+    metadata = dict(forbidden_variables=[2], forbidden_variable_pairs=[[0, 4]])
+    assert selection_is_geometry_admissible(metadata, [1, 0, 0, 1, 0, 0])
+    assert not selection_is_geometry_admissible(metadata, [0, 0, 1, 1, 0, 0])   # forbidden state
+    assert not selection_is_geometry_admissible(metadata, [1, 0, 0, 0, 1, 0])   # forbidden pair
+    assert selection_is_geometry_admissible({}, [1, 0, 1])                      # raw fallback
+
+
+def test_assignment_search_limit_is_a_typed_signal(monkeypatch) -> None:
+    from nanoqc.qubo import allatom_qubo
+    monkeypatch.setattr(allatom_qubo, "_ASSIGNMENT_SEARCH_NODE_LIMIT", 3)
+    sites = {0: (0, 1), 1: (2, 3), 2: (4, 5)}
+    pair_ok = np.ones((6, 6), dtype=bool)
+    for v in (4, 5):
+        for u in range(4):
+            pair_ok[u, v] = pair_ok[v, u] = False         # site 2 always conflicts
+    import pytest
+    with pytest.raises(allatom_qubo._SearchLimitExceeded):
+        allatom_qubo._admissible_assignment(sites, np.ones(6, dtype=bool), pair_ok, order=list)
