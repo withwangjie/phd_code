@@ -225,3 +225,11 @@ def test_admissible_assignment_avoids_forbidden_states_and_pairs() -> None:
     assert _admissible_assignment(sites, single_ok, pair_ok, order=list) == [1, 3, 5]
     pair_ok[3, 5] = pair_ok[5, 3] = False
     assert _admissible_assignment(sites, single_ok, pair_ok, order=list) is None
+
+
+def test_impossible_contact_uses_the_a45_floors() -> None:
+    from nanoqc.qubo.allatom_qubo import _impossible_contact
+    assert _impossible_contact(0.39, heavy_pair=False)      # any atoms under 0.4 A
+    assert not _impossible_contact(0.7, heavy_pair=False)    # a hydrogen contact relaxation removes
+    assert _impossible_contact(0.9, heavy_pair=True)         # heavy atoms under 1.0 A
+    assert not _impossible_contact(1.05, heavy_pair=True)

@@ -319,14 +319,27 @@ def _minimize_movable_positions(context: Any, positions: np.ndarray,
                        minimizer_overlap_floor_vetoes=vetoes[0])
 
 
-# A47: discrete rotamer states closer than this to a fixed atom, or to the
-# atoms of a state at another site, are geometrically impossible. Any such
-# interacting pair costs at least ~1e5 kcal/mol unrelaxed, so no admissible
-# optimum contains one, while its raw r^-12 energy (up to 1e14 kcal/mol at
-# atom-on-atom contact) would exhaust the float64 precision of the QUBO. It
-# matches the 1.0-A heavy-atom input floor (A24/A45) and is shorter than any
-# covalent X-H bond.
-DISCRETE_STATE_CONTACT_FLOOR_ANGSTROM = 1.0
+# A47 (revised): a discrete rotamer state is geometrically impossible if it
+# puts an interacting atom pair under either A45 input floor: any two atoms
+# closer than the 0.4-A near-coincidence floor, or two heavy atoms closer
+# than 1.0 A, against a fixed atom or against a state at another site. Their
+# raw r^-12 energies (up to 1e14 kcal/mol) would exhaust the float64
+# precision of the QUBO. Hydrogen contacts between 0.4 and 1.0 A are not
+# impossible (relaxation removes them) and keep their Amber energies.
+DISCRETE_STATE_CONTACT_FLOOR_ANGSTROM = 1.0          # heavy-heavy
+DISCRETE_STATE_ALL_ATOM_FLOOR_ANGSTROM = EXTREME_NONBONDED_FLOOR_ANGSTROM   # any elements
+
+
+def _heavy_mask(topology: Any) -> np.ndarray:
+    return np.asarray([atom.element is not None and atom.element.symbol.upper() != "H"
+                       for atom in topology.atoms()], dtype=bool)
+
+
+def _impossible_contact(distance_angstrom: float, heavy_pair: bool) -> bool:
+    return (distance_angstrom < DISCRETE_STATE_ALL_ATOM_FLOOR_ANGSTROM
+            or (heavy_pair and distance_angstrom < DISCRETE_STATE_CONTACT_FLOOR_ANGSTROM))
+
+
 _ASSIGNMENT_SEARCH_NODE_LIMIT = 1_000_000
 
 
@@ -341,6 +354,7 @@ def _discrete_state_admissibility(builder: Any) -> dict[str, Any]:
                        f"{atoms[i].residue.name}:{atoms[i].name}")
     found = _nonbonded_exclusions_and_wall(builder.system)
     excluded = found[0] if found is not None else set()
+    heavy = _heavy_mask(builder.topology)
     floor_nm = DISCRETE_STATE_CONTACT_FLOOR_ANGSTROM / 10.0
     side_chain = set().union(*(set(int(i) for i in c["indices"]) for c in candidates))
     fixed = np.array(sorted(set(range(len(builder.base_positions))) - side_chain), dtype=np.int64)
@@ -355,6 +369,8 @@ def _discrete_state_admissibility(builder: Any) -> dict[str, Any]:
                 if (min(atom, other), max(atom, other)) in excluded:
                     continue
                 distance = float(np.linalg.norm(xyz - builder.base_positions[other])) * 10.0
+                if not _impossible_contact(distance, bool(heavy[atom] and heavy[other])):
+                    continue
                 if closest is None or distance < closest[0]:
                     closest = (distance, int(atom), other)
         if closest is not None:
@@ -372,16 +388,19 @@ def _discrete_state_admissibility(builder: Any) -> dict[str, Any]:
             distances = cdist(left["positions"], right["positions"]) * 10.0
             for a, b in zip(*np.nonzero(distances < DISCRETE_STATE_CONTACT_FLOOR_ANGSTROM)):
                 x, y = int(left["indices"][a]), int(right["indices"][b])
-                if (min(x, y), max(x, y)) not in excluded:
+                if ((min(x, y), max(x, y)) not in excluded
+                        and _impossible_contact(float(distances[a, b]), bool(heavy[x] and heavy[y]))):
                     pair_ok[i, j] = pair_ok[j, i] = False
                     forbidden_pairs.append(dict(variables=[i, j],
                                                 distance_angstrom=float(distances[a, b]),
                                                 atoms=[label(x), label(y)]))
                     break
     return dict(single_ok=single_ok, pair_ok=pair_ok, audit=dict(
-        contact_floor_angstrom=DISCRETE_STATE_CONTACT_FLOOR_ANGSTROM,
-        definition=("interacting atom pairs (1-2 and 1-3 excluded), all elements, unrelaxed "
-                    "discrete states; singles against atoms outside every Active side chain"),
+        heavy_atom_floor_angstrom=DISCRETE_STATE_CONTACT_FLOOR_ANGSTROM,
+        all_atom_floor_angstrom=DISCRETE_STATE_ALL_ATOM_FLOOR_ANGSTROM,
+        definition=("interacting atom pairs (1-2 and 1-3 excluded) under 0.4 A, or heavy-atom "
+                    "pairs under 1.0 A; unrelaxed discrete states; singles against atoms outside "
+                    "every Active side chain"),
         forbidden_single_count=len(forbidden_singles), forbidden_singles=forbidden_singles[:100],
         forbidden_pair_count=len(forbidden_pairs), forbidden_pairs=forbidden_pairs[:100]))
 
@@ -841,7 +860,7 @@ class AllAtomInterfaceQUBOBuilder:
     def chi_assignment_contact(
         self, assignment: Mapping[str, Sequence[float]]
     ) -> Optional[dict[str, Any]]:
-        """Closest interacting contact under the A47 floor for a chi assignment, or None.
+        """Closest interacting contact under the A47 floors for a chi assignment, or None.
 
         Pairs involve at least one Active side-chain atom; 1-2 and 1-3 pairs are
         excluded. A non-None result is a geometrically impossible state.
@@ -852,12 +871,14 @@ class AllAtomInterfaceQUBOBuilder:
                                               found[0] if found is not None else set())
         positions = self.positions_for_chi_assignment(assignment)
         floor_nm = DISCRETE_STATE_CONTACT_FLOOR_ANGSTROM / 10.0
-        pairs = self._contact_pairs(positions, floor_nm)
-        if not pairs:
+        heavy = _heavy_mask(self.topology)
+        violations = [(float(np.linalg.norm(positions[i] - positions[j])) * 10.0, i, j)
+                      for i, j in self._contact_pairs(positions, floor_nm)]
+        violations = [v for v in violations if _impossible_contact(v[0], bool(heavy[v[1]] and heavy[v[2]]))]
+        if not violations:
             return None
         atoms = list(self.topology.atoms())
-        distance, i, j = min((float(np.linalg.norm(positions[i] - positions[j])) * 10.0, i, j)
-                             for i, j in pairs)
+        distance, i, j = min(violations)
         label = lambda k: (f"{atoms[k].residue.chain.id}:{atoms[k].residue.id}:"
                            f"{atoms[k].residue.name}:{atoms[k].name}")
         return dict(distance_angstrom=distance, atoms=[label(i), label(j)])
@@ -879,11 +900,15 @@ class AllAtomInterfaceQUBOBuilder:
               for v in range(count)}
         anchors=_admissible_assignment(self.site_to_variables,env_ok,pair_ok,
                                        order=lambda group:sorted(group,key=lambda v:rank[v]))
-        if anchors is None:
-            raise StructureQualityError(
-                "No geometry-admissible rotamer assignment: every combination places atoms "
-                f"closer than {DISCRETE_STATE_CONTACT_FLOOR_ANGSTROM} A",
-                category="candidate_geometry",audit=admissibility["audit"])
+        raw_fallback=anchors is None
+        if raw_fallback:
+            # Every combination contains an impossible contact, so there is no
+            # admissible space to be exact on. Build as before A47 from raw
+            # energies; the precision budget below still applies and fails
+            # closed if those energies are too large to represent.
+            env_ok=np.ones(count,dtype=bool); pair_ok=np.ones((count,count),dtype=bool)
+            rank={v:self.energy(self.positions_for_variables([v])) for v in range(count)}
+            anchors=[min(group,key=lambda v:rank[v]) for group in self.site_to_variables.values()]
         anchor_positions=self.positions_for_variables(anchors)
         def assignment(variables):
             positions=anchor_positions.copy()
@@ -979,9 +1004,11 @@ class AllAtomInterfaceQUBOBuilder:
                 decomposition_anchor_variables=anchors,ising_equivalence_max_error=ising_error,
                 discrete_state_contact_floor_angstrom=DISCRETE_STATE_CONTACT_FLOOR_ANGSTROM,
                 forbidden_state_penalty_kcal=forbidden_penalty,
-                forbidden_single_states=int((~env_ok).sum()),
+                forbidden_single_states=admissibility["audit"]["forbidden_single_count"],
                 forbidden_pair_states=admissibility["audit"]["forbidden_pair_count"],
-                equivalence_scope="exact on every geometry-admissible assignment; forbidden states carry the penalty",
+                equivalence_scope=("raw energies: no geometry-admissible assignment exists" if raw_fallback
+                                   else "exact on every geometry-admissible assignment; forbidden states carry the penalty"),
+                no_admissible_assignment_raw_fallback=raw_fallback,
                 ising_roundoff_tolerance=roundoff_bound,
                 atom_count=len(self.base_positions),
                 forcefield=(["amber14-all.xml"] if self.solvent_model=="vacuum"
