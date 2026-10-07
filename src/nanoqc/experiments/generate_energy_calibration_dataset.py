@@ -97,8 +97,13 @@ def coarse_physical_energy(qubo, selected: list[int]) -> float:
     return float(qubo.physical_self@x + x@qubo.physical_pair@x)
 
 
-def calibration_assignments(qubo, count: int, rng: np.random.Generator) -> list[list[int]]:
+def calibration_assignments(qubo, count: int, rng: np.random.Generator,
+                            admissible=None) -> list[list[int]]:
     """Mix exact low-energy feasible states with uniform legal states.
+
+    With ``admissible`` (A48), only states it accepts are used: the anchor is
+    the lowest-energy admissible state, and the low-energy half and the
+    uniform samples are drawn from the admissible states.
 
     The feasible space is at most 6^8 for the supported generic builder, but
     formal calibration uses six sites. To keep this stage bounded, exact
@@ -118,8 +123,11 @@ def calibration_assignments(qubo, count: int, rng: np.random.Generator) -> list[
         selected=[int(v) for v in state]
         scored.append((coarse_physical_energy(qubo,selected),tuple(selected)))
     scored.sort(key=lambda item:(item[0],item[1]))
+    if admissible is not None:
+        scored=[item for item in scored if admissible(list(item[1]))]
     if not scored:
         raise ValueError("No feasible calibration assignments")
+    allowed={state for _,state in scored}
 
     wanted=min(int(count),len(scored))
     low_count=max(1,wanted//2)
@@ -129,7 +137,7 @@ def calibration_assignments(qubo, count: int, rng: np.random.Generator) -> list[
     while len(chosen)<wanted and attempts<max(1000,wanted*100):
         proposal=legal_assignment(qubo.site_to_variables,rng)
         key=tuple(proposal);attempts+=1
-        if key not in seen:
+        if key not in seen and key in allowed:
             seen.add(key);chosen.append(proposal)
     if len(chosen)<wanted:
         for _,state in scored[low_count:]:
@@ -380,7 +388,7 @@ def main() -> int:
         "pdb_id","family_cluster","split","training_row_index","assignment_index",
         "prior_energy","vhh_environment_energy","antigen_energy","pair_energy",
         "amber_delta_kcal","anchor_amber_kcal","active_residues","chi_assignment",
-        "graph_sha256","source_id",
+        "graph_sha256","source_id","geometry_rejected_states","geometry_states_checked",
     ]
     if args.dual_energy_diagnostic:
         from nanoqc.experiments.training_energy_diagnostic import DIAGNOSTIC_FIELDS
@@ -488,9 +496,29 @@ def main() -> int:
                         if {v.residue_id for v in coarse.variable_map}!=set(active_residues):
                             raise ValueError("Diagnostic coarse and atomistic Active residue identities differ")
 
-                    assignments=calibration_assignments(
-                        coarse,args.assignments_per_complex,rng
-                    )
+                    # A48: geometrically impossible states (an interacting contact under
+                    # the A47 1.0-A floor) have r^-12 Amber energies up to 1e17
+                    # kcal/mol, which are artifacts, not a calibration target.
+                    contacts={}
+                    def admissible(selected,coarse=coarse,atomistic=atomistic,contacts=contacts):
+                        key=tuple(selected)
+                        if key not in contacts:
+                            contacts[key]=atomistic.chi_assignment_contact(chi_assignment(coarse,selected))
+                        return contacts[key] is None
+                    try:
+                        assignments=calibration_assignments(
+                            coarse,args.assignments_per_complex,rng,admissible=admissible
+                        )
+                    except ValueError as exc:
+                        if str(exc)!="No feasible calibration assignments":
+                            raise
+                        from nanoqc.structure.physical_quality import StructureQualityError
+                        raise StructureQualityError(
+                            "No geometry-admissible calibration assignment",
+                            category="calibration_geometry",
+                            audit=dict(examples=[v for v in contacts.values() if v][:20],
+                                       states_checked=len(contacts))) from exc
+                    geometry_rejections=sum(v is not None for v in contacts.values())
                     anchor=assignments[0]
                     anchor_components=np.asarray(assignment_components(coarse,anchor),dtype=float)
                     anchor_angles=chi_assignment(coarse,anchor)
@@ -530,6 +558,8 @@ def main() -> int:
                             active_residues=json.dumps(active_residues,separators=(",",":")),
                             chi_assignment=json.dumps(angles,separators=(",",":"),sort_keys=True),
                             graph_sha256=row["sha256"],source_id=data.source_id,
+                            geometry_rejected_states=geometry_rejections,
+                            geometry_states_checked=len(contacts),
                         ))
                         if args.dual_energy_diagnostic:
                             complex_rows[-1].update(evaluated)
@@ -585,8 +615,9 @@ def main() -> int:
         homology_isolation=homology_isolation,
         antigen_guidance_weight=float(args.antigen_guidance_weight),
         assignment_sampling=(
-            "exact feasible-space ranking; lowest-energy half plus unique uniform legal samples; "
-            "anchor is exact coarse physical ground state"
+            "A48: geometry-admissible states only (no interacting contact under 1.0 A); "
+            "exact admissible-space ranking; lowest-energy half plus unique uniform admissible samples; "
+            "anchor is the lowest-energy admissible coarse state"
         ),
         rotamer_state_policy="fixed_three_chi1_wells; exactly three retained states per site, one real Dunbrack sample per chi1 well including top positive-probability sample below the global floor when required",
         active_sites=args.active_sites,radius=args.radius,

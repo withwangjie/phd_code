@@ -838,6 +838,30 @@ class AllAtomInterfaceQUBOBuilder:
                     )
         return positions
 
+    def chi_assignment_contact(
+        self, assignment: Mapping[str, Sequence[float]]
+    ) -> Optional[dict[str, Any]]:
+        """Closest interacting contact under the A47 floor for a chi assignment, or None.
+
+        Pairs involve at least one Active side-chain atom; 1-2 and 1-3 pairs are
+        excluded. A non-None result is a geometrically impossible state.
+        """
+        if getattr(self, "_contact_pairs", None) is None:
+            found = _nonbonded_exclusions_and_wall(self.system)
+            self._contact_pairs = _ClosePairs(self.base_positions, sorted(self.movable),
+                                              found[0] if found is not None else set())
+        positions = self.positions_for_chi_assignment(assignment)
+        floor_nm = DISCRETE_STATE_CONTACT_FLOOR_ANGSTROM / 10.0
+        pairs = self._contact_pairs(positions, floor_nm)
+        if not pairs:
+            return None
+        atoms = list(self.topology.atoms())
+        distance, i, j = min((float(np.linalg.norm(positions[i] - positions[j])) * 10.0, i, j)
+                             for i, j in pairs)
+        label = lambda k: (f"{atoms[k].residue.chain.id}:{atoms[k].residue.id}:"
+                           f"{atoms[k].residue.name}:{atoms[k].name}")
+        return dict(distance_angstrom=distance, atoms=[label(i), label(j)])
+
     def energy_for_chi_assignment(
         self, assignment: Mapping[str, Sequence[float]]
     ) -> float:
