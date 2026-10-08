@@ -133,19 +133,40 @@ class QAOAOptimizationMixin:
 
         raise ValueError("method must be 'cobyla' or 'adam'")
 
+    def _scale_admissible_states(self):
+        """Feasible subspace states free of A47 forbidden states (A54), or None."""
+        excluded = getattr(self, "scale_excluded_variables", ())
+        pairs = getattr(self, "scale_excluded_pairs", ())
+        if not excluded and not pairs:
+            return None
+        bits = np.asarray(self._subspace_bits, dtype=bool)
+        mask = np.ones(len(bits), dtype=bool)
+        for v in excluded:
+            mask &= ~bits[:, v]
+        for a, b in pairs:
+            mask &= ~(bits[:, a] & bits[:, b])
+        return mask
+
     def parameter_scale(self, mode: str = "max_coefficient") -> float:
         """Gamma normalisation: physical gamma = internal gamma / scale.
 
         ``max_coefficient`` uses the largest Ising coefficient; ``feasible_iqr``
         the interquartile range of feasible energies (classical preprocessing).
+        Geometry-forbidden states (A47) are excluded from both scales (A54).
         Shared by ``optimize_robust`` and by parameter transfer, so transferred
         internal angles are rescaled exactly as the optimizer scaled them.
         """
         if mode not in ("max_coefficient", "feasible_iqr"):
             raise ValueError("parameter_scale must be 'max_coefficient' or 'feasible_iqr'")
         self.subspace_state(np.zeros(2 * self.p))
-        scale = self.gamma_scale if mode == "max_coefficient" else max(
-            float(np.subtract(*np.quantile(self._subspace_energies, [.75, .25]))), 1.)
+        if mode == "max_coefficient":
+            scale = self.gamma_scale
+        else:
+            energies = np.asarray(self._subspace_energies, dtype=float)
+            admissible = self._scale_admissible_states()
+            if admissible is not None and admissible.any():
+                energies = energies[admissible]
+            scale = max(float(np.subtract(*np.quantile(energies, [.75, .25]))), 1.)
         if not np.isfinite(scale) or scale <= 0:
             raise ValueError("Computed parameter scale is not a positive finite number")
         return float(scale)

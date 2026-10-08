@@ -230,6 +230,11 @@ class QUBOResult:
                 "ising_energy_equivalence_max_error": self.metadata.get(
                     "ising_energy_equivalence_max_error"
                 ),
+                # A54: geometry-forbidden states (A47) carry a constraint
+                # penalty; the solver excludes them from its angle scale only.
+                "forbidden_variables": list(self.metadata.get("forbidden_variables", []) or []),
+                "forbidden_variable_pairs": [list(pair) for pair in
+                                             (self.metadata.get("forbidden_variable_pairs", []) or [])],
             },
         )
 

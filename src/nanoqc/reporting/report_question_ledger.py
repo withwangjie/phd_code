@@ -204,7 +204,7 @@ def section_research_question_ledger(ctx: ReportContext) -> List[str]:
         "- Scope of every verdict: fixed backbone and known pose; noiseless exact-subspace simulation, so no "
         "hardware or speed claim; finite-range scaling; the structural energy is Amber ff14SB in vacuum with "
         "the A50 polar-hydrogen modification (CHARMM polar-H Lennard-Jones terms on ff14SB HO hydrogens; a "
-        "study-specific hybrid, not a published validated force field, A53); QAOA parameter scaling is instance-dependent where forbidden "
-        "states exist (A51). Failed cases remain in every denominator.")
+        "study-specific hybrid, not a published validated force field, A53); QAOA angles are normalised on the admissible "
+        "physical objective, not on forbidden-state penalties (A54). Failed cases remain in every denominator.")
     lines.append("")
     return lines

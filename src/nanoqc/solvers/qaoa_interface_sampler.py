@@ -79,8 +79,16 @@ class XYMixerQAOASampler(QAOAOptimizationMixin, QAOASamplingMixin):
         seed: int = 7,
         coefficient_tolerance: float = 1e-10,
         simulation_mode: str = "pennylane",
+        scale_excluded_variables: Sequence[int] = (),
+        scale_excluded_pairs: Sequence[Sequence[int]] = (),
     ) -> None:
         self.physical_self = np.asarray(physical_self, dtype=np.float64)
+        # A54: geometry-forbidden states (A47) stay in the cost Hamiltonian but
+        # are a constraint encoding, like the one-hot penalties XY-QAOA omits,
+        # so they do not set the angle scale.
+        self.scale_excluded_variables = tuple(sorted({int(v) for v in scale_excluded_variables}))
+        self.scale_excluded_pairs = tuple(sorted({(min(int(a), int(b)), max(int(a), int(b)))
+                                                  for a, b in scale_excluded_pairs}))
         self.physical_pair = np.asarray(physical_pair, dtype=np.float64)
         self.site_to_variables = {
             int(site): tuple(int(variable) for variable in variables)
@@ -119,9 +127,20 @@ class XYMixerQAOASampler(QAOAOptimizationMixin, QAOASamplingMixin):
         physical_qubo = self.physical_pair.copy()
         np.fill_diagonal(physical_qubo, self.physical_self)
         self.ising_h, self.ising_J, self.ising_offset = qubo_to_ising(physical_qubo)
+        scale_qubo = physical_qubo.copy()
+        for v in self.scale_excluded_variables:
+            if not 0 <= v < self.num_variables:
+                raise ValueError("Scale-excluded variable outside the instance")
+            scale_qubo[v, :] = 0.0
+            scale_qubo[:, v] = 0.0
+        for a, b in self.scale_excluded_pairs:
+            if not (0 <= a < b < self.num_variables):
+                raise ValueError("Scale-excluded pair outside the instance")
+            scale_qubo[a, b] = 0.0
+        scale_h, scale_j, _ = qubo_to_ising(scale_qubo)
         self.gamma_scale = max(
-            float(np.max(np.abs(self.ising_h), initial=0.0)),
-            float(np.max(np.abs(self.ising_J), initial=0.0)),
+            float(np.max(np.abs(scale_h), initial=0.0)),
+            float(np.max(np.abs(scale_j), initial=0.0)),
             1.0,
         )
         self._hamiltonian = self._build_cost_hamiltonian()
@@ -153,6 +172,8 @@ class XYMixerQAOASampler(QAOAOptimizationMixin, QAOASamplingMixin):
             seed=seed,
             coefficient_tolerance=coefficient_tolerance,
             simulation_mode=simulation_mode,
+            scale_excluded_variables=(instance.metadata or {}).get("forbidden_variables", ()) or (),
+            scale_excluded_pairs=(instance.metadata or {}).get("forbidden_variable_pairs", ()) or (),
         )
 
     def _validate_inputs(self) -> None:
