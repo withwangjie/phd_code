@@ -22,26 +22,29 @@ from nanoqc.structure.physical_quality import (StructureQualityError, topology_g
     EXTREME_NONBONDED_FLOOR_ANGSTROM)
 
 
-# A46: L-BFGS with a per-atom step cap. Amber14 polar hydrogens (type HO: Tyr
-# HH, Ser HG, Thr HG1) have zero Lennard-Jones repulsion, so their Coulomb
-# attraction to an oppositely charged atom is unbounded as the distance goes
-# to zero. From a physical geometry that singularity lies behind a valence
-# (angle/bond) barrier, so a local descent does not reach it, but SciPy's
-# L-BFGS-B starts with a 1 nm step along the steepest descent and its line
-# search accepts any step that lowers the energy, so it can jump over the
-# barrier. Capping every iteration's displacement of each atom keeps each
-# step local; the quasi-Newton history is kept across iterations, so the total
-# distance an atom may travel is limited only by the iteration cap.
+# A46: L-BFGS (Liu & Nocedal 1989) with a per-atom step cap. Amber ff14SB
+# hydroxyl hydrogens (type protein-HO: Ser HG, Thr HG1, Tyr HH, ASH HD2, GLH
+# HE2, HYP HD1) have zero Lennard-Jones repulsion, so their Coulomb attraction
+# to an oppositely charged atom is unbounded as the distance goes to zero.
+# SciPy's L-BFGS-B takes a first trial step of length 1 in coordinate units
+# (stp = min(1/dnorm, stpmx) at iteration 0; 1 nm here) and later full
+# quasi-Newton steps, and its line search accepts any energy decrease, so it
+# can jump into that basin. Capping every iteration's displacement of each
+# atom, as GROMACS steepest descent caps it with emstep, keeps each step
+# local; the quasi-Newton history is kept, so total travel is limited only by
+# the iteration cap. A step cap alone does not remove the basin (7WKI, A50).
 MINIMIZER_MAX_ATOM_STEP_NM = 0.03
 MINIMIZER_HISTORY = 10
 _ARMIJO = 1e-4
 _MAX_BACKTRACKS = 40
-# OpenMM's GPU platforms accumulate forces in 64-bit fixed point with 32
-# fractional bits, so a force component above 2**31 kJ/mol/nm saturates or
-# wraps around, and the returned gradient no longer matches the energy; a
-# wrapped value can even look small. A carbon 0.5 A from a hydrogen exceeds
-# the limit. Whether that can happen is decided from geometry, not from the
-# GPU's own (possibly wrapped) output: if any interacting pair with a movable
+# OpenMM's CUDA platform accumulates forces only in a 64-bit fixed-point
+# buffer, converting by multiplying by 2**32 (OpenMM developer guide; OpenCL
+# uses such a buffer too), so no force component above 2**31 kJ/mol/nm is
+# representable in any precision mode. The guide does not define what happens
+# beyond that range; on the server, three atoms reported the identical
+# magnitude 2**31*sqrt(3) (7NXX seed 43), so such output cannot be trusted.
+# A carbon 0.5 A from a hydrogen exceeds the limit. Whether that can happen is
+# therefore decided from geometry, never from the GPU's own output: if any interacting pair with a movable
 # atom is closer than the distance at which the strongest Lennard-Jones pair
 # of the System reaches 1/64 of the limit, energy and forces are recomputed on
 # the double-precision Reference platform from the same System. Otherwise the
@@ -330,15 +333,18 @@ DISCRETE_STATE_CONTACT_FLOOR_ANGSTROM = 1.0          # heavy-heavy
 DISCRETE_STATE_ALL_ATOM_FLOOR_ANGSTROM = EXTREME_NONBONDED_FLOOR_ANGSTROM   # any elements
 
 
-# A50: Amber ff14SB gives hydroxyl hydrogens (type HO: Tyr HH, Ser HG, Thr
-# HG1) no Lennard-Jones term. Their parent oxygen normally shields them, but
+# A50: Amber ff14SB (type inherited from Cornell et al. 1995) gives hydroxyl
+# hydrogens (type protein-HO: Ser HG, Thr HG1, Tyr HH, ASH HD2, GLH HE2, HYP
+# HD1; the only zero-epsilon protein type) no Lennard-Jones term. Their parent oxygen normally shields them, but
 # not from atoms the oxygen is 1-3 excluded from: Tyr HH and its own ring
 # carbon CE1/CE2 form a 1-4 pair with an attractive Coulomb term and no
 # repulsion, so a relaxation can slide HH onto the ring (7WKI seed 42). These
-# hydrogens get the CHARMM36 polar-hydrogen parameters (HO: epsilon 0.046
-# kcal/mol, Rmin/2 0.2245 A), and their 1-4 pairs get the force field's own
-# 1-4 Lennard-Jones scaling. At hydrogen-bond distances the added term is
-# about 0.01 kcal/mol; at 1 A from a ring carbon it is about +275 kcal/mol.
+# hydrogens get CHARMM's polar-hydrogen parameters (type H: epsilon 0.046
+# kcal/mol, Rmin/2 0.2245 A; MacKerell et al. 1998, kept in CHARMM36), and
+# their 1-4 pairs get the force field's own 1-4 Lennard-Jones scaling (0.5).
+# At hydrogen-bond distances the added term is at most ~0.1 kcal/mol; at 1 A
+# from a ring carbon it is about +270 kcal/mol. This hybrid is a
+# study-specific modification, not a published validated force field.
 POLAR_HYDROGEN_SIGMA_NM = 2 * 0.02245 / 2 ** (1 / 6)
 POLAR_HYDROGEN_EPSILON_KJ_MOL = 0.046 * 4.184
 

@@ -50,6 +50,12 @@ The formal manuscript/report must not turn category 2 or 3 into a claim that the
 | Coarse environment scope | Every antigen and fixed-VHH residue of the source complex; only the 8 A coarse atom-pair cutoff limits it | Direct literature basis for the scope, study-specific coarse parameters | Standard fixed-backbone packers score each rotamer's one-body energy against all neighbouring fixed residues, with neighbours defined by the potential's own atom-pair interaction range rather than an arbitrary pre-truncated region [R31,R32]. The environment radius therefore no longer limits any energy term; an exact CA pre-filter (cutoff + maximum pseudo-atom offset) removes no scored pair. |
 | Amber ff14SB | All-atom validation / calibration force field | Direct literature basis | ff14SB protein backbone and side-chain parameters are described in [R15]. |
 | OpenMM | All-atom energy/relaxation engine | Direct literature basis | OpenMM 7 is described and benchmarked in [R19]. |
+| Movable-coordinate minimizer (A46) | L-BFGS, 10 correction pairs, backtracking Armijo line search (c1 = 1e-4), exact force-RMS stop | Direct literature basis for the algorithm; study-specific settings | L-BFGS [R50] and Armijo backtracking with c1 = 1e-4 and a few correction pairs are standard [R52]. SciPy's L-BFGS-B [R51] starts unconstrained runs with a trial step of length 1 in coordinate units (`stp = min(1/dnorm, stpmx)` at iteration 0, then `stp = 1`; SciPy 1.13 Fortran and 1.17 C source). With nm coordinates that is a 1 nm first step, which is the mechanism A46 removes. |
+| Per-atom step cap 0.03 nm (A46) | maximum displacement of any movable atom per accepted iteration | Literature precedent; study-specific value | Capping the maximum atomic displacement per minimization step is standard practice: GROMACS steepest descent uses `emstep`, a maximum step of 0.01 nm by default [R53]. The value 0.03 nm is a preregistered choice, not a literature-derived constant. |
+| GPU fixed-point force accumulation (A46) | close contacts evaluated on the double-precision Reference platform | Direct documentation basis | The OpenMM CUDA platform accumulates forces only in a 64-bit fixed-point buffer (`long long`), converting by multiplying by 2^32 [R59]. A representable component is therefore below 2^31 kJ/mol/nm in every precision mode. The documentation does not define behaviour beyond that range, so the protocol never relies on it. |
+| Zero-LJ hydroxyl hydrogens and their shielding (A50) | CHARMM polar-hydrogen LJ (epsilon 0.046 kcal/mol, Rmin/2 0.2245 A) on the Amber type `protein-HO` | Direct parameter basis; **study-specific force-field modification** | In Amber ff14SB [R15], which inherits the type from Cornell et al. [R56], `protein-HO` (Ser HG, Thr HG1, Tyr HH, ASH HD2, GLH HE2, HYP HD1) has epsilon = 0. It is the only zero-epsilon protein type in OpenMM's `protein.ff14SB.xml`, which also sets lj14scale = 0.5 and coulomb14scale = 1/1.2. The added values are CHARMM's polar-hydrogen parameters [R54], retained in CHARMM36 [R55]. Grafting them onto Amber is this study's own modification; the combination is not a published, validated force field and is reported as such. |
+| Geometry-forbidden discrete states and precision budget (A47) | impossible contacts (< 0.4 A any atoms, < 1.0 A heavy atoms) priced by a bounded penalty; float64 roundoff bound 32*eps*sum(abs(coefficients)) | Numerical-analysis basis; study-specific floors | The rounding error of a sum of n floating-point terms is bounded by gamma_n * sum(abs(x_i)) [R58]. The 32*eps bound is a conservative instance of this for the short sums used here. The floors are the protocol's existing A24/A28/A45 floors, not literature thresholds; in particular they are absolute distances, not MolProbity vdW-overlap clash scores. |
+| IMGT CDR3 insertion order (A49) | peptide neighbours from C-N bonds | Direct literature basis | IMGT unique numbering inserts CDR3 positions as 111.1, 111.2, ... after 111 and as ..., 112.2, 112.1 before 112 [R57] (IMGT chart: 111, 111.1-111.4, 112.4, 112.3, 112.2, 112.1, 112). Alphabetic insertion-code order is therefore not chain order at 112. |
 
 ### Quantum algorithm
 
@@ -195,3 +201,23 @@ The formal manuscript/report must not turn category 2 or 3 into a claim that the
 
 
 **[R49]** Krawczyk, K., Liu, X., Baker, T., Shi, J., & Deane, C. M. (2014). Improving B-cell epitope prediction and its application to global antibody-antigen docking. *Bioinformatics*, 30(16), 2288-2294. https://doi.org/10.1093/bioinformatics/btu190
+
+**[R50]** Liu, D. C., & Nocedal, J. (1989). On the limited memory BFGS method for large scale optimization. *Mathematical Programming*, 45, 503-528. https://doi.org/10.1007/BF01589116
+
+**[R51]** Byrd, R. H., Lu, P., Nocedal, J., & Zhu, C. (1995). A limited memory algorithm for bound constrained optimization. *SIAM Journal on Scientific Computing*, 16(5), 1190-1208. https://doi.org/10.1137/0916069
+
+**[R52]** Nocedal, J., & Wright, S. J. (2006). *Numerical Optimization* (2nd ed.). Springer. https://doi.org/10.1007/978-0-387-40065-5
+
+**[R53]** Abraham, M. J., Murtola, T., Schulz, R., et al. (2015). GROMACS: High performance molecular simulations through multi-level parallelism from laptops to supercomputers. *SoftwareX*, 1-2, 19-25. https://doi.org/10.1016/j.softx.2015.06.001 (energy-minimization options, `emstep`, in the GROMACS reference manual).
+
+**[R54]** MacKerell, A. D. Jr., Bashford, D., Bellott, M., et al. (1998). All-atom empirical potential for molecular modeling and dynamics studies of proteins. *The Journal of Physical Chemistry B*, 102(18), 3586-3616. https://doi.org/10.1021/jp973084f
+
+**[R55]** Best, R. B., Zhu, X., Shim, J., et al. (2012). Optimization of the additive CHARMM all-atom protein force field targeting improved sampling of the backbone phi, psi and side-chain chi1 and chi2 dihedral angles. *Journal of Chemical Theory and Computation*, 8(9), 3257-3273. https://doi.org/10.1021/ct300400x
+
+**[R56]** Cornell, W. D., Cieplak, P., Bayly, C. I., et al. (1995). A second generation force field for the simulation of proteins, nucleic acids, and organic molecules. *Journal of the American Chemical Society*, 117(19), 5179-5197. https://doi.org/10.1021/ja00124a002
+
+**[R57]** Lefranc, M.-P., Pommié, C., Ruiz, M., et al. (2003). IMGT unique numbering for immunoglobulin and T cell receptor variable domains and Ig superfamily V-like domains. *Developmental and Comparative Immunology*, 27(1), 55-77. https://doi.org/10.1016/S0145-305X(02)00039-3 ; IMGT CDR3-IMGT position chart: https://imgt.org/IMGTScientificChart/Numbering/CDR3-IMGTposition.html
+
+**[R58]** Higham, N. J. (2002). *Accuracy and Stability of Numerical Algorithms* (2nd ed.). SIAM. https://doi.org/10.1137/1.9780898718027
+
+**[R59]** OpenMM Developer Guide, "The CUDA Platform" and "The OpenCL Platform" (force accumulation in a 64-bit fixed-point buffer scaled by 2^32). https://docs.openmm.org/7.6.0/developerguide/07_cuda_platform.html ; https://docs.openmm.org/7.6.0/developerguide/06_opencl_platform.html
