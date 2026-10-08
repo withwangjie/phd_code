@@ -129,6 +129,8 @@ def section_structural_benefit(ctx: ReportContext) -> List[str]:
                 )
         lines.append("")
 
+    lines += _structural_protocol_execution(ctx.run_dir / "validation_queue", ctx)
+
     # Failure denominators, preserved explicitly rather than dropped.
     for label, directory in (("dev queue", ctx.run_dir / "dev_queue"), ("validation queue", ctx.run_dir / "validation_queue")):
         if label=="dev queue" and not dev_enabled:continue
@@ -138,6 +140,59 @@ def section_structural_benefit(ctx: ReportContext) -> List[str]:
             lines.append(f"- {label}: `failures.log` present, {len(failed)} logged failure line(s) preserved verbatim "
                           f"(see `{failures_log}`).")
     lines.append("")
+    return lines
+
+
+def _structural_protocol_execution(queue: Path, ctx: ReportContext) -> List[str]:
+    """How the A45-A51 structural protocol actually executed in this run."""
+    import collections
+    root = queue / "results"
+    expected_seeds = len((ctx.frozen_config.get("structure_experiment", {}) or {}).get("seeds", []) or [])
+    summaries = sorted(root.glob("*/recovery_quality_summary.json"))
+    failures = collections.Counter()
+    for path in summaries:
+        for failure in (_read_json(path) or {}).get("failures", []) or []:
+            failures[str(failure.get("category"))] += 1
+    attempts = []
+    for path in sorted(root.glob("*/seed_*/perturbation.json")):
+        value = (_read_json(path) or {}).get("selected_attempt")
+        if value is not None:
+            attempts.append(int(value))
+    stops = collections.Counter()
+    reference_outputs = vetoed_outputs = outputs = forbidden_selected = 0
+    for result_path in sorted(root.glob("*/seed_*/experiment/*_result.json")):
+        relaxation = (_read_json(result_path) or {}).get("relaxation") or {}
+        outputs += 1
+        stops[str(relaxation.get("minimizer_stop_reason"))] += 1
+        reference_outputs += int(bool(relaxation.get("minimizer_reference_platform_evaluations")))
+        vetoed_outputs += int(bool(relaxation.get("minimizer_overlap_floor_vetoes")))
+        forbidden_selected += int(relaxation.get("selected_state_geometry_admissible") is False)
+    instances = with_forbidden = fallback = shielded = 0
+    for mapping in sorted(root.glob("*/seed_*/experiment/allatom_mapping.json")):
+        metadata = (_read_json(mapping) or {}).get("metadata") or {}
+        instances += 1
+        with_forbidden += int(bool(metadata.get("forbidden_variables") or metadata.get("forbidden_variable_pairs")))
+        fallback += int(bool(metadata.get("no_admissible_assignment_raw_fallback")))
+        shielded += int(bool((metadata.get("polar_hydrogen_shielding") or {}).get("shielded_hydrogens")))
+    lines = ["### 4.3 Structural protocol execution (A45-A51)", ""]
+    if not summaries:
+        lines += ["No per-target recovery summaries were found.", ""]
+        return lines
+    sorted_attempts = sorted(attempts)
+    median = sorted_attempts[len(sorted_attempts) // 2] if sorted_attempts else None
+    lines += [
+        f"- Targets with a recovery summary: {len(summaries)}; seeds per target: {expected_seeds}. "
+        f"Recorded seed failures by category: {dict(failures) or 'none'} (all retained in denominators).",
+        f"- Generated inputs (A45/A51): {len(attempts)} seeds received a geometry-qualified input; selected attempt "
+        f"index median {median}, maximum {max(attempts) if attempts else None} (0 = the seed's own first draw).",
+        f"- Relaxations: {outputs} outputs; minimizer stop reasons {dict(stops)}; {reference_outputs} used "
+        f"double-precision Reference evaluations for close contacts (A46); {vetoed_outputs} had an overlap-floor "
+        "veto (A47).",
+        f"- Structural QUBOs: {instances} instances; {with_forbidden} contained geometry-forbidden states, "
+        f"{fallback} used the raw-energy fallback (A47); {forbidden_selected} solver selections were forbidden "
+        f"states (judged by physical acceptance only, A51); polar-hydrogen shielding applied in {shielded} (A50).",
+        "",
+    ]
     return lines
 
 

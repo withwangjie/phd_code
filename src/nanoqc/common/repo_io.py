@@ -97,6 +97,7 @@ MODULE_LAYOUT = {
     "report_common.py": "src/nanoqc/reporting/report_common.py",
     "report_sections_quantum.py": "src/nanoqc/reporting/report_sections_quantum.py",
     "report_sections_structure.py": "src/nanoqc/reporting/report_sections_structure.py",
+    "report_question_ledger.py": "src/nanoqc/reporting/report_question_ledger.py",
     "generate_figure1_pymol_script.py": "src/nanoqc/reporting/generate_figure1_pymol_script.py",
     "run_full_experiment.py": "src/nanoqc/pipeline/run_full_experiment.py",
     "orchestrator_common.py": "src/nanoqc/pipeline/orchestrator_common.py",

@@ -327,6 +327,28 @@ validation applies the same gate to previously written results.
 Required:
 - `FINAL_RESEARCH_REPORT.md`
 
+#### Research-question ledger (A52)
+
+`FINAL_RESEARCH_REPORT.md` section R answers each central research question (README) from this run's artifacts only, with one rule fixed before any result of the A45–A52 lineage was seen:
+
+| Question | Evidence | Family |
+|---|---|---|
+| Q1 encoding fidelity | coarse `quantum_instance` metadata; structural `allatom_mapping.json` | descriptive; each instance is already gated by its own fail-closed equivalence check |
+| Q2 ground-state amplification | `statistics/quantum_scaling_statistics.json` `primary_amplification` | primary (serial gatekeeping) |
+| Q3 amplification scaling slope | same file, `primary` | primary (serial gatekeeping) |
+| Q2 QAOA vs classical | `qc_benchmark/statistics_outputs.json` effects with `gatekeeping_family = secondary` | secondary; testable only after both primary hypotheses are rejected |
+| Q4 CVaR vs mean | `qc_benchmark/metrics.csv` | descriptive ablation |
+| Q5 structural endpoint and RQ5 transfer | `statistics/structure_statistics.json` | structural Holm family |
+| Q6 problem reduction | `checkpoints/training_summary.json`, section 6 | descriptive enabling component |
+
+Verdict rule (alpha = `statistics.alpha`, default 0.05):
+- the producing stage or `statistics` did not complete: **not established**;
+- no multiplicity-adjusted p value (gatekeeping closed, too few clusters, not estimable): **not testable**;
+- adjusted p < alpha: **null rejected**, with the sign of the estimate stated;
+- otherwise: **null not rejected**.
+
+A verdict is never upgraded by a descriptive table, by a coarse result standing in for a structural one, or by an earlier run. If either primary hypothesis is not rejected, every QAOA-vs-classical difference is reported as descriptive only. Failed cases stay in every denominator. Section 4.3 reports how the structural protocol executed: generated-input attempts, minimizer stop reasons, Reference-platform use, forbidden states, raw fallbacks and polar-hydrogen shielding.
+
 ## Run-level audit outputs
 
 Every formal run terminates with:

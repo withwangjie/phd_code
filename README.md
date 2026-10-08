@@ -126,6 +126,10 @@ QAOA's own ground-state amplification and its finite-range scaling slope
    rotamer discretization preserves adequate state coverage. These are enabling
    components, not the primary research object.
 
+Each question is answered in `FINAL_RESEARCH_REPORT.md` section R, which gives
+its evidence artifact, estimate, multiplicity family and verdict under the
+pre-declared rule in `docs/RESULTS_CONTRACT.md` (A52).
+
 ## Interpretation limits
 
 - No hardware quantum advantage or quantum speedup claim is made from
@@ -167,7 +171,7 @@ QAOA's own ground-state amplification and its finite-range scaling slope
 - Smoke checks and legacy explicit `chi1_angles` overrides are engineering or
   ablation paths and are not the formal main protocol.
 - Every protocol change after the original freeze is listed, with its reason
-  and inspection status, in `docs/PROTOCOL_AMENDMENTS.md` (currently A1-A51).
+  and inspection status, in `docs/PROTOCOL_AMENDMENTS.md` (currently A1-A52).
 
 ## Scientific configuration
 

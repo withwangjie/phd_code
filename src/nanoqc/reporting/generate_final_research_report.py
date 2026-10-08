@@ -66,6 +66,7 @@ from nanoqc.reporting.report_sections_structure import (  # noqa: E402,F401
     section_structural_benefit,
     section_external_and_robustness,
 )
+from nanoqc.reporting.report_question_ledger import section_research_question_ledger
 
 
 def section_stage_table(ctx: ReportContext) -> List[str]:
@@ -384,8 +385,10 @@ def section_applicability_boundary(ctx: ReportContext) -> List[str]:
     lines = ["## 10. Applicability boundary", "",
         "- Fixed backbone, known binding pose, local side-chain optimization only. Not blind docking, not "
         "CDR-H3 backbone prediction, not de novo complex structure prediction.",
-        "- 4S10/8YVO/9GCN remain development-only regression targets (selection order: ascending structure "
-        "size; already inspected during development). They are never reported above as a confirmatory result.",
+        ("- 4S10/8YVO/9GCN remain development-only regression targets (selection order: ascending structure "
+         "size; already inspected during development). They are never reported above as a confirmatory result."
+         if bool(((ctx.frozen_config.get("queue_freeze", {}) or {}).get("dev_queue", {}) or {}).get("enabled", True))
+         else "- Development targets are disabled in this run (A41); no development-queue result is reported."),
         "- The validation queue in section 1.3 is the only queue in this run intended to support a "
         "confirmatory claim, and only to the extent its own target count and per-target variance support one "
         "- A small queue (see section 1.3 for its actual selected count) supports stability/sanity checking, "
@@ -470,6 +473,7 @@ def compile_report(run_dir: Path) -> str:
     ]
     lines += section_stage_table(ctx)
     lines += [""]
+    lines += section_research_question_ledger(ctx)
     lines += section_quantum_problem_encoding(ctx)
     lines += section_quantum_protocol(ctx)
     lines += section_search_performance(ctx)

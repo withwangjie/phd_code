@@ -213,6 +213,7 @@ ORCHESTRATED_SCRIPTS: List[str] = [
     "report_common.py",
     "report_sections_quantum.py",
     "report_sections_structure.py",
+    "report_question_ledger.py",
     "analyze_structure_recovery.py",
     "analyze_quantum_scaling.py",
     "analyze_quantum_exploration.py",
