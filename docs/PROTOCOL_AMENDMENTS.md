@@ -1003,3 +1003,9 @@ Each mechanistic statement and parameter introduced in A45–A52 was checked aga
   - On CUDA the force evaluations are an order of magnitude faster, so this repeated bookkeeping would dominate the stage's run time on the server.
 - **Change:** a single `_NonbondedTables` object (charges, σ, ε, exclusions, exceptions, strongest r⁻¹² wall) is built once per builder after the A50 shielding. It reads raw values in OpenMM's internal units (nm, kJ/mol, e). Every candidate and final minimization, the GPU-overflow guard, the overlap veto, the admissibility screen and the calibration contact check share it. Masses, which are the only thing that differs between the frozen-atom copies of the System, do not enter it.
 - **Not changed:** any computed value. A test checks that the tables equal the unit-converted parameters exactly, and the full test suite is unchanged.
+- **Measured effect (same seed, same profiler):**
+  - Total time fell from 1,479 s to 1,059 s.
+  - Python function calls fell from 1.19×10⁹ to 7.8×10⁷.
+  - Time outside OpenMM's own force evaluation fell from 602 s to 120 s; the force evaluation itself was 877 s and 939 s in the two runs.
+  - On the GPU server, where each force evaluation costs milliseconds, the stage is now close to bound by the evaluation count itself (about 5×10⁴ per seed, mostly candidate relaxation).
+  - The remaining overheads are each below 20 s per seed: pair screening, SA, geometry audits and rotamer-library loading.
