@@ -963,3 +963,8 @@ Each mechanistic statement and parameter introduced in A45–A52 was checked aga
     - 10 sites: old and new decompositions agree, because that instance has no forbidden states.
   - The 7 failing server seeds have not been rerun.
 - **Not changed:** the energy function, candidates, admissibility floors, F, the 0.001 kcal/mol physical budget, solver budgets and acceptance. Under GBN2 (a sensitivity model, not formal) the Born terms are not switched, so the decomposition remains a recorded pairwise approximation, as before.
+
+## A57. Physical precision budget over admissible terms only
+
+- **Problem:** A55 evaluated the 0.001 kcal/mol budget on all physical coefficients, including the forbidden-state penalty F at every forbidden single and pair. An admissible assignment's energy never touches those coefficients: each is multiplied by an exact floating-point zero. Many forbidden pairs could therefore fail the budget on terms that cannot affect any compared energy.
+- **Change:** the budget bound is 32·ε·(|baseline| + Σ|admissible singles and pairs|), with forbidden singles, rows of forbidden variables and forbidden pairs set to zero. F still orders every forbidden assignment above every admissible one (A55). The budget value and the fail-closed rule are unchanged.

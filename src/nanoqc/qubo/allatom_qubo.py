@@ -1186,7 +1186,18 @@ class AllAtomInterfaceQUBOBuilder:
         # feasible SA, uniform and greedy all stay one-hot and read only
         # physical_self/physical_pair). The one-hot-penalised Q is exported and
         # checked against its Ising form at its own float64 roundoff bound.
+        # A57: an admissible assignment's energy never touches a forbidden
+        # coefficient (it is multiplied by an exact zero), so the budget is
+        # the rounding bound of the admissible terms; F only orders forbidden
+        # assignments above admissible ones.
         physical_q=pairs.copy(); np.fill_diagonal(physical_q,singles)
+        for v in range(count):
+            if not env_ok[v]:
+                physical_q[v,:]=0.0; physical_q[:,v]=0.0
+        for left in range(count):
+            for right in range(left+1,count):
+                if not pair_ok[left,right]:
+                    physical_q[left,right]=0.0
         physical_roundoff=ising_roundoff_tolerance(physical_q,baseline)
         if physical_roundoff>1e-3:
             raise FloatingPointError("All-atom physical coefficient dynamic range exceeds 0.001 kcal/mol "
