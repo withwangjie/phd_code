@@ -968,3 +968,14 @@ Each mechanistic statement and parameter introduced in A45–A52 was checked aga
 
 - **Problem:** A55 evaluated the 0.001 kcal/mol budget on all physical coefficients, including the forbidden-state penalty F at every forbidden single and pair. An admissible assignment's energy never touches those coefficients: each is multiplied by an exact floating-point zero. Many forbidden pairs could therefore fail the budget on terms that cannot affect any compared energy.
 - **Change:** the budget bound is 32·ε·(|baseline| + Σ|admissible singles and pairs|), with forbidden singles, rows of forbidden variables and forbidden pairs set to zero. F still orders every forbidden assignment above every admissible one (A55). The budget value and the fail-closed rule are unchanged.
+- **Local stress rehearsal (A45–A57 code; development check, not the frozen protocol's data):**
+  - Setup: 9 of the targets that failed on the server (4KDT, 5FOJ, 6I8G, 6RVC, 7R1Z, 7WKI, 7ZRA, 9FVC, 9GV3; 7NXX could not be prepared automatically), each prepared from its PDB entry as VHH chain plus most-contacted antigen chain. For each, the 6 VHH interface sites closest to the antigen were used, with seeds 42 and 43.
+  - Steps per seed: A45 input → candidates → A56 decomposition on the Reference platform → quantum instance → exhaustive ground state → relax-only and ground-state reconstruction, each relaxed for up to 1000 iterations.
+  - Differences from the formal protocol: the Dunbrack 2010 text library instead of PyRosetta dun10, no candidate relaxation, and the CPU platform for the relaxations.
+  - Results: all 18 seeds completed with no error.
+    - Qualified input found by attempt 15 at the latest.
+    - Forbidden pairs occurred in 6RVC seed 42 (2) and 9GV3 seed 42 (3).
+    - Physical roundoff bounds ≤ 6.6×10⁻⁶ kcal/mol.
+    - Exact-equivalence errors ≤ 1.5×10⁻⁶ kcal/mol over 12 full assignments each.
+    - Ground-state QUBO–Amber difference ≤ 2×10⁻⁹ kcal/mol.
+    - All 36 relaxations converged on the force criterion (relax-only 154–754 iterations, ground states 60–244).
