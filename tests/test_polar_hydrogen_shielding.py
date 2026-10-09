@@ -62,3 +62,24 @@ def test_the_one_four_hydroxyl_pair_is_repulsive_at_short_range() -> None:
     _shield_zero_lj_polar_hydrogens(shielded, topology)
     assert pair_energy(plain, 0.01) < pair_energy(plain, 0.1) < 0          # singular attraction
     assert pair_energy(shielded, 0.01) > pair_energy(shielded, 0.1) > 0     # repulsive wall
+
+
+def test_nonbonded_tables_match_unit_converted_parameters() -> None:
+    from nanoqc.qubo.allatom_qubo import _NonbondedTables
+    system, topology, force = _chain()
+    _shield_zero_lj_polar_hydrogens(system, topology)
+    tables = _NonbondedTables.of(system)
+    for i in range(force.getNumParticles()):
+        q, s, e = force.getParticleParameters(i)
+        assert tables.charge[i] == q.value_in_unit(unit.elementary_charge)
+        assert tables.sigma[i] == s.value_in_unit(unit.nanometer)
+        assert tables.epsilon[i] == e.value_in_unit(unit.kilojoule_per_mole)
+    for k in range(force.getNumExceptions()):
+        i, j, qq, s, e = force.getExceptionParameters(k)
+        pair = (min(i, j), max(i, j))
+        if qq.value_in_unit(unit.elementary_charge ** 2) == 0 and e.value_in_unit(unit.kilojoule_per_mole) == 0:
+            assert pair in tables.excluded
+        else:
+            assert tables.exceptions[pair] == (qq.value_in_unit(unit.elementary_charge ** 2),
+                                               s.value_in_unit(unit.nanometer),
+                                               e.value_in_unit(unit.kilojoule_per_mole))

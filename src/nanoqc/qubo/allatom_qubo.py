@@ -53,6 +53,45 @@ FIXED_POINT_FORCE_LIMIT_KJ_MOL_NM = 2.0 ** 31
 _PAIR_FORCE_BUDGET = FIXED_POINT_FORCE_LIMIT_KJ_MOL_NM / 64
 
 
+class _NonbondedTables:
+    """Per-particle and per-exception nonbonded parameters of one System (A60).
+
+    Read once per builder and shared by every minimization and audit; masses,
+    which differ between the frozen-atom copies, do not enter. Values are the
+    raw quantities in OpenMM's internal units (nm, kJ/mol, e), which is what
+    ``value_in_unit`` would return, without its per-call conversion cost.
+    """
+
+    def __init__(self, force: Any) -> None:
+        n = force.getNumParticles()
+        params = [force.getParticleParameters(i) for i in range(n)]
+        self.charge = np.array([q._value for q, _, _ in params], dtype=float)
+        self.sigma = np.array([s._value for _, s, _ in params], dtype=float)
+        self.epsilon = np.array([e._value for _, _, e in params], dtype=float)
+        self.excluded: set[tuple[int, int]] = set()
+        self.exceptions: dict[tuple[int, int], tuple[float, float, float]] = {}
+        for k in range(force.getNumExceptions()):
+            i, j, qq, s, e = force.getExceptionParameters(k)
+            pair = (min(i, j), max(i, j))
+            if qq._value == 0.0 and e._value == 0.0:
+                self.excluded.add(pair)
+            else:
+                self.exceptions[pair] = (float(qq._value), float(s._value), float(e._value))
+        types = np.unique(np.column_stack([self.sigma, self.epsilon]), axis=0)
+        sigma_ij = 0.5 * (types[:, 0][:, None] + types[:, 0][None, :])
+        epsilon_ij = np.sqrt(np.outer(types[:, 1], types[:, 1]))
+        strength = float(np.max(epsilon_ij * sigma_ij ** 12, initial=0.0))
+        for _, s, e in self.exceptions.values():
+            strength = max(strength, e * s ** 12)
+        self.strength = strength
+
+    @classmethod
+    def of(cls, system: Any) -> Optional["_NonbondedTables"]:
+        import openmm as mm
+        nonbonded = [f for f in system.getForces() if isinstance(f, mm.NonbondedForce)]
+        return cls(nonbonded[0]) if len(nonbonded) == 1 else None
+
+
 def _nonbonded_exclusions_and_wall(system: Any) -> tuple[set[tuple[int, int]], float] | None:
     """Fully excluded pairs (1-2, 1-3) and the strongest r^-12 wall of a System.
 
@@ -60,26 +99,8 @@ def _nonbonded_exclusions_and_wall(system: Any) -> tuple[set[tuple[int, int]], f
     epsilon*sigma^12 maximized over Lorentz-Berthelot combinations of the
     particle types and over the explicit parameters of every nonzero exception.
     """
-    import openmm as mm
-    nonbonded = [f for f in system.getForces() if isinstance(f, mm.NonbondedForce)]
-    if len(nonbonded) != 1:
-        return None
-    force = nonbonded[0]
-    nm, kj = mm.unit.nanometer, mm.unit.kilojoule_per_mole
-    types = {(force.getParticleParameters(i)[1].value_in_unit(nm),
-              force.getParticleParameters(i)[2].value_in_unit(kj))
-             for i in range(force.getNumParticles())}
-    strength = max((math.sqrt(e1 * e2) * ((s1 + s2) / 2) ** 12
-                    for s1, e1 in types for s2, e2 in types), default=0.0)
-    excluded: set[tuple[int, int]] = set()
-    for index in range(force.getNumExceptions()):
-        i, j, charge, s, e = force.getExceptionParameters(index)
-        epsilon = e.value_in_unit(kj)
-        if charge.value_in_unit(mm.unit.elementary_charge ** 2) == 0.0 and epsilon == 0.0:
-            excluded.add((min(i, j), max(i, j)))
-        else:
-            strength = max(strength, epsilon * s.value_in_unit(nm) ** 12)
-    return excluded, strength
+    tables = _NonbondedTables.of(system)
+    return None if tables is None else (tables.excluded, tables.strength)
 
 
 class _ClosePairs:
@@ -118,7 +139,8 @@ class _ClosePairs:
 class _ExactForces:
     """Energy and forces at given positions, exact even under severe overlaps."""
 
-    def __init__(self, context: Any, movable: set[int]) -> None:
+    def __init__(self, context: Any, movable: set[int],
+                 tables: Optional[_NonbondedTables] = None) -> None:
         import openmm as mm
         self._mm = mm
         self.context = context
@@ -131,27 +153,17 @@ class _ExactForces:
         self._pairs = None
         if not self.guarded:
             return
-        found = _nonbonded_exclusions_and_wall(context.getSystem())
-        if found is None:
+        tables = tables if tables is not None else _NonbondedTables.of(context.getSystem())
+        if tables is None:
             self.safe_distance_nm = float("inf")   # unknown pair potential: always exact
             return
-        self.excluded, strength = found
+        self.excluded = tables.excluded
         # Screening radius: beyond it no pair of the System can exceed the
         # per-pair budget (|F_LJ(r)| <= 48 epsilon sigma^12 / r^13).
-        self.safe_distance_nm = float((48.0 * strength / _PAIR_FORCE_BUDGET) ** (1 / 13))
+        self.safe_distance_nm = float((48.0 * tables.strength / _PAIR_FORCE_BUDGET) ** (1 / 13))
         # A58: inside it, each pair is bounded with its own parameters.
-        nonbonded = [f for f in context.getSystem().getForces() if isinstance(f, mm.NonbondedForce)][0]
-        nm, kj, e = mm.unit.nanometer, mm.unit.kilojoule_per_mole, mm.unit.elementary_charge
-        params = [nonbonded.getParticleParameters(i) for i in range(nonbonded.getNumParticles())]
-        self._charge = np.array([q.value_in_unit(e) for q, _, _ in params])
-        self._sigma = np.array([s.value_in_unit(nm) for _, s, _ in params])
-        self._epsilon = np.array([x.value_in_unit(kj) for _, _, x in params])
-        self._exceptions = {}
-        for k in range(nonbonded.getNumExceptions()):
-            i, j, qq, s, x = nonbonded.getExceptionParameters(k)
-            pair = (min(i, j), max(i, j))
-            if pair not in self.excluded:
-                self._exceptions[pair] = (qq.value_in_unit(e ** 2), s.value_in_unit(nm), x.value_in_unit(kj))
+        self._charge, self._sigma, self._epsilon = tables.charge, tables.sigma, tables.epsilon
+        self._exceptions = tables.exceptions
 
     def pair_force_bound(self, i: int, j: int, distance_nm: float) -> float:
         """Upper bound on the nonbonded force magnitude of one pair, kJ/mol/nm."""
@@ -275,7 +287,8 @@ def _capped_lbfgs(objective, x0: np.ndarray, *, max_iterations: int, max_atom_st
 
 def _minimize_movable_positions(context: Any, positions: np.ndarray,
                                 movable: set[int], max_iterations: int,
-                                unit: Any) -> tuple[np.ndarray, dict[str, Any]]:
+                                unit: Any, tables: Optional[_NonbondedTables] = None
+                                ) -> tuple[np.ndarray, dict[str, Any]]:
     """Minimize the exact OpenMM potential over movable coordinates only.
 
     OpenMM's LocalEnergyMinimizer can stop with substantial residual force when
@@ -292,7 +305,9 @@ def _minimize_movable_positions(context: Any, positions: np.ndarray,
     if indices[0] < 0 or indices[-1] >= len(start):
         raise ValueError("Movable atom index outside topology")
 
-    exact = _ExactForces(context, movable)
+    if tables is None:
+        tables = _NonbondedTables.of(context.getSystem())
+    exact = _ExactForces(context, movable, tables)
 
     def objective(flat: np.ndarray) -> tuple[float, np.ndarray]:
         current = start.copy()
@@ -311,7 +326,7 @@ def _minimize_movable_positions(context: Any, positions: np.ndarray,
     # bound onto an oppositely charged atom once they overlap it, so no step
     # may bring an interacting pair below the absolute near-coincidence floor
     # closer than it already is. A physical minimum never has such a pair.
-    found = _nonbonded_exclusions_and_wall(context.getSystem())
+    found = None if tables is None else (tables.excluded, tables.strength)
     floor_nm = EXTREME_NONBONDED_FLOOR_ANGSTROM / 10.0
     vetoes = [0]
 
@@ -472,8 +487,8 @@ def _discrete_state_admissibility(builder: Any) -> dict[str, Any]:
     atoms = list(builder.topology.atoms())
     label = lambda i: (f"{atoms[i].residue.chain.id}:{atoms[i].residue.id}:"
                        f"{atoms[i].residue.name}:{atoms[i].name}")
-    found = _nonbonded_exclusions_and_wall(builder.system)
-    excluded = found[0] if found is not None else set()
+    tables = getattr(builder, "nonbonded_tables", None) or _NonbondedTables.of(builder.system)
+    excluded = tables.excluded if tables is not None else set()
     heavy = _heavy_mask(builder.topology)
     floor_nm = DISCRETE_STATE_CONTACT_FLOOR_ANGSTROM / 10.0
     side_chain = set().union(*(set(int(i) for i in c["indices"]) for c in candidates))
@@ -794,6 +809,8 @@ class AllAtomInterfaceQUBOBuilder:
             constraints=None,rigidWater=False,removeCMMotion=False
         )
         self.polar_hydrogen_shielding=_shield_zero_lj_polar_hydrogens(self.system,self.topology)
+        # A60: one parameter table per System, shared by every minimization.
+        self.nonbonded_tables=_NonbondedTables.of(self.system)
         self.energy_force_groups={}
         for i, force in enumerate(self.system.getForces()):
             if i>=32: raise ValueError("Energy audit supports at most 32 force groups")
@@ -873,7 +890,7 @@ class AllAtomInterfaceQUBOBuilder:
                 for variable in group:
                     positions, minimization = _minimize_movable_positions(
                         context, self.positions_for_variables([variable]), moving,
-                        candidate_relax_iterations, unit)
+                        candidate_relax_iterations, unit, self.nonbonded_tables)
                     fixed = sorted(set(range(len(positions)))-moving)
                     if not np.allclose(positions[fixed], self.base_positions[fixed], atol=1e-10, rtol=0):
                         raise AssertionError("Candidate preparation moved fixed atoms")
@@ -1021,9 +1038,9 @@ class AllAtomInterfaceQUBOBuilder:
         excluded. A non-None result is a geometrically impossible state.
         """
         if getattr(self, "_contact_pairs", None) is None:
-            found = _nonbonded_exclusions_and_wall(self.system)
+            tables = getattr(self, "nonbonded_tables", None) or _NonbondedTables.of(self.system)
             self._contact_pairs = _ClosePairs(self.base_positions, sorted(self.movable),
-                                              found[0] if found is not None else set())
+                                              tables.excluded if tables is not None else set())
         positions = self.positions_for_chi_assignment(assignment)
         floor_nm = DISCRETE_STATE_CONTACT_FLOOR_ANGSTROM / 10.0
         heavy = _heavy_mask(self.topology)
@@ -1449,7 +1466,7 @@ class AllAtomInterfaceQUBOBuilder:
             integrator=self.mm.VerletIntegrator(.001)
             context=_openmm_context(self.mm, system, integrator)
             positions,minimization=_minimize_movable_positions(
-                context,positions,self.movable,minimize_iterations,self.unit)
+                context,positions,self.movable,minimize_iterations,self.unit,getattr(self,"nonbonded_tables",None))
             del context,integrator
         else:
             minimization=dict(minimizer="skipped",minimizer_iterations=0,
@@ -1464,7 +1481,7 @@ class AllAtomInterfaceQUBOBuilder:
         after_components=self.energy_components()
         if after>before+1e-4: raise ValueError("Relaxation increased potential energy")
         self.write_structure(positions,destination)
-        audit_forces=_ExactForces(self.context,self.movable)
+        audit_forces=_ExactForces(self.context,self.movable,getattr(self,"nonbonded_tables",None))
         _,final_forces=audit_forces(positions,self.unit)
         force_quality=relaxation_force_audit(final_forces,self.movable,iterations=minimize_iterations)
         force_quality["force_audit_platform"]=("Reference" if audit_forces.reference_evaluations

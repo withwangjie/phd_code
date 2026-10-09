@@ -171,7 +171,7 @@ pre-declared rule in `docs/RESULTS_CONTRACT.md` (A52).
 - Smoke checks and legacy explicit `chi1_angles` overrides are engineering or
   ablation paths and are not the formal main protocol.
 - Every protocol change after the original freeze is listed, with its reason
-  and inspection status, in `docs/PROTOCOL_AMENDMENTS.md` (currently A1-A59).
+  and inspection status, in `docs/PROTOCOL_AMENDMENTS.md` (currently A1-A60).
 
 ## Scientific configuration
 

@@ -992,3 +992,14 @@ Each mechanistic statement and parameter introduced in A45–A52 was checked aga
 - **Observed (run after A48):** 62 eligible complexes (minimum 100); grouped CV RMSE 4.3×10⁸ kcal/mol (1.6×10¹⁷ before A48), MAE 1.1×10⁸, R² −0.017, Spearman −0.034. The nine-order-of-magnitude fall is the expected effect of excluding geometrically impossible assignments (A48). The remaining magnitude comes from unrelaxed hydrogen contacts in admissible assignments, and A48 stated before the run that unrelaxed targets cannot meet a 10 kcal/mol RMSE.
 - **Decision (investigator, 2026-10-09):** keep the calibration as the A23 training-only diagnostic. No change to its target, data, eligibility rule or acceptance thresholds. The alternatives considered and declined were a relaxed-energy target (about 1–3 h more per run, still below 100 complexes) and, in addition, PDBFixer completion of distant missing atoms with chain splitting at breaks (modelled atoms in training data).
 - **Consequence:** `energy_calibration` continues to end `completed_with_failures` without blocking the run, and its coefficients are never used by a solver. The final report states that the coarse energy is an uncalibrated surrogate: coarse QUBO gains are not evidence of Amber energy gains, and research question Q5 is answered only by the structural statistics (A52).
+
+## A60. Nonbonded parameter tables built once per System (speed)
+
+- **Measurement:** one full seed of 7WKI (6 sites, formal budgets: 100-iteration candidate relaxation, 1000-iteration final relaxation, QAOA 90 evaluations × 4 restarts, 1000 outputs), profiled on the local CPU platform, took 1,479 s.
+  - Candidate relaxation took 1,405 s. Of that, 877 s was OpenMM force evaluation and 346 s was `_nonbonded_exclusions_and_wall`.
+  - That function was called twice per minimization (382 calls per seed). Each call re-read about 30,000 nonbonded exceptions through OpenMM's per-value unit conversion.
+  - The per-particle tables built by the A58 guard added about 30 s.
+  - Everything else was small: final relaxations 33 s, SA 17 s, QUBO construction 12 s, geometry audits 12 s, QAOA negligible.
+  - On CUDA the force evaluations are an order of magnitude faster, so this repeated bookkeeping would dominate the stage's run time on the server.
+- **Change:** a single `_NonbondedTables` object (charges, σ, ε, exclusions, exceptions, strongest r⁻¹² wall) is built once per builder after the A50 shielding. It reads raw values in OpenMM's internal units (nm, kJ/mol, e). Every candidate and final minimization, the GPU-overflow guard, the overlap veto, the admissibility screen and the calibration contact check share it. Masses, which are the only thing that differs between the frozen-atom copies of the System, do not enter it.
+- **Not changed:** any computed value. A test checks that the tables equal the unit-converted parameters exactly, and the full test suite is unchanged.
