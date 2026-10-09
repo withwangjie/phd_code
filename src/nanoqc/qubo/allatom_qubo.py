@@ -136,10 +136,36 @@ class _ExactForces:
             self.safe_distance_nm = float("inf")   # unknown pair potential: always exact
             return
         self.excluded, strength = found
-        # |F_LJ(r)| <= 48 epsilon sigma^12 / r^13 for every interacting pair.
+        # Screening radius: beyond it no pair of the System can exceed the
+        # per-pair budget (|F_LJ(r)| <= 48 epsilon sigma^12 / r^13).
         self.safe_distance_nm = float((48.0 * strength / _PAIR_FORCE_BUDGET) ** (1 / 13))
+        # A58: inside it, each pair is bounded with its own parameters.
+        nonbonded = [f for f in context.getSystem().getForces() if isinstance(f, mm.NonbondedForce)][0]
+        nm, kj, e = mm.unit.nanometer, mm.unit.kilojoule_per_mole, mm.unit.elementary_charge
+        params = [nonbonded.getParticleParameters(i) for i in range(nonbonded.getNumParticles())]
+        self._charge = np.array([q.value_in_unit(e) for q, _, _ in params])
+        self._sigma = np.array([s.value_in_unit(nm) for _, s, _ in params])
+        self._epsilon = np.array([x.value_in_unit(kj) for _, _, x in params])
+        self._exceptions = {}
+        for k in range(nonbonded.getNumExceptions()):
+            i, j, qq, s, x = nonbonded.getExceptionParameters(k)
+            pair = (min(i, j), max(i, j))
+            if pair not in self.excluded:
+                self._exceptions[pair] = (qq.value_in_unit(e ** 2), s.value_in_unit(nm), x.value_in_unit(kj))
+
+    def pair_force_bound(self, i: int, j: int, distance_nm: float) -> float:
+        """Upper bound on the nonbonded force magnitude of one pair, kJ/mol/nm."""
+        if (min(i, j), max(i, j)) in self._exceptions:
+            qq, sigma, epsilon = self._exceptions[(min(i, j), max(i, j))]
+        else:
+            qq = self._charge[i] * self._charge[j]
+            sigma = 0.5 * (self._sigma[i] + self._sigma[j])
+            epsilon = math.sqrt(self._epsilon[i] * self._epsilon[j])
+        return (48.0 * epsilon * sigma ** 12 / distance_nm ** 13
+                + 138.935456 * abs(qq) / distance_nm ** 2)
 
     def needs_reference(self, positions_nm: np.ndarray) -> bool:
+        """Whether any atom's summed pair-force bound may exceed 1/8 of the limit (A58)."""
         if not self.guarded:
             return False
         if not np.isfinite(self.safe_distance_nm):
@@ -147,7 +173,14 @@ class _ExactForces:
         if self._pairs is None:
             # Frozen atoms keep these positions for the life of this object.
             self._pairs = _ClosePairs(positions_nm, self.movable, self.excluded)
-        return bool(self._pairs(positions_nm, self.safe_distance_nm))
+        per_atom: dict[int, float] = {}
+        for i, j in self._pairs(positions_nm, self.safe_distance_nm):
+            bound = self.pair_force_bound(i, j, float(np.linalg.norm(positions_nm[i] - positions_nm[j])))
+            for atom in (i, j):
+                per_atom[atom] = per_atom.get(atom, 0.0) + bound
+                if per_atom[atom] >= FIXED_POINT_FORCE_LIMIT_KJ_MOL_NM / 8:
+                    return True
+        return False
 
     def __call__(self, positions_nm: np.ndarray, unit: Any) -> tuple[float, np.ndarray]:
         target = self.context

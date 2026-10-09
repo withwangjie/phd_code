@@ -189,7 +189,12 @@ def test_well_separated_atoms_keep_the_gpu_result() -> None:
     # sigma 0.3 nm, epsilon 0.5 kJ/mol: 48*0.5*0.3**12/(2**31/64) to the 1/13.
     assert abs(exact.safe_distance_nm - (48 * 0.5 * 0.3 ** 12 / (2 ** 31 / 64)) ** (1 / 13)) < 1e-12
     assert not exact.needs_reference(start)
-    assert exact.needs_reference(np.array([[0.0, 0.0, 0.0], [0.9 * exact.safe_distance_nm, 0, 0]]))
+    # A58: inside the screening radius each pair is bounded with its own
+    # parameters; Reference is used only when the bound reaches 2**31/8.
+    r = exact.safe_distance_nm
+    assert exact.pair_force_bound(0, 1, r) <= allatom_qubo._PAIR_FORCE_BUDGET * (1 + 1e-9)
+    assert not exact.needs_reference(np.array([[0.0, 0.0, 0.0], [0.9 * r, 0, 0]]))
+    assert exact.needs_reference(np.array([[0.0, 0.0, 0.0], [0.5 * r, 0, 0]]))
 
 
 def test_an_unscreened_hydrogen_overlap_is_never_deepened() -> None:
