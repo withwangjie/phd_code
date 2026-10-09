@@ -492,6 +492,36 @@ def _discrete_state_admissibility(builder: Any) -> dict[str, Any]:
         forbidden_pair_count=len(forbidden_pairs), forbidden_pairs=forbidden_pairs[:100]))
 
 
+def _forbidden_state_penalty(singles: np.ndarray, pairs: np.ndarray,
+                             site_to_variables: Mapping[int, Sequence[int]],
+                             single_ok: np.ndarray, pair_ok: np.ndarray) -> float:
+    """Smallest simple penalty that puts every forbidden assignment above every admissible one.
+
+    One state is chosen per site, so with per-site/per-site-pair extrema over
+    admissible terms an admissible assignment has relative energy at most
+    U = sum_s max single + sum_{s<t} max(0, max pair), and an assignment with
+    at least one forbidden term at least L + F, where
+    L = sum_s min(0, min single) + sum_{s<t} min(0, min pair).
+    F = U - L + 1 therefore separates them (A55; formerly 2*sum|terms| + 1).
+    """
+    sites = list(site_to_variables)
+    upper = lower = 0.0
+    for s in sites:
+        values = [float(singles[v]) for v in site_to_variables[s] if single_ok[v]]
+        if values:
+            upper += max(values)
+            lower += min(0.0, min(values))
+    for a, s in enumerate(sites):
+        for t in sites[a + 1:]:
+            values = [float(pairs[min(i, j), max(i, j)])
+                      for i in site_to_variables[s] for j in site_to_variables[t]
+                      if single_ok[i] and single_ok[j] and pair_ok[i, j]]
+            if values:
+                upper += max(0.0, max(values))
+                lower += min(0.0, min(values))
+    return float(upper - lower + 1.0)
+
+
 class _SearchLimitExceeded(RuntimeError):
     """The bounded admissible-assignment search gave up before deciding."""
 
@@ -1034,10 +1064,7 @@ class AllAtomInterfaceQUBOBuilder:
                 if (self.candidates[i]["site"]!=self.candidates[j]["site"]
                         and env_ok[i] and env_ok[j] and pair_ok[i,j]):
                     pairs[i,j]=self.energy(assignment([i,j]))-baseline-singles[i]-singles[j]
-        # Every admissible assignment has relative energy within +-bound, so a
-        # forbidden state priced at 2*bound+1 is above all of them.
-        bound=float(np.abs(singles).sum()+np.abs(pairs).sum())
-        forbidden_penalty=2.0*bound+1.0
+        forbidden_penalty=_forbidden_state_penalty(singles,pairs,self.site_to_variables,env_ok,pair_ok)
         for v in range(count):
             if not env_ok[v]:
                 singles[v]=forbidden_penalty
@@ -1088,9 +1115,17 @@ class AllAtomInterfaceQUBOBuilder:
         rms_error=float(math.sqrt(sum(squared_errors)/len(squared_errors)))
         offset=baseline+penalty*len(self.site_to_variables)
         h,j,ising_offset=qubo_to_ising(q,offset)
+        # A55: the 0.001 kcal/mol budget applies to the objective every
+        # structural solver evaluates: the penalty-free physical terms (XY-QAOA,
+        # feasible SA, uniform and greedy all stay one-hot and read only
+        # physical_self/physical_pair). The one-hot-penalised Q is exported and
+        # checked against its Ising form at its own float64 roundoff bound.
+        physical_q=pairs.copy(); np.fill_diagonal(physical_q,singles)
+        physical_roundoff=ising_roundoff_tolerance(physical_q,baseline)
+        if physical_roundoff>1e-3:
+            raise FloatingPointError("All-atom physical coefficient dynamic range exceeds 0.001 kcal/mol "
+                                     f"precision budget: {physical_roundoff}")
         roundoff_bound=ising_roundoff_tolerance(q,offset)
-        if roundoff_bound>1e-3:
-            raise FloatingPointError(f"All-atom coefficient dynamic range exceeds 0.001 kcal/mol precision budget: {roundoff_bound}")
         ising_error=validate_qubo_ising_equivalence(q,offset,h,j,ising_offset,tolerance=roundoff_bound)
         return QUBOResult(q,records,self.site_to_variables,penalty,penalty,offset,singles,pairs,
             dict(model=("Amber14 all-atom fixed-backbone Dunbrack full chi1..chiN rotamer states"
@@ -1113,6 +1148,7 @@ class AllAtomInterfaceQUBOBuilder:
                 forbidden_variable_pairs=[[int(i),int(j)] for i in range(count) for j in range(i+1,count)
                                           if env_ok[i] and env_ok[j] and not pair_ok[i,j]],
                 ising_roundoff_tolerance=roundoff_bound,
+                physical_roundoff_bound=physical_roundoff,
                 atom_count=len(self.base_positions),
                 polar_hydrogen_shielding=self.polar_hydrogen_shielding,
                 forcefield=(["amber14-all.xml"] if self.solvent_model=="vacuum"

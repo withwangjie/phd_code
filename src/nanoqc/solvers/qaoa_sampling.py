@@ -224,9 +224,20 @@ class QAOASamplingMixin:
 
         if num_reads <= 0 or sweeps <= 0:
             raise ValueError("num_reads and sweeps must be positive")
+        # A55: geometry-forbidden penalties (A47) do not set the temperature,
+        # for the same reason they do not set the QAOA angle scale (A54).
+        scale_self = np.array(self.physical_self, dtype=float, copy=True)
+        scale_pair = np.array(self.physical_pair, dtype=float, copy=True)
+        for v in getattr(self, "scale_excluded_variables", ()):
+            scale_self[v] = 0.0
+            scale_pair[v, :] = 0.0
+            scale_pair[:, v] = 0.0
+        for a, b in getattr(self, "scale_excluded_pairs", ()):
+            scale_pair[a, b] = 0.0
+            scale_pair[b, a] = 0.0
         coefficient_scale = max(
-            float(np.max(np.abs(self.physical_self), initial=0.0)),
-            float(np.max(np.abs(self.physical_pair), initial=0.0)),
+            float(np.max(np.abs(scale_self), initial=0.0)),
+            float(np.max(np.abs(scale_pair), initial=0.0)),
             1e-3,
         )
         start_temp = (
