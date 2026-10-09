@@ -1011,59 +1011,107 @@ class AllAtomInterfaceQUBOBuilder:
         """Amber14 potential for an exact residue->chi1..chiN assignment."""
         return self.energy(self.positions_for_chi_assignment(assignment))
 
+    def _site_switched_energy(self):
+        """Energy with each Active site's side chain switched in or out (A56).
+
+        A switched-out site keeps its input coordinates and bonded terms, but
+        its side-chain atoms carry no charge or Lennard-Jones term, and their
+        nonbonded exceptions are zero. Switches are OpenMM per-site global
+        parameters with exact 0/1 parameter offsets, so in vacuum the energy
+        of any set of present sites is exactly pair-additive over sites.
+        """
+        import openmm as mm
+        system = mm.XmlSerializer.deserialize(mm.XmlSerializer.serialize(self.system))
+        nonbonded = [f for f in system.getForces() if isinstance(f, mm.NonbondedForce)]
+        if len(nonbonded) != 1:
+            raise ValueError("Site-switched decomposition requires exactly one NonbondedForce")
+        force = nonbonded[0]
+        e, kj = mm.unit.elementary_charge, mm.unit.kilojoule_per_mole
+        site_of = {}
+        for site, variables in self.site_to_variables.items():
+            for atom in self.candidates[variables[0]]["indices"]:
+                site_of[int(atom)] = site
+        names = {site: f"present_site_{site}" for site in self.site_to_variables}
+        for name in names.values():
+            force.addGlobalParameter(name, 1.0)
+        for atom, site in site_of.items():
+            charge, sigma, epsilon = force.getParticleParameters(atom)
+            force.setParticleParameters(atom, 0.0 * e, sigma, 0.0 * kj)
+            force.addParticleParameterOffset(names[site], atom, charge.value_in_unit(e), 0.0,
+                                             epsilon.value_in_unit(kj))
+        for k in range(force.getNumExceptions()):
+            i, j, charge_product, sigma, epsilon = force.getExceptionParameters(k)
+            sites = {site_of[a] for a in (i, j) if a in site_of}
+            if not sites:
+                continue
+            if len(sites) > 1:
+                raise ValueError("A nonbonded exception couples two Active side chains")
+            qq, eps = charge_product.value_in_unit(e ** 2), epsilon.value_in_unit(kj)
+            if qq == 0.0 and eps == 0.0:
+                continue
+            force.setExceptionParameters(k, i, j, 0.0 * e ** 2, sigma, 0.0 * kj)
+            force.addExceptionParameterOffset(names[sites.pop()], k, qq, 0.0, eps)
+        context = _openmm_context(mm, system, mm.VerletIntegrator(0.001))
+
+        def energy(present: Mapping[int, int]) -> float:
+            positions = self.base_positions.copy()
+            for site, variable in present.items():
+                candidate = self.candidates[int(variable)]
+                positions[candidate["indices"]] = candidate["positions"]
+            for site, name in names.items():
+                context.setParameter(name, 1.0 if site in present else 0.0)
+            context.setPositions(positions * self.unit.nanometer)
+            value = float(context.getState(getEnergy=True).getPotentialEnergy()
+                          .value_in_unit(self.unit.kilocalories_per_mole))
+            if not math.isfinite(value):
+                raise FloatingPointError("Nonfinite site-switched all-atom energy")
+            return value
+        return energy
+
     def build(self) -> QUBOResult:
-        """Inclusion-exclusion physical terms; validate full-assignment energy equivalence."""
-        # Use a complete candidate assignment as decomposition origin. A heavily
-        # clashing perturbed input would otherwise cause catastrophic cancellation.
+        """Site-switched physical terms; validate full-assignment energy equivalence.
+
+        A56: singles are each candidate's interaction with the fixed
+        environment alone (other Active side chains switched out), and pairs
+        the direct interaction of two candidates. No term ever contains a
+        contact with a third site's reference state, so a geometry-forbidden
+        contact can only appear in its own forbidden single or pair, which is
+        never evaluated (A47).
+        """
         count=len(self.candidates)
         admissibility=_discrete_state_admissibility(self)
         env_ok,pair_ok=admissibility["single_ok"],admissibility["pair_ok"]
-        rank={v:self.energy(self.positions_for_variables([v])) if env_ok[v] else math.inf
-              for v in range(count)}
-        try:
-            anchors=_admissible_assignment(self.site_to_variables,env_ok,pair_ok,
-                                           order=lambda group:sorted(group,key=lambda v:rank[v]))
-        except _SearchLimitExceeded:
-            anchors=None          # treated as no admissible assignment: raw fallback below
-        raw_fallback=anchors is None
-        if raw_fallback:
-            # Every combination contains an impossible contact, so there is no
-            # admissible space to be exact on. Build as before A47 from raw
-            # energies; the precision budget below still applies and fails
-            # closed if those energies are too large to represent.
-            env_ok=np.ones(count,dtype=bool); pair_ok=np.ones((count,count),dtype=bool)
-            rank={v:self.energy(self.positions_for_variables([v])) for v in range(count)}
-            anchors=[min(group,key=lambda v:rank[v]) for group in self.site_to_variables.values()]
-        anchor_positions=self.positions_for_variables(anchors)
-        def assignment(variables):
-            positions=anchor_positions.copy()
-            for v in variables:
-                c=self.candidates[v]
-                positions[c["indices"]]=c["positions"]
-            return positions
         self.decomposition_quality=dict(
-            anchor=topology_geometry_audit(self.topology,anchor_positions),
+            reference=topology_geometry_audit(self.topology,self.base_positions),
             single_site_candidates=[dict(variable=v,residue_id=c["residue_id"],
-                audit=topology_geometry_audit(self.topology,assignment([v])))
+                audit=topology_geometry_audit(self.topology,self.positions_for_variables([v])))
                 for v,c in enumerate(self.candidates)],
-            background="other Active sites fixed at decomposition anchors; not an exhaustive pair-combination audit",
+            background=("reference: every Active side chain switched out at its input coordinates; "
+                        "singles = candidate vs fixed environment, pairs = candidate vs candidate (A56)"),
             candidate_filtering=dict(policy="exclude sub-0.4-A topology-excluded intramolecular overlaps before retention",
                                      exclusions=self.candidate_quality_exclusions),
             discrete_state_admissibility=admissibility["audit"])
-        baseline=self.energy(anchor_positions)
+        switched=self._site_switched_energy()
+        site_of={v:c["site"] for v,c in enumerate(self.candidates)}
+        baseline=switched({})
         # Energies of geometrically impossible states are never evaluated: an
         # r^-12 wall at atom-on-atom contact exceeds 1e11 kcal/mol and would
         # consume the float64 precision of every other coefficient.
         singles=np.zeros(count)
         for v in range(count):
             if env_ok[v]:
-                singles[v]=self.energy(assignment([v]))-baseline
+                singles[v]=switched({site_of[v]:v})-baseline
         pairs=np.zeros((count,count))
         for i in range(count):
             for j in range(i+1,count):
-                if (self.candidates[i]["site"]!=self.candidates[j]["site"]
-                        and env_ok[i] and env_ok[j] and pair_ok[i,j]):
-                    pairs[i,j]=self.energy(assignment([i,j]))-baseline-singles[i]-singles[j]
+                if (site_of[i]!=site_of[j] and env_ok[i] and env_ok[j] and pair_ok[i,j]):
+                    pairs[i,j]=switched({site_of[i]:i,site_of[j]:j})-baseline-singles[i]-singles[j]
+        try:
+            anchors=_admissible_assignment(self.site_to_variables,env_ok,pair_ok,
+                                           order=lambda group:sorted(group,key=lambda v:singles[v]))
+        except _SearchLimitExceeded:
+            anchors=None
+        no_admissible=anchors is None
         forbidden_penalty=_forbidden_state_penalty(singles,pairs,self.site_to_variables,env_ok,pair_ok)
         for v in range(count):
             if not env_ok[v]:
@@ -1095,23 +1143,41 @@ class AllAtomInterfaceQUBOBuilder:
         # every structure is still relaxed/scored with the full GBN2 energy.
         exact=self.pair_decomposition_exact
         rng=np.random.default_rng(918); max_error=0.; squared_errors=[]
-        for _ in range(12):
-            try:
-                selected=_admissible_assignment(self.site_to_variables,env_ok,pair_ok,
-                                                order=lambda group:list(rng.permutation(group)))
-            except _SearchLimitExceeded:
-                selected=None
-            if selected is None:
-                selected=list(anchors)    # an admissible assignment known to exist
-            x=np.zeros(count); x[selected]=1
-            actual=self.energy(self.positions_for_variables(selected))
-            predicted=baseline+singles@x+x@pairs@x
+        def check(actual,predicted):
+            nonlocal max_error
             if not (math.isfinite(actual) and math.isfinite(predicted)):
                 raise FloatingPointError("Non-finite all-atom energy during decomposition check")
             max_error=max(max_error,abs(actual-predicted))
             squared_errors.append((actual-predicted)**2)
             if exact and not np.isclose(actual,predicted,atol=1e-4,rtol=1e-9):
                 raise ValueError("Force field is not pair-decomposable at required precision")
+        full_checks=0
+        for _ in range(12):
+            if no_admissible:
+                break
+            try:
+                selected=_admissible_assignment(self.site_to_variables,env_ok,pair_ok,
+                                                order=lambda group:list(rng.permutation(group)))
+            except _SearchLimitExceeded:
+                selected=None
+            if selected is None:
+                selected=list(anchors)
+            x=np.zeros(count); x[selected]=1
+            # The real all-present energy, not the switched model.
+            check(self.energy(self.positions_for_variables(selected)),baseline+singles@x+x@pairs@x)
+            full_checks+=1
+        # Partial admissible selections check pair additivity directly, and are
+        # the only check available when no admissible full assignment exists.
+        sites=list(self.site_to_variables)
+        for _ in range(12-full_checks):
+            present={}
+            for site in rng.permutation(sites):
+                options=[int(v) for v in rng.permutation(self.site_to_variables[int(site)])
+                         if env_ok[v] and all(pair_ok[v,u] for u in present.values())]
+                if options and rng.random()<0.6:
+                    present[int(site)]=options[0]
+            x=np.zeros(count); x[list(present.values())]=1
+            check(switched(present),baseline+singles@x+x@pairs@x)
         rms_error=float(math.sqrt(sum(squared_errors)/len(squared_errors)))
         offset=baseline+penalty*len(self.site_to_variables)
         h,j,ising_offset=qubo_to_ising(q,offset)
@@ -1136,14 +1202,15 @@ class AllAtomInterfaceQUBOBuilder:
                 pair_decomposition=("exact" if exact else "pairwise_approximation"),
                 candidate_relax_iterations=self.candidate_relax_iterations,
                 physical_quality_schema=self.preparation_quality["schema"],
-                decomposition_anchor_variables=anchors,ising_equivalence_max_error=ising_error,
+                decomposition_reference="all Active side chains switched out at input coordinates (A56)",
+                admissible_reference_assignment=anchors,ising_equivalence_max_error=ising_error,
+                all_atom_equivalence_full_assignment_checks=full_checks,
                 discrete_state_contact_floor_angstrom=DISCRETE_STATE_CONTACT_FLOOR_ANGSTROM,
                 forbidden_state_penalty_kcal=forbidden_penalty,
                 forbidden_single_states=admissibility["audit"]["forbidden_single_count"],
                 forbidden_pair_states=admissibility["audit"]["forbidden_pair_count"],
-                equivalence_scope=("raw energies: no geometry-admissible assignment exists" if raw_fallback
-                                   else "exact on every geometry-admissible assignment; forbidden states carry the penalty"),
-                no_admissible_assignment_raw_fallback=raw_fallback,
+                equivalence_scope="exact on every geometry-admissible assignment; forbidden states carry the penalty",
+                no_admissible_assignment=no_admissible,
                 forbidden_variables=[int(v) for v in range(count) if not env_ok[v]],
                 forbidden_variable_pairs=[[int(i),int(j)] for i in range(count) for j in range(i+1,count)
                                           if env_ok[i] and env_ok[j] and not pair_ok[i,j]],

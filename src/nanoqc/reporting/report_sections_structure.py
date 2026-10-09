@@ -172,7 +172,7 @@ def _structural_protocol_execution(queue: Path, ctx: ReportContext) -> List[str]
         metadata = (_read_json(mapping) or {}).get("metadata") or {}
         instances += 1
         with_forbidden += int(bool(metadata.get("forbidden_variables") or metadata.get("forbidden_variable_pairs")))
-        fallback += int(bool(metadata.get("no_admissible_assignment_raw_fallback")))
+        fallback += int(bool(metadata.get("no_admissible_assignment")))
         shielded += int(bool((metadata.get("polar_hydrogen_shielding") or {}).get("shielded_hydrogens")))
     lines = ["### 4.3 Structural protocol execution (A45-A51)", ""]
     if not summaries:
@@ -189,7 +189,7 @@ def _structural_protocol_execution(queue: Path, ctx: ReportContext) -> List[str]
         f"double-precision Reference evaluations for close contacts (A46); {vetoed_outputs} had an overlap-floor "
         "veto (A47).",
         f"- Structural QUBOs: {instances} instances; {with_forbidden} contained geometry-forbidden states, "
-        f"{fallback} used the raw-energy fallback (A47); {forbidden_selected} solver selections were forbidden "
+        f"{fallback} had no admissible full assignment (solved on the penalty model, A56); {forbidden_selected} solver selections were forbidden "
         f"states (judged by physical acceptance only, A51); polar-hydrogen shielding applied in {shielded} (A50).",
         "",
     ]

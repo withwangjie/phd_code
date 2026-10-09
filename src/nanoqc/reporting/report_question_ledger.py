@@ -49,7 +49,7 @@ def _encoding_evidence(ctx: ReportContext) -> Dict[str, Any]:
         if value is not None:
             coarse_errors.append(float(value))
     structural = dict(instances=0, max_equivalence_error=None, with_forbidden_states=0,
-                      raw_fallback=0, forbidden_selected_outputs=0, selected_outputs=0)
+                      no_admissible=0, forbidden_selected_outputs=0, selected_outputs=0)
     root = ctx.run_dir / "validation_queue" / "results"
     errors: List[float] = []
     for mapping in sorted(root.glob("*/seed_*/experiment/allatom_mapping.json")):
@@ -59,8 +59,8 @@ def _encoding_evidence(ctx: ReportContext) -> Dict[str, Any]:
             errors.append(float(metadata["all_atom_equivalence_max_error"]))
         if metadata.get("forbidden_variables") or metadata.get("forbidden_variable_pairs"):
             structural["with_forbidden_states"] += 1
-        if metadata.get("no_admissible_assignment_raw_fallback"):
-            structural["raw_fallback"] += 1
+        if metadata.get("no_admissible_assignment"):
+            structural["no_admissible"] += 1
         for method in ("qaoa", "sa", "uniform", "greedy"):
             result = _read_json(mapping.parent / f"{method}_result.json") or {}
             admissible = (result.get("relaxation") or {}).get("selected_state_geometry_admissible")
@@ -135,7 +135,7 @@ def section_research_question_ledger(ctx: ReportContext) -> List[str]:
         f"coarse max QUBO/Ising error {_fmt(encoding['coarse_max_error'])} over {encoding['coarse_instances']} instances; "
         f"structural max Amber/QUBO error {_fmt(s['max_equivalence_error'])} kcal/mol over {s['instances']} instances "
         f"(exact on admissible assignments; {s['with_forbidden_states']} with geometry-forbidden states, "
-        f"{s['raw_fallback']} raw fallbacks; A47) | descriptive (each instance is gated by its own fail-closed check) |")
+        f"{s['no_admissible']} without any admissible assignment; A47/A56) | descriptive (each instance is gated by its own fail-closed check) |")
     lines.append(
         f"| Q2 Ground-state amplification (primary family) | statistics/quantum_scaling_statistics.json | "
         f"mean log10 amplification {_fmt(amplification.get('mean_log10_amplification'))} "

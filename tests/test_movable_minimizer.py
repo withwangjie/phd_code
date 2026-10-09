@@ -241,7 +241,7 @@ def test_selection_admissibility_reads_the_forbidden_lists() -> None:
     assert selection_is_geometry_admissible(metadata, [1, 0, 0, 1, 0, 0])
     assert not selection_is_geometry_admissible(metadata, [0, 0, 1, 1, 0, 0])   # forbidden state
     assert not selection_is_geometry_admissible(metadata, [1, 0, 0, 0, 1, 0])   # forbidden pair
-    assert selection_is_geometry_admissible({}, [1, 0, 1])                      # raw fallback
+    assert selection_is_geometry_admissible({}, [1, 0, 1])                      # no forbidden lists
 
 
 def test_assignment_search_limit_is_a_typed_signal(monkeypatch) -> None:

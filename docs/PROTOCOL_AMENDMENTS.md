@@ -938,3 +938,28 @@ Each mechanistic statement and parameter introduced in A45–A52 was checked aga
 - **Not changed:** energies of admissible states and pairs, the forbidden/admissible definition, the separation guarantee, the budget value (0.001 kcal/mol), every solver's budget, and every instance without forbidden states. For those instances, F is not used, the SA scale is identical and the budget is evaluated on the same terms as before, without λ.
 - **Local check:** prepared 7ZRA complex, 8 sites, Reference platform. F fell from 4.6×10⁷ to 2.3×10⁷ kcal/mol (it is not applied there, because that instance has no forbidden states). The physical-objective roundoff bound is 1.6×10⁻⁷ kcal/mol, against 2.4×10⁻⁵ for the penalised Q, which is about 145× smaller. The exact-equivalence error is 1.9×10⁻⁹. The failing server seed has not been rerun.
 - **Assessment:** change (2) changes what the budget is evaluated on. It is not a looser threshold. The budget exists so that the energies the experiment compares are resolved to 0.001 kcal/mol, and those energies are the physical ones. A seed that fails it still fails closed.
+
+## A56. Site-switched energy decomposition (no reference-state contamination)
+
+- **Trigger:** in a run on the A51/A52 code, 7 seeds stopped at the precision budget, with roundoff bounds from 0.0022 to 78,659 kcal/mol. The largest corresponds to a total coefficient magnitude near 10¹⁹ kcal/mol, which only atom-on-atom contacts produce.
+- **Cause, a defect of the A47 decomposition:** singles were computed with every other site held at a decomposition anchor state, single(v) = E(v, anchors) − E(anchors). If candidate v clashes with the anchor state a of another site, the forbidden pair (v, a) was correctly never evaluated as a pair, but its clash energy (up to 10¹⁵ kcal/mol) still entered single(v). Every pair (v, w) with another state w of that site then cancels it: E(v, w) − E(v) − E(w) + E(anchors) ≈ −clash. The decomposition stays algebraically exact, but its coefficients are astronomically large. When no admissible full assignment existed, the raw-energy fallback produced the same magnitudes directly.
+- **Change:** the decomposition reference is the configuration with every Active side chain switched out. Each site's side-chain atoms keep their input coordinates and bonded terms, but carry no charge or Lennard-Jones term, and their nonbonded exceptions are zero. This is implemented with OpenMM per-site global parameters and exact 0/1 parameter offsets.
+  - The baseline is E(none present).
+  - single(v) = E(v present) − baseline: candidate v against the fixed environment, including its own internal terms.
+  - pair(v, w) = E(v, w present) − baseline − single(v) − single(w): the direct interaction of the two candidates.
+
+  This is the standard self/pair decomposition of fixed-backbone side-chain packing [R10–R12]. In vacuum, Amber energies are exactly pair-additive over sites, so baseline + Σ singles + Σ pairs equals the real all-present energy for every assignment. No term can contain a contact with a third site's state. A geometry-forbidden contact can appear only in its own forbidden single or pair, which is never evaluated and carries F (A47/A55).
+- **Consequences:**
+  - The anchor and the raw-energy fallback are removed.
+  - If no admissible full assignment exists, the penalty model is still defined. Every assignment then carries at least one F, so the solvers' optimum is an assignment with the fewest forbidden terms, ordered by its admissible energy. The output is relaxed and judged by physical acceptance as usual (flag `no_admissible_assignment`).
+  - Exactness checks:
+    - up to 12 random admissible full assignments are compared against the real all-present energy;
+    - any remaining checks use random admissible partial selections in the switched model, which test pair additivity directly;
+    - both checks keep the 1e-4 kcal/mol tolerance in vacuum.
+- **Checks:**
+  - Synthetic test: one fixed atom and two one-atom sites, where one state of each site lies 0.2 A from the other. The A47–A55 decomposition stops with "not pair-decomposable", because the 0.2-A clash leaks into singles and pairs and cancels catastrophically. The A56 decomposition isolates the forbidden pair (penalty F); every other coefficient is below 3 kcal/mol, and all admissible assignments match the true energy within 10⁻⁶ kcal/mol (`tests/test_site_switched_decomposition.py`).
+  - Local 7ZRA complex (Reference platform):
+    - 8 sites, 30 variables: exact-equivalence error 3×10⁻⁹ kcal/mol over 12 full assignments, physical roundoff bound 1.6×10⁻⁷, quantum instance built;
+    - 10 sites: old and new decompositions agree, because that instance has no forbidden states.
+  - The 7 failing server seeds have not been rerun.
+- **Not changed:** the energy function, candidates, admissibility floors, F, the 0.001 kcal/mol physical budget, solver budgets and acceptance. Under GBN2 (a sensitivity model, not formal) the Born terms are not switched, so the decomposition remains a recorded pairwise approximation, as before.
