@@ -1024,6 +1024,15 @@ Each mechanistic statement and parameter introduced in A45–A52 was checked aga
   - Unchanged: every identity threshold, the cluster rule, and the CDR-H3 string compared, which is the same string the holdout carve used for isolation.
   - The audit now always writes a manifest. An unverifiable target becomes a failed, uncertified row carrying its error, and the stage summary quotes it.
 - **Cause 2 (FASPR):** FASPR writes no `OXT`. The Active-only restriction restored backbone coordinates only for atoms present in FASPR's output.
+- **Further FASPR input hazards (from its reader, `Structure::ReadPDB`):**
+  - it reads only `ATOM` records and a one-character chain ID (column 22);
+  - it starts a new residue whenever columns 23–27 (number plus insertion code) change, without looking at the chain;
+  - a blank line ends the read;
+  - author chain names such as `A-2` cannot be written to PDB at all (gemmi refuses).
 - **Change 2:**
-  - Backbone atoms, including `OXT`, and non-Active side-chain heavy atoms that FASPR omits are copied from the identical perturbed input, as their coordinates already were.
-  - A missing Active side-chain atom is FASPR's own prediction and still fails the completeness check.
+  - The FASPR input is a heavy-atom PDB with one-character chain IDs in chain order, one global consecutive residue number without insertion codes, and every residue an `ATOM` record. A non-amino-acid residue, more than 62 chains or more than 9,999 residues is refused.
+  - FASPR's output is mapped back by residue order. Residue count and names must match exactly.
+  - The prediction is the identical perturbed input (heavy atoms, author chain names and numbering) with only the Active side-chain atoms replaced by FASPR's. Backbone atoms (including `OXT`) and non-Active side chains are therefore exactly the input's, as the restriction always intended.
+  - A side-chain atom FASPR fails to build for an Active residue stays missing and still fails the completeness check.
+  - The internal methods' relaxed structures are scored as the mmCIF files they are, no longer converted to PDB, which cannot hold every author chain name.
+  - Unchanged: the evaluator, the completeness check, Phenix clashscore, and which atoms FASPR is allowed to change.

@@ -22,64 +22,102 @@ from nanoqc.qubo.subgraph_to_qubo import evaluate_atomistic_prediction
 from nanoqc.common.repo_io import sha256_file as sha256
 
 
-def cif_to_pdb(source: Path, destination: Path) -> None:
-    structure=gemmi.read_structure(str(source))
-    if len(structure)!=1:
-        raise ValueError(f"Expected one model: {source}")
-    structure.write_pdb(str(destination))
+FASPR_CHAIN_IDS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+BACKBONE_ATOMS = frozenset({"N", "CA", "C", "O", "OXT"})
+
+
+def _single_model(path: Path) -> gemmi.Structure:
+    structure = gemmi.read_structure(str(path))
+    if len(structure) != 1:
+        raise ValueError(f"Expected one model: {path}")
+    structure.remove_hydrogens()
+    return structure
+
+
+def _residues(structure: gemmi.Structure) -> list[tuple[gemmi.Chain, gemmi.Residue]]:
+    return [(chain, residue) for chain in structure[0] for residue in chain]
+
+
+def write_faspr_input(source: Path, destination: Path) -> list[str]:
+    """Write a heavy-atom PDB that FASPR's fixed-column reader cannot misread.
+
+    FASPR reads only ATOM records, a one-character chain ID (column 22), and
+    starts a new residue whenever columns 23-27 (number plus insertion code)
+    change, without looking at the chain. Author chain names such as ``A-2``
+    cannot be written to PDB at all, and IMGT insertion codes or a repeated
+    number across a chain boundary could merge residues. The FASPR input
+    therefore uses one-character chain IDs in chain order and one global
+    consecutive residue number, with every residue an ATOM record. The
+    returned list gives the residue order, which is how the output is mapped
+    back to the original author identities.
+    """
+    structure = _single_model(source)
+    rows = _residues(structure)
+    chains = list(structure[0])
+    if len(chains) > len(FASPR_CHAIN_IDS):
+        raise ValueError(f"FASPR input supports at most {len(FASPR_CHAIN_IDS)} chains: {source}")
+    if len(rows) > 9999:
+        raise ValueError(f"FASPR input supports at most 9999 residues: {source}")
+    order = []
+    number = 0
+    for index, chain in enumerate(chains):
+        order_chain = chain.name
+        chain.name = FASPR_CHAIN_IDS[index]
+        for residue in chain:
+            if not gemmi.find_tabulated_residue(residue.name).is_amino_acid():
+                raise ValueError(f"FASPR input contains a non-amino-acid residue "
+                                 f"{order_chain}:{residue.seqid} {residue.name}: {source}")
+            order.append(f"{order_chain}:{residue.seqid}:{residue.name}")
+            number += 1
+            residue.seqid = gemmi.SeqId(number, " ")
+            residue.het_flag = "A"
+    structure.setup_entities()
+    text = structure.make_pdb_string(gemmi.PdbWriteOptions(minimal=True))
+    destination.write_text("\n".join(line for line in text.splitlines() if line.strip()) + "\n")
+    return order
 
 
 def restrict_sidechain_packing(
-    input_pdb: Path, packed_pdb: Path, destination: Path, active_residues: list[str]
+    source: Path, packed_pdb: Path, order: list[str], destination: Path,
+    active_residues: list[str],
 ) -> None:
     """Keep FASPR changes only on the declared Active side chains.
 
-    FASPR repacks every eligible residue by default. The formal comparison in
-    this project optimizes only Active side chains, so backbone atoms and all
-    non-Active side-chain atoms are restored from the identical perturbed
-    input before scoring.
+    FASPR repacks every eligible residue. The formal comparison optimizes only
+    Active side chains, so the prediction is the identical perturbed input
+    (heavy atoms, original author chain names and numbering) with only the
+    Active side-chain atoms replaced by FASPR's. Backbone atoms, the
+    C-terminal OXT that FASPR does not write, and non-Active side chains are
+    therefore exactly the input's. A side-chain atom FASPR fails to build for
+    an Active residue stays missing and fails the completeness check.
     """
-    source = gemmi.read_structure(str(input_pdb))
+    structure = _single_model(source)
     packed = gemmi.read_structure(str(packed_pdb))
-    if len(source) != 1 or len(packed) != 1:
-        raise ValueError("Active-only FASPR restriction requires one-model structures")
+    if len(packed) != 1:
+        raise ValueError("FASPR output must have one model")
+    rows = _residues(structure)
+    packed_rows = [residue for chain in packed[0] for residue in chain]
+    if len(rows) != len(order) or len(packed_rows) != len(order):
+        raise ValueError(f"FASPR output has {len(packed_rows)} residues; input has {len(order)}")
     active = {str(rid) for rid in active_residues}
-    # OXT is the C-terminal backbone oxygen. FASPR does not write it, so it is
-    # restored from the input like every other backbone atom.
-    backbone = {"N", "CA", "C", "O", "OXT"}
-    source_atoms = {}
-    for chain in source[0]:
-        for residue in chain:
-            rid = f"{chain.name}:{residue.seqid}"
-            source_atoms[rid] = {str(atom.name).strip(): atom for atom in residue}
-    for chain in packed[0]:
-        for residue in chain:
-            rid = f"{chain.name}:{residue.seqid}"
-            reference = source_atoms.get(rid)
-            if reference is None:
-                raise ValueError(f"FASPR output residue is absent from input: {rid}")
-            keep_sidechain = rid in active
-            for atom in residue:
-                name = str(atom.name).strip()
-                if name in backbone or not keep_sidechain:
-                    original = reference.get(name)
-                    if original is None:
-                        raise ValueError(f"Input is missing atom {rid}:{name}")
-                    atom.pos = original.pos
-                    atom.occ = original.occ
-                    atom.b_iso = original.b_iso
-                    atom.altloc = original.altloc
-            # Heavy atoms FASPR omitted from parts it does not own (backbone,
-            # including OXT, and non-Active side chains) are copied from the
-            # input. Missing Active side-chain atoms stay missing and fail the
-            # completeness check, since those are FASPR's own prediction.
-            present = {str(atom.name).strip() for atom in residue}
-            for name, original in reference.items():
-                if name in present or original.element.is_hydrogen:
-                    continue
-                if name in backbone or not keep_sidechain:
-                    residue.add_atom(original)
-    packed.make_mmcif_document().write_file(str(destination))
+    seen = set()
+    for (chain, residue), packed_residue, expected in zip(rows, packed_rows, order):
+        rid = f"{chain.name}:{residue.seqid}"
+        if f"{rid}:{residue.name}" != expected or packed_residue.name != residue.name:
+            raise ValueError(f"FASPR output residue order differs from input at {expected}")
+        if rid not in active:
+            continue
+        seen.add(rid)
+        for index in reversed(range(len(residue))):
+            if residue[index].name.strip() not in BACKBONE_ATOMS:
+                del residue[index]
+        for atom in packed_residue:
+            if atom.name.strip() not in BACKBONE_ATOMS and not atom.element.is_hydrogen:
+                residue.add_atom(atom)
+    if seen != active:
+        raise ValueError(f"Active residues absent from the FASPR input: {sorted(active - seen)}")
+    structure.setup_entities()
+    structure.make_mmcif_document().write_file(str(destination))
 
 
 def run_checked(argv: list[str], *, timeout: int = 1800) -> subprocess.CompletedProcess[str]:
@@ -195,9 +233,9 @@ def main() -> int:
             out_case=args.out_dir/target/f"seed_{seed}"
             out_case.mkdir(parents=True,exist_ok=True)
             try:
-                input_pdb=out_case/"perturbed_input.pdb"
+                input_pdb=out_case/"faspr_input.pdb"
                 prediction_pdb=out_case/"faspr_prediction.pdb"
-                cif_to_pdb(perturbed,input_pdb)
+                order=write_faspr_input(perturbed,input_pdb)
                 run_checked(
                     [str(args.faspr),"-i",str(input_pdb),"-o",str(prediction_pdb)],
                     timeout=args.timeout_seconds,
@@ -206,7 +244,7 @@ def main() -> int:
                     raise RuntimeError("FASPR did not produce a nonempty prediction")
                 active_only_prediction=out_case/"faspr_active_only.cif"
                 restrict_sidechain_packing(
-                    input_pdb,prediction_pdb,active_only_prediction,active
+                    perturbed,prediction_pdb,order,active_only_prediction,active
                 )
                 row=evaluated_row(
                     target=target,seed=seed,method="faspr_active_only",
@@ -219,9 +257,10 @@ def main() -> int:
                 rows.append(row)
 
                 # Apply the same evaluator and standard clashscore to the
-                # internal methods' final relaxed structures. These rows are
-                # not a matched-compute baseline; they provide a common
-                # structural-quality scale across all reconstruction methods.
+                # internal methods' final relaxed structures, read as the
+                # mmCIF files they are (PDB cannot hold every author chain
+                # name). These rows are not a matched-compute baseline; they
+                # provide a common structural-quality scale across methods.
                 experiment_dir=seed_dir/"experiment"
                 for internal_method in ("qaoa","sa","uniform","greedy"):
                     internal=experiment_dir/f"{internal_method}_relaxed.cif"
@@ -229,11 +268,9 @@ def main() -> int:
                         raise RuntimeError(
                             f"Missing final relaxed structure for {internal_method}: {internal}"
                         )
-                    internal_pdb=out_case/f"{internal_method}_relaxed.pdb"
-                    cif_to_pdb(internal,internal_pdb)
                     rows.append(evaluated_row(
                         target=target,seed=seed,method=internal_method,
-                        reference=native,prediction=internal_pdb,
+                        reference=native,prediction=internal,
                         active=active,alignment=alignment,partners=partners,
                         phenix_executable=args.phenix_clashscore,
                     ))
