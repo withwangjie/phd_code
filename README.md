@@ -513,6 +513,7 @@ Useful variants, all passed straight through to `run_full_experiment.sh`:
 ./scripts/deploy_launch.sh --resume=<run directory name>    # same code/evidence/config only; otherwise refused
 ./scripts/deploy_launch.sh --resume=<run> --force-restage egnn_train
 ./scripts/deploy_launch.sh --only <stage>                   # prerequisites must already be complete
+./scripts/check_external_validation.sh <run>               # diagnostic re-check of external validation with current code
 ```
 
 The launcher resolves the current server, creates exactly one timestamped run directory before preflight, and stores the complete experiment archive under that directory. A fresh run contains:

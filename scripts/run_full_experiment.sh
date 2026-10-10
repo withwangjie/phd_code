@@ -135,6 +135,15 @@ else
 fi
 log "Activated virtual environment: $(command -v python)"
 python --version
+# Register src/ in the venv so manual `python -m nanoqc...` commands work too
+# (the launcher itself already exports PYTHONPATH). Offline; no package copy.
+python - "${REPO_ROOT}/src" <<'PY' || log "WARNING: could not register src/ in the venv; use PYTHONPATH=src"
+import pathlib, sys, sysconfig
+pth = pathlib.Path(sysconfig.get_paths()["purelib"]) / "nanoqc_src.pth"
+line = sys.argv[1] + "\n"
+if not pth.is_file() or pth.read_text() != line:
+    pth.write_text(line)
+PY
 
 # ---------------------------------------------------------------------------
 # 1b. Resolve infrastructure/runtime settings for THIS server.
