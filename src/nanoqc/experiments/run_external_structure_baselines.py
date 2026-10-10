@@ -200,6 +200,7 @@ def main() -> int:
         raise ValueError("No frozen recovery manifests found")
     args.out_dir.mkdir(parents=True,exist_ok=True)
     rows=[];failures=[]
+    total=len(manifests)*len(args.expected_seeds);done=0
     for manifest_path in manifests:
         case=json.loads(manifest_path.read_text(encoding="utf-8"))
         target=str(case.get("target") or manifest_path.parent.name).lower()
@@ -230,6 +231,8 @@ def main() -> int:
                     target=target,seed=seed,error=f"Missing perturbed input: {perturbed}"
                 ))
                 continue
+            done+=1
+            print(f"[{done}/{total}] {target}/seed_{seed} rows={len(rows)} failures={len(failures)}",flush=True)
             out_case=args.out_dir/target/f"seed_{seed}"
             out_case.mkdir(parents=True,exist_ok=True)
             try:
