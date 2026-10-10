@@ -1009,3 +1009,21 @@ Each mechanistic statement and parameter introduced in A45–A52 was checked aga
   - Time outside OpenMM's own force evaluation fell from 602 s to 120 s; the force evaluation itself was 877 s and 939 s in the two runs.
   - On the GPU server, where each force evaluation costs milliseconds, the stage is now close to bound by the evaluation count itself (about 5×10⁴ per seed, mostly candidate relaxation).
   - The remaining overheads are each below 20 s per seed: pair screening, SA, geometry audits and rotamer-library loading.
+
+## A61. External validation: holdout CDR-H3 provenance and FASPR terminal atoms
+
+- **Observed (run 20261009_073701):** the independence audit stopped before writing its manifest. The cause was `snac_db__7QCQ`: CDR-H3 sequence is absent from encoded VHH chains. In the same run, every Active-only FASPR prediction failed heavy-atom completeness at the chain C-terminus (3p9w A:97 LYS, `OXT` missing), so no structural-baseline row was produced.
+- **Cause 1 (audit):**
+  - Antigen-fold holdout graphs (A10) are training graphs. Their `cdr3_seq` is the single CDR-H3 recorded for their `source_id` in the frozen data-audit ledger, and the annotation can include residues that are not modelled in the structure.
+  - The external-graph rule ("CDR-H3 is an exact substring of the modelled VHH chain") was written for graphs built by `build_external_vhh_graphs.py`. Those graphs derive CDR-H3 from the structure itself, so holdout graphs could not satisfy it.
+- **Change 1:**
+  - For the holdout, the stage passes `--audit-details <run>/audit/data_audit_details.jsonl`.
+  - Each holdout graph's CDR-H3 must then equal the single audited annotation of its `source_id`, and the ledger PDB must equal the graph PDB. Otherwise the target is not certified.
+  - Residue identities and CA coordinates are still verified against the raw structure, and the graph↔source_id↔audited-source-hash binding is still verified at queue_freeze.
+  - A genuinely external set keeps the substring rule. The manifest records which binding was used (`cdr_h3_binding`).
+  - Unchanged: every identity threshold, the cluster rule, and the CDR-H3 string compared, which is the same string the holdout carve used for isolation.
+  - The audit now always writes a manifest. An unverifiable target becomes a failed, uncertified row carrying its error, and the stage summary quotes it.
+- **Cause 2 (FASPR):** FASPR writes no `OXT`. The Active-only restriction restored backbone coordinates only for atoms present in FASPR's output.
+- **Change 2:**
+  - Backbone atoms, including `OXT`, and non-Active side-chain heavy atoms that FASPR omits are copied from the identical perturbed input, as their coordinates already were.
+  - A missing Active side-chain atom is FASPR's own prediction and still fails the completeness check.

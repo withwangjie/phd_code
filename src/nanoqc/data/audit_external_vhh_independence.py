@@ -24,7 +24,8 @@ from nanoqc.data.sequence_identity import nw_identity, length_coverage, partner_
 AA_ORDER="ACDEFGHIKLMNPQRSTVWY"
 
 
-def verified_graph_identity(graph: object, path: Path, *, require_cdr: bool = False) -> dict:
+def verified_graph_identity(graph: object, path: Path, *, require_cdr: bool = False,
+                            audited_cdrs: dict | None = None) -> dict:
     """Cross-check sequence metadata against the graph's encoded residues."""
     pdb=str(getattr(graph,"pdb_id","")).strip().lower()
     if len(pdb)!=4 or not pdb.isalnum():
@@ -65,7 +66,20 @@ def verified_graph_identity(graph: object, path: Path, *, require_cdr: bool = Fa
     # Training graphs are hash-bound to this run's frozen manifest; their
     # annotated CDR-H3 may legitimately contain residues that are unmodeled in
     # the structure, so it is kept as annotated instead of aborting the audit.
-    if require_cdr and (not cdr or not any(cdr in sequence for sequence in vhh)):
+    # Antigen-fold holdout graphs (audited_cdrs given) are training graphs
+    # whose CDR-H3 is the frozen data-audit annotation, which may include
+    # residues unmodeled in the structure. They are bound instead to that
+    # exact ledger entry: same source_id, same PDB, the single audited CDR-H3.
+    if require_cdr and audited_cdrs is not None:
+        source_id=str(getattr(graph,"source_id","") or "")
+        entry=audited_cdrs.get(source_id)
+        if entry is None:
+            raise ValueError(f"{path}: source_id {source_id!r} is absent from the frozen data-audit ledger")
+        if entry["pdb_id"]!=pdb:
+            raise ValueError(f"{path}: audited source {source_id} is PDB {entry['pdb_id']}, graph is {pdb}")
+        if not cdr or entry["cdr3_sequences"]!=[cdr]:
+            raise ValueError(f"{path}: CDR-H3 differs from the audited annotation of {source_id}")
+    elif require_cdr and (not cdr or not any(cdr in sequence for sequence in vhh)):
         raise ValueError(f"{path}: CDR-H3 sequence is absent from encoded VHH chains")
     if int(getattr(graph,"cdr3_len",-1))!=len(cdr):
         raise ValueError(f"{path}: CDR-H3 length disagrees with sequence")
@@ -211,10 +225,27 @@ def load_training_sequences(training_dataset: Path) -> list[dict]:
     return train
 
 
-def graph_sequences(path: Path, source_dir: Path | None = None) -> dict:
+def load_audited_cdrs(audit_jsonl: Path) -> dict:
+    """source_id -> PDB and CDR-H3 annotation from the frozen data-audit ledger."""
+    from nanoqc.common.repo_io import iter_jsonl
+    entries={}
+    for row in iter_jsonl(audit_jsonl):
+        source_id=str((row or {}).get("id","") or "")
+        if not source_id:
+            continue
+        if source_id in entries:
+            raise ValueError(f"Duplicate audit source_id {source_id!r}")
+        entries[source_id]=dict(pdb_id=str(row.get("pdb_id","")).strip().lower(),
+                                cdr3_sequences=list(row.get("cdr3_sequences") or []))
+    return entries
+
+
+def graph_sequences(path: Path, source_dir: Path | None = None,
+                    audited_cdrs: dict | None = None) -> dict:
     digest=sha256(path)
     graph=load_graph(path)
-    identity_fields=verified_graph_identity(graph,path,require_cdr=source_dir is not None)
+    identity_fields=verified_graph_identity(graph,path,require_cdr=source_dir is not None,
+                                            audited_cdrs=audited_cdrs)
     source=None
     if source_dir is not None:
         source=source_structure_for_pdb(source_dir,identity_fields["pdb_id"])
@@ -248,9 +279,9 @@ def _external_target_audit(task: tuple) -> tuple[dict, str]:
 
 
 def _external_target_audit_checked(task: tuple) -> tuple[dict, str]:
-    path,source_dir,train,cluster_map,train_clusters,thresholds=task
+    path,source_dir,train,cluster_map,train_clusters,thresholds,audited_cdrs=task
     vhh_threshold,cdr_threshold,antigen_threshold,min_coverage=thresholds
-    ext=graph_sequences(path,source_dir)
+    ext=graph_sequences(path,source_dir,audited_cdrs)
     pdb=ext["pdb_id"]
     if pdb not in cluster_map:
         raise ValueError(f"Cluster map missing external PDB {pdb}")
@@ -286,6 +317,9 @@ def main() -> int:
     parser.add_argument("--cdr-h3-threshold",type=float,default=0.50)
     parser.add_argument("--antigen-threshold",type=float,default=0.30)
     parser.add_argument("--antigen-min-length-coverage",type=float,default=0.70)
+    parser.add_argument("--audit-details",type=Path,default=None,
+        help="Frozen data_audit_details.jsonl. Given for the antigen-fold holdout, whose "
+             "CDR-H3 is bound to its audited annotation instead of the modeled chain.")
     parser.add_argument("--workers",type=int,default=1,
         help="Spawned processes for independent external-target sequence audits.")
     args=parser.parse_args()
@@ -331,6 +365,7 @@ def main() -> int:
         external_paths=sorted(args.external_graph_dir.glob("*.pt"))
         if not external_paths:
             raise ValueError("No external .pt graphs")
+        audited_cdrs=(None if args.audit_details is None else load_audited_cdrs(args.audit_details))
     except Exception as exc:
         # Nothing is certified; the manifest records why so the gate can say it.
         args.out.write_text(json.dumps(dict(
@@ -339,7 +374,7 @@ def main() -> int:
             homology_isolation=homology,target_count=0,failed_targets=[],targets=[],
         ),indent=2,sort_keys=True)+"\n",encoding="utf-8")
         raise
-    tasks=[(path,args.external_source_dir,train,cluster_map,train_clusters,thresholds)
+    tasks=[(path,args.external_source_dir,train,cluster_map,train_clusters,thresholds,audited_cdrs)
            for path in external_paths]
     if args.workers==1:
         audited=map(_external_target_audit,tasks)
@@ -374,6 +409,8 @@ def main() -> int:
         failed_targets=[row["pdb_id"] for row in failed],
         errored_targets={row["pdb_id"]:row["error"] for row in audits if row.get("error")},
         targets=audits,
+        cdr_h3_binding=("frozen data-audit annotation by source_id" if audited_cdrs is not None
+                        else "exact substring of the encoded VHH chain"),
         scope="external graphs compared only against frozen training graphs and frozen family/structure clusters",
     )
     args.out.write_text(json.dumps(payload,indent=2,sort_keys=True)+"\n",encoding="utf-8")

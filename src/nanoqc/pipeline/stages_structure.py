@@ -556,6 +556,9 @@ class StructureStagesMixin:
                             str(homology.get("antigen_min_length_coverage",0.70)),
                         "--workers",str(self.config.get("hardware",{}).get("external_audit_workers",1)),
                     ]
+                    if from_run:
+                        audit_argv+=["--audit-details",
+                                     str(self.run_dir/"audit"/"data_audit_details.jsonl")]
                     audit_rc,audit_log=self._run_subprocess("audit_external_vhh_independence",audit_argv)
                     logs.append(str(audit_log));argvs.append(audit_argv)
                     if audit_rc!=0 or not independence.is_file():
@@ -596,8 +599,12 @@ class StructureStagesMixin:
                         "External independence manifest is not bound to the current training graph manifest"
                     )
                 from nanoqc.data.audit_external_vhh_independence import graph_sequences
+                audited_cdrs=None
+                if from_run:
+                    from nanoqc.data.audit_external_vhh_independence import load_audited_cdrs
+                    audited_cdrs=load_audited_cdrs(self.run_dir/"audit"/"data_audit_details.jsonl")
                 current_external_records=[
-                    graph_sequences(path,source_dir) for path in sorted(graph_dir.glob("*.pt"))
+                    graph_sequences(path,source_dir,audited_cdrs) for path in sorted(graph_dir.glob("*.pt"))
                 ]
                 audit_hashes=sorted(
                     str(row.get("graph_sha256",""))

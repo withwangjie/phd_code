@@ -114,3 +114,29 @@ def test_training_cdr_with_unmodeled_residues_does_not_abort_audit(tmp_path) -> 
     assert graph_sequences(path)["cdr_h3"]=="AXW"
     with pytest.raises(ValueError,match="CDR-H3 sequence"):
         graph_sequences(path,tmp_path)
+
+
+def test_holdout_cdr_is_bound_to_the_audit_ledger(tmp_path) -> None:
+    from nanoqc.data.audit_external_vhh_independence import load_audited_cdrs, verified_graph_identity
+    import json
+    features=torch.zeros((2,21))
+    features[0,0]=1;features[1,1]=1;features[1,20]=1
+    graph=Data(x=features,node_chain_id=torch.tensor([0,1]))
+    graph.pdb_id="1ABC";graph.source_id="snac_db:1abc:x"
+    graph.chain_sequences=["A","C"];graph.chain_groups=[0,1]
+    graph.vhh_sequences=["A"];graph.antigen_sequences=["C"]
+    graph.cdr3_seq="AXW";graph.cdr3_len=3
+    ledger=tmp_path/"audit.jsonl"
+    ledger.write_text(json.dumps(dict(id="snac_db:1abc:x",pdb_id="1ABC",cdr3_sequences=["AXW"]))+"\n")
+    audited=load_audited_cdrs(ledger)
+    assert verified_graph_identity(graph,tmp_path,require_cdr=True,audited_cdrs=audited)["cdr_h3"]=="AXW"
+    with pytest.raises(ValueError,match="differs from the audited annotation"):
+        verified_graph_identity(graph,tmp_path,require_cdr=True,
+                                audited_cdrs={"snac_db:1abc:x":dict(pdb_id="1abc",cdr3_sequences=["AXY"])})
+    with pytest.raises(ValueError,match="is PDB 2xyz"):
+        verified_graph_identity(graph,tmp_path,require_cdr=True,
+                                audited_cdrs={"snac_db:1abc:x":dict(pdb_id="2xyz",cdr3_sequences=["AXW"])})
+    with pytest.raises(ValueError,match="absent from the frozen data-audit ledger"):
+        verified_graph_identity(graph,tmp_path,require_cdr=True,audited_cdrs={})
+    with pytest.raises(ValueError,match="CDR-H3 sequence is absent"):
+        verified_graph_identity(graph,tmp_path,require_cdr=True)

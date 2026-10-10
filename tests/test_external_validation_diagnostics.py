@@ -33,7 +33,7 @@ def test_fatal_error_still_writes_manifest(tmp_path, monkeypatch):
 
 
 def test_unverifiable_target_is_a_failed_row(tmp_path):
-    row,version=audit._external_target_audit((tmp_path/"9xyz.pt",tmp_path,[],{},set(),(0.8,0.5,0.3,0.7)))
+    row,version=audit._external_target_audit((tmp_path/"9xyz.pt",tmp_path,[],{},set(),(0.8,0.5,0.3,0.7),None))
     assert version=="" and row["passes"] is False and row["family_cluster_overlap"] is True
     assert row["pdb_id"]=="9xyz" and row["error"]
 
