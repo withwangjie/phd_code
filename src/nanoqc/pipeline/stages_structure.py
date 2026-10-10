@@ -26,6 +26,42 @@ from nanoqc.pipeline.orchestrator_common import (
 )
 
 
+
+def _independence_failure_detail(manifest_path: Path) -> str:
+    """The audit's own reason, so the stage summary names what failed."""
+    if not manifest_path.is_file():
+        return ""
+    try:
+        manifest=json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError,ValueError):
+        return ""
+    if manifest.get("fatal_error"):
+        return f": {manifest['fatal_error']}"
+    errored=manifest.get("errored_targets") or {}
+    failed=manifest.get("failed_targets") or []
+    parts=[]
+    if failed:
+        parts.append(f"{len(failed)}/{manifest.get('target_count')} target(s) not certified")
+    if errored:
+        first=sorted(errored.items())[:3]
+        parts.append(f"{len(errored)} unverifiable, e.g. "+"; ".join(f"{k}: {v}" for k,v in first))
+    return (": "+"; ".join(parts)) if parts else ""
+
+
+def _baseline_failure_detail(summary_path: Path) -> str:
+    """Count and first errors of the per-seed baseline failures."""
+    if not summary_path.is_file():
+        return ""
+    try:
+        failures=json.loads(summary_path.read_text(encoding="utf-8")).get("failures") or []
+    except (OSError,ValueError):
+        return ""
+    if not failures:
+        return ""
+    first="; ".join(f"{f.get('target')}/seed_{f.get('seed')}: {str(f.get('error','')).splitlines()[0][:200]}"
+                    for f in failures[:3])
+    return f": {len(failures)} failed case(s), e.g. {first}"
+
 class StructureStagesMixin:
     """All-atom recovery and external validation, mixed into ``Orchestrator``.
 
@@ -525,9 +561,12 @@ class StructureStagesMixin:
                     if audit_rc!=0 or not independence.is_file():
                         ext_failures.append(
                             f"External VHH independence audit failed (exit={audit_rc}; see {audit_log})"
+                            +_independence_failure_detail(independence)
                         )
             if not independence.is_file():
                 ext_failures.append(f"Required external independence manifest missing: {independence}")
+            elif json.loads(independence.read_text(encoding="utf-8")).get("fatal_error"):
+                pass  # already reported with the audit failure above; nothing was certified
             else:
                 manifest=json.loads(independence.read_text(encoding="utf-8"))
                 current_cluster_path=self.frozen_cluster_map_path()
@@ -599,6 +638,9 @@ class StructureStagesMixin:
                 else:
                     from nanoqc.data.audit_external_vhh_independence import source_structure_for_pdb
                     for audit in audits:
+                        if audit.get("error"):
+                            ext_failures.append(f"{audit.get('pdb_id')}: not certified ({audit['error']})")
+                            continue
                         try:
                             pdb=str(audit["pdb_id"]).lower()
                             source=source_structure_for_pdb(source_dir,pdb)
@@ -769,7 +811,8 @@ class StructureStagesMixin:
                 logs.append(str(log));argvs.append(argv)
                 baseline_summary=out/"run_summary.json"
                 if rc!=0 or not (out/"external_baseline_metrics.csv").is_file() or not baseline_summary.is_file():
-                    failures.append(f"External structural baselines failed (exit={rc}; see {log})")
+                    failures.append(f"External structural baselines failed (exit={rc}; see {log})"
+                                    +_baseline_failure_detail(baseline_summary))
                 else:
                     summary=json.loads(baseline_summary.read_text(encoding="utf-8"))
                     report_path=out/"external_baseline_report.md"

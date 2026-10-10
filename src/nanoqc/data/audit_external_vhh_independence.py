@@ -230,6 +230,24 @@ def graph_sequences(path: Path, source_dir: Path | None = None) -> dict:
 
 
 def _external_target_audit(task: tuple) -> tuple[dict, str]:
+    """One target's audit; an unverifiable target is a recorded failure.
+
+    Any exception becomes a failed row carrying the error, so the manifest is
+    always written and names every target that could not be certified. Such a
+    row never passes and its family overlap counts as unverified.
+    """
+    path=task[0]
+    try:
+        return _external_target_audit_checked(task)
+    except Exception as exc:
+        return dict(
+            pdb_id=Path(path).stem.lower(),graph_path=str(path),
+            error=f"{type(exc).__name__}: {exc}",
+            family_cluster_overlap=True,passes=False,
+        ),""
+
+
+def _external_target_audit_checked(task: tuple) -> tuple[dict, str]:
     path,source_dir,train,cluster_map,train_clusters,thresholds=task
     vhh_threshold,cdr_threshold,antigen_threshold,min_coverage=thresholds
     ext=graph_sequences(path,source_dir)
@@ -290,21 +308,37 @@ def main() -> int:
     if not args.cluster_map.is_file():
         parser.error("Cluster map not found")
 
-    raw_map=json.loads(args.cluster_map.read_text(encoding="utf-8"))
-    cluster_map={str(k).lower():str(v) for k,v in raw_map.items()}
-    if not cluster_map:
-        raise ValueError("Cluster map is empty")
+    homology=dict(
+        vhh_full_chain_identity=float(args.vhh_threshold),
+        cdr_h3_identity=float(args.cdr_h3_threshold),
+        antigen_identity=float(args.antigen_threshold),
+        antigen_min_length_coverage=float(args.antigen_min_length_coverage),
+    )
+    args.out.parent.mkdir(parents=True,exist_ok=True)
+    try:
+        raw_map=json.loads(args.cluster_map.read_text(encoding="utf-8"))
+        cluster_map={str(k).lower():str(v) for k,v in raw_map.items()}
+        if not cluster_map:
+            raise ValueError("Cluster map is empty")
 
-    train=load_training_sequences(args.training_dataset)
-    train_pdb={item["pdb_id"] for item in train}
-    missing_train=sorted(train_pdb-set(cluster_map))
-    if missing_train:
-        raise ValueError(f"Cluster map missing training PDBs: {missing_train[:20]}")
-    train_clusters={cluster_map[pdb] for pdb in train_pdb}
+        train=load_training_sequences(args.training_dataset)
+        train_pdb={item["pdb_id"] for item in train}
+        missing_train=sorted(train_pdb-set(cluster_map))
+        if missing_train:
+            raise ValueError(f"Cluster map missing training PDBs: {missing_train[:20]}")
+        train_clusters={cluster_map[pdb] for pdb in train_pdb}
 
-    external_paths=sorted(args.external_graph_dir.glob("*.pt"))
-    if not external_paths:
-        raise ValueError("No external .pt graphs")
+        external_paths=sorted(args.external_graph_dir.glob("*.pt"))
+        if not external_paths:
+            raise ValueError("No external .pt graphs")
+    except Exception as exc:
+        # Nothing is certified; the manifest records why so the gate can say it.
+        args.out.write_text(json.dumps(dict(
+            fatal_error=f"{type(exc).__name__}: {exc}",
+            training_family_overlap_zero=False,all_targets_pass=False,
+            homology_isolation=homology,target_count=0,failed_targets=[],targets=[],
+        ),indent=2,sort_keys=True)+"\n",encoding="utf-8")
+        raise
     tasks=[(path,args.external_source_dir,train,cluster_map,train_clusters,thresholds)
            for path in external_paths]
     if args.workers==1:
@@ -319,7 +353,8 @@ def main() -> int:
     graph_versions=set()
     external_pdbs=set()
     for path,(row,graph_version) in zip(external_paths,audited):
-        graph_versions.add(graph_version)
+        if graph_version:
+            graph_versions.add(graph_version)
         pdb=row["pdb_id"]
         if pdb in external_pdbs:
             raise ValueError(f"Duplicate external PDB ID {pdb}: {path}")
@@ -331,21 +366,16 @@ def main() -> int:
         graph_version=(next(iter(graph_versions)) if len(graph_versions)==1 else sorted(graph_versions)),
         training_family_overlap_zero=not any(row["family_cluster_overlap"] for row in audits),
         all_targets_pass=not failed,
-        homology_isolation=dict(
-            vhh_full_chain_identity=float(args.vhh_threshold),
-            cdr_h3_identity=float(args.cdr_h3_threshold),
-            antigen_identity=float(args.antigen_threshold),
-            antigen_min_length_coverage=float(args.antigen_min_length_coverage),
-        ),
+        homology_isolation=homology,
         training_cluster_map_sha256=sha256(args.cluster_map),
         training_graph_manifest_sha256=sha256(manifest_path),
         external_graph_dir=str(args.external_graph_dir.resolve()),
         target_count=len(audits),
         failed_targets=[row["pdb_id"] for row in failed],
+        errored_targets={row["pdb_id"]:row["error"] for row in audits if row.get("error")},
         targets=audits,
         scope="external graphs compared only against frozen training graphs and frozen family/structure clusters",
     )
-    args.out.parent.mkdir(parents=True,exist_ok=True)
     args.out.write_text(json.dumps(payload,indent=2,sort_keys=True)+"\n",encoding="utf-8")
     if failed:
         raise SystemExit(f"External independence failed for {len(failed)} target(s); see {args.out}")
