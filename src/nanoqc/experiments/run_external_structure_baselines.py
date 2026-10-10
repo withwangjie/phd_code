@@ -44,7 +44,9 @@ def restrict_sidechain_packing(
     if len(source) != 1 or len(packed) != 1:
         raise ValueError("Active-only FASPR restriction requires one-model structures")
     active = {str(rid) for rid in active_residues}
-    backbone = {"N", "CA", "C", "O"}
+    # OXT is the C-terminal backbone oxygen. FASPR does not write it, so it is
+    # restored from the input like every other backbone atom.
+    backbone = {"N", "CA", "C", "O", "OXT"}
     source_atoms = {}
     for chain in source[0]:
         for residue in chain:
@@ -67,6 +69,16 @@ def restrict_sidechain_packing(
                     atom.occ = original.occ
                     atom.b_iso = original.b_iso
                     atom.altloc = original.altloc
+            # Heavy atoms FASPR omitted from parts it does not own (backbone,
+            # including OXT, and non-Active side chains) are copied from the
+            # input. Missing Active side-chain atoms stay missing and fail the
+            # completeness check, since those are FASPR's own prediction.
+            present = {str(atom.name).strip() for atom in residue}
+            for name, original in reference.items():
+                if name in present or original.element.is_hydrogen:
+                    continue
+                if name in backbone or not keep_sidechain:
+                    residue.add_atom(original)
     packed.make_mmcif_document().write_file(str(destination))
 
 
