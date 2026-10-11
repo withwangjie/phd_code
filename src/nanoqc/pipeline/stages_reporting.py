@@ -138,7 +138,10 @@ class ReportingStagesMixin:
                     if denominator_failures:
                         failures.append(
                             f"{results_dir.name}/{budget_mode}: paired-statistics denominator "
-                            f"is incomplete: {denominator_failures}")
+                            f"is incomplete: {denominator_failures}"
+                            +"".join(f"; {c['baseline']} {c['pdb']} ({c['file']}): "
+                                     f"{c['elapsed_seconds']:.3g}s for a {c['budget_seconds']:.3g}s budget"
+                                     for c in (stats_payload.get("overrun_cases") or [])[:5]))
                     primary_effect=next(
                         (e for e in stats_payload.get("effects",[])
                          if e.get("baseline")==primary_qc_effect_name(

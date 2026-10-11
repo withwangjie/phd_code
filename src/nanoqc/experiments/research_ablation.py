@@ -35,7 +35,7 @@ from nanoqc.qubo.subgraph_to_qubo import InterfaceQUBOBuilder, ForceFieldConfig,
 from nanoqc.quantum.resource_estimation import estimate_qaoa_resources
 import itertools
 import platform
-from collections import Counter
+from collections import Counter, deque
 from nanoqc.model.model_egnn_pruning import select_ablation_active, build_ablation_subgraph
 from nanoqc.common.repo_io import sha256_file as _ablation_digest, atomic_write_json_fsync as _ablation_atomic_json, repo_path
 from nanoqc.experiments.benchmark_common import SHARED_HELPER_MODULES
@@ -81,6 +81,8 @@ def _ablation_classical_counts(sampler: Any, reads: int, seed: int,
 
 
 QTS_TARGET_CONFIDENCE = 0.99
+# A62: read durations used to predict whether one more time-matched read fits.
+TIME_BUDGET_READ_WINDOW = 8
 
 
 def queries_to_solution(counts: dict, energies: dict, ground: float, *,
@@ -844,8 +846,12 @@ def _time_budget_counts(sampler: Any, method: str, seconds: float, seed: int,
                         sa_passes: int, greedy_passes: int) -> tuple[dict, float, int]:
     """Independent restarts to a soft wall deadline, checked between complete reads.
 
-    Includes solver call/setup overhead. One final read may exceed the budget;
-    this is recorded, never silently presented as strict equal-time computation.
+    Includes solver call/setup overhead. A further read starts only if, at the
+    longest of the last few read durations, it would finish by the deadline,
+    so a read is not started that is predictably going to overshoot (A62).
+    The first read always runs. Any remaining overrun (a slower read than
+    recently observed) is recorded, never silently presented as strict
+    equal-time computation; the unused remainder is at most about one read.
     """
     if seconds <= 0 or not math.isfinite(seconds):
         raise ValueError("Time budget must be positive and finite")
@@ -854,7 +860,9 @@ def _time_budget_counts(sampler: Any, method: str, seconds: float, seed: int,
     start = time.perf_counter()
     counts: Counter = Counter()
     queries, restart = 0, 0
-    while not counts or time.perf_counter()-start < seconds:
+    recent: deque = deque(maxlen=TIME_BUDGET_READ_WINDOW)
+    while not counts or time.perf_counter()-start+max(recent) <= seconds:
+        read_start = time.perf_counter()
         if method == "sa":
             result = sampler.simulated_annealing(num_reads=1, site_passes=sa_passes,
                                                  seed=seed+restart)
@@ -871,4 +879,5 @@ def _time_budget_counts(sampler: Any, method: str, seconds: float, seed: int,
         counts.update(current)
         queries += used
         restart += 1
+        recent.append(time.perf_counter()-read_start)
     return dict(counts), time.perf_counter()-start, queries

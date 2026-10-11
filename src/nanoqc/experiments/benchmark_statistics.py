@@ -45,7 +45,7 @@ def _paired_statistics_main(argv: Optional[Sequence[str]] = None) -> int:
     if not paths:
         parser.error("No case JSON artifacts")
     cluster_map=json.loads(args.cluster_map.read_text()) if args.cluster_map else None
-    grouped={}; skipped=Counter(); pair_count=Counter()
+    grouped={}; skipped=Counter(); pair_count=Counter(); overrun_cases=[]
     metrics=("gap","hit","ground_probability","low_energy_mass","low_energy_coverage","entropy","log10_qts99")
     for path in paths:
         case=json.loads(path.read_text())
@@ -102,7 +102,11 @@ def _paired_statistics_main(argv: Optional[Sequence[str]] = None) -> int:
                 if not budget or abs(budget-a["solver_seconds"])>1e-6*max(1.,budget):
                     skipped[name+":invalid_budget"]+=1; continue
                 if b["budget_overrun_seconds"]>budget*args.max_time_overrun_fraction:
-                    skipped[name+":overrun"]+=1; continue
+                    skipped[name+":overrun"]+=1
+                    overrun_cases.append(dict(baseline=name,pdb=pdb,file=path.name,
+                        budget_seconds=float(budget),elapsed_seconds=float(b["solver_seconds"]),
+                        overrun_fraction=float(b["budget_overrun_seconds"])/float(budget)))
+                    continue
             pair_count[name]+=1
             for metric in metrics:
                 # Unequal read counts bias empirical diversity/coverage; do not test them in time mode.
@@ -132,6 +136,7 @@ def _paired_statistics_main(argv: Optional[Sequence[str]] = None) -> int:
         primary_restarts=args.primary_restarts, primary_active_sites=args.primary_active_sites,
         cluster_unit="provided family clusters" if cluster_map is not None else "PDB (homology dependence unresolved)",
         effects=effects,cluster_differences=cluster_values,paired_cases=dict(pair_count),exclusions=dict(skipped),
+        overrun_cases=overrun_cases,
         denominator_failures=paired_denominator_failures(dict(skipped),args.budget_mode),
         source_sha256={p.name:_ablation_digest(p) for p in paths},
         cluster_map_sha256=_ablation_digest(args.cluster_map) if args.cluster_map else None,

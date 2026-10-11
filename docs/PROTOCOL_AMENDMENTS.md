@@ -1036,3 +1036,21 @@ Each mechanistic statement and parameter introduced in A45–A52 was checked aga
   - A side-chain atom FASPR fails to build for an Active residue stays missing and still fails the completeness check.
   - The internal methods' relaxed structures are scored as the mmCIF files they are, no longer converted to PDB, which cannot hold every author chain name.
   - Unchanged: the evaluator, the completeness check, Phenix clashscore, and which atoms FASPR is allowed to change.
+
+## A62. Time-matched baselines do not start a read that would predictably overshoot
+
+- **Observed:** statistics failed with `qc_benchmark/time: paired-statistics denominator is incomplete: {'sa_time:overrun': 2}`. Two time-matched SA runs exceeded their QAOA wall-clock budget by more than `max_time_overrun_fraction` (10%). They were correctly excluded, and the incomplete denominator was correctly refused.
+- **Cause:** `_time_budget_counts` checked the deadline only between complete reads and started another read whenever any time was left. The last read therefore always ended after the deadline, by up to one full read plus scheduler jitter. On short budgets that alone exceeds 10%.
+- **Change:**
+  - After the first read, a further read starts only if, at the longest of the last 8 read durations, it would finish by the deadline.
+  - The sliding window lets a slow first (setup) read drop out.
+  - The first read always runs.
+  - The unused remainder of the budget is at most about one read; any remaining overrun is recorded as before.
+  - `statistics_time.json` now lists each excluded overrun case (`overrun_cases`: baseline, PDB, file, budget, elapsed), and the stage failure message quotes the first five.
+- **Not changed:**
+  - the 10% overrun rule;
+  - the requirement that the time-mode denominator is complete;
+  - the time donor, the SA/greedy/uniform procedures;
+  - the matched-output analysis.
+
+  A new run is required, because time-mode baseline outputs change.
