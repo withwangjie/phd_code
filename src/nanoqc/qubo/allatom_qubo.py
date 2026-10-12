@@ -397,6 +397,16 @@ POLAR_HYDROGEN_SIGMA_NM = 2 * 0.02245 / 2 ** (1 / 6)
 POLAR_HYDROGEN_EPSILON_KJ_MOL = 0.046 * 4.184
 
 
+# A64: the frozen structural model (Amber ff14SB with A50 polar-H shielding)
+# and the two declared force-field sensitivity arms.
+DEFAULT_STRUCTURE_FORCE_FIELD = "amber14_a50"
+STRUCTURE_FORCE_FIELDS = {
+    "amber14_a50": ("amber14-all.xml",),
+    "amber14_unshielded": ("amber14-all.xml",),
+    "charmm36": ("charmm36.xml",),
+}
+
+
 def _shield_zero_lj_polar_hydrogens(system: Any, topology: Any) -> dict[str, Any]:
     """Give zero-LJ hydroxyl hydrogens a small repulsive core (in place)."""
     import openmm as mm
@@ -710,7 +720,8 @@ class AllAtomInterfaceQUBOBuilder:
                  rotamer_library_path: Optional[Path] = None,
                  rotamer_probability_floor: float = 1e-4,
                  rotamer_sigma_offsets: Sequence[float] = (-1.0,0.0,1.0),
-                 solvent_model: str = "vacuum"):
+                 solvent_model: str = "vacuum",
+                 force_field: str = DEFAULT_STRUCTURE_FORCE_FIELD):
         import openmm as mm
         from openmm import app, unit
         import random
@@ -728,6 +739,11 @@ class AllAtomInterfaceQUBOBuilder:
         self.solvent_model=str(solvent_model).lower()
         if self.solvent_model not in ("vacuum","gbn2"):
             raise ValueError("solvent_model must be vacuum or gbn2")
+        self.force_field=str(force_field).lower()
+        if self.force_field not in STRUCTURE_FORCE_FIELDS:
+            raise ValueError(f"force_field must be one of {sorted(STRUCTURE_FORCE_FIELDS)}")
+        if self.force_field=="charmm36" and self.solvent_model!="vacuum":
+            raise ValueError("The CHARMM36 sensitivity arm is defined in vacuum only")
         # Only the vacuum model is exactly pair-decomposable; see build().
         self.pair_decomposition_exact=self.solvent_model=="vacuum"
         if chi1_angles is not None:
@@ -788,13 +804,18 @@ class AllAtomInterfaceQUBOBuilder:
             raise StructureQualityError("Prepared protein contains a peptide-chain break",
                 category="input_topology", audit=self.input_quality)
         if self.solvent_model=="vacuum":
-            self.forcefield=app.ForceField("amber14-all.xml")
+            self.forcefield=app.ForceField(*STRUCTURE_FORCE_FIELDS[self.force_field])
         else:
             # OpenMM's Amber implicit-solvent GBN2 parameters; no explicit
             # solvent particles are added. This is a sensitivity model, not
             # the frozen primary structural protocol.
             self.forcefield=app.ForceField("amber14-all.xml","implicit/gbn2.xml")
         modeller=app.Modeller(parsed.topology,parsed.positions)
+        if self.force_field=="charmm36":
+            # A64: hydrogens placed under Amber naming/protonation are removed
+            # and re-added from CHARMM36 templates; heavy atoms are unchanged.
+            modeller.delete([a for a in modeller.topology.atoms()
+                             if a.element is not None and a.element.symbol.upper()=="H"])
         state=random.getstate()
         try:
             random.seed(seed)
@@ -808,7 +829,13 @@ class AllAtomInterfaceQUBOBuilder:
             self.topology,nonbondedMethod=app.NoCutoff,
             constraints=None,rigidWater=False,removeCMMotion=False
         )
-        self.polar_hydrogen_shielding=_shield_zero_lj_polar_hydrogens(self.system,self.topology)
+        # A50 shielding belongs to the frozen amber14_a50 model only; the A64
+        # sensitivity arms run their force field as published.
+        self.polar_hydrogen_shielding=(
+            _shield_zero_lj_polar_hydrogens(self.system,self.topology)
+            if self.force_field=="amber14_a50"
+            else dict(shielded_hydrogens=0,one_four_pairs_updated=0,
+                      not_applied=f"force_field={self.force_field}"))
         # A60: one parameter table per System, shared by every minimization.
         self.nonbonded_tables=_NonbondedTables.of(self.system)
         self.energy_force_groups={}
@@ -1279,8 +1306,9 @@ class AllAtomInterfaceQUBOBuilder:
                 physical_roundoff_bound=physical_roundoff,
                 atom_count=len(self.base_positions),
                 polar_hydrogen_shielding=self.polar_hydrogen_shielding,
-                forcefield=(["amber14-all.xml"] if self.solvent_model=="vacuum"
-                            else ["amber14-all.xml","implicit/gbn2.xml"]),
+                forcefield=(list(STRUCTURE_FORCE_FIELDS[getattr(self,"force_field",DEFAULT_STRUCTURE_FORCE_FIELD)])
+                            if self.solvent_model=="vacuum" else ["amber14-all.xml","implicit/gbn2.xml"]),
+                structure_force_field=getattr(self,"force_field",DEFAULT_STRUCTURE_FORCE_FIELD),
                 solvent=("vacuum; NoCutoff" if self.solvent_model=="vacuum" else "implicit GBN2; NoCutoff"),
                 solvent_model=self.solvent_model,
                 raw_rotamer_pool_sizes=self.raw_rotamer_pool_sizes,

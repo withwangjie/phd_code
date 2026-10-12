@@ -22,6 +22,7 @@ from nanoqc.experiments.benchmark_common import SHARED_HELPER_MODULES
 from nanoqc.common.device_errors import raise_if_resource_error
 from nanoqc.common.seed_streams import derive_child_seed
 from nanoqc.experiments.research_ablation import _ablation_classical_counts, _ablation_summarize
+from nanoqc.qubo.allatom_qubo import DEFAULT_STRUCTURE_FORCE_FIELD, STRUCTURE_FORCE_FIELDS
 from nanoqc.structure.physical_quality import (
     DEFAULT_MAX_PERTURBATION_ATTEMPTS,
     StructureQualityError,
@@ -195,6 +196,7 @@ def _allatom_experiment_main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--parameter-scale",choices=("max_coefficient","feasible_iqr"),default="max_coefficient")
     parser.add_argument("--relax-iterations",type=int,default=200)
     parser.add_argument("--solvent-model",choices=("vacuum","gbn2"),default="vacuum")
+    parser.add_argument("--structure-force-field",choices=sorted(STRUCTURE_FORCE_FIELDS),default=DEFAULT_STRUCTURE_FORCE_FIELD)
     parser.add_argument("--seed",type=int,default=42)
     parser.add_argument("--optimize-seed",type=int,default=None,
         help="Independent optimizer sub-seed (defaults to --seed when omitted, for standalone-"
@@ -257,7 +259,7 @@ def _allatom_experiment_main(argv: Optional[Sequence[str]] = None) -> int:
             rotamer_library_path=rotamer_cfg.get("library_path"),
             rotamer_probability_floor=float(rotamer_cfg.get("probability_floor",1e-4)),
             rotamer_sigma_offsets=rotamer_cfg.get("sigma_offsets",[-1.0,0.0,1.0]),
-            solvent_model=args.solvent_model)
+            solvent_model=args.solvent_model,force_field=args.structure_force_field)
         builder.write_structure(builder.base_positions,out/"prepared_input.cif")
         _ablation_atomic_json(out/"structure_preparation_audit.json",dict(
             source=builder.input_quality,after_hydrogen_addition=builder.preparation_quality,
@@ -459,6 +461,8 @@ def _recovery_benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
              "CVaR/mean draws WHILE searching -- distinct from --optimize-seeds and --sample-seeds.")
     parser.add_argument("--perturbation-mode",choices=("multi_chi","chi1"),default="multi_chi")
     parser.add_argument("--solvent-model",choices=("vacuum","gbn2"),default="vacuum")
+    parser.add_argument("--structure-force-field",choices=sorted(STRUCTURE_FORCE_FIELDS),default=DEFAULT_STRUCTURE_FORCE_FIELD,
+        help="A64 sensitivity arms only; the perturbation generator always uses the frozen default.")
     parser.add_argument("--min-perturb-degrees",type=float,default=40.)
     parser.add_argument("--max-perturb-degrees",type=float,default=120.)
     parser.add_argument("--perturbation-max-attempts", "--max-perturbation-attempts",
@@ -598,7 +602,7 @@ def _recovery_benchmark_main(argv: Optional[Sequence[str]] = None) -> int:
                         "--relax-iterations",str(args.relax_iterations),"--seed",str(seed),
                         "--optimize-seed",str(optimize_seed),"--measurement-seed",str(measurement_seed),"--sample-seed",str(sample_seed),
                         "--loop-relax-iterations",str(args.loop_relax_iterations),
-                        "--solvent-model",args.solvent_model,
+                        "--solvent-model",args.solvent_model,"--structure-force-field",args.structure_force_field,
                         *(["--eval-shots",str(args.eval_shots)] if args.eval_shots else []),
                         *(["--robust-qaoa","--qaoa-restarts",str(args.qaoa_restarts),
                            "--qaoa-objective",args.qaoa_objective,"--cvar-alpha",str(args.cvar_alpha),

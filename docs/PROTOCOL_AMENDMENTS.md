@@ -1054,3 +1054,50 @@ Each mechanistic statement and parameter introduced in A45–A52 was checked aga
   - the matched-output analysis.
 
   A new run is required, because time-mode baseline outputs change.
+
+## A64. Supplementary experiments for publication: noise, optimised classical baselines, force field
+
+All three were specified after the formal results of run 20261011_075258 (code 38b0ae7) and are exploratory. They do not change any preregistered endpoint, threshold, family or verdict. They read the frozen run and write only under `<run>/analysis/a64/`; one command runs them all (`scripts/run_supplement_a64.sh <run>`). The post-run analyses of A63 are recorded on branch `analysis/post-run-20261011`.
+
+### A64a. Depolarizing-noise sensitivity (`nanoqc.supplement.noise_simulation`)
+- **Question:** how much of the noiseless ground-state amplification (Q2/Q3) survives gate noise?
+- **Circuit:** the identical XY-QAOA circuit is simulated on the full 2^n register, in the solver's own gate order:
+  - local W states;
+  - per layer, RZ, then IsingZZ in (i, j) order, then IsingXY over each register's pairs, reversed on odd layers.
+- **Angles:** the frozen noiselessly fitted primary angles (CVaR, 4 restarts, p=2), not re-optimised under noise.
+- **Noise:**
+  - after every two-qubit gate, a two-qubit depolarizing channel of probability ε (one of the 15 non-identity Paulis), sampled by quantum trajectories;
+  - single-qubit gates, W-state preparation, readout, idling and crosstalk are noiseless, so the results are optimistic.
+- **Validation:** the noiseless full-register result must equal the exact subspace simulation per case (asserted ≤ 1e-9).
+- **Metrics:** reported raw and after discarding non-one-hot outcomes. Post-selection is a classical Hamming-weight check per register.
+- **Global white-noise model:** ρ = Fρ_ideal + (1−F)I/2^n, with F = (1−ε)^N₂q.
+  - It is checked against trajectories at 4 and 6 sites (10 PDBs each, sorted, outcome-blind; 200 trajectories).
+  - It is then applied to every primary case at 4–10 sites, with logical two-qubit gate counts and with the A63 heavy-hex compiled counts.
+  - Reported quantities: the ε at which post-selected amplification falls to 1× and to 10×.
+
+### A64b. Budget-optimised classical baselines and exact solvers (`nanoqc.supplement.classical_baselines`)
+- **Question:** what does SA actually need? The formal SA used 100 site passes per read, and hit = 1 at every size, so its cost reflected the chosen budget.
+- **SA optimal TTS99** (Rønnow et al. 2014): SA is run at 1, 2, 5, 10, 20, 50 and 100 site passes with 200 reads each, and TTS99 = min over passes of reads99 × (1 + passes × sites).
+  - Here p̂ = (successes + ½)/(reads + 1).
+- **QAOA shots99:** computed from the exact noiseless ground probability of the frozen state, execution-only and with the recorded optimisation shots.
+- **Units:** shots and energy queries are different operations; they are tabulated, not equated.
+- **Exact solvers:** vectorised brute-force enumeration and a mixed-integer program (scipy.optimize.milp/HiGHS, product linearisation). They must agree on every case.
+- **Scaling:** within-cluster slopes of log10(TTS) on log10(configurations), with a cluster bootstrap. These are descriptive only.
+- **Sample:** one case per PDB and size under the frozen primary filter.
+
+### A64c. Force-field sensitivity of the structural experiment (`nanoqc.supplement.forcefield_sensitivity`)
+- **Question:** do the structural conclusions depend on the study-specific A50 hybrid (ff14SB + CHARMM polar-H LJ, A53)?
+- **Arms:**
+  - `charmm36`: OpenMM `charmm36.xml` as published, in vacuum. Amber-placed hydrogens are deleted and re-added from CHARMM36 templates; heavy atoms are unchanged.
+  - `amber14_unshielded`: ff14SB without the A50 shielding.
+- **Fixed across arms:** the same recovery manifests and seeds, and the same derived optimize/measurement/sample sub-seeds (derived exactly as `run_real_complex_pilot.py` does). The perturbed input is identical, because the perturbation generator always uses the frozen model. Solvers and relaxation settings are the same; only the all-atom QUBO and relaxation change.
+- **Reproduction control:** the frozen model (`amber14_a50`) is first run through the same driver on one target (seed 42). The arms run only if every control row reproduces the formal final RMSD within 1e-3 Å.
+- **Reported:**
+  - per-arm acceptance;
+  - mean final RMSD and χ1 recovery per method versus formal;
+  - the QAOA−SA contrast within each model;
+  - the Spearman correlation of target-level RMSD between models.
+- **Failures:** a target that fails under an alternative force field is reported as missing, never dropped silently.
+- **Code change:** `AllAtomInterfaceQUBOBuilder(force_field=...)` and `--structure-force-field` in `structure_benchmarks`.
+  - The default `amber14_a50` is the frozen model and is unchanged.
+  - QUBO metadata now records `structure_force_field`.
