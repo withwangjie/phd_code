@@ -875,7 +875,10 @@ def main():
                 hard_clusters.add(cluster_map[key])
         train_records=[r for r in manifest if r['split']=='train']
         retained_train=[]; removed_train=set()
+        # cross_max: every training graph before isolation removal (diagnostic);
+        # retained_cross_max: the training graphs actually kept.
         cross_max=dict(vhh_full_chain_identity=0.0,cdr_h3_loop_identity=0.0,antigen_full_chain_identity=0.0)
+        retained_cross_max=dict(cross_max)
         # Each training graph against every hard graph, in parallel, details in hard order (A35).
         train_sequences=[graph_build_parallel.sequences(torch.load(output/r['path'],map_location='cpu',weights_only=False))
                          for r in train_records]
@@ -897,6 +900,10 @@ def main():
                     cross_max[key]=max(cross_max[key],float(detail[key]))
                 if homologous:
                     violation_details.append((hard_record,detail))
+            if not violation_details:
+                for detail in details:
+                    for key in retained_cross_max:
+                        retained_cross_max[key]=max(retained_cross_max[key],float(detail[key]))
             if violation_details:
                 reasons=set()
                 for source,detail in violation_details:
@@ -939,6 +946,7 @@ def main():
             db55_expected_count=expected_db55_count,pdb_split_overlap=0,
             hard_max_pair_cdr_h3_loop_identity=maxhard,known_train_hard_max_cdr_h3_loop_identity=maxtrain,
             hard_layered_pair_max=hard_pair_max,train_hard_layered_cross_max=cross_max,
+            retained_train_hard_layered_cross_max=retained_cross_max,
             layered_train_hard_isolation=True,
             family_cluster_map_used=cluster_map is not None,
             family_cluster_map_sha256=cluster_map_sha256,

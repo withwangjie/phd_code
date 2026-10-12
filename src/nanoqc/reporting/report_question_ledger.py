@@ -26,6 +26,21 @@ def _alpha(ctx: ReportContext) -> float:
     return float((ctx.frozen_config.get("statistics", {}) or {}).get("alpha", DEFAULT_ALPHA))
 
 
+# Which direction of a QAOA-minus-classical difference is better for QAOA.
+# Entropy measures output diversity and has no better direction.
+METRIC_BETTER = {"gap": "lower", "hit": "higher", "ground_probability": "higher",
+                 "low_energy_mass": "higher", "low_energy_coverage": "higher", "entropy": None}
+
+
+def _direction_labels(metric: str, baseline: str) -> Dict[str, str]:
+    better = METRIC_BETTER.get(metric)
+    def label(side: str) -> str:
+        if better is None:
+            return f"QAOA {side} (diversity; no better direction)"
+        return f"QAOA {side} (favours {'QAOA' if side == better else baseline})"
+    return dict(positive=label("higher"), negative=label("lower"))
+
+
 def verdict(adjusted_p: Optional[float], estimate: Optional[float], alpha: float, *,
             positive: str, negative: str, evidence_complete: bool = True) -> str:
     """The pre-declared verdict rule; never reads anything but its arguments."""
@@ -152,7 +167,8 @@ def section_research_question_ledger(ctx: ReportContext) -> List[str]:
                 f"qc_benchmark/statistics_outputs.json | mean difference {_fmt(effect.get('mean_difference'))}, "
                 f"clusters={effect.get('n_clusters')} | "
                 + verdict(effect.get("p_gatekeeping_adjusted"), effect.get("mean_difference"), alpha,
-                          evidence_complete=qc_done, positive="QAOA higher", negative="QAOA lower")
+                          evidence_complete=qc_done,
+                          **_direction_labels(str(effect.get("metric")), str(effect.get("baseline"))))
                 + " |")
     else:
         lines.append("| Q2 QAOA vs classical (secondary family) | qc_benchmark/statistics_outputs.json | "

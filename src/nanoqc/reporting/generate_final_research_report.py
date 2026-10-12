@@ -69,6 +69,18 @@ from nanoqc.reporting.report_sections_structure import (  # noqa: E402,F401
 from nanoqc.reporting.report_question_ledger import section_research_question_ledger
 
 
+
+def _train_hard_maxima_sentence(validation: dict) -> str:
+    """Maxima over retained training graphs; the pre-removal maxima only as such."""
+    retained = validation.get("retained_train_hard_layered_cross_max")
+    before = validation.get("train_hard_layered_cross_max", {})
+    if retained is not None:
+        return (f"Retained train-hard maxima: {json.dumps(retained)} (before isolation removal: "
+                f"{json.dumps(before)}; every training graph at or above a threshold was removed).")
+    return (f"Train-hard maxima before isolation removal: {json.dumps(before)}. Training graphs at or "
+            f"above any threshold were removed (layered_train_hard_isolation="
+            f"{validation.get('layered_train_hard_isolation')}); this run did not record the retained-set maxima.")
+
 def section_stage_table(ctx: ReportContext) -> List[str]:
     lines = ["## 0. Stage completion", "",
              "Every number below is scoped to only the stages that actually completed; "
@@ -135,8 +147,7 @@ def section_data_reliability(ctx: ReportContext) -> List[str]:
         f"- Final layered graph-level isolation: VHH full-chain<{vhh_threshold:.2f}, "
         f"CDR-H3 loop<{cdr_h3_threshold:.2f}, antigen full-chain<{antigen_threshold:.2f} "
         f"with antigen length coverage>={antigen_coverage:.2f}. "
-        f"Observed train-hard maxima: "
-        f"{json.dumps((run_summary.get('validation', {}) or {}).get('train_hard_layered_cross_max', {}))}"
+        + _train_hard_maxima_sentence(run_summary.get("validation", {}) or {})
     )
     graphs = run_summary.get("graphs", "n/a")
     complete = run_summary.get("complete", None)
@@ -389,16 +400,16 @@ def section_applicability_boundary(ctx: ReportContext) -> List[str]:
          "size; already inspected during development). They are never reported above as a confirmatory result."
          if bool(((ctx.frozen_config.get("queue_freeze", {}) or {}).get("dev_queue", {}) or {}).get("enabled", True))
          else "- Development targets are disabled in this run (A41); no development-queue result is reported."),
-        "- The validation queue in section 1.3 is the only queue in this run intended to support a "
+        "- The validation queue in section 5.3 is the only queue in this run intended to support a "
         "confirmatory claim, and only to the extent its own target count and per-target variance support one "
-        "- A small queue (see section 1.3 for its actual selected count) supports stability/sanity checking, "
+        "- A small queue (see section 5.3 for its actual selected count) supports stability/sanity checking, "
         "not a general statistical-power guarantee.",
         f"- Independence checking is PDB-disjoint plus layered sequence isolation using published anti-leakage precedents: "
         f"VHH full-chain < {100.0 * float((((ctx.frozen_config.get('queue_freeze', {}) or {}).get('homology_isolation', {}) or {}).get('vhh_full_chain_identity', 0.80))):.0f}%, "
         f"CDR-H3 loop < {100.0 * float((((ctx.frozen_config.get('queue_freeze', {}) or {}).get('homology_isolation', {}) or {}).get('cdr_h3_identity', 0.50))):.0f}%, "
         f"antigen full-chain < {100.0 * float((((ctx.frozen_config.get('queue_freeze', {}) or {}).get('homology_isolation', {}) or {}).get('antigen_identity', 0.30))):.0f}% "
         f"with minimum length coverage {100.0 * float((((ctx.frozen_config.get('queue_freeze', {}) or {}).get('homology_isolation', {}) or {}).get('antigen_min_length_coverage', 0.70))):.0f}%. "
-        "Formal runs additionally require the frozen family/structure cluster map recorded in section 1; "
+        "Formal runs additionally require the frozen family/structure cluster map recorded in section 5.3; "
         "independence claims are limited to those explicitly encoded sequence and cluster criteria, not arbitrary remote homology.",
         "- QAOA follows the variational optimization framework of Farhi et al. [R7]. CVaR optimization follows [R8]; "
         "alpha=0.1 is literature-supported as an empirical CVaR setting, while primary p=2 remains a preregistered "
@@ -407,7 +418,7 @@ def section_applicability_boundary(ctx: ReportContext) -> List[str]:
         "classical simulation, not a quantum-hardware run; nothing in this report should be read as a "
         "hardware or NISQ-noise result.",
         "- \"Budget exhausted\" (`termination_reason == max_evaluations_reached`) is reported as exactly "
-        "that, never as algorithmic convergence -- see section 3.2's raw termination-reason distribution.",
+        "that, never as algorithmic convergence -- see section 3.3's raw termination-reason distribution.",
         "- A stage that only started successfully (subprocess launched, provenance file written) but produced "
         "no usable per-case artifacts is marked `failed` in section 0, never silently reported as complete.",
         "- This report, and the code it summarizes, exist in exactly three distinct, never-conflated states: "

@@ -52,3 +52,24 @@ def test_missing_stages_are_not_established(tmp_path) -> None:
     text = _run(tmp_path, primary_p=0.01, slope_p=0.01, completed=("qc_benchmark",))
     assert text.count("not established (evidence stage incomplete)") >= 3
     assert "Q5 is not established" in text
+
+
+def test_secondary_verdict_names_which_side_is_favoured():
+    from nanoqc.reporting.report_question_ledger import _direction_labels, verdict
+    gap = _direction_labels("gap", "sa")
+    assert verdict(0.001, 0.01, 0.05, **gap).endswith("QAOA higher (favours sa)")
+    hit = _direction_labels("hit", "sa")
+    assert verdict(0.001, -0.01, 0.05, **hit).endswith("QAOA lower (favours sa)")
+    assert verdict(0.001, 0.2, 0.05, **hit).endswith("QAOA higher (favours QAOA)")
+    assert "no better direction" in verdict(0.001, 1.0, 0.05, **_direction_labels("entropy", "sa"))
+
+
+def test_train_hard_maxima_are_labelled_by_set():
+    from nanoqc.reporting.generate_final_research_report import _train_hard_maxima_sentence
+    before = {"vhh_full_chain_identity": 0.85}
+    old = _train_hard_maxima_sentence({"train_hard_layered_cross_max": before,
+                                       "layered_train_hard_isolation": True})
+    assert old.startswith("Train-hard maxima before isolation removal") and "were removed" in old
+    new = _train_hard_maxima_sentence({"train_hard_layered_cross_max": before,
+                                       "retained_train_hard_layered_cross_max": {"vhh_full_chain_identity": 0.79}})
+    assert new.startswith("Retained train-hard maxima: {\"vhh_full_chain_identity\": 0.79}")
