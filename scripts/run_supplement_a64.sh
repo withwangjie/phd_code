@@ -34,7 +34,9 @@ rows = [r for r in csv.DictReader(open(sys.argv[1])) if r["arm"] == "amber14_a50
 diffs = [abs(float(r["arm_final_rmsd"]) - float(r["formal_final_rmsd"])) for r in rows
          if r["arm_final_rmsd"] and r["formal_final_rmsd"]]
 if len(diffs) != len(rows) or not rows:
-    sys.exit(f"control: {len(diffs)}/{len(rows)} rows comparable; refusing to run the arms")
+    sys.exit(f"control: {len(diffs)}/{len(rows)} rows comparable; refusing to run the arms. "
+             "Inspect analysis/a64/forcefield/amber14_a50/results/<target>/ and the "
+             "'[forcefield] ... FAILED' / Traceback lines above in run.log")
 worst = max(diffs)
 print(f"control: {len(rows)} rows, max |arm - formal| final RMSD = {worst:.2e} A")
 if worst > 1e-3:

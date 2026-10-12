@@ -84,6 +84,13 @@ def job_argv(config: dict, manifest: Path, destination: Path, pdb: str, seeds: l
     return argv
 
 
+def target_complete(destination: Path, seeds: list[int]) -> bool:
+    """Every requested seed has a row for every method (the CSV is written incrementally)."""
+    rows = read_rows(destination / "recovery_metrics.csv")
+    present = {(str(r.get("seed")), r.get("method")) for r in rows}
+    return all((str(seed), method) in present for seed in seeds for method in METHODS)
+
+
 def read_rows(path: Path) -> list[dict]:
     if not path.is_file():
         return []
@@ -104,7 +111,7 @@ def compare(run_dir: Path, arms: list[str], seeds: list[int],
     """Paired rows (target, seed, method) across the formal model and each arm."""
     formal_root = Path(run_dir) / "validation_queue" / "results"
     rows = []
-    for target_dir in sorted(p for p in formal_root.iterdir() if p.is_dir()):
+    for target_dir in sorted(p for p in formal_root.iterdir() if p.is_dir() and ".incomplete-" not in p.name):
         if targets is not None and target_dir.name not in targets:
             continue
         formal = {(r["seed"], r["method"]): r for r in read_rows(target_dir / "recovery_metrics.csv")}
@@ -224,8 +231,15 @@ def main(argv=None) -> int:
             for manifest in manifests:
                 pdb = manifest.parent.name
                 destination = root / pdb
-                if (destination / "recovery_metrics.csv").is_file():
+                if target_complete(destination, seeds):
                     continue  # resumable: a finished target is never re-run
+                if destination.exists():
+                    # The benchmark writes recovery_metrics.csv row by row, so an
+                    # interrupted or failed attempt leaves a partial file. Keep it
+                    # as evidence and re-run the target from scratch.
+                    aside = destination.with_name(f"{destination.name}.incomplete-{time.strftime('%Y%m%d%H%M%S')}")
+                    destination.rename(aside)
+                    print(f"[forcefield] {arm}/{pdb}: incomplete earlier attempt moved to {aside.name}", flush=True)
                 jobs.append((f"{arm}/{pdb}", destination, job_argv(config, manifest, destination, pdb, seeds, arm)))
         print(f"[forcefield] {len(jobs)} target jobs on GPUs {devices} x {per_gpu}", flush=True)
         if jobs:

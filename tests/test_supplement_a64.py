@@ -242,3 +242,20 @@ def test_tabulated_lj_transfer_refuses_nbfix():
     system, positions = _tabulated_system(nbfix=True)
     with pytest.raises(ValueError, match="NBFIX"):
         _tabulated_lj_to_nonbonded(system, positions)
+
+
+def test_partial_recovery_csv_is_not_complete(tmp_path):
+    from nanoqc.supplement.forcefield_sensitivity import target_complete
+    import csv as _csv
+    path = tmp_path / "recovery_metrics.csv"
+    with path.open("w", newline="") as h:
+        w = _csv.DictWriter(h, fieldnames=["seed", "method"]); w.writeheader()
+    assert not target_complete(tmp_path, [42])                      # header only
+    with path.open("a", newline="") as h:
+        w = _csv.DictWriter(h, fieldnames=["seed", "method"])
+        for m in ("qaoa", "sa", "uniform"):
+            w.writerow(dict(seed=42, method=m))
+    assert not target_complete(tmp_path, [42])                      # one method missing
+    with path.open("a", newline="") as h:
+        _csv.DictWriter(h, fieldnames=["seed", "method"]).writerow(dict(seed=42, method="greedy"))
+    assert target_complete(tmp_path, [42]) and not target_complete(tmp_path, [42, 43])
