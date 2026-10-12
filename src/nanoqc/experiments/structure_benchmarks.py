@@ -248,7 +248,7 @@ def _allatom_experiment_main(argv: Optional[Sequence[str]] = None) -> int:
             if all((out/name).exists() and _ablation_digest(out/name)==digest for name,digest in saved["artifacts"].items()):
                 print(f"Verified completed experiment: {out}");return 0
             raise ValueError("Completed artifacts changed or missing")
-        print("Preparing complete atoms and Amber14 parameters",flush=True)
+        print(f"Preparing complete atoms and {args.structure_force_field} parameters",flush=True)
         rotamer_cfg=case.get("rotamer_model",{}) or {}
         builder=AllAtomInterfaceQUBOBuilder(
             source,case["active_residues"],seed=args.seed,
