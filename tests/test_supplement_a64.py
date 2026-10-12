@@ -202,3 +202,43 @@ def test_forcefield_compare_pairs_rows(tmp_path):
     assert len(rows) == 8
     assert "+0.200" in summary
     assert "Reproduction control: 4/4" in summary
+
+
+def _tabulated_system(nbfix=False):
+    import openmm as mm
+    sig = [0.30, 0.35, 0.25]; eps = [0.5, 0.2, 0.1]
+    A = np.zeros((3, 3)); B = np.zeros((3, 3))
+    for i in range(3):
+        for j in range(3):
+            s = 0.5 * (sig[i] + sig[j]); e = math.sqrt(eps[i] * eps[j])
+            A[i, j] = 4 * e * s ** 12; B[i, j] = 4 * e * s ** 6
+    if nbfix:
+        A[0, 1] = A[1, 0] = A[0, 1] * 1.3
+    system = mm.System(); nb = mm.NonbondedForce(); nb.setNonbondedMethod(mm.NonbondedForce.NoCutoff)
+    custom = mm.CustomNonbondedForce("acoef(type1, type2)/r^12 - bcoef(type1, type2)/r^6;")
+    custom.addTabulatedFunction("acoef", mm.Discrete2DFunction(3, 3, A.T.flatten().tolist()))
+    custom.addTabulatedFunction("bcoef", mm.Discrete2DFunction(3, 3, B.T.flatten().tolist()))
+    custom.addPerParticleParameter("type")
+    for i, charge in enumerate((0.3, -0.2, 0.1, -0.2)):
+        system.addParticle(12.0); nb.addParticle(charge, 0.1, 0.0); custom.addParticle([i % 3])
+    nb.addException(0, 1, 0.0, 0.1, 0.0); custom.addExclusion(0, 1)
+    system.addForce(nb); system.addForce(custom)
+    positions = np.array([[0, 0, 0], [0.4, 0, 0], [0, 0.45, 0], [0.5, 0.5, 0.1]], dtype=float)
+    return system, positions
+
+
+def test_tabulated_lj_transfer_is_exact_for_lorentz_berthelot():
+    import openmm as mm
+    from nanoqc.qubo.allatom_qubo import _tabulated_lj_to_nonbonded
+    system, positions = _tabulated_system()
+    audit = _tabulated_lj_to_nonbonded(system, positions)
+    assert audit["converted"] and audit["lj_types"] == 3
+    assert abs(audit["energy_after_kj_mol"] - audit["energy_before_kj_mol"]) < 1e-9
+    assert not any(isinstance(f, mm.CustomNonbondedForce) for f in system.getForces())
+
+
+def test_tabulated_lj_transfer_refuses_nbfix():
+    from nanoqc.qubo.allatom_qubo import _tabulated_lj_to_nonbonded
+    system, positions = _tabulated_system(nbfix=True)
+    with pytest.raises(ValueError, match="NBFIX"):
+        _tabulated_lj_to_nonbonded(system, positions)

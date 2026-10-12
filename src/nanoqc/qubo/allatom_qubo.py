@@ -407,6 +407,85 @@ STRUCTURE_FORCE_FIELDS = {
 }
 
 
+def _tabulated_lj_to_nonbonded(system: Any, positions_nm: np.ndarray) -> dict[str, Any]:
+    """Move CHARMM36's tabulated LJ into NonbondedForce, exactly or not at all (A64).
+
+    OpenMM's charmm36.xml keeps every Lennard-Jones term in a
+    CustomNonbondedForce of per-type tables, acoef/r^12 - bcoef/r^6, so that
+    NBFIX pairs can be represented; NonbondedForce carries charges only. The
+    site-switched decomposition (A56), the overflow guard (A58), the overlap
+    veto and the admissibility screen all read LJ from NonbondedForce. When
+    every type pair present follows Lorentz-Berthelot (no NBFIX pair in this
+    system), per-type sigma/epsilon from the table diagonal reproduce every
+    entry; they are written to NonbondedForce, the custom force is removed, and
+    the total energy is required to be unchanged. Otherwise this raises.
+    """
+    import openmm as mm
+    custom = [(i, f) for i, f in enumerate(system.getForces()) if isinstance(f, mm.CustomNonbondedForce)]
+    if not custom:
+        return dict(converted=False, reason="no CustomNonbondedForce")
+    if len(custom) != 1:
+        raise ValueError("Expected one tabulated LJ CustomNonbondedForce")
+    index, force = custom[0]
+    expression = force.getEnergyFunction().replace(" ", "").rstrip(";")
+    if expression != "acoef(type1,type2)/r^12-bcoef(type1,type2)/r^6":
+        raise ValueError(f"Unsupported CustomNonbondedForce expression: {force.getEnergyFunction()}")
+    nonbonded = [f for f in system.getForces() if isinstance(f, mm.NonbondedForce)]
+    if len(nonbonded) != 1:
+        raise ValueError("Expected exactly one NonbondedForce")
+    nb = nonbonded[0]
+    tables = {}
+    for k in range(force.getNumTabulatedFunctions()):
+        nx, ny, values = force.getTabulatedFunction(k).getFunctionParameters()
+        tables[force.getTabulatedFunctionName(k)] = np.asarray(values, dtype=float).reshape(ny, nx).T
+    A, B = tables["acoef"], tables["bcoef"]
+    types = [int(round(force.getParticleParameters(i)[0])) for i in range(force.getNumParticles())]
+    used = sorted(set(types))
+    sigma, epsilon = {}, {}
+    for t in used:
+        a, b = A[t, t], B[t, t]
+        if a <= 0.0 or b <= 0.0:
+            if a != 0.0 or b != 0.0:
+                raise ValueError(f"LJ type {t} has inconsistent coefficients")
+            sigma[t], epsilon[t] = 0.1, 0.0
+        else:
+            sigma[t], epsilon[t] = (a / b) ** (1.0 / 6.0), b * b / (4.0 * a)
+    worst = 0.0
+    for i, ti in enumerate(used):
+        for tj in used[i:]:
+            s = 0.5 * (sigma[ti] + sigma[tj]); e = math.sqrt(epsilon[ti] * epsilon[tj])
+            for table, power in ((A, 12), (B, 6)):
+                expected = 4.0 * e * s ** power
+                error = abs(table[ti, tj] - expected) / max(abs(table[ti, tj]), 1e-30)
+                if table[ti, tj] == 0.0 and expected == 0.0:
+                    error = 0.0
+                worst = max(worst, error)
+                if error > 1e-6:
+                    raise ValueError(f"CHARMM36 type pair ({ti},{tj}) is not Lorentz-Berthelot (NBFIX); "
+                                     "the tabulated LJ cannot be represented exactly in NonbondedForce")
+    exclusions = {tuple(sorted(force.getExclusionParticles(k))) for k in range(force.getNumExclusions())}
+    exceptions = {tuple(sorted(nb.getExceptionParameters(k)[:2])) for k in range(nb.getNumExceptions())}
+    if exclusions != exceptions:
+        raise ValueError("Tabulated LJ exclusions differ from NonbondedForce exceptions")
+
+    def energy(target):
+        integrator = mm.VerletIntegrator(0.001)
+        context = mm.Context(target, integrator, mm.Platform.getPlatformByName("Reference"))
+        context.setPositions(positions_nm)
+        return context.getState(getEnergy=True).getPotentialEnergy().value_in_unit(mm.unit.kilojoule_per_mole)
+
+    before = energy(mm.XmlSerializer.deserialize(mm.XmlSerializer.serialize(system)))
+    for i, t in enumerate(types):
+        charge, _, _ = nb.getParticleParameters(i)
+        nb.setParticleParameters(i, charge, sigma[t] * mm.unit.nanometer, epsilon[t] * mm.unit.kilojoule_per_mole)
+    system.removeForce(index)
+    after = energy(system)
+    if abs(after - before) > 1e-7 * max(1.0, abs(before)):
+        raise ValueError(f"LJ transfer changed the energy: {before} -> {after} kJ/mol")
+    return dict(converted=True, lj_types=len(used), max_relative_table_error=float(worst),
+                energy_before_kj_mol=before, energy_after_kj_mol=after)
+
+
 def _shield_zero_lj_polar_hydrogens(system: Any, topology: Any) -> dict[str, Any]:
     """Give zero-LJ hydroxyl hydrogens a small repulsive core (in place)."""
     import openmm as mm
@@ -831,6 +910,9 @@ class AllAtomInterfaceQUBOBuilder:
         )
         # A50 shielding belongs to the frozen amber14_a50 model only; the A64
         # sensitivity arms run their force field as published.
+        self.tabulated_lj_transfer=(
+            _tabulated_lj_to_nonbonded(self.system,self.base_positions)
+            if self.force_field=="charmm36" else dict(converted=False,reason="force field has no tabulated LJ"))
         self.polar_hydrogen_shielding=(
             _shield_zero_lj_polar_hydrogens(self.system,self.topology)
             if self.force_field=="amber14_a50"
@@ -1309,6 +1391,7 @@ class AllAtomInterfaceQUBOBuilder:
                 forcefield=(list(STRUCTURE_FORCE_FIELDS[getattr(self,"force_field",DEFAULT_STRUCTURE_FORCE_FIELD)])
                             if self.solvent_model=="vacuum" else ["amber14-all.xml","implicit/gbn2.xml"]),
                 structure_force_field=getattr(self,"force_field",DEFAULT_STRUCTURE_FORCE_FIELD),
+                tabulated_lj_transfer=getattr(self,"tabulated_lj_transfer",None),
                 solvent=("vacuum; NoCutoff" if self.solvent_model=="vacuum" else "implicit GBN2; NoCutoff"),
                 solvent_model=self.solvent_model,
                 raw_rotamer_pool_sizes=self.raw_rotamer_pool_sizes,

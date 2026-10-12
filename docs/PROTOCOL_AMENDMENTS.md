@@ -1097,6 +1097,12 @@ All three were specified after the formal results of run 20261011_075258 (code 3
   - mean final RMSD and χ1 recovery per method versus formal;
   - the QAOA−SA contrast within each model;
   - the Spearman correlation of target-level RMSD between models.
+- **CHARMM36 Lennard-Jones representation:**
+  - OpenMM's `charmm36.xml` keeps all LJ in a `CustomNonbondedForce` of per-type tables (to allow NBFIX), with every NonbondedForce ε = 0.
+  - The A56 site-switched decomposition, the A58 overflow guard, the overlap veto and the admissibility screen all read LJ from NonbondedForce. Without a fix they would see no LJ: in a local smoke test the A56 exactness check failed closed ("not pair-decomposable").
+  - The builder therefore moves the tables into NonbondedForce when every type pair present follows Lorentz–Berthelot, and requires the total energy to be unchanged (relative 1e-7). Otherwise it refuses, naming the NBFIX pair.
+  - On 7WKI: 25 types, worst table error 3.5×10⁻¹⁵, energy change 3×10⁻¹⁴ relative.
+  - The audit is recorded as `tabulated_lj_transfer` in the QUBO metadata.
 - **Failures:** a target that fails under an alternative force field is reported as missing, never dropped silently.
 - **Code change:** `AllAtomInterfaceQUBOBuilder(force_field=...)` and `--structure-force-field` in `structure_benchmarks`.
   - The default `amber14_a50` is the frozen model and is unchanged.
